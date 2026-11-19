@@ -2,14 +2,24 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::io;
+use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::net::UnixStream;
+use std::sync::Arc;
+use std::thread;
 use thiserror::Error;
+use tokio::io::{Interest, unix::AsyncFd};
+use tokio::sync::{broadcast, oneshot};
+use wayland_client::backend::WaylandError;
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
 use wayland_client::protocol::{wl_registry, wl_seat};
-use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle};
+use wayland_client::{Connection, Dispatch, DispatchError, EventQueue, QueueHandle};
 use wayland_protocols::ext::idle_notify::v1::client::{
     ext_idle_notification_v1 as notification, ext_idle_notifier_v1 as notifier,
 };
+
+use crate::idle::IdleEffect;
+use crate::service::SessionService;
 
 /// Wayland idle setup or dispatch failure.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
@@ -189,6 +199,7 @@ impl WaylandIdle {
     pub fn cancel(&mut self, token: u64) -> bool {
         if let Some(notification) = self.watches.remove(&token) {
             notification.destroy();
+            let _ = self.connection.flush();
             true
         } else {
             false
@@ -233,4 +244,185 @@ impl Drop for WaylandIdle {
         self.notifier.destroy();
         let _ = self.connection.flush();
     }
+}
+
+/// Owns the dedicated non-blocking `ext-idle-notify-v1` dispatch worker thread.
+///
+/// Dropping the driver stops the event loop cleanly and joins the worker thread.
+#[must_use = "dropping the driver stops Wayland idle monitoring"]
+pub struct WaylandIdleDriver {
+    stop: Option<oneshot::Sender<()>>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl fmt::Debug for WaylandIdleDriver {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WaylandIdleDriver")
+            .field("running", &self.thread.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl WaylandIdleDriver {
+    /// Spawns a dedicated `AsyncFd`-driven Wayland idle worker wired to `service`.
+    ///
+    /// Arms all currently active idle watches immediately, reacts to `StartWatch`/`CancelWatch`
+    /// effects live, and forwards `idled`/`resumed` events onto `service` via `runtime`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error if cloning the Wayland socket FD, building the worker runtime,
+    /// or spawning the thread fails.
+    pub fn spawn(
+        idle: WaylandIdle,
+        service: Arc<SessionService>,
+        runtime: tokio::runtime::Handle,
+    ) -> io::Result<Self> {
+        let worker_rt = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .build()?;
+        let fd = idle.connection.as_fd().try_clone_to_owned()?;
+        let async_fd = {
+            let _entered = worker_rt.enter();
+            // SAFETY: AsyncFd owns the duplicated descriptor, which stays open until drop.
+            unsafe { AsyncFd::register(fd) }.map_err(io::Error::from)?
+        };
+        let effects = service.subscribe_idle_effects();
+        let (stop_tx, stop_rx) = oneshot::channel();
+        let thread = thread::Builder::new()
+            .name("z-shell-wayland-idle".into())
+            .spawn(move || {
+                worker_rt.block_on(run_idle_driver(
+                    idle, async_fd, service, runtime, effects, stop_rx,
+                ));
+            })?;
+        Ok(Self {
+            stop: Some(stop_tx),
+            thread: Some(thread),
+        })
+    }
+}
+
+impl Drop for WaylandIdleDriver {
+    fn drop(&mut self) {
+        drop(self.stop.take());
+        if let Some(thread) = self.thread.take()
+            && thread.join().is_err()
+        {
+            tracing::error!("Wayland idle worker thread panicked");
+        }
+    }
+}
+
+async fn run_idle_driver(
+    mut idle: WaylandIdle,
+    async_fd: AsyncFd<OwnedFd>,
+    service: Arc<SessionService>,
+    runtime: tokio::runtime::Handle,
+    mut effects: broadcast::Receiver<IdleEffect>,
+    mut stop: oneshot::Receiver<()>,
+) {
+    let mut state = State::default();
+    for (rule_index, token, timeout_seconds) in service.active_idle_watches() {
+        if let Err(error) = idle.watch(rule_index, token, timeout_seconds) {
+            tracing::warn!(%error, rule_index, "failed to arm initial Wayland idle watch");
+        }
+    }
+
+    loop {
+        if let Err(error) = dispatch_pending(&mut idle, &mut state, &service, &runtime) {
+            tracing::warn!(%error, "Wayland idle dispatch ended");
+            service.set_idle_unavailable(format!("Wayland idle disconnected: {error}"));
+            return;
+        }
+        let _ = idle.connection.flush();
+
+        let Some(guard) = idle.queue.prepare_read() else {
+            continue;
+        };
+
+        tokio::select! {
+            biased;
+            _ = &mut stop => {
+                drop(guard);
+                return;
+            }
+            effect = effects.recv() => {
+                drop(guard);
+                match effect {
+                    Ok(IdleEffect::StartWatch { rule_index, token, timeout_seconds }) => {
+                        if let Err(error) = idle.watch(rule_index, token, timeout_seconds) {
+                            tracing::warn!(%error, rule_index, "failed to arm Wayland idle watch");
+                        }
+                    }
+                    Ok(IdleEffect::CancelWatch { token, .. }) => {
+                        idle.cancel(token);
+                    }
+                    Ok(_) => {}
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        // Re-sync live watches cleanly after an effect burst.
+                        let active = service.active_idle_watches();
+                        let desired: std::collections::HashSet<u64> =
+                            active.iter().map(|(_, token, _)| *token).collect();
+                        let stale: Vec<u64> = idle
+                            .watches
+                            .keys()
+                            .copied()
+                            .filter(|token| !desired.contains(token))
+                            .collect();
+                        for token in stale {
+                            idle.cancel(token);
+                        }
+                        for (rule_index, token, timeout_seconds) in active {
+                            if !idle.watches.contains_key(&token)
+                                && let Err(error) = idle.watch(rule_index, token, timeout_seconds)
+                            {
+                                tracing::warn!(%error, rule_index, "failed to re-arm Wayland idle watch");
+                            }
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Closed) => return,
+                }
+            }
+            ready = async_fd.ready(Interest::READABLE) => {
+                let mut ready_guard = match ready {
+                    Ok(ready_guard) => ready_guard,
+                    Err(error) => {
+                        drop(guard);
+                        tracing::warn!(%error, "Wayland idle poll failed");
+                        service.set_idle_unavailable(format!("Wayland idle poll failed: {error}"));
+                        return;
+                    }
+                };
+                match guard.read() {
+                    Ok(_) => {}
+                    Err(WaylandError::Io(io_err)) if io_err.kind() == io::ErrorKind::WouldBlock => {
+                        ready_guard.clear_ready();
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "Wayland idle read failed");
+                        service.set_idle_unavailable(format!("Wayland idle disconnected: {error}"));
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn dispatch_pending(
+    idle: &mut WaylandIdle,
+    state: &mut State,
+    service: &Arc<SessionService>,
+    runtime: &tokio::runtime::Handle,
+) -> Result<(), DispatchError> {
+    idle.queue.dispatch_pending(state)?;
+    for event in state.events.drain(..) {
+        let svc = Arc::clone(service);
+        runtime.spawn(async move {
+            svc.handle_wayland_idle(event).await;
+        });
+    }
+    Ok(())
 }

@@ -28,7 +28,28 @@ use std::thread::JoinHandle;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 use wayland_client::Connection;
+use wayland_protocols_wlr::output_power_management::v1::client::zwlr_output_power_v1::Mode as WlrOutputPowerMode;
 use z_shell_bus::{BusHub, UpdateKind};
+use z_shell_protocol::{ErrorCode, RpcError};
+
+/// Target display power state for compositor `wlr-output-power` control.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputPowerMode {
+    /// Wake displays back on.
+    On,
+    /// Power displays off (DPMS standby).
+    Off,
+}
+
+impl From<OutputPowerMode> for WlrOutputPowerMode {
+    fn from(mode: OutputPowerMode) -> Self {
+        match mode {
+            OutputPowerMode::On => Self::On,
+            OutputPowerMode::Off => Self::Off,
+        }
+    }
+}
 
 /// Live availability of one compositor protocol domain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,6 +91,28 @@ impl fmt::Debug for WaylandHandle {
         f.debug_struct("WaylandHandle")
             .field("installed", &self.install.is_none())
             .finish_non_exhaustive()
+    }
+}
+
+impl WaylandHandle {
+    /// Requests a power-mode transition across all compositor outputs via `wlr-output-power`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RpcError`] if the Wayland worker has stopped, output-power is unsupported,
+    /// or any output lacks an active power-control object.
+    pub async fn set_all_outputs_power(&self, mode: OutputPowerMode) -> Result<(), RpcError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.commands
+            .send(commands::Request {
+                command: commands::Command::SetPower(outputs::PowerTarget::All, mode.into()),
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| RpcError::new(ErrorCode::Disabled, "Wayland service is disconnected"))?;
+        reply_rx
+            .await
+            .map_err(|_| RpcError::new(ErrorCode::Disabled, "Wayland service disconnected"))?
     }
 }
 

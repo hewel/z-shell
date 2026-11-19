@@ -1,7 +1,7 @@
 //! Declarative user settings stored in `$XDG_CONFIG_HOME/z-shell/settings.toml`.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use z_shell_protocol::PluginId;
 
 /// Default outer spacing in logical pixels between screen edges and shell islands.
@@ -15,6 +15,15 @@ pub const MAX_EDGE_OVERRIDE_PX: u16 = 512;
 
 /// Default pre-action fade warning duration in seconds before idle rules execute.
 pub const DEFAULT_PRE_ACTION_FADE_SECONDS: u32 = 2;
+
+/// Maximum number of declarative idle rules allowed in `settings.toml`.
+pub const MAX_IDLE_RULES: usize = 64;
+
+/// Maximum idle rule timeout in seconds (24 hours).
+pub const MAX_IDLE_TIMEOUT_SECONDS: u32 = 86_400;
+
+/// Maximum pre-action fade duration in seconds.
+pub const MAX_PRE_ACTION_FADE_SECONDS: u32 = 60;
 
 /// Log verbosity for the shell daemon.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,14 +177,67 @@ pub struct ThemeSettings {
     pub gtk_linking: bool,
 }
 
+/// Declarative action executed when a named idle rule triggers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum IdleRuleAction {
+    /// Request a host-verified compositor session lock.
+    Lock,
+    /// Power off outputs via `wlr-output-power`.
+    ScreenOff,
+    /// Request system suspend without an additional lock request.
+    Suspend,
+    /// Lock, await host acknowledgement, and then suspend.
+    LockAndSuspend,
+    /// Spawn an exact argv without shell interpolation.
+    CustomCommand(Vec<String>),
+}
+
+/// One declarative idle rule entry in `[[idle.rules]]`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct IdleRuleSettings {
+    /// Unique human-readable rule name (1..=128 bytes, no control chars or surrounding whitespace).
+    pub name: String,
+    /// Whether this rule is active (disabled by default).
+    pub enabled: bool,
+    /// Inactivity timeout in seconds while unlocked (`1..=86400` when enabled).
+    pub timeout_seconds: u32,
+    /// Optional alternate inactivity timeout in seconds while locked (`1..=86400`).
+    pub locked_timeout_seconds: Option<u32>,
+    /// Action executed after timeout and warning fade.
+    pub action: IdleRuleAction,
+    /// Optional exact argv executed when user activity resumes after this action.
+    pub resume_command: Option<Vec<String>>,
+    /// Optional per-rule warning fade duration in seconds (defaults to `idle.pre_action_fade_seconds`).
+    pub pre_action_fade_seconds: Option<u32>,
+}
+
+impl Default for IdleRuleSettings {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            enabled: false,
+            timeout_seconds: 0,
+            locked_timeout_seconds: None,
+            action: IdleRuleAction::Lock,
+            resume_command: None,
+            pre_action_fade_seconds: None,
+        }
+    }
+}
+
 /// Idle and lock coordination preferences.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct IdleSettings {
-    /// Warning fade duration in seconds before idle rules fire.
+    /// Default warning fade duration in seconds before idle rules fire (`0..=60`).
     pub pre_action_fade_seconds: u32,
     /// Optional fallback locker argv used only when no `zgui-js` UI host is connected.
     pub fallback_locker: Option<Vec<String>>,
+    /// Optional declarative named idle rules (`[[idle.rules]]`). When empty, built-in disabled presets apply.
+    pub rules: Vec<IdleRuleSettings>,
 }
 
 impl Default for IdleSettings {
@@ -183,6 +245,7 @@ impl Default for IdleSettings {
         Self {
             pre_action_fade_seconds: DEFAULT_PRE_ACTION_FADE_SECONDS,
             fallback_locker: None,
+            rules: Vec::new(),
         }
     }
 }
@@ -265,6 +328,12 @@ impl UserSettings {
                 ));
             }
         }
+        if self.idle.pre_action_fade_seconds > MAX_PRE_ACTION_FADE_SECONDS {
+            return Err(format!(
+                "idle.pre_action_fade_seconds must be <= {MAX_PRE_ACTION_FADE_SECONDS}, got {}",
+                self.idle.pre_action_fade_seconds
+            ));
+        }
         if let Some(argv) = &self.idle.fallback_locker
             && argv.first().is_none_or(|arg| arg.trim().is_empty())
         {
@@ -272,6 +341,70 @@ impl UserSettings {
                 "idle.fallback_locker must be a non-empty argv with a non-empty executable"
                     .to_owned(),
             );
+        }
+        if self.idle.rules.len() > MAX_IDLE_RULES {
+            return Err(format!(
+                "idle.rules supports at most {MAX_IDLE_RULES} rules, got {}",
+                self.idle.rules.len()
+            ));
+        }
+        let mut seen_rule_names = BTreeSet::new();
+        for rule in &self.idle.rules {
+            let trimmed = rule.name.trim();
+            if trimmed.is_empty()
+                || rule.name.len() > 128
+                || rule.name.chars().any(char::is_control)
+                || trimmed != rule.name
+            {
+                return Err(format!(
+                    "idle.rules entry has invalid name {:?} (1..=128 bytes, no controls or outer whitespace)",
+                    rule.name
+                ));
+            }
+            if !seen_rule_names.insert(rule.name.as_str()) {
+                return Err(format!("duplicate idle rule name {:?}", rule.name));
+            }
+            if rule.timeout_seconds > MAX_IDLE_TIMEOUT_SECONDS
+                || rule
+                    .locked_timeout_seconds
+                    .is_some_and(|t| t == 0 || t > MAX_IDLE_TIMEOUT_SECONDS)
+            {
+                return Err(format!(
+                    "idle rule {:?} timeouts must be within 1..={MAX_IDLE_TIMEOUT_SECONDS} seconds",
+                    rule.name
+                ));
+            }
+            if rule.enabled && rule.timeout_seconds == 0 {
+                return Err(format!(
+                    "enabled idle rule {:?} requires a non-zero timeout_seconds",
+                    rule.name
+                ));
+            }
+            if rule
+                .pre_action_fade_seconds
+                .is_some_and(|fade| fade > MAX_PRE_ACTION_FADE_SECONDS)
+            {
+                return Err(format!(
+                    "idle rule {:?} pre_action_fade_seconds must be <= {MAX_PRE_ACTION_FADE_SECONDS}",
+                    rule.name
+                ));
+            }
+            if let IdleRuleAction::CustomCommand(argv) = &rule.action
+                && argv.first().is_none_or(|arg| arg.trim().is_empty())
+            {
+                return Err(format!(
+                    "idle rule {:?} custom_command must be a non-empty argv",
+                    rule.name
+                ));
+            }
+            if let Some(argv) = &rule.resume_command
+                && argv.first().is_none_or(|arg| arg.trim().is_empty())
+            {
+                return Err(format!(
+                    "idle rule {:?} resume_command must be a non-empty argv",
+                    rule.name
+                ));
+            }
         }
         Ok(())
     }

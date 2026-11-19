@@ -175,3 +175,98 @@ fn ext_idle_notify_delivers_idle_and_resumed_events_with_watch_tokens() {
     idle.cancel(44);
     idle.roundtrip().expect("destroy notification");
 }
+
+#[tokio::test]
+async fn wayland_idle_driver_arms_settings_rules_and_delivers_idled_to_session_service() {
+    use std::sync::Arc;
+    use tokio::time::{Duration, sleep};
+    use z_shell_config::{IdleRuleAction, IdleRuleSettings, IdleSettings};
+    use z_shell_session::coordinator::{InhibitorFuture, SleepInhibitor};
+    use z_shell_session::pam::MockAuthenticator;
+    use z_shell_session::service::SessionService;
+    use z_shell_session::wayland_idle::WaylandIdleDriver;
+
+    #[derive(Debug)]
+    struct NoopSleepInhibitor;
+    impl SleepInhibitor for NoopSleepInhibitor {
+        fn acquire(&self) -> InhibitorFuture<'_> {
+            Box::pin(async { Ok(()) })
+        }
+        fn release(&self) {}
+        fn is_held(&self) -> bool {
+            false
+        }
+    }
+
+    let (peer, socket) = Peer::new();
+    let idle = WaylandIdle::connect_stream(socket).expect("connect mock compositor");
+
+    let settings = IdleSettings {
+        pre_action_fade_seconds: 0,
+        fallback_locker: None,
+        rules: vec![IdleRuleSettings {
+            name: "screen-off".to_owned(),
+            enabled: true,
+            timeout_seconds: 15,
+            locked_timeout_seconds: None,
+            action: IdleRuleAction::ScreenOff,
+            resume_command: None,
+            pre_action_fade_seconds: Some(0),
+        }],
+    };
+    let service = Arc::new(SessionService::new(
+        "daemon-idle-driver",
+        Arc::new(MockAuthenticator::new([])),
+        Arc::new(NoopSleepInhibitor),
+        &settings,
+    ));
+    let mut effects = service.subscribe_idle_effects();
+
+    let driver = WaylandIdleDriver::spawn(
+        idle,
+        Arc::clone(&service),
+        tokio::runtime::Handle::current(),
+    )
+    .expect("spawn wayland idle driver");
+
+    // Wait for the driver to arm the enabled rule watch on the mock compositor.
+    let seen = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let seen_clone = Arc::clone(&seen);
+        peer.act(move |state| {
+            seen_clone.store(
+                state.notifications.len(),
+                std::sync::atomic::Ordering::SeqCst,
+            );
+        });
+        if seen.load(std::sync::atomic::Ordering::SeqCst) == 1 {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for WaylandIdleDriver to register initial watch"
+        );
+        sleep(Duration::from_millis(10)).await;
+    }
+
+    peer.act(|state| {
+        state.notifications[0].idled();
+    });
+
+    // SessionService must receive Idled and emit RunAction(ScreenOff).
+    let effect = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Ok(z_shell_session::idle::IdleEffect::RunAction { action, .. }) =
+                effects.recv().await
+            {
+                return action;
+            }
+        }
+    })
+    .await
+    .expect("expected RunAction effect from SessionService");
+    assert_eq!(effect, z_shell_session::idle::IdleAction::ScreenOff);
+
+    drop(driver);
+}

@@ -51,9 +51,20 @@ struct CookieState {
 }
 
 /// Connection-scoped cookie registry, independent of D-Bus transport.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ScreenSaverRegistry {
     state: Arc<Mutex<CookieState>>,
+    changes: tokio::sync::watch::Sender<Vec<IdleInhibitor>>,
+}
+
+impl Default for ScreenSaverRegistry {
+    fn default() -> Self {
+        let (changes, _) = tokio::sync::watch::channel(Vec::new());
+        Self {
+            state: Arc::new(Mutex::new(CookieState::default())),
+            changes,
+        }
+    }
 }
 
 impl ScreenSaverRegistry {
@@ -61,6 +72,28 @@ impl ScreenSaverRegistry {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Subscribes to live inhibitor list snapshots emitted whenever cookies change.
+    #[must_use]
+    pub fn subscribe(&self) -> tokio::sync::watch::Receiver<Vec<IdleInhibitor>> {
+        self.changes.subscribe()
+    }
+
+    fn publish_snapshot(&self, state: &CookieState) {
+        let snapshot = state
+            .records
+            .iter()
+            .map(|(&cookie, record)| IdleInhibitor {
+                source: InhibitorSource::ScreenSaver {
+                    connection: record.owner.clone(),
+                    cookie,
+                },
+                scope: InhibitorScope::Idle,
+                reason: format!("{}: {}", record.application, record.reason),
+            })
+            .collect();
+        self.changes.send_replace(snapshot);
     }
 
     /// Starts accepting inhibitors after the well-known name is acquired.
@@ -99,6 +132,7 @@ impl ScreenSaverRegistry {
                     reason: reason.to_owned(),
                 });
                 state.next = cookie;
+                self.publish_snapshot(&state);
                 return Ok(cookie);
             }
             cookie = cookie.wrapping_add(1).max(1);
@@ -121,6 +155,7 @@ impl ScreenSaverRegistry {
         match state.records.get(&cookie) {
             Some(record) if record.owner == owner => {
                 state.records.remove(&cookie);
+                self.publish_snapshot(&state);
                 Ok(())
             }
             Some(_) => Err(ScreenSaverError::AccessDenied),
@@ -130,11 +165,15 @@ impl ScreenSaverRegistry {
 
     /// Releases every cookie owned by a disconnected D-Bus connection.
     pub fn disconnect(&self, owner: &str) {
-        self.state
+        let mut state = self
+            .state
             .lock()
-            .expect("ScreenSaver registry lock poisoned")
-            .records
-            .retain(|_, record| record.owner != owner);
+            .expect("ScreenSaver registry lock poisoned");
+        let before = state.records.len();
+        state.records.retain(|_, record| record.owner != owner);
+        if state.records.len() != before {
+            self.publish_snapshot(&state);
+        }
     }
 
     /// Clears all cookies and rejects subsequent acquisition.
@@ -144,7 +183,10 @@ impl ScreenSaverRegistry {
             .lock()
             .expect("ScreenSaver registry lock poisoned");
         state.accepting = false;
-        state.records.clear();
+        if !state.records.is_empty() {
+            state.records.clear();
+            self.publish_snapshot(&state);
+        }
     }
 
     /// Returns the number of active connection cookies.
@@ -254,6 +296,20 @@ impl fmt::Debug for ScreenSaverServer {
 }
 
 impl ScreenSaverServer {
+    /// Connects to the session D-Bus and installs the ScreenSaver inhibition interface.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the session bus is unreachable or another process owns the name.
+    pub async fn connect_session(registry: ScreenSaverRegistry) -> Result<Self, ScreenSaverError> {
+        let connection = zbus::connection::Builder::session()
+            .map_err(bus_error)?
+            .build()
+            .await
+            .map_err(bus_error)?;
+        Self::install(connection, registry).await
+    }
+
     /// Registers both standard paths and acquires the name without replacing or queuing behind an owner.
     ///
     /// # Errors

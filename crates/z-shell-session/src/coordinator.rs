@@ -12,6 +12,18 @@ use zbus::zvariant::OwnedFd;
 const LOGIND_NAME: &str = "org.freedesktop.login1";
 const LOGIND_PATH: &str = "/org/freedesktop/login1";
 const LOGIND_INTERFACE: &str = "org.freedesktop.login1.Manager";
+const LOGIND_SESSION_INTERFACE: &str = "org.freedesktop.login1.Session";
+
+/// Asynchronous lifecycle signal received from `systemd-logind`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LogindEvent {
+    /// `org.freedesktop.login1.Manager.PrepareForSleep(true)`.
+    PrepareForSleep,
+    /// `org.freedesktop.login1.Manager.PrepareForSleep(false)`.
+    Wake,
+    /// `org.freedesktop.login1.Session.Lock` for the current user session.
+    SessionLock,
+}
 
 /// Error acquiring or using a logind sleep inhibitor.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
@@ -129,6 +141,115 @@ impl LogindSleepInhibitor {
         } else {
             SleepSignal::Wake
         })
+    }
+
+    /// Resolves the current logind session object path via PID or `XDG_SESSION_ID`.
+    async fn resolve_session_path(&self) -> Option<zbus::zvariant::OwnedObjectPath> {
+        let proxy = self.proxy().await.ok()?;
+        if let Ok(path) = proxy
+            .call::<_, _, zbus::zvariant::OwnedObjectPath>(
+                "GetSessionByPID",
+                &(std::process::id(),),
+            )
+            .await
+        {
+            return Some(path);
+        }
+        if let Ok(session_id) = std::env::var("XDG_SESSION_ID")
+            && !session_id.trim().is_empty()
+            && let Ok(path) = proxy
+                .call::<_, _, zbus::zvariant::OwnedObjectPath>("GetSession", &(session_id,))
+                .await
+        {
+            return Some(path);
+        }
+        None
+    }
+
+    /// Monitors `org.freedesktop.login1.Manager.PrepareForSleep` and (when a session path resolves)
+    /// `org.freedesktop.login1.Session.Lock`, delivering every [`LogindEvent`] into `sender`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if match-rule registration or D-Bus signal reception fails.
+    pub async fn monitor_events(
+        &self,
+        sender: tokio::sync::mpsc::Sender<LogindEvent>,
+    ) -> Result<(), SleepInhibitorError> {
+        use zbus::export::futures_core::Stream;
+
+        let sleep_rule = zbus::MatchRule::builder()
+            .msg_type(zbus::message::Type::Signal)
+            .interface(LOGIND_INTERFACE)
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))?
+            .path(LOGIND_PATH)
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))?
+            .member("PrepareForSleep")
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))?
+            .build();
+        let sleep_stream = zbus::MessageStream::for_match_rule(sleep_rule, &self.connection, None)
+            .await
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))?;
+        let mut sleep_stream = std::pin::pin!(sleep_stream);
+
+        let lock_stream = if let Some(session_path) = self.resolve_session_path().await {
+            let lock_rule = zbus::MatchRule::builder()
+                .msg_type(zbus::message::Type::Signal)
+                .interface(LOGIND_SESSION_INTERFACE)
+                .map_err(|error| SleepInhibitorError::new(error.to_string()))?
+                .path(session_path.as_str())
+                .map_err(|error| SleepInhibitorError::new(error.to_string()))?
+                .member("Lock")
+                .map_err(|error| SleepInhibitorError::new(error.to_string()))?
+                .build();
+            zbus::MessageStream::for_match_rule(lock_rule, &self.connection, None)
+                .await
+                .ok()
+        } else {
+            None
+        };
+        let mut lock_stream = lock_stream.map(Box::pin);
+
+        loop {
+            let event = tokio::select! {
+                sleep_msg = std::future::poll_fn(|cx| sleep_stream.as_mut().poll_next(cx)) => {
+                    let message = sleep_msg
+                        .ok_or_else(|| SleepInhibitorError::new("logind PrepareForSleep stream ended"))?
+                        .map_err(|error| SleepInhibitorError::new(error.to_string()))?;
+                    let (sleeping,) = message
+                        .body()
+                        .deserialize::<(bool,)>()
+                        .map_err(|error| SleepInhibitorError::new(error.to_string()))?;
+                    if sleeping {
+                        LogindEvent::PrepareForSleep
+                    } else {
+                        LogindEvent::Wake
+                    }
+                }
+                lock_msg = async {
+                    match lock_stream.as_mut() {
+                        Some(stream) => std::future::poll_fn(|cx| stream.as_mut().poll_next(cx)).await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    match lock_msg {
+                        Some(Ok(_)) => LogindEvent::SessionLock,
+                        Some(Err(error)) => {
+                            tracing::debug!(%error, "logind Session.Lock stream failed; disabling session lock monitor");
+                            lock_stream = None;
+                            continue;
+                        }
+                        None => {
+                            lock_stream = None;
+                            continue;
+                        }
+                    }
+                }
+            };
+            if sender.send(event).await.is_err() {
+                return Ok(());
+            }
+        }
     }
 }
 
@@ -418,6 +539,11 @@ impl Coordinator {
             sleep_inhibitor,
             last_error: None,
         }
+    }
+
+    /// Updates the optional fallback locker argv used only when no privileged host is connected.
+    pub fn set_fallback_locker(&mut self, fallback_locker: Option<Vec<String>>) {
+        self.fallback_locker = fallback_locker;
     }
 
     /// Returns the full internal phase for trusted callers.

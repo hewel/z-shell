@@ -316,4 +316,69 @@ mod tests {
             Err(ConfigError::Validation(_))
         ));
     }
+
+    #[test]
+    fn loads_and_validates_declarative_idle_rules() {
+        let (_dir, store) = test_store();
+        fs::create_dir_all(store.paths().config_dir()).unwrap();
+        fs::write(
+            store.paths().settings_file(),
+            r#"
+[idle]
+pre_action_fade_seconds = 5
+
+[[idle.rules]]
+name = "lock"
+enabled = true
+timeout_seconds = 300
+action = "lock"
+
+[[idle.rules]]
+name = "screen-off"
+enabled = true
+timeout_seconds = 360
+locked_timeout_seconds = 60
+action = "screen_off"
+
+[[idle.rules]]
+name = "notify-idle"
+enabled = false
+timeout_seconds = 120
+action = { custom_command = ["notify-send", "idle"] }
+resume_command = ["notify-send", "back"]
+pre_action_fade_seconds = 1
+"#,
+        )
+        .unwrap();
+
+        let loaded = store.load_settings().unwrap();
+        assert_eq!(loaded.idle.pre_action_fade_seconds, 5);
+        assert_eq!(loaded.idle.rules.len(), 3);
+        assert_eq!(loaded.idle.rules[0].name, "lock");
+        assert!(loaded.idle.rules[0].enabled);
+        assert_eq!(loaded.idle.rules[1].locked_timeout_seconds, Some(60));
+        assert_eq!(
+            loaded.idle.rules[2].action,
+            crate::settings::IdleRuleAction::CustomCommand(vec![
+                "notify-send".to_owned(),
+                "idle".to_owned()
+            ])
+        );
+
+        // Duplicate names must fail validation.
+        let mut invalid = loaded.clone();
+        invalid.idle.rules.push(invalid.idle.rules[0].clone());
+        assert!(matches!(
+            store.save_settings(&invalid),
+            Err(ConfigError::Validation(_))
+        ));
+
+        // Enabled rule with zero timeout must fail validation.
+        let mut zero_timeout = loaded;
+        zero_timeout.idle.rules[0].timeout_seconds = 0;
+        assert!(matches!(
+            store.save_settings(&zero_timeout),
+            Err(ConfigError::Validation(_))
+        ));
+    }
 }

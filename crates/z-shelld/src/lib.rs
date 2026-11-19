@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
-use tokio::sync::{Mutex as AsyncMutex, OnceCell};
+use tokio::sync::{Mutex as AsyncMutex, OnceCell, watch};
 use tracing::info;
 use z_shell_bus::{
     BusHub, BusLimits, BusServer, CommandCall, CommandHandler, ShutdownHandle, UpdateKind,
@@ -20,15 +20,18 @@ use z_shell_protocol::{
 };
 use z_shell_session::{
     coordinator::{
-        InhibitorFuture, LockPhaseName, LogindSleepInhibitor, SleepInhibitor, SleepInhibitorError,
+        InhibitorFuture, LockPhaseName, LogindEvent, LogindSleepInhibitor, SleepInhibitor,
+        SleepInhibitorError, SleepSignal,
     },
-    idle::MediaPlayback,
+    idle::{ActionCompletion, IdleAction, IdleEffect, MediaPlayback},
     pam::HelperAuthenticator,
+    screensaver::{ScreenSaverRegistry, ScreenSaverServer},
     service::{LOCK_TOPIC, SessionService},
+    wayland_idle::{WaylandIdle, WaylandIdleDriver},
 };
 use z_shell_system::{SystemHandle, SystemServices};
 use z_shell_theme::{GtkLinker, ThemeEngine};
-use z_shell_wayland::WaylandHandle;
+use z_shell_wayland::{OutputPowerMode, WaylandHandle};
 
 /// Canonical core topic names published by `z-shelld`.
 pub mod topics {
@@ -47,11 +50,12 @@ pub struct DaemonApp {
     hub: BusHub,
     server: BusServer,
     _theme: ThemeEngine,
-    _wayland: Option<WaylandHandle>,
+    _wayland: Option<Arc<WaylandHandle>>,
     _system: Option<SystemHandle>,
     _clipboard: Arc<ClipboardService>,
     _desktop: Option<Arc<DesktopHandle>>,
     _session: Arc<SessionService>,
+    _session_drivers: Option<SessionRuntimeDrivers>,
     _bridge: Option<CrossDomainBridge>,
 }
 
@@ -127,7 +131,7 @@ impl DaemonApp {
         theme.install_on_bus(&hub);
 
         let wayland = match z_shell_wayland::connect_from_env() {
-            Ok(handle) => Some(z_shell_wayland::install_on_bus(&hub, handle)),
+            Ok(handle) => Some(Arc::new(z_shell_wayland::install_on_bus(&hub, handle))),
             Err(err) => {
                 tracing::info!(error = %err, "no Wayland compositor detected; publishing disconnected baselines");
                 z_shell_wayland::publish_disconnected_baselines(&hub);
@@ -154,13 +158,20 @@ impl DaemonApp {
             Arc::new(DesktopServices::install(&hub, &paths, offline_policy))
         });
 
+        let sleep_inhibitor = Arc::new(LazyLogindSleepInhibitor::new());
         let session = Arc::new(SessionService::new(
             hub.daemon_instance_id().to_owned(),
             Arc::new(HelperAuthenticator::new(resolve_pam_helper_path())),
-            Arc::new(LazyLogindSleepInhibitor::new()),
+            Arc::clone(&sleep_inhibitor) as Arc<dyn SleepInhibitor>,
             &settings.idle,
         ));
         session.install_on_bus(&hub);
+
+        let session_drivers = SessionRuntimeDrivers::start(
+            Arc::clone(&session),
+            sleep_inhibitor,
+            wayland.as_ref().map(Arc::downgrade),
+        );
 
         let bridge =
             CrossDomainBridge::start(&hub, Arc::downgrade(&clipboard), Arc::downgrade(&session));
@@ -172,6 +183,7 @@ impl DaemonApp {
             shared_settings,
             shared_state,
             desktop.as_ref().map(Arc::downgrade),
+            Arc::downgrade(&session),
             shutdown,
         );
 
@@ -190,6 +202,7 @@ impl DaemonApp {
             _clipboard: clipboard,
             _desktop: desktop,
             _session: session,
+            _session_drivers: session_drivers,
             _bridge: bridge,
         })
     }
@@ -321,6 +334,7 @@ fn register_core_commands(
     settings_cell: Arc<AsyncMutex<UserSettings>>,
     state_cell: Arc<AsyncMutex<RuntimeState>>,
     desktop_ref: Option<Weak<DesktopHandle>>,
+    session_ref: Weak<SessionService>,
     shutdown: ShutdownHandle,
 ) {
     // status (public) — receives `call.hub` at invocation time so BusHub holds zero Arc cycles!
@@ -431,10 +445,12 @@ fn register_core_commands(
         let store_ref = Arc::clone(&store);
         let settings_ref = Arc::clone(&settings_cell);
         let desktop_ref = desktop_ref.clone();
+        let session_ref = session_ref.clone();
         let handler: CommandHandler = Arc::new(move |call: CommandCall| {
             let store_ref = Arc::clone(&store_ref);
             let settings_ref = Arc::clone(&settings_ref);
             let desktop_ref = desktop_ref.clone();
+            let session_ref = session_ref.clone();
             Box::pin(async move {
                 let mut guard = settings_ref.lock().await;
                 let fresh = store_ref.load_settings().map_err(|err| {
@@ -452,6 +468,7 @@ fn register_core_commands(
                     });
                 }
                 let old_offline = guard.general.offline_mode;
+                let idle_changed = guard.idle != fresh.idle;
                 let summary_changed = guard.public_summary() != fresh.public_summary();
                 *guard = fresh.clone();
                 let summary_json = serde_json::to_value(guard.public_summary())
@@ -465,6 +482,9 @@ fn register_core_commands(
                     } else {
                         OfflinePolicy::Online
                     });
+                }
+                if idle_changed && let Some(session) = session_ref.upgrade() {
+                    session.apply_settings(&fresh.idle).await;
                 }
 
                 let msg = if summary_changed {
@@ -722,6 +742,218 @@ impl SleepInhibitor for LazyLogindSleepInhibitor {
 
     fn suspend(&self) -> InhibitorFuture<'_> {
         Box::pin(async move { self.get_or_connect().await?.suspend().await })
+    }
+}
+
+struct SessionRuntimeDrivers {
+    stop: watch::Sender<bool>,
+    _wayland_idle: Option<WaylandIdleDriver>,
+    tasks: Vec<tokio::task::JoinHandle<()>>,
+}
+
+impl SessionRuntimeDrivers {
+    fn start(
+        session: Arc<SessionService>,
+        sleep_inhibitor: Arc<LazyLogindSleepInhibitor>,
+        wayland: Option<Weak<WaylandHandle>>,
+    ) -> Option<Self> {
+        let runtime = tokio::runtime::Handle::try_current().ok()?;
+        let (stop, stop_rx) = watch::channel(false);
+
+        let wayland_idle = match WaylandIdle::connect_from_env() {
+            Ok(idle) => match WaylandIdleDriver::spawn(idle, Arc::clone(&session), runtime.clone())
+            {
+                Ok(driver) => Some(driver),
+                Err(error) => {
+                    tracing::warn!(%error, "failed to start Wayland idle driver");
+                    session.set_idle_unavailable(format!("Wayland idle worker failed: {error}"));
+                    None
+                }
+            },
+            Err(error) => {
+                tracing::info!(%error, "no Wayland ext-idle-notify-v1 compositor available");
+                session.set_idle_unavailable(format!("ext-idle-notify-v1 unavailable: {error}"));
+                None
+            }
+        };
+
+        let mut tasks = Vec::new();
+
+        // 1. DPMS ScreenOff / ResumeAction consumer bridging idle effects to wlr-output-power.
+        {
+            let session_weak = Arc::downgrade(&session);
+            let mut effects = session.subscribe_idle_effects();
+            let mut stop_dpms = stop_rx.clone();
+            tasks.push(runtime.spawn(async move {
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = stop_dpms.changed() => break,
+                        effect = effects.recv() => {
+                            match effect {
+                                Ok(IdleEffect::RunAction {
+                                    action_id,
+                                    action: IdleAction::ScreenOff,
+                                    ..
+                                }) => {
+                                    let outcome = match wayland.as_ref().and_then(Weak::upgrade) {
+                                        Some(handle) => {
+                                            match handle.set_all_outputs_power(OutputPowerMode::Off).await {
+                                                Ok(()) => ActionCompletion::Succeeded,
+                                                Err(error) => {
+                                                    tracing::warn!(%error, "ScreenOff output-power failed");
+                                                    ActionCompletion::Failed
+                                                }
+                                            }
+                                        }
+                                        None => ActionCompletion::Failed,
+                                    };
+                                    if let Some(svc) = session_weak.upgrade() {
+                                        svc.complete_idle_action(action_id, outcome).await;
+                                    }
+                                }
+                                Ok(IdleEffect::ResumeAction {
+                                    action: IdleAction::ScreenOff,
+                                    ..
+                                }) => {
+                                    if let Some(handle) = wayland.as_ref().and_then(Weak::upgrade)
+                                        && let Err(error) = handle.set_all_outputs_power(OutputPowerMode::On).await
+                                    {
+                                        tracing::warn!(%error, "ScreenOff resume output-power failed");
+                                    }
+                                }
+                                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                            }
+                        }
+                    }
+                }
+            }));
+        }
+
+        // 2. org.freedesktop.ScreenSaver per-connection cookie inhibition server.
+        {
+            let session_weak = Arc::downgrade(&session);
+            let mut stop_ss = stop_rx.clone();
+            tasks.push(runtime.spawn(async move {
+                let registry = ScreenSaverRegistry::new();
+                let mut changes = registry.subscribe();
+                let server = tokio::select! {
+                    biased;
+                    _ = stop_ss.changed() => return,
+                    res = ScreenSaverServer::connect_session(registry) => match res {
+                        Ok(server) => server,
+                        Err(error) => {
+                            tracing::info!(%error, "org.freedesktop.ScreenSaver unavailable or owned by another daemon");
+                            return;
+                        }
+                    }
+                };
+                let sync_session = session_weak.clone();
+                let sync_task = tokio::spawn(async move {
+                    while changes.changed().await.is_ok() {
+                        let list = changes.borrow_and_update().clone();
+                        if let Some(svc) = sync_session.upgrade() {
+                            svc.sync_screensaver_inhibitors(list).await;
+                        } else {
+                            break;
+                        }
+                    }
+                });
+                tokio::select! {
+                    biased;
+                    _ = stop_ss.changed() => {}
+                    res = server.monitor_disconnects() => {
+                        if let Err(error) = res {
+                            tracing::info!(%error, "ScreenSaver disconnect monitor ended");
+                        }
+                    }
+                }
+                sync_task.abort();
+                if let Err(error) = server.shutdown().await {
+                    tracing::debug!(%error, "ScreenSaver shutdown reported D-Bus error");
+                }
+                if let Some(svc) = session_weak.upgrade() {
+                    svc.sync_screensaver_inhibitors(Vec::new()).await;
+                }
+            }));
+        }
+
+        // 3. systemd-logind delay inhibitor + PrepareForSleep + Session.Lock monitor.
+        {
+            let session_weak = Arc::downgrade(&session);
+            let mut stop_logind = stop_rx;
+            tasks.push(runtime.spawn(async move {
+                let logind = tokio::select! {
+                    biased;
+                    _ = stop_logind.changed() => return,
+                    res = sleep_inhibitor.get_or_connect() => match res {
+                        Ok(logind) => logind,
+                        Err(error) => {
+                            tracing::info!(%error, "systemd-logind unavailable; sleep/lock signals inactive");
+                            return;
+                        }
+                    }
+                };
+                if let Some(svc) = session_weak.upgrade()
+                    && let Err(error) = svc.arm_sleep_delay().await
+                {
+                    tracing::info!(%error, "could not acquire initial logind sleep delay inhibitor");
+                }
+                let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+                let monitor = logind.monitor_events(tx);
+                tokio::pin!(monitor);
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = stop_logind.changed() => break,
+                        res = &mut monitor => {
+                            if let Err(error) = res {
+                                tracing::info!(%error, "logind event monitor stopped");
+                            }
+                            break;
+                        }
+                        maybe_event = rx.recv() => {
+                            let Some(event) = maybe_event else {
+                                break;
+                            };
+                            let Some(svc) = session_weak.upgrade() else {
+                                break;
+                            };
+                            match event {
+                                LogindEvent::PrepareForSleep => {
+                                    svc.handle_sleep_signal(SleepSignal::PrepareForSleep).await;
+                                }
+                                LogindEvent::Wake => {
+                                    svc.handle_sleep_signal(SleepSignal::Wake).await;
+                                }
+                                LogindEvent::SessionLock => {
+                                    if let Err(error) = svc.request_lock().await {
+                                        tracing::warn!(%error, "logind Session.Lock request failed");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                sleep_inhibitor.release();
+            }));
+        }
+
+        Some(Self {
+            stop,
+            _wayland_idle: wayland_idle,
+            tasks,
+        })
+    }
+}
+
+impl Drop for SessionRuntimeDrivers {
+    fn drop(&mut self) {
+        let _ = self.stop.send(true);
+        for task in &self.tasks {
+            task.abort();
+        }
     }
 }
 

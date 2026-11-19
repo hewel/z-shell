@@ -45,3 +45,20 @@ fn screensaver_shutdown_clears_cookies_and_stops_accepting_new_ones() {
         Err(ScreenSaverError::UnknownCookie)
     );
 }
+
+#[tokio::test]
+async fn screensaver_subscribe_broadcasts_live_cookie_transitions() {
+    let registry = ScreenSaverRegistry::new();
+    let mut rx = registry.subscribe();
+    registry.open();
+
+    let cookie = registry
+        .inhibit(":1.20", "browser", "video playback")
+        .expect("cookie");
+    rx.changed().await.expect("inhibit notification");
+    assert_eq!(rx.borrow_and_update().len(), 1);
+
+    registry.uninhibit(":1.20", cookie).expect("uninhibit");
+    rx.changed().await.expect("uninhibit notification");
+    assert!(rx.borrow_and_update().is_empty());
+}

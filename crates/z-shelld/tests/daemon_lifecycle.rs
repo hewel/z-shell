@@ -342,6 +342,47 @@ async fn wires_desktop_and_session_domains_and_locks_clipboard_on_session_lock()
         ClientError::Rpc(ref rpc) if rpc.code == ErrorCode::PermissionDenied
     ));
 
+    // Reloading declarative [[idle.rules]] from settings.toml must update session.idle live!
+    std::fs::write(
+        paths.settings_file(),
+        r#"
+[idle]
+pre_action_fade_seconds = 3
+
+[[idle.rules]]
+name = "quick-screen-off"
+enabled = true
+timeout_seconds = 45
+action = "screen_off"
+"#,
+    )
+    .unwrap();
+    public_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("settings.reload").unwrap(),
+            args: Vec::new(),
+            payload: None,
+        })
+        .await
+        .unwrap();
+    let idle_status = public_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("idle.status").unwrap(),
+            args: Vec::new(),
+            payload: None,
+        })
+        .await
+        .unwrap();
+    let rules = idle_status.data.unwrap()["rules"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0]["name"], json!("quick-screen-off"));
+    assert_eq!(rules[0]["enabled"], json!(true));
+    assert_eq!(rules[0]["timeout_seconds"], json!(45));
+    assert_eq!(rules[0]["pre_action_fade_seconds"], json!(3));
+
     // Subscribe public_client to session.lock, then drop host_client abruptly ->
     // Coordinator::host_disconnected must fire immediately (host_connected=false) while staying
     // fail-closed in phase="locked"!

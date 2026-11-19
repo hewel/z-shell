@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use thiserror::Error;
+use z_shell_config::{IdleRuleAction, IdleSettings};
 use z_shell_protocol::{InhibitorEntry, InhibitorScope};
 
 const MAX_RULES: usize = 64;
@@ -96,6 +97,44 @@ impl Default for IdleConfig {
 }
 
 impl IdleConfig {
+    /// Builds an [`IdleConfig`] from declarative `settings.toml` [`IdleSettings`].
+    ///
+    /// When `settings.rules` is empty, the built-in disabled presets are used with
+    /// `settings.pre_action_fade_seconds` applied as their warning fade duration.
+    #[must_use]
+    pub fn from_settings(settings: &IdleSettings) -> Self {
+        if settings.rules.is_empty() {
+            let mut config = Self::default();
+            for rule in &mut config.rules {
+                rule.pre_action_fade_seconds = settings.pre_action_fade_seconds;
+            }
+            return config;
+        }
+        let rules = settings
+            .rules
+            .iter()
+            .map(|rule| IdleRule {
+                name: rule.name.clone(),
+                enabled: rule.enabled,
+                timeout_seconds: rule.timeout_seconds,
+                locked_timeout_seconds: rule.locked_timeout_seconds,
+                action: match &rule.action {
+                    IdleRuleAction::Lock => IdleAction::Lock,
+                    IdleRuleAction::ScreenOff => IdleAction::ScreenOff,
+                    IdleRuleAction::Suspend => IdleAction::Suspend,
+                    IdleRuleAction::LockAndSuspend => IdleAction::LockAndSuspend,
+                    IdleRuleAction::CustomCommand(argv) => IdleAction::CustomCommand(argv.clone()),
+                    _ => IdleAction::Lock,
+                },
+                resume_command: rule.resume_command.clone(),
+                pre_action_fade_seconds: rule
+                    .pre_action_fade_seconds
+                    .unwrap_or(settings.pre_action_fade_seconds),
+            })
+            .collect();
+        Self { rules }
+    }
+
     /// Validates all rules atomically before any live policy is changed.
     ///
     /// # Errors
@@ -437,6 +476,32 @@ impl Default for IdlePolicy {
 }
 
 impl IdlePolicy {
+    /// Returns currently active `(rule_index, token, timeout_seconds)` watches that a newly
+    /// connected Wayland `ext-idle-notify-v1` driver should arm immediately.
+    #[must_use]
+    pub fn active_watches(&self) -> Vec<(usize, u64, u32)> {
+        self.states
+            .iter()
+            .enumerate()
+            .filter_map(|(index, state)| {
+                if state.watch == 0 || self.rule_inhibited(index) {
+                    return None;
+                }
+                let rule = &self.config.rules[index];
+                let timeout_seconds = if self.lock == LockState::Locked {
+                    rule.locked_timeout_seconds.unwrap_or(rule.timeout_seconds)
+                } else {
+                    rule.timeout_seconds
+                };
+                if rule.enabled && timeout_seconds > 0 {
+                    Some((index, state.watch, timeout_seconds))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     /// Atomically replaces all rules and invalidates earlier watches and fade callbacks.
     ///
     /// # Errors

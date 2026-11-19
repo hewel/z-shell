@@ -7,8 +7,9 @@ pub mod store;
 
 pub use paths::{PathError, ShellPaths};
 pub use settings::{
-    BarPosition, BarSettings, EdgeOverrides, GeneralSettings, IdleSettings, LogLevel,
-    PublicSettingsSummary, ThemeBackend, ThemeMode, ThemeSettings, ThemeVariant, UserSettings,
+    BarPosition, BarSettings, EdgeOverrides, GeneralSettings, IdleRuleAction, IdleRuleSettings,
+    IdleSettings, LogLevel, PublicSettingsSummary, ThemeBackend, ThemeMode, ThemeSettings,
+    ThemeVariant, UserSettings,
 };
 pub use state::{PublicStateSummary, RuntimeState};
 pub use store::{ConfigError, ConfigStore};

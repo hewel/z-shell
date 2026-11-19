@@ -103,12 +103,16 @@ impl SessionService {
         );
         let lock_snapshot = coordinator.snapshot();
         let mut idle = IdlePolicy::default();
-        let mut config = IdleConfig::default();
-        for rule in &mut config.rules {
-            rule.pre_action_fade_seconds = settings.pre_action_fade_seconds;
+        let config = IdleConfig::from_settings(settings);
+        if let Err(error) = idle.configure(config) {
+            tracing::warn!(%error, "invalid idle rules in settings.toml; falling back to disabled presets");
+            let mut fallback = IdleConfig::default();
+            for rule in &mut fallback.rules {
+                rule.pre_action_fade_seconds = settings.pre_action_fade_seconds;
+            }
+            idle.configure(fallback)
+                .expect("built-in idle presets are valid");
         }
-        idle.configure(config)
-            .expect("built-in idle presets are valid");
         let (effects, _) = tokio::sync::broadcast::channel(256);
         Self {
             coordinator: tokio::sync::Mutex::new(coordinator),
@@ -163,6 +167,54 @@ impl SessionService {
     /// Subscribes a native Wayland/action adapter to policy effects.
     pub fn subscribe_idle_effects(&self) -> tokio::sync::broadcast::Receiver<IdleEffect> {
         self.effects.subscribe()
+    }
+
+    /// Returns currently active `(rule_index, token, timeout_seconds)` watches for initial driver arming.
+    #[must_use]
+    pub fn active_idle_watches(&self) -> Vec<(usize, u64, u32)> {
+        self.idle
+            .lock()
+            .expect("idle policy lock poisoned")
+            .active_watches()
+    }
+
+    /// Applies updated declarative `settings.toml` [`IdleSettings`] atomically on reload.
+    pub async fn apply_settings(self: &Arc<Self>, settings: &IdleSettings) {
+        {
+            let mut coordinator = self.coordinator.lock().await;
+            coordinator.set_fallback_locker(settings.fallback_locker.clone());
+        }
+        let config = IdleConfig::from_settings(settings);
+        let result = self
+            .idle
+            .lock()
+            .expect("idle policy lock poisoned")
+            .configure(config);
+        match result {
+            Ok(effects) => {
+                self.publish_idle();
+                self.apply_idle_effects(effects).await;
+            }
+            Err(error) => {
+                tracing::warn!(%error, "ignoring invalid idle rules on settings reload");
+            }
+        }
+    }
+
+    /// Requests a host-verified session lock (used by `lock.request` and `logind` `Session.Lock`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`RpcError`] if an immediate fallback action fails.
+    pub async fn request_lock(self: &Arc<Self>) -> Result<Value, RpcError> {
+        let actions = {
+            let mut coordinator = self.coordinator.lock().await;
+            let actions = coordinator.request_lock();
+            let snapshot = coordinator.snapshot();
+            self.publish_lock(snapshot);
+            actions
+        };
+        self.finish_coordinator_actions(actions).await
     }
 
     /// Acquires the initial logind delay FD before sleep monitoring begins.
@@ -650,14 +702,7 @@ async fn dispatch(
     match name {
         "lock.request" => {
             parse_params::<EmptyParams>(call.params.payload)?;
-            let actions = {
-                let mut coordinator = service.coordinator.lock().await;
-                let actions = coordinator.request_lock();
-                let snapshot = coordinator.snapshot();
-                service.publish_lock(snapshot);
-                actions
-            };
-            service.finish_coordinator_actions(actions).await
+            service.request_lock().await
         }
         "idle.caffeine" => {
             let params: CaffeineParams = parse_params(call.params.payload)?;
