@@ -1,13 +1,18 @@
 //! Bounded wallpaper decoding and deterministic dominant-seed extraction.
 
 use crate::{Rgb, ThemeError};
-use image::GenericImageView as _;
+use image::{GenericImageView as _, ImageReader, Limits};
+use rustix::fs::{self, Mode, OFlags};
 use std::collections::BTreeMap;
-use std::fs;
+use std::fs::File;
+use std::io::{self, Cursor, Read};
 use std::path::Path;
 
 const MAX_SAMPLE_EDGE: u32 = 128;
 const MIN_CHROMATIC_RANGE: u8 = 16;
+const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_DECODE_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_IMAGE_EDGE: u32 = 8192;
 
 #[derive(Debug, Default)]
 struct Bin {
@@ -36,7 +41,18 @@ impl Bin {
 ///
 /// Returns an error for unsupported image data or an entirely transparent image.
 pub fn dominant_color(bytes: &[u8]) -> Result<Rgb, ThemeError> {
-    let decoded = image::load_from_memory(bytes)?;
+    if bytes.len() as u64 > MAX_IMAGE_BYTES {
+        return Err(ThemeError::WallpaperTooLarge);
+    }
+    let mut reader = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(image::ImageError::from)?;
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(MAX_IMAGE_EDGE);
+    limits.max_image_height = Some(MAX_IMAGE_EDGE);
+    limits.max_alloc = Some(MAX_DECODE_BYTES);
+    reader.limits(limits);
+    let decoded = reader.decode()?;
     let sampled = decoded.thumbnail(MAX_SAMPLE_EDGE, MAX_SAMPLE_EDGE);
     let mut bins: BTreeMap<(u8, u8, u8), Bin> = BTreeMap::new();
     for (_, _, pixel) in sampled.pixels() {
@@ -87,10 +103,34 @@ pub fn dominant_color(bytes: &[u8]) -> Result<Rgb, ThemeError> {
 ///
 /// Returns an error when reading or decoding fails, or the image is transparent.
 pub fn dominant_color_from_path(path: &Path) -> Result<Rgb, ThemeError> {
-    let bytes = fs::read(path).map_err(|source| ThemeError::Io {
+    let io_error = |source| ThemeError::Io {
         operation: "read wallpaper",
         path: path.to_owned(),
         source,
-    })?;
+    };
+    // The source can have changed since wallpaper staging. Do not block on a FIFO or
+    // trust the size reported by metadata alone.
+    let file = File::from(
+        fs::open(
+            path,
+            OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|error| io_error(error.into()))?,
+    );
+    let metadata = file.metadata().map_err(io_error)?;
+    if !metadata.is_file() {
+        return Err(io_error(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "not a regular file",
+        )));
+    }
+    if metadata.len() > MAX_IMAGE_BYTES {
+        return Err(ThemeError::WallpaperTooLarge);
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(MAX_IMAGE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(io_error)?;
     dominant_color(&bytes)
 }

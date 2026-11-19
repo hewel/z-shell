@@ -83,8 +83,8 @@ fn register_set(hub: &BusHub, engine: WeakThemeEngine) {
                     "theme.set wallpaper must not be empty",
                 ));
             }
-            let request = engine
-                .successor(|request| {
+            let outcome = engine
+                .generate_next(|request| {
                     if let Some(mode) = params.mode {
                         request.mode = mode;
                     }
@@ -107,7 +107,7 @@ fn register_set(hub: &BusHub, engine: WeakThemeEngine) {
                     }
                 })
                 .await;
-            let snapshot = generate(engine, request).await?;
+            let snapshot = outcome_snapshot(&engine, outcome).await?;
             result(snapshot_json(snapshot)?)
         })
     });
@@ -123,8 +123,8 @@ fn register_retry(hub: &BusHub, engine: WeakThemeEngine) {
         let engine = engine.clone();
         Box::pin(async move {
             let engine = upgrade(&engine)?;
-            let request = engine.successor(|_| {}).await;
-            let snapshot = generate(engine, request).await?;
+            let outcome = engine.generate_next(|_| {}).await;
+            let snapshot = outcome_snapshot(&engine, outcome).await?;
             result(snapshot_json(snapshot)?)
         })
     });
@@ -141,11 +141,11 @@ fn upgrade(engine: &WeakThemeEngine) -> Result<ThemeEngine, RpcError> {
         .ok_or_else(|| RpcError::new(ErrorCode::Internal, "theme engine has been shut down"))
 }
 
-async fn generate(
-    engine: ThemeEngine,
-    request: crate::GenerationRequest,
+async fn outcome_snapshot(
+    engine: &ThemeEngine,
+    outcome: Result<GenerationOutcome, ThemeError>,
 ) -> Result<ThemeSnapshot, RpcError> {
-    match engine.generate(request).await.map_err(theme_rpc_error)? {
+    match outcome.map_err(theme_rpc_error)? {
         GenerationOutcome::Committed(snapshot) => Ok(snapshot),
         GenerationOutcome::Superseded => Ok(engine.snapshot().await),
     }

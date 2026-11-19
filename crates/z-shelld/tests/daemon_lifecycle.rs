@@ -560,3 +560,147 @@ action = "screen_off"
         .unwrap()
         .unwrap();
 }
+
+#[tokio::test]
+async fn wires_wallpaper_to_durable_state_theme_reload_and_session_lock() {
+    let dir = TempDir::new().unwrap();
+    let paths = ShellPaths::from_roots(
+        dir.path().join("config"),
+        dir.path().join("state"),
+        dir.path().join("runtime"),
+        dir.path().join("runtime/bus.sock"),
+    );
+    let store = z_shell_config::ConfigStore::new(paths.clone());
+    let mut settings = z_shell_config::UserSettings::default();
+    settings.wallpaper.directories = vec![dir.path().to_str().unwrap().to_owned()];
+    settings.theme.mode = z_shell_config::ThemeMode::Light;
+    store.save_settings(&settings).unwrap();
+    let image = dir.path().join("desktop.png");
+    image::RgbImage::from_pixel(40, 30, image::Rgb([28, 172, 80]))
+        .save(&image)
+        .unwrap();
+
+    let app = DaemonApp::bootstrap(paths.clone()).unwrap();
+    let shutdown = app.shutdown_handle();
+    let server = tokio::spawn(app.run());
+    let mut public = BusClient::connect(paths.socket_path()).await.unwrap();
+    let host = BusClient::connect(paths.host_socket_path()).await.unwrap();
+    let wallpaper = TopicName::try_new("wallpaper").unwrap();
+    let initial = public.subscribe(wallpaper.clone()).await.unwrap();
+    assert_eq!(initial.data["available"], true);
+    assert_eq!(initial.data["catalog_count"], 1);
+    assert!(initial.data["current"].is_null());
+    public
+        .subscribe(TopicName::try_new("theme").unwrap())
+        .await
+        .unwrap();
+    public
+        .subscribe(TopicName::try_new("state").unwrap())
+        .await
+        .unwrap();
+
+    let command = |name: &str, payload| CommandInvokeParams {
+        name: CommandName::try_new(name).unwrap(),
+        args: vec![],
+        payload,
+    };
+    let set = command("wallpaper.set", Some(json!({"path": image})));
+    let applied = public
+        .invoke_command(set.clone())
+        .await
+        .unwrap()
+        .data
+        .unwrap();
+    let staged = std::path::Path::new(applied["current"]["media"]["path"].as_str().unwrap());
+    assert_eq!(
+        staged.parent().unwrap(),
+        paths.media_dir().join("wallpapers")
+    );
+    assert!(std::fs::symlink_metadata(staged).unwrap().is_file());
+    assert_eq!(
+        std::fs::read(staged).unwrap(),
+        std::fs::read(&image).unwrap()
+    );
+    assert_eq!(
+        store.load_state().unwrap().last_wallpaper.as_ref(),
+        Some(&image)
+    );
+
+    let mut updated = std::collections::BTreeMap::new();
+    timeout(Duration::from_secs(5), async {
+        while updated.len() < 3 {
+            if let Some(ServerMessage::Notification { method, params }) =
+                public.next_notification().await
+                && method == methods::TOPIC_UPDATE
+            {
+                let update: TopicUpdate = serde_json::from_value(params).unwrap();
+                assert!(
+                    !update.source_baseline,
+                    "expected a live update: {update:?}"
+                );
+                updated.insert(update.topic, update.data);
+            }
+        }
+    })
+    .await
+    .expect("wallpaper.set must publish live wallpaper, state, and theme updates");
+    assert_eq!(updated[&wallpaper]["current"]["source_path"], json!(image));
+    assert_eq!(
+        updated[&TopicName::try_new("state").unwrap()]["last_wallpaper"],
+        json!(image)
+    );
+    let theme = &updated[&TopicName::try_new("theme").unwrap()];
+    assert_eq!(
+        theme["source"],
+        json!({"kind": "wallpaper_path", "value": image})
+    );
+    assert_eq!(theme["dark"], false);
+
+    settings.wallpaper.fit = z_shell_config::WallpaperFit::Contain;
+    settings.wallpaper.sync_theme = false;
+    store.save_settings(&settings).unwrap();
+    let reloaded = public
+        .invoke_command(command("settings.reload", None))
+        .await
+        .unwrap()
+        .data
+        .unwrap();
+    assert_eq!(reloaded["wallpaper"]["fit"], "contain");
+    let effective = public.subscribe(wallpaper.clone()).await.unwrap();
+    assert_eq!(effective.data["sync_theme"], false);
+    assert_eq!(effective.data["current"]["fit"], "contain");
+
+    host.invoke_command(command(
+        "host.session-register",
+        Some(json!({"ui_session_generation": 1})),
+    ))
+    .await
+    .unwrap();
+    let lock = public
+        .invoke_command(command("lock.request", None))
+        .await
+        .unwrap()
+        .data
+        .unwrap();
+    host.invoke_command(command(
+        "host.lock-ack",
+        Some(json!({"lock_id": lock[0]["data"]["lock_id"], "ui_session_generation": 1})),
+    ))
+    .await
+    .unwrap();
+    assert!(matches!(
+        public.invoke_command(set).await,
+        Err(ClientError::Rpc(rpc)) if rpc.code == ErrorCode::PermissionDenied
+    ));
+    assert_eq!(
+        public.subscribe(wallpaper).await.unwrap().data["current"]["source_path"],
+        json!(image)
+    );
+
+    shutdown.shutdown();
+    timeout(Duration::from_secs(3), server)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}

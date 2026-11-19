@@ -235,6 +235,63 @@ mod tests {
     }
 
     #[test]
+    fn loads_and_validates_wallpaper_settings_and_output_state() {
+        let (_dir, store) = test_store();
+        store.paths().ensure_dirs().unwrap();
+        let path = store.paths().settings_file();
+        fs::write(
+            &path,
+            "[wallpaper]\ndirectories = ['~/Pictures', '/srv/wallpapers']\nfit = 'contain'\nsync_theme = false\nslideshow_seconds = 60\n",
+        )
+        .unwrap();
+        let settings = store.load_settings().unwrap();
+        assert_eq!(
+            settings.wallpaper.directories,
+            ["~/Pictures", "/srv/wallpapers"]
+        );
+        assert_eq!(
+            settings.wallpaper.fit,
+            crate::settings::WallpaperFit::Contain
+        );
+        assert!(!settings.wallpaper.sync_theme);
+        assert_eq!(settings.wallpaper.slideshow_seconds, 60);
+        assert_eq!(settings.public_summary().wallpaper, settings.wallpaper);
+
+        for (field, value) in [("directories", "[' ']"), ("slideshow_seconds", "86401")] {
+            fs::write(&path, format!("[wallpaper]\n{field} = {value}\n")).unwrap();
+            assert!(matches!(
+                store.load_settings(),
+                Err(ConfigError::Validation(message)) if message.contains(field)
+            ));
+        }
+
+        fs::write(
+            store.paths().state_file(),
+            "last_wallpaper = '/pictures/global.png'\n[output_wallpapers]\nDP-1 = '/pictures/monitor.webp'\n",
+        )
+        .unwrap();
+        let committed = store
+            .update_state(|state| {
+                state
+                    .output_wallpapers
+                    .insert("HDMI-A-1".into(), "/pictures/other.jpg".into());
+                Ok(())
+            })
+            .unwrap();
+        let summary = store.load_state().unwrap().public_summary();
+        assert_eq!(summary.last_wallpaper, Some("/pictures/global.png".into()));
+        assert_eq!(
+            summary.output_wallpapers["DP-1"],
+            Path::new("/pictures/monitor.webp")
+        );
+        assert_eq!(
+            summary.output_wallpapers["HDMI-A-1"],
+            Path::new("/pictures/other.jpg")
+        );
+        assert_eq!(summary, committed.public_summary());
+    }
+
+    #[test]
     fn round_trips_settings_and_state_and_projects_public_summaries() {
         let (_dir, store) = test_store();
         let mut settings = UserSettings::default();

@@ -119,3 +119,7 @@ _Avoid_: Candidate bar, kimpanel window, IME popup
 **Polkit agent**:
 The session authentication agent registered with `polkitd` that brokers privileged authorization prompts over the host control channel using the system `polkit-agent-helper-1` subprocess without exposing cookies or credentials on the public bus.
 _Avoid_: Sudo dialog, auth daemon
+
+**Wallpaper**:
+The daemon-managed desktop background catalog, multi-output assignment, bounded thumbnail and active-image media cache, and optional slideshow feeding native `zgui-js` background surfaces and dynamic theme seed extraction.
+_Avoid_: Background daemon, desktop image

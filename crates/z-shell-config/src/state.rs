@@ -9,8 +9,10 @@ use std::path::PathBuf;
 pub struct PublicStateSummary {
     /// Desktop IDs of applications pinned in the dock.
     pub pinned_apps: Vec<String>,
-    /// Path to the most recently applied wallpaper image.
+    /// Path to the most recently applied global wallpaper image.
     pub last_wallpaper: Option<PathBuf>,
+    /// Optional per-output wallpaper overrides keyed by stable connector/monitor name.
+    pub output_wallpapers: BTreeMap<String, PathBuf>,
     /// Whether Do Not Disturb mode is currently active.
     pub dnd_enabled: bool,
     /// Sorted list of persisted owner-scoped table keys.
@@ -23,8 +25,10 @@ pub struct PublicStateSummary {
 pub struct RuntimeState {
     /// Desktop IDs of applications pinned in the dock.
     pub pinned_apps: Vec<String>,
-    /// Path to the most recently applied wallpaper image.
+    /// Path to the most recently applied global wallpaper image.
     pub last_wallpaper: Option<PathBuf>,
+    /// Optional per-output wallpaper overrides keyed by stable connector/monitor name.
+    pub output_wallpapers: BTreeMap<String, PathBuf>,
     /// Whether Do Not Disturb mode is currently active.
     pub dnd_enabled: bool,
     /// Owner-scoped state tables (for example, `wallpaper_panel` or plugin state keys).
@@ -38,6 +42,7 @@ impl RuntimeState {
         PublicStateSummary {
             pinned_apps: self.pinned_apps.clone(),
             last_wallpaper: self.last_wallpaper.clone(),
+            output_wallpapers: self.output_wallpapers.clone(),
             dnd_enabled: self.dnd_enabled,
             table_keys: self.tables.keys().cloned().collect(),
         }

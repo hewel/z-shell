@@ -11,7 +11,7 @@ use std::process::Command;
 use std::sync::{Arc, Mutex, Weak};
 use tokio::sync::Mutex as AsyncMutex;
 use z_shell_bus::{BusHub, UpdateKind};
-use z_shell_config::{ThemeBackend, ThemeMode, ThemeVariant};
+use z_shell_config::{ThemeBackend, ThemeMode, ThemeSettings, ThemeVariant};
 use z_shell_protocol::TopicName;
 
 /// Seed or wallpaper input used to generate a palette.
@@ -100,8 +100,7 @@ pub enum GenerationOutcome {
 #[derive(Debug)]
 struct State {
     snapshot: ThemeSnapshot,
-    latest_requested: u64,
-    committed_seq: u64,
+    latest_requested: Option<u64>,
     last_request: GenerationRequest,
 }
 
@@ -178,8 +177,7 @@ impl ThemeEngine {
             inner: Arc::new(EngineInner {
                 state: AsyncMutex::new(State {
                     snapshot,
-                    latest_requested: 0,
-                    committed_seq: 0,
+                    latest_requested: None,
                     last_request,
                 }),
                 gtk,
@@ -219,84 +217,121 @@ impl ThemeEngine {
     ) -> Result<GenerationOutcome, ThemeError> {
         {
             let mut state = self.inner.state.lock().await;
-            state.latest_requested = state.latest_requested.max(request.request_seq);
-            state.last_request = request.clone();
-        }
-        let program = self.matugen_program.clone();
-        let request_seq = request.request_seq;
-        let generation = tokio::task::spawn_blocking(move || generate_scheme(request, &program))
-            .await
-            .map_err(|error| ThemeError::GenerationTask(error.to_string()));
-        let (scheme, dark, request) = match generation {
-            Ok(Ok(generated)) => generated,
-            Ok(Err(error)) => {
-                self.record_failure(&error, request_seq).await;
-                return Err(error);
-            }
-            Err(error) => {
-                self.record_failure(&error, request_seq).await;
-                return Err(error);
-            }
-        };
-
-        {
-            let mut state = self.inner.state.lock().await;
-            if request.request_seq != state.latest_requested
-                || request.request_seq < state.committed_seq
+            if state
+                .latest_requested
+                .is_some_and(|latest| latest >= request.request_seq)
             {
                 return Ok(GenerationOutcome::Superseded);
             }
-            state.committed_seq = request.request_seq;
-            state.snapshot.scheme = scheme;
-            state.snapshot.dark = dark;
-            state.snapshot.source = request.source.clone();
-            state.snapshot.variant = request.variant;
-            state.snapshot.backend = request.backend;
-            state.snapshot.gtk_status = GtkLinkStatus::Disabled;
-            state.snapshot.last_error = None;
+            state.latest_requested = Some(request.request_seq);
+            state.last_request = request.clone();
         }
+        self.generate_started(request).await
+    }
 
+    /// Generates a palette for a wallpaper using the current theme settings.
+    ///
+    /// Shares sequencing with `theme.set` and `theme.retry`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the image or configured backend cannot produce a palette.
+    pub async fn generate_wallpaper(
+        &self,
+        path: PathBuf,
+        settings: &ThemeSettings,
+    ) -> Result<GenerationOutcome, ThemeError> {
+        self.generate_next(|request| {
+            request.source = ThemeSource::WallpaperPath(path);
+            request.mode = settings.mode;
+            request.variant = settings.variant;
+            request.backend = settings.backend;
+            request.gtk_linking = settings.gtk_linking;
+        })
+        .await
+    }
+
+    async fn generate_started(
+        &self,
+        request: GenerationRequest,
+    ) -> Result<GenerationOutcome, ThemeError> {
+        let engine = self.clone();
+        let request_seq = request.request_seq;
+        match tokio::task::spawn_blocking(move || engine.generate_and_commit(request)).await {
+            Ok(result) => result,
+            Err(error) => {
+                let error = ThemeError::GenerationTask(error.to_string());
+                let mut state = self.inner.state.lock().await;
+                self.record_failure(&mut state, &error, request_seq);
+                Err(error)
+            }
+        }
+    }
+
+    fn generate_and_commit(
+        &self,
+        request: GenerationRequest,
+    ) -> Result<GenerationOutcome, ThemeError> {
+        let request_seq = request.request_seq;
+        let generated = generate_scheme(request, &self.matugen_program);
+        // Sequence export and publication with the commit. A stale generation must not
+        // overwrite GTK assets or publish after a newer commit.
+        let mut state = self.inner.state.blocking_lock();
+        let (scheme, dark, request) = match generated {
+            Ok(generated) => generated,
+            Err(error) => {
+                self.record_failure(&mut state, &error, request_seq);
+                return Err(error);
+            }
+        };
+        if state.latest_requested != Some(request_seq) {
+            return Ok(GenerationOutcome::Superseded);
+        }
         let gtk_status = if request.gtk_linking {
-            self.inner.gtk.link(&self.snapshot().await.scheme, dark)
+            self.inner.gtk.link(&scheme, dark)
         } else {
             match self.inner.gtk.revert() {
                 GtkLinkStatus::Unlinked => GtkLinkStatus::Disabled,
                 status => status,
             }
         };
-        let snapshot = {
-            let mut state = self.inner.state.lock().await;
-            if state.committed_seq != request.request_seq {
-                return Ok(GenerationOutcome::Superseded);
-            }
-            state.snapshot.gtk_status = gtk_status;
-            state.snapshot.clone()
+        state.snapshot = ThemeSnapshot {
+            scheme,
+            dark,
+            source: request.source,
+            variant: request.variant,
+            backend: request.backend,
+            gtk_status,
+            last_error: None,
         };
-        self.publish(&snapshot, UpdateKind::Live);
-        Ok(GenerationOutcome::Committed(snapshot))
+        self.publish(&state.snapshot, UpdateKind::Live);
+        Ok(GenerationOutcome::Committed(state.snapshot.clone()))
     }
 
-    async fn record_failure(&self, error: &ThemeError, request_seq: u64) {
-        let snapshot = {
-            let mut state = self.inner.state.lock().await;
-            if request_seq != state.latest_requested {
-                return;
-            }
+    fn record_failure(&self, state: &mut State, error: &ThemeError, request_seq: u64) {
+        if state.latest_requested == Some(request_seq) {
             state.snapshot.last_error = Some(error.to_string());
-            state.snapshot.clone()
-        };
-        self.publish(&snapshot, UpdateKind::Live);
+            self.publish(&state.snapshot, UpdateKind::Live);
+        }
     }
 
-    pub(crate) async fn successor(
+    pub(crate) async fn generate_next(
         &self,
         update: impl FnOnce(&mut GenerationRequest),
-    ) -> GenerationRequest {
-        let state = self.inner.state.lock().await;
-        let mut request = state.last_request.clone();
-        update(&mut request);
-        request.request_seq = state.latest_requested.saturating_add(1);
-        request
+    ) -> Result<GenerationOutcome, ThemeError> {
+        let request = {
+            let mut state = self.inner.state.lock().await;
+            let Some(sequence) = state.latest_requested.unwrap_or_default().checked_add(1) else {
+                return Ok(GenerationOutcome::Superseded);
+            };
+            let mut request = state.last_request.clone();
+            update(&mut request);
+            request.request_seq = sequence;
+            state.latest_requested = Some(sequence);
+            state.last_request = request.clone();
+            request
+        };
+        self.generate_started(request).await
     }
 
     pub(crate) fn downgrade(&self) -> WeakThemeEngine {

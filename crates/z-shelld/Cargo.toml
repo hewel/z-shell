@@ -15,6 +15,7 @@ z-shell-protocol = { workspace = true }
 z-shell-session = { workspace = true }
 z-shell-system = { workspace = true }
 z-shell-theme = { workspace = true }
+z-shell-wallpaper = { workspace = true }
 z-shell-wayland = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
@@ -24,6 +25,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
+image = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]

@@ -13,6 +13,9 @@ pub enum ThemeError {
     /// An encoded wallpaper could not be decoded.
     #[error("could not decode wallpaper: {0}")]
     WallpaperDecode(#[from] image::ImageError),
+    /// The encoded image exceeds the input byte budget.
+    #[error("wallpaper exceeds the encoded image byte limit")]
+    WallpaperTooLarge,
     /// Every wallpaper pixel was transparent.
     #[error("wallpaper has no visible pixels")]
     EmptyWallpaper,

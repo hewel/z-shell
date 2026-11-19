@@ -1947,6 +1947,26 @@ version = "0.1.0"
 dependencies = [
  "image",
  "libloading",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "z-shell-bus",
+ "z-shell-config",
+ "z-shell-protocol",
+]
+
+[[package]]
+name = "z-shell-wallpaper"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "image",
+ "rustix",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1982,6 +2002,7 @@ name = "z-shelld"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "image",
  "serde_json",
  "tempfile",
  "tokio",
@@ -1997,6 +2018,7 @@ dependencies = [
  "z-shell-session",
  "z-shell-system",
  "z-shell-theme",
+ "z-shell-wallpaper",
  "z-shell-wayland",
 ]
 

@@ -25,7 +25,7 @@ use z_shell_session::{
         InhibitorFuture, LockPhaseName, LogindEvent, LogindSleepInhibitor, SleepInhibitor,
         SleepInhibitorError, SleepSignal,
     },
-    idle::{ActionCompletion, IdleAction, IdleEffect, MediaPlayback},
+    idle::{ActionCompletion, IdleAction, IdleEffect, MediaPlayback, SleepState},
     pam::HelperAuthenticator,
     polkit::{PolkitBus, PolkitEnabled, PolkitLockState, PolkitRegistration, PolkitService},
     screensaver::{ScreenSaverRegistry, ScreenSaverServer},
@@ -34,6 +34,7 @@ use z_shell_session::{
 };
 use z_shell_system::{SystemHandle, SystemServices};
 use z_shell_theme::{GtkLinker, ThemeEngine};
+use z_shell_wallpaper::{WallpaperLockState, WallpaperService, WallpaperSleepState};
 use z_shell_wayland::{OutputPowerMode, WaylandHandle};
 
 /// Canonical core topic names published by `z-shelld`.
@@ -57,16 +58,18 @@ struct SettingsTargets {
     desktop: Option<Weak<DesktopSlot>>,
     session: Weak<SessionService>,
     polkit: Weak<PolkitService>,
+    wallpaper: Weak<WallpaperService>,
 }
 
 /// Running daemon assembly owning the config store, bus hub, domain services, and dual Unix socket server.
 pub struct DaemonApp {
     hub: BusHub,
     server: BusServer,
-    _theme: ThemeEngine,
+    wallpaper_theme: WallpaperThemeBridge,
     _wayland: Option<Arc<WaylandHandle>>,
     _system: Option<SystemHandle>,
     _clipboard: Arc<ClipboardService>,
+    wallpaper: Arc<WallpaperService>,
     desktop: Option<Arc<DesktopSlot>>,
     _session: Arc<SessionService>,
     session_drivers: Option<SessionRuntimeDrivers>,
@@ -145,6 +148,23 @@ impl DaemonApp {
         let theme = ThemeEngine::with_gtk(GtkLinker::new(config_home, state_home));
         theme.install_on_bus(&hub);
 
+        let (wallpaper_changes, updates) = watch::channel(None);
+        let wallpaper = Arc::new(
+            WallpaperService::new(store.as_ref().clone(), &settings.wallpaper, &runtime_state)
+                .with_shared_state(Arc::clone(&shared_state))
+                .with_theme_sync(move |path| {
+                    wallpaper_changes.send_replace(Some(path));
+                }),
+        );
+        wallpaper.install_on_bus(&hub);
+        let mut wallpaper_theme = WallpaperThemeBridge {
+            theme,
+            settings: Arc::clone(&shared_settings),
+            pending: Some(updates),
+            task: None,
+        };
+        wallpaper_theme.start();
+
         let wayland = match z_shell_wayland::connect_from_env() {
             Ok(handle) => Some(Arc::new(z_shell_wayland::install_on_bus(&hub, handle))),
             Err(err) => {
@@ -197,7 +217,19 @@ impl DaemonApp {
                 Arc::downgrade(&clipboard),
                 desktop.as_ref().map(Arc::downgrade),
                 Arc::downgrade(&polkit),
-            )),
+                Arc::downgrade(&wallpaper),
+            ))
+            .with_sleep_guard({
+                let wallpaper = Arc::downgrade(&wallpaper);
+                move |state| {
+                    if let Some(wallpaper) = wallpaper.upgrade() {
+                        wallpaper.set_sleeping(match state {
+                            SleepState::Awake => WallpaperSleepState::Awake,
+                            SleepState::Sleeping => WallpaperSleepState::Sleeping,
+                        });
+                    }
+                }
+            }),
         );
         session.install_on_bus(&hub);
 
@@ -220,6 +252,7 @@ impl DaemonApp {
                 desktop: desktop.as_ref().map(Arc::downgrade),
                 session: Arc::downgrade(&session),
                 polkit: Arc::downgrade(&polkit),
+                wallpaper: Arc::downgrade(&wallpaper),
             },
             shutdown,
         );
@@ -233,10 +266,11 @@ impl DaemonApp {
         Ok(Self {
             hub,
             server,
-            _theme: theme,
+            wallpaper_theme,
             _wayland: wayland,
             _system: system,
             _clipboard: clipboard,
+            wallpaper,
             desktop,
             _session: session,
             session_drivers,
@@ -262,8 +296,11 @@ impl DaemonApp {
     /// # Errors
     ///
     /// Returns an error if the underlying listener encounters a fatal I/O failure.
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(mut self) -> Result<()> {
+        self.wallpaper_theme.start();
         let result = self.server.serve().await.context("serving z-shelld bus");
+        drop(self.wallpaper);
+        drop(self.wallpaper_theme);
         drop(self.bridge);
         if let Some(mut drivers) = self.session_drivers {
             drivers.shutdown_polkit().await;
@@ -517,6 +554,7 @@ fn register_core_commands(
                 let idle_changed = guard.idle != fresh.idle;
                 let ime_changed = guard.ime != fresh.ime;
                 let polkit_changed = guard.polkit != fresh.polkit;
+                let wallpaper_changed = guard.wallpaper != fresh.wallpaper;
                 let summary_changed = guard.public_summary() != fresh.public_summary();
                 *guard = fresh.clone();
                 let summary_json = serde_json::to_value(guard.public_summary())
@@ -543,6 +581,12 @@ fn register_core_commands(
                 }
                 if idle_changed && let Some(session) = targets.session.upgrade() {
                     session.apply_settings(&fresh.idle).await;
+                }
+                if wallpaper_changed
+                    && let Some(wallpaper) = targets.wallpaper.upgrade()
+                    && let Err(error) = wallpaper.apply_settings(&fresh.wallpaper).await
+                {
+                    tracing::error!(%error, "wallpaper settings worker failed");
                 }
 
                 let msg = if summary_changed {
@@ -1036,19 +1080,22 @@ impl CrossDomainBridge {
         clipboard: Weak<ClipboardService>,
         desktop: Option<Weak<DesktopSlot>>,
         polkit: Weak<PolkitService>,
+        wallpaper: Weak<WallpaperService>,
     ) -> impl Fn(LockPhaseName) {
         // Apply privacy changes before publishing the lock transition, not through a subscriber.
         move |phase| {
-            let (ime, clip, polkit_lock) = match phase {
+            let (ime, clip, polkit_lock, wallpaper_lock) = match phase {
                 LockPhaseName::Unlocked | LockPhaseName::FallbackSpawned => (
                     ImeLockState::Unlocked,
                     LockedState::Unlocked,
                     PolkitLockState::Unlocked,
+                    WallpaperLockState::Unlocked,
                 ),
                 LockPhaseName::Locked | LockPhaseName::Engaging => (
                     ImeLockState::Locked,
                     LockedState::Locked,
                     PolkitLockState::Locked,
+                    WallpaperLockState::Locked,
                 ),
             };
             if let Some(polkit) = polkit.upgrade() {
@@ -1061,6 +1108,9 @@ impl CrossDomainBridge {
             }
             if let Some(clipboard) = clipboard.upgrade() {
                 clipboard.set_locked(clip);
+            }
+            if let Some(wallpaper) = wallpaper.upgrade() {
+                wallpaper.set_locked(wallpaper_lock);
             }
         }
     }
@@ -1134,4 +1184,50 @@ fn media_playing(message: ServerMessage) -> Option<MediaPlayback> {
     } else {
         MediaPlayback::Idle
     })
+}
+
+struct WallpaperThemeBridge {
+    theme: ThemeEngine,
+    settings: Arc<AsyncMutex<UserSettings>>,
+    pending: Option<watch::Receiver<Option<PathBuf>>>,
+    task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl WallpaperThemeBridge {
+    fn start(&mut self) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let Some(mut updates) = self.pending.take() else {
+            return;
+        };
+        let theme = self.theme.clone();
+        let settings = Arc::clone(&self.settings);
+        self.task = Some(runtime.spawn(async move {
+            // A single consumer preserves assignment order; a slow backend can coalesce
+            // pending changes rather than building up one generation job per assignment.
+            while updates.changed().await.is_ok() {
+                let path = updates.borrow_and_update().clone();
+                let Some(path) = path else { continue };
+                let theme_settings = {
+                    let settings = settings.lock().await;
+                    if !settings.wallpaper.sync_theme || settings.theme.seed_color.is_some() {
+                        continue;
+                    }
+                    settings.theme.clone()
+                };
+                if let Err(error) = theme.generate_wallpaper(path, &theme_settings).await {
+                    tracing::warn!(%error, "wallpaper theme generation failed");
+                }
+            }
+        }));
+    }
+}
+
+impl Drop for WallpaperThemeBridge {
+    fn drop(&mut self) {
+        if let Some(task) = &self.task {
+            task.abort();
+        }
+    }
 }

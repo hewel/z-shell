@@ -314,6 +314,53 @@ impl Default for PolkitSettings {
     }
 }
 
+/// Image scaling strategy for desktop wallpaper surfaces.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum WallpaperFit {
+    /// Scale uniformly to fill the output, cropping overflow.
+    #[default]
+    Cover,
+    /// Scale uniformly to fit inside the output without cropping.
+    Contain,
+    /// Stretch non-uniformly to fill the exact output bounds.
+    Fill,
+    /// Render at native dimensions centered on the output.
+    Center,
+}
+
+/// Maximum number of configured wallpaper scan directories.
+pub const MAX_WALLPAPER_DIRECTORIES: usize = 32;
+
+/// Maximum slideshow interval in seconds (24 hours).
+pub const MAX_WALLPAPER_SLIDESHOW_SECONDS: u32 = 86_400;
+
+/// Desktop wallpaper catalog, fit, theme linkage, and slideshow preferences (`[wallpaper]`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WallpaperSettings {
+    /// Directories scanned for PNG, JPEG, and WebP wallpapers (`~/` is expanded at runtime).
+    pub directories: Vec<String>,
+    /// Default scaling strategy for wallpaper background surfaces.
+    pub fit: WallpaperFit,
+    /// Automatically re-derives the Material 3 theme palette from the active wallpaper when `theme.seed_color` is unset.
+    pub sync_theme: bool,
+    /// Optional slideshow rotation interval in seconds (`0` disables automatic rotation).
+    pub slideshow_seconds: u32,
+}
+
+impl Default for WallpaperSettings {
+    fn default() -> Self {
+        Self {
+            directories: vec!["~/Pictures/wallpapers".to_owned()],
+            fit: WallpaperFit::Cover,
+            sync_theme: true,
+            slideshow_seconds: 0,
+        }
+    }
+}
+
 /// Public non-secret settings view broadcast on the `settings` topic (excludes plugin settings tables).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublicSettingsSummary {
@@ -327,6 +374,8 @@ pub struct PublicSettingsSummary {
     pub ime: ImeSettings,
     /// Polkit authentication agent preferences.
     pub polkit: PolkitSettings,
+    /// Wallpaper catalog and slideshow preferences.
+    pub wallpaper: WallpaperSettings,
     /// Idle warning duration (omits host-only fallback argv).
     pub pre_action_fade_seconds: u32,
     /// Sorted list of plugin IDs that have configuration overrides in `settings.toml`.
@@ -347,6 +396,8 @@ pub struct UserSettings {
     pub ime: ImeSettings,
     /// Polkit authentication agent preferences.
     pub polkit: PolkitSettings,
+    /// Desktop wallpaper preferences.
+    pub wallpaper: WallpaperSettings,
     /// Idle and lock preferences.
     pub idle: IdleSettings,
     /// Per-plugin configuration overrides keyed by canonical `author/plugin` ID.
@@ -363,6 +414,7 @@ impl UserSettings {
             theme: self.theme.clone(),
             ime: self.ime.clone(),
             polkit: self.polkit.clone(),
+            wallpaper: self.wallpaper.clone(),
             pre_action_fade_seconds: self.idle.pre_action_fade_seconds,
             configured_plugins: self.plugin_settings.keys().cloned().collect(),
         }
@@ -401,6 +453,29 @@ impl UserSettings {
                     "theme.seed_color must be a #rrggbb hex string, got {seed:?}"
                 ));
             }
+        }
+        if self.wallpaper.directories.len() > MAX_WALLPAPER_DIRECTORIES {
+            return Err(format!(
+                "wallpaper.directories supports at most {MAX_WALLPAPER_DIRECTORIES} entries, got {}",
+                self.wallpaper.directories.len()
+            ));
+        }
+        if self
+            .wallpaper
+            .directories
+            .iter()
+            .any(|dir| dir.trim().is_empty() || dir.chars().any(char::is_control))
+        {
+            return Err(
+                "wallpaper.directories entries must be non-empty paths without control characters"
+                    .to_owned(),
+            );
+        }
+        if self.wallpaper.slideshow_seconds > MAX_WALLPAPER_SLIDESHOW_SECONDS {
+            return Err(format!(
+                "wallpaper.slideshow_seconds must be <= {MAX_WALLPAPER_SLIDESHOW_SECONDS}, got {}",
+                self.wallpaper.slideshow_seconds
+            ));
         }
         if self.idle.pre_action_fade_seconds > MAX_PRE_ACTION_FADE_SECONDS {
             return Err(format!(

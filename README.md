@@ -44,6 +44,7 @@ A modular Linux Wayland desktop shell built around a single **Rust Shell daemon*
 | **Encrypted Clipboard** | Native `ext-data-control-v1` / `wlr-data-control` with verbatim MIME/Latin-1 preservation, `x-kde-passwordManagerHint` rejection, ChaCha20-Poly1305 + Secret Service encrypted history (degrading cleanly to memory-only), revocable out-of-band media handles, and lock-screen read denial. |
 | **Session, PAM, Idle & Polkit** | Isolated `z-shell-pam-helper`, fail-closed cross-process lock & `PrepareForSleep` coordinator (host-verified `ext_session_lock_v1.locked` ACK, single-use scoped unlock approvals, sleep hold, optional `fallback_locker`), declarative `[[idle.rules]]`, Caffeine, `org.freedesktop.ScreenSaver`, `ext-idle-notify-v1`, DPMS screen-off, and session Polkit agent (`session.polkit` + host-only `host.polkit-*` commands). |
 | **Theme Engine** | Pure-Rust Material 3 HCT palette generator (31 roles, 6 variants, Dark/Light/Auto), bounded wallpaper seed extraction, optional `matugen` CLI backend with stale-sequence rejection, and reversible GTK 3/4 linking with conflict detection. |
+| **Wallpaper** | Paginated PNG/JPEG/WebP catalog, confined media tokens, durable global and per-output assignments, lock/sleep-aware slideshow, and optional theme linkage. |
 | **Plugin Ecosystem** | Offline-capable `z-shell plugin` CLI (`path` & commit-pinned `git` sources), capability diff audit/approval/revocation, `@z-shell/composer`, QuickJS-safe `@z-shell/sdk` & `@z-shell/plugin-api`, and 4 first-party reference plugins (`ai-usage`, `nosleep`, `theme-bridges`, `niri-overview`). |
 
 ## Repository Layout
@@ -56,6 +57,7 @@ crates/
   z-shell-plugins/     Static plugin.toml parser, SHA-256 digest, git/path PluginManager
   z-shell-wayland/     Generic Wayland outputs, workspaces, windows, and output power
   z-shell-theme/       Pure-Rust Material 3 HCT engine, wallpaper seed, Matugen, GTK linker
+  z-shell-wallpaper/   Wallpaper catalog, runtime media, durable assignments, slideshow
   z-shell-system/      PulseAudio, NetworkManager, BlueZ, UPower, PPD, logind, telemetry
   z-shell-clipboard/   Wayland data-control clipboard with ChaCha20-Poly1305 persistence
   z-shell-desktop/     Notifications, SNI/DBusMenu tray, MPRIS, XDG launcher, Fcitx5 IME
@@ -157,6 +159,12 @@ variant = "tonal"        # "tonal" | "vibrant" | "expressive" | "fidelity" | "ne
 backend = "builtin"      # "builtin" | "matugen"
 gtk_linking = false
 
+[wallpaper]
+directories = ["~/Pictures/wallpapers"]
+fit = "cover"            # "cover" | "contain" | "fill" | "center"
+sync_theme = true        # derive from global wallpaper when theme.seed_color is unset
+slideshow_seconds = 0    # disabled; positive values rotate the global image
+
 [ime]
 mode = "indicator_only"  # "indicator_only" | "kimpanel" | "disabled"
 candidate_layout = "auto"
@@ -181,6 +189,28 @@ timeout_seconds = 660
 locked_timeout_seconds = 60
 action = "screen_off"
 ```
+
+### Wallpaper
+
+Subscribe to `wallpaper` for the global image (`current`) and connector-specific overrides
+(`per_output`, keyed by names such as `DP-1`). The renderer only needs an `imagePrefixes`
+entry for `$XDG_RUNTIME_DIR/z-shell/media/wallpapers/`; resolve `media` and `thumbnail` as
+daemon media tokens, not `source_path` as a host image path.
+
+```bash
+z-shell msg wallpaper.list --payload '{"offset":0,"limit":24}'
+z-shell msg wallpaper.set --payload '{"path":"/home/me/Pictures/desktop.webp"}'
+z-shell msg wallpaper.set --payload '{"path":"/home/me/Pictures/portrait.jpg","output":"DP-1","fit":"contain"}'
+z-shell msg wallpaper.clear --payload '{"output":"DP-1"}'
+z-shell msg wallpaper.rescan
+```
+
+Omit `output` for the global assignment. `wallpaper.next`, `wallpaper.previous`, and
+`wallpaper.random` take the same optional `output`. Source paths survive daemon restarts;
+one-off `fit` overrides do not. Scans are non-recursive, cap the picker at 512 images,
+and skip missing directories and undecodable files. Images are limited to 64 MiB encoded
+and 8192 pixels per edge; picker thumbnails are no larger than 320 × 320 pixels. Public
+mutations are denied during shell lock, but the topic and picker remain readable.
 
 ## Documentation
 

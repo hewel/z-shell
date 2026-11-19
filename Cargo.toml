@@ -7,6 +7,7 @@ members = [
     "crates/z-shell-plugins",
     "crates/z-shell-wayland",
     "crates/z-shell-theme",
+    "crates/z-shell-wallpaper",
     "crates/z-shell-system",
     "crates/z-shell-clipboard",
     "crates/z-shell-desktop",
@@ -35,6 +36,7 @@ z-shell-plugins = { path = "crates/z-shell-plugins" }
 z-shell-bus = { path = "crates/z-shell-bus" }
 z-shell-wayland = { path = "crates/z-shell-wayland" }
 z-shell-theme = { path = "crates/z-shell-theme" }
+z-shell-wallpaper = { path = "crates/z-shell-wallpaper" }
 z-shell-system = { path = "crates/z-shell-system" }
 z-shell-clipboard = { path = "crates/z-shell-clipboard" }
 z-shell-desktop = { path = "crates/z-shell-desktop" }

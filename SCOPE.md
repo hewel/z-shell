@@ -23,6 +23,7 @@
   - Isolated **PAM helper** authentication and fail-closed cross-process **Idle & Sleep** coordination over the **Host control channel**.
   - Session **Polkit agent** (`[polkit].enabled`, default `true`), with a non-secret `session.polkit` topic and host-only identity selection, response, and cancellation. Prompts are hidden while the shell is locking or locked. An unavailable PolicyKit Authority or an existing agent does not prevent daemon startup.
   - Pure-Rust Material 3 HCT dynamic palette engine (optional `matugen` CLI backend), reversible GTK 3/4 linking, and allowlisted template application consuming committed palettes.
+  - Dedicated **Wallpaper** service (`crates/z-shell-wallpaper`) managing directory scanning, bounded thumbnail & active-image staging under `$XDG_RUNTIME_DIR/z-shell/media/`, global and per-output durable persistence in `state.toml`, optional lock/sleep-aware slideshow, and automatic theme seed linkage.
 - **First-party reference TS plugins**: `z-shell/ai-usage`, `z-shell/nosleep`, `z-shell/theme-bridges`, and `z-shell/niri-overview`.
 
 ## Out of scope

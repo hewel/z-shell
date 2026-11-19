@@ -69,6 +69,7 @@ pub struct SessionService {
     coordinator: tokio::sync::Mutex<Coordinator>,
     lock_snapshot: Mutex<LockSnapshot>,
     lock_guard: Option<Box<dyn Fn(LockPhaseName) + Send + Sync>>,
+    sleep_guard: Option<Box<dyn Fn(SleepState) + Send + Sync>>,
     host_client_id: Mutex<Option<u64>>,
     idle: Mutex<IdlePolicy>,
     authenticator: Arc<dyn Authenticator>,
@@ -119,6 +120,7 @@ impl SessionService {
             coordinator: tokio::sync::Mutex::new(coordinator),
             lock_snapshot: Mutex::new(lock_snapshot),
             lock_guard: None,
+            sleep_guard: None,
             host_client_id: Mutex::new(None),
             idle: Mutex::new(idle),
             authenticator,
@@ -139,6 +141,15 @@ impl SessionService {
         guard: impl Fn(LockPhaseName) + Send + Sync + 'static,
     ) -> Self {
         self.lock_guard = Some(Box::new(guard));
+        self
+    }
+
+    /// Installs a synchronous guard for changes to the coordinator's sleep hold.
+    ///
+    /// The callback runs before the lock snapshot is published and must not reenter the service.
+    #[must_use]
+    pub fn with_sleep_guard(mut self, guard: impl Fn(SleepState) + Send + Sync + 'static) -> Self {
+        self.sleep_guard = Some(Box::new(guard));
         self
     }
 
@@ -482,6 +493,13 @@ impl SessionService {
     fn publish_lock(&self, snapshot: LockSnapshot) {
         if let Some(guard) = &self.lock_guard {
             guard(snapshot.phase);
+        }
+        if let Some(guard) = &self.sleep_guard {
+            guard(if snapshot.sleep_hold {
+                SleepState::Sleeping
+            } else {
+                SleepState::Awake
+            });
         }
         *self.lock_snapshot.lock().expect("lock snapshot poisoned") = snapshot.clone();
         if let Some(hub) = self.hub.lock().expect("session hub lock poisoned").as_ref() {
