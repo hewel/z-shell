@@ -10,6 +10,8 @@ z-shell-bus = { workspace = true }
 z-shell-config = { workspace = true }
 z-shell-plugins = { workspace = true }
 z-shell-protocol = { workspace = true }
+z-shell-theme = { workspace = true }
+z-shell-wayland = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

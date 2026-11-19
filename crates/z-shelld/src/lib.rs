@@ -13,6 +13,8 @@ use z_shell_plugins::registry::{PluginError, PluginManager};
 use z_shell_protocol::{
     ClientRole, CommandInvokeResult, CommandName, ErrorCode, PluginId, RpcError, TopicName,
 };
+use z_shell_theme::{GtkLinker, ThemeEngine};
+use z_shell_wayland::WaylandHandle;
 
 /// Canonical core topic names published by `z-shelld`.
 pub mod topics {
@@ -26,10 +28,12 @@ pub mod topics {
     pub const PLUGINS: &str = "plugins";
 }
 
-/// Running daemon assembly owning the config store, bus hub, and dual Unix socket server.
+/// Running daemon assembly owning the config store, bus hub, domain services, and dual Unix socket server.
 pub struct DaemonApp {
     hub: BusHub,
     server: BusServer,
+    _theme: ThemeEngine,
+    _wayland: Option<WaylandHandle>,
 }
 
 impl DaemonApp {
@@ -89,6 +93,29 @@ impl DaemonApp {
             json!(plugin_summaries),
             UpdateKind::SourceBaseline,
         );
+
+        let config_home = paths
+            .config_dir()
+            .parent()
+            .unwrap_or_else(|| paths.config_dir())
+            .to_path_buf();
+        let state_home = paths
+            .state_dir()
+            .parent()
+            .unwrap_or_else(|| paths.state_dir())
+            .to_path_buf();
+        let theme = ThemeEngine::with_gtk(GtkLinker::new(config_home, state_home));
+        theme.install_on_bus(&hub);
+
+        let wayland = match z_shell_wayland::connect_from_env() {
+            Ok(handle) => Some(z_shell_wayland::install_on_bus(&hub, handle)),
+            Err(err) => {
+                tracing::info!(error = %err, "no Wayland compositor detected; publishing disconnected baselines");
+                z_shell_wayland::publish_disconnected_baselines(&hub);
+                None
+            }
+        };
+
         register_plugin_commands(&hub, plugins);
         register_core_commands(&hub, store, shared_settings, shared_state, shutdown);
 
@@ -98,7 +125,12 @@ impl DaemonApp {
             daemon_instance_id = hub.daemon_instance_id(),
             "z-shelld bootstrapped"
         );
-        Ok(Self { hub, server })
+        Ok(Self {
+            hub,
+            server,
+            _theme: theme,
+            _wayland: wayland,
+        })
     }
 
     /// Returns a cloneable [`ShutdownHandle`] for stopping the daemon gracefully.
