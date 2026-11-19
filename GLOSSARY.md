@@ -115,3 +115,7 @@ _Avoid_: Keyboard indicator, kimpanel status
 **Input method panel**:
 The high-frequency live composition view—preedit text, caret offset, auxiliary text, candidate lookup table, and compositor spot rectangle—published separately from input method status for candidate popups.
 _Avoid_: Candidate bar, kimpanel window, IME popup
+
+**Polkit agent**:
+The session authentication agent registered with `polkitd` that brokers privileged authorization prompts over the host control channel using the system `polkit-agent-helper-1` subprocess without exposing cookies or credentials on the public bus.
+_Avoid_: Sudo dialog, auth daemon

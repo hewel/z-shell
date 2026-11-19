@@ -215,7 +215,7 @@ async fn enforces_host_trust_atomic_state_and_deduped_settings_reload() {
 }
 
 #[tokio::test]
-async fn wires_desktop_settings_and_protects_clipboard_and_ime_on_session_lock() {
+async fn wires_desktop_settings_and_protects_clipboard_ime_and_polkit_on_session_lock() {
     let dir = TempDir::new().unwrap();
     let paths = ShellPaths::from_roots(
         dir.path().join("config"),
@@ -248,12 +248,25 @@ async fn wires_desktop_settings_and_protects_clipboard_and_ime_on_session_lock()
         "desktop.ime.panel",
         "session.lock",
         "session.idle",
+        "session.polkit",
     ] {
         assert!(
             topics.iter().any(|name| name == expected),
             "missing expected core topic {expected} in {topics:?}"
         );
     }
+
+    let polkit = public_client
+        .subscribe(TopicName::try_new("session.polkit").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(polkit.data["enabled"], true);
+    assert_eq!(polkit.data["locked_suppressed"], false);
+    assert!(polkit.data["active"].is_null());
+    public_client
+        .unsubscribe(TopicName::try_new("session.polkit").unwrap())
+        .await
+        .unwrap();
 
     let ime_snap = public_client
         .subscribe(TopicName::try_new("desktop.ime").unwrap())
@@ -270,6 +283,9 @@ async fn wires_desktop_settings_and_protects_clipboard_and_ime_on_session_lock()
 mode = "indicator_only"
 candidate_layout = "vertical"
 switch_osd = false
+
+[polkit]
+enabled = false
 "#,
     )
     .unwrap();
@@ -291,6 +307,17 @@ switch_osd = false
             "switch_osd": false,
         })
     );
+    assert_eq!(settings["polkit"]["enabled"], false);
+    let polkit = public_client
+        .subscribe(TopicName::try_new("session.polkit").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(polkit.data["enabled"], false);
+    assert_eq!(polkit.data["registered"], false);
+    public_client
+        .unsubscribe(TopicName::try_new("session.polkit").unwrap())
+        .await
+        .unwrap();
 
     let Some(ServerMessage::Notification { method, params }) =
         timeout(Duration::from_secs(2), public_client.next_notification())
@@ -312,13 +339,17 @@ switch_osd = false
         .await
         .unwrap();
 
-    // Public socket cannot call host.lock-ack or idle.configure (which can spawn commands).
+    // The public socket cannot call host controls or configure executable idle actions.
     for (name, payload) in [
         (
             "host.lock-ack",
             json!({ "lock_id": 1, "ui_session_generation": 1 }),
         ),
         ("idle.configure", json!({ "rules": [] })),
+        (
+            "host.polkit-respond",
+            json!({"request_id": 1, "response": "not-a-credential"}),
+        ),
     ] {
         let denied = public_client
             .invoke_command(CommandInvokeParams {
@@ -360,6 +391,16 @@ switch_osd = false
         .unwrap();
     let lock_id = lock_req.data.unwrap()[0]["data"]["lock_id"]
         .as_u64()
+        .unwrap();
+    let polkit = public_client
+        .subscribe(TopicName::try_new("session.polkit").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(polkit.data["locked_suppressed"], true);
+    assert!(polkit.data["active"].is_null());
+    public_client
+        .unsubscribe(TopicName::try_new("session.polkit").unwrap())
+        .await
         .unwrap();
     let denied_while_engaging = public_client
         .invoke_command(CommandInvokeParams {
@@ -443,6 +484,16 @@ action = "screen_off"
             args: Vec::new(),
             payload: None,
         })
+        .await
+        .unwrap();
+    let polkit = public_client
+        .subscribe(TopicName::try_new("session.polkit").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(polkit.data["enabled"], true);
+    assert_eq!(polkit.data["locked_suppressed"], true);
+    public_client
+        .unsubscribe(TopicName::try_new("session.polkit").unwrap())
         .await
         .unwrap();
     let idle_status = public_client

@@ -413,4 +413,19 @@ switch_osd = false
         assert!(!loaded.ime.switch_osd);
         assert_eq!(loaded.public_summary().ime, loaded.ime);
     }
+
+    #[test]
+    fn loads_polkit_settings_with_enabled_default() {
+        let (_dir, store) = test_store();
+        assert!(store.load_settings().unwrap().polkit.enabled);
+
+        fs::create_dir_all(store.paths().config_dir()).unwrap();
+        fs::write(store.paths().settings_file(), "[polkit]\n").unwrap();
+        assert!(store.load_settings().unwrap().polkit.enabled);
+
+        fs::write(store.paths().settings_file(), "[polkit]\nenabled = false\n").unwrap();
+        let settings = store.load_settings().unwrap();
+        assert!(!settings.polkit.enabled);
+        assert!(!settings.public_summary().polkit.enabled);
+    }
 }

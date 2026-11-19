@@ -300,6 +300,20 @@ impl Default for ImeSettings {
     }
 }
 
+/// Polkit authentication agent preferences (`[polkit]`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PolkitSettings {
+    /// Registers `z-shelld` as the session Polkit authentication agent when true.
+    pub enabled: bool,
+}
+
+impl Default for PolkitSettings {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 /// Public non-secret settings view broadcast on the `settings` topic (excludes plugin settings tables).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublicSettingsSummary {
@@ -311,6 +325,8 @@ pub struct PublicSettingsSummary {
     pub theme: ThemeSettings,
     /// Input method display preferences.
     pub ime: ImeSettings,
+    /// Polkit authentication agent preferences.
+    pub polkit: PolkitSettings,
     /// Idle warning duration (omits host-only fallback argv).
     pub pre_action_fade_seconds: u32,
     /// Sorted list of plugin IDs that have configuration overrides in `settings.toml`.
@@ -329,6 +345,8 @@ pub struct UserSettings {
     pub theme: ThemeSettings,
     /// Input method integration preferences.
     pub ime: ImeSettings,
+    /// Polkit authentication agent preferences.
+    pub polkit: PolkitSettings,
     /// Idle and lock preferences.
     pub idle: IdleSettings,
     /// Per-plugin configuration overrides keyed by canonical `author/plugin` ID.
@@ -344,6 +362,7 @@ impl UserSettings {
             bar: self.bar.clone(),
             theme: self.theme.clone(),
             ime: self.ime.clone(),
+            polkit: self.polkit.clone(),
             pre_action_fade_seconds: self.idle.pre_action_fade_seconds,
             configured_plugins: self.plugin_settings.keys().cloned().collect(),
         }

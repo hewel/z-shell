@@ -21,6 +21,7 @@
   - `org.freedesktop.Notifications`, SNI `StatusNotifierWatcher`/`DBusMenu`, MPRIS + bounded async cover fetching, XDG `.desktop` apps & fuzzy launcher with `query_id` cancellation.
   - Native Wayland clipboard (`ext-data-control-v1`/`wlr-data-control`) with Secret Service + ChaCha20-Poly1305 encrypted persistence.
   - Isolated **PAM helper** authentication and fail-closed cross-process **Idle & Sleep** coordination over the **Host control channel**.
+  - Session **Polkit agent** (`[polkit].enabled`, default `true`), with a non-secret `session.polkit` topic and host-only identity selection, response, and cancellation. Prompts are hidden while the shell is locking or locked. An unavailable PolicyKit Authority or an existing agent does not prevent daemon startup.
   - Pure-Rust Material 3 HCT dynamic palette engine (optional `matugen` CLI backend), reversible GTK 3/4 linking, and allowlisted template application consuming committed palettes.
 - **First-party reference TS plugins**: `z-shell/ai-usage`, `z-shell/nosleep`, `z-shell/theme-bridges`, and `z-shell/niri-overview`.
 

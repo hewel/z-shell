@@ -27,6 +27,7 @@ use z_shell_session::{
     },
     idle::{ActionCompletion, IdleAction, IdleEffect, MediaPlayback},
     pam::HelperAuthenticator,
+    polkit::{PolkitBus, PolkitEnabled, PolkitLockState, PolkitRegistration, PolkitService},
     screensaver::{ScreenSaverRegistry, ScreenSaverServer},
     service::SessionService,
     wayland_idle::{WaylandIdle, WaylandIdleDriver},
@@ -51,6 +52,13 @@ pub mod topics {
 // bridge callback still has a temporary strong reference to the slot.
 type DesktopSlot = Mutex<Option<DesktopHandle>>;
 
+#[derive(Clone)]
+struct SettingsTargets {
+    desktop: Option<Weak<DesktopSlot>>,
+    session: Weak<SessionService>,
+    polkit: Weak<PolkitService>,
+}
+
 /// Running daemon assembly owning the config store, bus hub, domain services, and dual Unix socket server.
 pub struct DaemonApp {
     hub: BusHub,
@@ -61,7 +69,8 @@ pub struct DaemonApp {
     _clipboard: Arc<ClipboardService>,
     desktop: Option<Arc<DesktopSlot>>,
     _session: Arc<SessionService>,
-    _session_drivers: Option<SessionRuntimeDrivers>,
+    session_drivers: Option<SessionRuntimeDrivers>,
+    _polkit: Arc<PolkitService>,
     bridge: Option<CrossDomainBridge>,
 }
 
@@ -173,6 +182,9 @@ impl DaemonApp {
             Arc::new(Mutex::new(Some(handle)))
         });
 
+        let polkit = Arc::new(PolkitService::new(&settings.polkit));
+        polkit.install_on_bus(&hub);
+
         let sleep_inhibitor = Arc::new(LazyLogindSleepInhibitor::new());
         let session = Arc::new(
             SessionService::new(
@@ -184,6 +196,7 @@ impl DaemonApp {
             .with_lock_guard(CrossDomainBridge::lock_guard(
                 Arc::downgrade(&clipboard),
                 desktop.as_ref().map(Arc::downgrade),
+                Arc::downgrade(&polkit),
             )),
         );
         session.install_on_bus(&hub);
@@ -192,6 +205,7 @@ impl DaemonApp {
             Arc::clone(&session),
             sleep_inhibitor,
             wayland.as_ref().map(Arc::downgrade),
+            &polkit,
         );
 
         let bridge = CrossDomainBridge::start(&hub, Arc::downgrade(&session));
@@ -202,8 +216,11 @@ impl DaemonApp {
             store,
             shared_settings,
             shared_state,
-            desktop.as_ref().map(Arc::downgrade),
-            Arc::downgrade(&session),
+            SettingsTargets {
+                desktop: desktop.as_ref().map(Arc::downgrade),
+                session: Arc::downgrade(&session),
+                polkit: Arc::downgrade(&polkit),
+            },
             shutdown,
         );
 
@@ -222,7 +239,8 @@ impl DaemonApp {
             _clipboard: clipboard,
             desktop,
             _session: session,
-            _session_drivers: session_drivers,
+            session_drivers,
+            _polkit: polkit,
             bridge,
         })
     }
@@ -239,7 +257,7 @@ impl DaemonApp {
         self.hub.clone()
     }
 
-    /// Runs the bus until shutdown, then waits for desktop D-Bus leases to be released.
+    /// Runs the bus until shutdown, then releases the Polkit registration and desktop D-Bus leases.
     ///
     /// # Errors
     ///
@@ -247,6 +265,9 @@ impl DaemonApp {
     pub async fn run(self) -> Result<()> {
         let result = self.server.serve().await.context("serving z-shelld bus");
         drop(self.bridge);
+        if let Some(mut drivers) = self.session_drivers {
+            drivers.shutdown_polkit().await;
+        }
         let desktop = self
             .desktop
             .and_then(|slot| slot.lock().expect("desktop slot mutex poisoned").take());
@@ -361,8 +382,7 @@ fn register_core_commands(
     store: Arc<ConfigStore>,
     settings_cell: Arc<AsyncMutex<UserSettings>>,
     state_cell: Arc<AsyncMutex<RuntimeState>>,
-    desktop_ref: Option<Weak<DesktopSlot>>,
-    session_ref: Weak<SessionService>,
+    settings_targets: SettingsTargets,
     shutdown: ShutdownHandle,
 ) {
     // status (public) — receives `call.hub` at invocation time so BusHub holds zero Arc cycles!
@@ -472,13 +492,11 @@ fn register_core_commands(
     {
         let store_ref = Arc::clone(&store);
         let settings_ref = Arc::clone(&settings_cell);
-        let desktop_ref = desktop_ref.clone();
-        let session_ref = session_ref.clone();
+        let targets = settings_targets;
         let handler: CommandHandler = Arc::new(move |call: CommandCall| {
             let store_ref = Arc::clone(&store_ref);
             let settings_ref = Arc::clone(&settings_ref);
-            let desktop_ref = desktop_ref.clone();
-            let session_ref = session_ref.clone();
+            let targets = targets.clone();
             Box::pin(async move {
                 let mut guard = settings_ref.lock().await;
                 let fresh = store_ref.load_settings().map_err(|err| {
@@ -498,13 +516,14 @@ fn register_core_commands(
                 let old_offline = guard.general.offline_mode;
                 let idle_changed = guard.idle != fresh.idle;
                 let ime_changed = guard.ime != fresh.ime;
+                let polkit_changed = guard.polkit != fresh.polkit;
                 let summary_changed = guard.public_summary() != fresh.public_summary();
                 *guard = fresh.clone();
                 let summary_json = serde_json::to_value(guard.public_summary())
                     .expect("PublicSettingsSummary serializes");
 
                 if (old_offline != fresh.general.offline_mode || ime_changed)
-                    && let Some(slot) = desktop_ref.as_ref().and_then(Weak::upgrade)
+                    && let Some(slot) = targets.desktop.as_ref().and_then(Weak::upgrade)
                     && let Some(desktop) =
                         slot.lock().expect("desktop slot mutex poisoned").as_ref()
                 {
@@ -519,7 +538,10 @@ fn register_core_commands(
                         desktop.set_ime_settings(fresh.ime.clone());
                     }
                 }
-                if idle_changed && let Some(session) = session_ref.upgrade() {
+                if polkit_changed && let Some(polkit) = targets.polkit.upgrade() {
+                    polkit.set_enabled(PolkitEnabled::from(&fresh.polkit));
+                }
+                if idle_changed && let Some(session) = targets.session.upgrade() {
                     session.apply_settings(&fresh.idle).await;
                 }
 
@@ -784,6 +806,7 @@ impl SleepInhibitor for LazyLogindSleepInhibitor {
 struct SessionRuntimeDrivers {
     stop: watch::Sender<bool>,
     _wayland_idle: Option<WaylandIdleDriver>,
+    polkit: Option<PolkitRegistration>,
     tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
@@ -792,9 +815,11 @@ impl SessionRuntimeDrivers {
         session: Arc<SessionService>,
         sleep_inhibitor: Arc<LazyLogindSleepInhibitor>,
         wayland: Option<Weak<WaylandHandle>>,
+        polkit: &Arc<PolkitService>,
     ) -> Option<Self> {
         let runtime = tokio::runtime::Handle::try_current().ok()?;
         let (stop, stop_rx) = watch::channel(false);
+        let polkit = polkit.start_registration(PolkitBus::System, &runtime);
 
         let wayland_idle = match WaylandIdle::connect_from_env() {
             Ok(idle) => match WaylandIdleDriver::spawn(idle, Arc::clone(&session), runtime.clone())
@@ -979,8 +1004,15 @@ impl SessionRuntimeDrivers {
         Some(Self {
             stop,
             _wayland_idle: wayland_idle,
+            polkit: Some(polkit),
             tasks,
         })
+    }
+
+    async fn shutdown_polkit(&mut self) {
+        if let Some(polkit) = self.polkit.take() {
+            polkit.shutdown().await;
+        }
     }
 }
 
@@ -1003,18 +1035,25 @@ impl CrossDomainBridge {
     fn lock_guard(
         clipboard: Weak<ClipboardService>,
         desktop: Option<Weak<DesktopSlot>>,
+        polkit: Weak<PolkitService>,
     ) -> impl Fn(LockPhaseName) {
-        // Do not route privacy transitions through a subscriber queue: a slow or
-        // reset subscription must not leave either domain unlocked.
+        // Apply privacy changes before publishing the lock transition, not through a subscriber.
         move |phase| {
-            let (ime, clip) = match phase {
-                LockPhaseName::Unlocked | LockPhaseName::FallbackSpawned => {
-                    (ImeLockState::Unlocked, LockedState::Unlocked)
-                }
-                LockPhaseName::Locked | LockPhaseName::Engaging => {
-                    (ImeLockState::Locked, LockedState::Locked)
-                }
+            let (ime, clip, polkit_lock) = match phase {
+                LockPhaseName::Unlocked | LockPhaseName::FallbackSpawned => (
+                    ImeLockState::Unlocked,
+                    LockedState::Unlocked,
+                    PolkitLockState::Unlocked,
+                ),
+                LockPhaseName::Locked | LockPhaseName::Engaging => (
+                    ImeLockState::Locked,
+                    LockedState::Locked,
+                    PolkitLockState::Locked,
+                ),
             };
+            if let Some(polkit) = polkit.upgrade() {
+                polkit.set_locked(polkit_lock);
+            }
             if let Some(slot) = desktop.as_ref().and_then(Weak::upgrade)
                 && let Some(desktop) = slot.lock().expect("desktop slot mutex poisoned").as_ref()
             {
