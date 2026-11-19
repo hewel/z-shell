@@ -1,0 +1,48 @@
+{
+  "valid_topics": [
+    "settings",
+    "daemon.status",
+    "plugin.z-shell.ai_usage.quotas",
+    "a.b.c"
+  ],
+  "invalid_topics": [
+    "",
+    ".leading",
+    "trailing.",
+    "double..dot",
+    "UpperCase",
+    "-leading-dash",
+    "trailing-dash-",
+    "has/slash",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  ],
+  "valid_plugin_ids": [
+    "z-shell/ai-usage",
+    "me/hello",
+    "a1/b_2"
+  ],
+  "invalid_plugin_ids": [
+    "",
+    "single",
+    "a/b/c",
+    "../escape",
+    "Me/Hello",
+    "-bad/ok",
+    "ok/bad-",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/b"
+  ],
+  "valid_server_frames": [
+    "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}",
+    "{\"jsonrpc\":\"2.0\",\"id\":\"req-1\",\"result\":null}",
+    "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":\"invalid_request\",\"message\":\"bad json\"}}",
+    "{\"jsonrpc\":\"2.0\",\"method\":\"topic.update\",\"params\":{\"daemon_instance_id\":\"d1\",\"topic_instance_id\":1,\"topic\":\"settings\",\"revision\":2,\"source_baseline\":false,\"data\":{}}}"
+  ],
+  "invalid_server_frames": [
+    "{\"jsonrpc\":\"1.0\",\"id\":1,\"result\":{}}",
+    "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{},\"error\":{\"code\":\"internal\",\"message\":\"both\"}}",
+    "{\"jsonrpc\":\"2.0\",\"id\":1}",
+    "{\"jsonrpc\":\"2.0\",\"id\":9007199254740992,\"result\":{}}",
+    "{\"jsonrpc\":\"2.0\",\"method\":\"topic.update\"}"
+  ]
+}

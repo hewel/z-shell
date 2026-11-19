@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/z-shell-protocol",
+    "crates/z-shell-config",
+    "crates/z-shell-bus",
+    "crates/z-shelld",
+    "crates/z-shell-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+all = "warn"
+
+[workspace.dependencies]
+z-shell-protocol = { path = "crates/z-shell-protocol" }
+z-shell-config = { path = "crates/z-shell-config" }
+z-shell-bus = { path = "crates/z-shell-bus" }
+anyhow = "1"
+rustix = { version = "1", features = ["fs"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "time"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

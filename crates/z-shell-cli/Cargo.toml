@@ -1,0 +1,20 @@
+[package]
+name = "z-shell-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "z-shell"
+path = "src/main.rs"
+
+[dependencies]
+z-shell-bus = { workspace = true }
+z-shell-config = { workspace = true }
+z-shell-protocol = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+
+[lints]
+workspace = true

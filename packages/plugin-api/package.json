@@ -1,0 +1,12 @@
+{
+  "name": "@z-shell/plugin-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@z-shell/sdk": "workspace:*"
+  }
+}

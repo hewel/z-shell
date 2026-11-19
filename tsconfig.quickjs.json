@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": [],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": [
+    "packages/sdk/src/index.ts",
+    "packages/sdk/src/protocol.ts",
+    "packages/sdk/src/transport.ts",
+    "packages/sdk/src/client.ts",
+    "packages/sdk/src/fixture.ts",
+    "packages/plugin-api/src/index.ts"
+  ]
+}

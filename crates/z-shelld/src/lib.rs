@@ -1,0 +1,487 @@
+//! Shell daemon (`z-shelld`) library entry point with serialized atomic state and trust tiers.
+
+use anyhow::{Context, Result};
+use serde_json::{Value, json};
+use std::sync::Arc;
+use tokio::sync::Mutex as AsyncMutex;
+use tracing::info;
+use z_shell_bus::{
+    BusHub, BusLimits, BusServer, CommandCall, CommandHandler, ShutdownHandle, UpdateKind,
+};
+use z_shell_config::{ConfigStore, RuntimeState, ShellPaths, UserSettings};
+use z_shell_protocol::{
+    ClientRole, CommandInvokeResult, CommandName, ErrorCode, PluginId, RpcError, TopicName,
+};
+
+/// Canonical core topic names published by `z-shelld`.
+pub mod topics {
+    /// Daemon readiness, version, and offline status.
+    pub const DAEMON_STATUS: &str = "daemon.status";
+    /// Public non-secret summary of `settings.toml`.
+    pub const SETTINGS: &str = "settings";
+    /// Public non-secret summary of durable `state.toml`.
+    pub const STATE: &str = "state";
+}
+
+/// Running daemon assembly owning the config store, bus hub, and dual Unix socket server.
+pub struct DaemonApp {
+    hub: BusHub,
+    server: BusServer,
+}
+
+impl DaemonApp {
+    /// Bootstraps verified XDG directories, loads `settings.toml` and `state.toml`, wires built-in
+    /// core topics and role-guarded control commands, and binds both public and host Unix sockets.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if directories, configuration files, single-instance lock, or sockets fail.
+    pub fn bootstrap(paths: ShellPaths) -> Result<Self> {
+        Self::bootstrap_with_limits(paths, BusLimits::default())
+    }
+
+    /// Bootstraps the daemon with explicit [`BusLimits`] (useful for backpressure tests).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if directories, configuration files, single-instance lock, or sockets fail.
+    pub fn bootstrap_with_limits(paths: ShellPaths, limits: BusLimits) -> Result<Self> {
+        paths
+            .ensure_dirs()
+            .context("initializing verified z-shell XDG directories")?;
+        let store = Arc::new(ConfigStore::new(paths.clone()));
+        let settings = store
+            .load_settings()
+            .context("loading settings.toml at startup")?;
+        let runtime_state = store
+            .load_state()
+            .context("loading state.toml at startup")?;
+
+        let hub = BusHub::with_limits(env!("CARGO_PKG_VERSION"), paths.media_dir(), limits);
+        let server = BusServer::bind(
+            paths.socket_path().to_path_buf(),
+            paths.host_socket_path().to_path_buf(),
+            paths.daemon_lock_path().to_path_buf(),
+            hub.clone(),
+        )
+        .context("binding z-shelld public and host Unix sockets")?;
+        let shutdown = server.shutdown_handle();
+
+        // Single serialized async writers prevent concurrent save/publish reordering and avoid
+        // holding std::sync::Mutex across disk I/O.
+        let shared_settings = Arc::new(AsyncMutex::new(settings.clone()));
+        let shared_state = Arc::new(AsyncMutex::new(runtime_state.clone()));
+
+        publish_core_baselines(&hub, &settings, &runtime_state);
+        register_core_commands(&hub, store, shared_settings, shared_state, shutdown);
+
+        info!(
+            public_socket = %paths.socket_path().display(),
+            host_socket = %paths.host_socket_path().display(),
+            daemon_instance_id = hub.daemon_instance_id(),
+            "z-shelld bootstrapped"
+        );
+        Ok(Self { hub, server })
+    }
+
+    /// Returns a cloneable [`ShutdownHandle`] for stopping the daemon gracefully.
+    #[must_use]
+    pub fn shutdown_handle(&self) -> ShutdownHandle {
+        self.server.shutdown_handle()
+    }
+
+    /// Returns a clone of the underlying [`BusHub`].
+    #[must_use]
+    pub fn hub(&self) -> BusHub {
+        self.hub.clone()
+    }
+
+    /// Runs the dual Unix socket accept loop until shutdown is signaled and active replies drain.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying listener encounters a fatal I/O failure.
+    pub async fn run(self) -> Result<()> {
+        self.server.serve().await.context("serving z-shelld bus")
+    }
+}
+
+fn publish_core_baselines(hub: &BusHub, settings: &UserSettings, state: &RuntimeState) {
+    hub.publish_core_topic(
+        topic(topics::DAEMON_STATUS),
+        json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "daemon_instance_id": hub.daemon_instance_id(),
+            "offline_mode": settings.general.offline_mode,
+        }),
+        UpdateKind::SourceBaseline,
+    );
+    hub.publish_core_topic(
+        topic(topics::SETTINGS),
+        serde_json::to_value(settings.public_summary())
+            .expect("PublicSettingsSummary serializes to JSON"),
+        UpdateKind::SourceBaseline,
+    );
+    hub.publish_core_topic(
+        topic(topics::STATE),
+        serde_json::to_value(state.public_summary())
+            .expect("PublicStateSummary serializes to JSON"),
+        UpdateKind::SourceBaseline,
+    );
+}
+
+fn require_host_role(call: &CommandCall, action: &str) -> Result<(), RpcError> {
+    if call.caller.role != ClientRole::PrivilegedHost {
+        return Err(RpcError::new(
+            ErrorCode::PermissionDenied,
+            format!("{action} requires the privileged host control channel"),
+        ));
+    }
+    Ok(())
+}
+
+fn register_core_commands(
+    hub: &BusHub,
+    store: Arc<ConfigStore>,
+    settings_cell: Arc<AsyncMutex<UserSettings>>,
+    state_cell: Arc<AsyncMutex<RuntimeState>>,
+    shutdown: ShutdownHandle,
+) {
+    // status (public) — receives `call.hub` at invocation time so BusHub holds zero Arc cycles!
+    {
+        let settings_ref = Arc::clone(&settings_cell);
+        let handler: CommandHandler = Arc::new(move |call: CommandCall| {
+            let settings_ref = Arc::clone(&settings_ref);
+            Box::pin(async move {
+                let offline = settings_ref.lock().await.general.offline_mode;
+                let clients = call.hub.connected_clients();
+                let topic_count = call.hub.list_topics().len();
+                let command_count = call.hub.list_commands().len();
+                Ok(CommandInvokeResult {
+                    message: Some(format!(
+                        "z-shelld v{} (clients={clients}, topics={topic_count}, commands={command_count}, offline={offline})",
+                        env!("CARGO_PKG_VERSION")
+                    )),
+                    data: Some(json!({
+                        "version": env!("CARGO_PKG_VERSION"),
+                        "daemon_instance_id": call.hub.daemon_instance_id(),
+                        "clients": clients,
+                        "topics": topic_count,
+                        "commands": command_count,
+                        "offline_mode": offline,
+                    })),
+                })
+            })
+        });
+        hub.register_core_command(cmd("status"), "Print daemon status summary", handler);
+    }
+
+    // settings.get (public: returns non-secret summary only)
+    {
+        let settings_ref = Arc::clone(&settings_cell);
+        let handler: CommandHandler = Arc::new(move |_call: CommandCall| {
+            let settings_ref = Arc::clone(&settings_ref);
+            Box::pin(async move {
+                let summary = settings_ref.lock().await.public_summary();
+                let data = serde_json::to_value(summary).expect("PublicSettingsSummary serializes");
+                Ok(CommandInvokeResult {
+                    message: None,
+                    data: Some(data),
+                })
+            })
+        });
+        hub.register_core_command(
+            cmd("settings.get"),
+            "Return public non-secret summary of settings.toml",
+            handler,
+        );
+    }
+
+    // settings.get-plugin (privileged host only: reads one plugin's settings table)
+    {
+        let settings_ref = Arc::clone(&settings_cell);
+        let handler: CommandHandler = Arc::new(move |call: CommandCall| {
+            let settings_ref = Arc::clone(&settings_ref);
+            Box::pin(async move {
+                require_host_role(&call, "settings.get-plugin")?;
+                let raw_id = call
+                    .params
+                    .args
+                    .first()
+                    .map(String::as_str)
+                    .or_else(|| {
+                        call.params
+                            .payload
+                            .as_ref()
+                            .and_then(|v| v.get("plugin_id"))
+                            .and_then(Value::as_str)
+                    })
+                    .ok_or_else(|| {
+                        RpcError::new(
+                            ErrorCode::InvalidParams,
+                            "settings.get-plugin requires a plugin_id argument",
+                        )
+                    })?;
+                let plugin_id = PluginId::try_new(raw_id).map_err(|err| {
+                    RpcError::new(
+                        ErrorCode::InvalidParams,
+                        format!("invalid plugin_id: {err}"),
+                    )
+                })?;
+                let guard = settings_ref.lock().await;
+                let value = guard
+                    .plugin_settings
+                    .get(&plugin_id)
+                    .map(|v| serde_json::to_value(v).expect("toml::Value serializes"))
+                    .unwrap_or_else(|| json!({}));
+                Ok(CommandInvokeResult {
+                    message: None,
+                    data: Some(json!({
+                        "plugin_id": plugin_id,
+                        "settings": value,
+                    })),
+                })
+            })
+        });
+        hub.register_core_command(
+            cmd("settings.get-plugin"),
+            "Return one plugin's settings overrides (privileged host only)",
+            handler,
+        );
+    }
+
+    // settings.reload (public: serialized single writer; no mutation on error; no live update if unchanged)
+    {
+        let store_ref = Arc::clone(&store);
+        let settings_ref = Arc::clone(&settings_cell);
+        let handler: CommandHandler = Arc::new(move |call: CommandCall| {
+            let store_ref = Arc::clone(&store_ref);
+            let settings_ref = Arc::clone(&settings_ref);
+            Box::pin(async move {
+                let mut guard = settings_ref.lock().await;
+                let fresh = store_ref.load_settings().map_err(|err| {
+                    RpcError::new(
+                        ErrorCode::InvalidParams,
+                        format!("failed to reload settings.toml: {err}"),
+                    )
+                })?;
+                if *guard == fresh {
+                    let data = serde_json::to_value(guard.public_summary())
+                        .expect("PublicSettingsSummary serializes");
+                    return Ok(CommandInvokeResult {
+                        message: Some("settings unchanged".to_owned()),
+                        data: Some(data),
+                    });
+                }
+                let old_offline = guard.general.offline_mode;
+                let summary_changed = guard.public_summary() != fresh.public_summary();
+                *guard = fresh.clone();
+                let summary_json = serde_json::to_value(guard.public_summary())
+                    .expect("PublicSettingsSummary serializes");
+
+                let msg = if summary_changed {
+                    let rev = call.hub.publish_core_topic(
+                        topic(topics::SETTINGS),
+                        summary_json.clone(),
+                        UpdateKind::Live,
+                    );
+                    if old_offline != fresh.general.offline_mode {
+                        call.hub.publish_core_topic(
+                            topic(topics::DAEMON_STATUS),
+                            json!({
+                                "version": env!("CARGO_PKG_VERSION"),
+                                "daemon_instance_id": call.hub.daemon_instance_id(),
+                                "offline_mode": fresh.general.offline_mode,
+                            }),
+                            UpdateKind::Live,
+                        );
+                    }
+                    format!("settings reloaded (revision {rev})")
+                } else {
+                    "settings reloaded (private overrides updated)".to_owned()
+                };
+                Ok(CommandInvokeResult {
+                    message: Some(msg),
+                    data: Some(summary_json),
+                })
+            })
+        });
+        hub.register_core_command(
+            cmd("settings.reload"),
+            "Reload settings.toml from disk and broadcast public changes",
+            handler,
+        );
+    }
+
+    // state.get (public: returns non-secret summary only)
+    {
+        let state_ref = Arc::clone(&state_cell);
+        let handler: CommandHandler = Arc::new(move |_call: CommandCall| {
+            let state_ref = Arc::clone(&state_ref);
+            Box::pin(async move {
+                let summary = state_ref.lock().await.public_summary();
+                let data = serde_json::to_value(summary).expect("PublicStateSummary serializes");
+                Ok(CommandInvokeResult {
+                    message: None,
+                    data: Some(data),
+                })
+            })
+        });
+        hub.register_core_command(
+            cmd("state.get"),
+            "Return public non-secret summary of state.toml",
+            handler,
+        );
+    }
+
+    // state.get-table (privileged host only)
+    {
+        let state_ref = Arc::clone(&state_cell);
+        let handler: CommandHandler = Arc::new(move |call: CommandCall| {
+            let state_ref = Arc::clone(&state_ref);
+            Box::pin(async move {
+                require_host_role(&call, "state.get-table")?;
+                let key = call
+                    .params
+                    .args
+                    .first()
+                    .map(String::as_str)
+                    .or_else(|| {
+                        call.params
+                            .payload
+                            .as_ref()
+                            .and_then(|v| v.get("key"))
+                            .and_then(Value::as_str)
+                    })
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| {
+                        RpcError::new(
+                            ErrorCode::InvalidParams,
+                            "state.get-table requires a non-empty key",
+                        )
+                    })?;
+                let guard = state_ref.lock().await;
+                let value = guard
+                    .tables
+                    .get(key)
+                    .map(|v| serde_json::to_value(v).expect("toml::Value serializes"));
+                Ok(CommandInvokeResult {
+                    message: None,
+                    data: Some(json!({
+                        "key": key,
+                        "value": value,
+                    })),
+                })
+            })
+        });
+        hub.register_core_command(
+            cmd("state.get-table"),
+            "Read a single owner-scoped durable state table (privileged host only)",
+            handler,
+        );
+    }
+
+    // state.set-table (privileged host only; serialized persist-before-commit so failure never mutates memory!)
+    {
+        let store_ref = Arc::clone(&store);
+        let state_ref = Arc::clone(&state_cell);
+        let handler: CommandHandler = Arc::new(move |call: CommandCall| {
+            let store_ref = Arc::clone(&store_ref);
+            let state_ref = Arc::clone(&state_ref);
+            Box::pin(async move {
+                require_host_role(&call, "state.set-table")?;
+                let Some(payload) = call.params.payload else {
+                    return Err(RpcError::new(
+                        ErrorCode::InvalidParams,
+                        "state.set-table requires a JSON object payload with 'key' and 'value'",
+                    ));
+                };
+                let Some(key) = payload
+                    .get("key")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                else {
+                    return Err(RpcError::new(
+                        ErrorCode::InvalidParams,
+                        "payload.key must be a non-empty string",
+                    ));
+                };
+                let Some(raw_val) = payload.get("value") else {
+                    return Err(RpcError::new(
+                        ErrorCode::InvalidParams,
+                        "payload.value is required",
+                    ));
+                };
+                let toml_val: toml::Value =
+                    serde_json::from_value(raw_val.clone()).map_err(|err| {
+                        RpcError::new(
+                            ErrorCode::InvalidParams,
+                            format!("value cannot be represented in TOML: {err}"),
+                        )
+                    })?;
+
+                // Single serialized writer: persist atomically under cross-display flock BEFORE
+                // swapping in-memory state or publishing a new revision.
+                let mut guard = state_ref.lock().await;
+                let key_owned = key.to_owned();
+                let committed = store_ref
+                    .update_state(move |disk_state| {
+                        disk_state.tables.insert(key_owned, toml_val);
+                        Ok(())
+                    })
+                    .map_err(|err| {
+                        RpcError::new(
+                            ErrorCode::Internal,
+                            format!("failed to persist state.toml: {err}"),
+                        )
+                    })?;
+
+                *guard = committed;
+                let summary_json = serde_json::to_value(guard.public_summary())
+                    .expect("PublicStateSummary serializes");
+                let rev = call.hub.publish_core_topic(
+                    topic(topics::STATE),
+                    summary_json.clone(),
+                    UpdateKind::Live,
+                );
+                Ok(CommandInvokeResult {
+                    message: Some(format!("state table '{key}' committed (revision {rev})")),
+                    data: Some(summary_json),
+                })
+            })
+        });
+        hub.register_core_command(
+            cmd("state.set-table"),
+            "Persist an owner-scoped table in state.toml atomically (privileged host only)",
+            handler,
+        );
+    }
+
+    // quit (privileged host only; reply flushes cleanly during bounded connection drain)
+    {
+        let handler: CommandHandler = Arc::new(move |call: CommandCall| {
+            let shutdown = shutdown.clone();
+            Box::pin(async move {
+                require_host_role(&call, "quit")?;
+                shutdown.shutdown();
+                Ok(CommandInvokeResult {
+                    message: Some("shutting down".to_owned()),
+                    data: None,
+                })
+            })
+        });
+        hub.register_core_command(
+            cmd("quit"),
+            "Gracefully shut down z-shelld (privileged host only)",
+            handler,
+        );
+    }
+}
+
+fn topic(name: &str) -> TopicName {
+    TopicName::try_new(name).expect("hardcoded core topic name is valid")
+}
+
+fn cmd(name: &str) -> CommandName {
+    CommandName::try_new(name).expect("hardcoded core command name is valid")
+}

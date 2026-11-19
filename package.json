@@ -1,0 +1,23 @@
+{
+  "name": "z-shell",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT OR Apache-2.0",
+  "packageManager": "bun@1.4.4",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "bun": ">=1.4.4"
+  },
+  "scripts": {
+    "typecheck": "bun --bun run tsrs --project tsconfig.quickjs.json",
+    "test:rust": "cargo test --workspace && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo doc --workspace --no-deps",
+    "test:ts": "bun test packages/",
+    "check": "cargo fmt --check && bun run typecheck && bun run test:rust && bun run test:ts"
+  },
+  "devDependencies": {
+    "tsrs": "7.1.0-beta.tsrs2"
+  }
+}
