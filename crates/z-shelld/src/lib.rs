@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::path::PathBuf;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use tokio::sync::{Mutex as AsyncMutex, OnceCell, watch};
 use tracing::info;
 use z_shell_bus::{
@@ -11,7 +11,9 @@ use z_shell_bus::{
 };
 use z_shell_clipboard::{ClipboardService, History as ClipboardHistory, LockedState};
 use z_shell_config::{ConfigStore, RuntimeState, ShellPaths, UserSettings};
-use z_shell_desktop::{DesktopHandle, DesktopServices, OfflinePolicy};
+use z_shell_desktop::{
+    DesktopHandle, DesktopOptions, DesktopServices, ImeLockState, OfflinePolicy,
+};
 use z_shell_plugins::registry::{PluginError, PluginManager};
 use z_shell_protocol::{
     ClientMessage, ClientRole, CommandInvokeResult, CommandName, ErrorCode, PROTOCOL_VERSION,
@@ -26,7 +28,7 @@ use z_shell_session::{
     idle::{ActionCompletion, IdleAction, IdleEffect, MediaPlayback},
     pam::HelperAuthenticator,
     screensaver::{ScreenSaverRegistry, ScreenSaverServer},
-    service::{LOCK_TOPIC, SessionService},
+    service::SessionService,
     wayland_idle::{WaylandIdle, WaylandIdleDriver},
 };
 use z_shell_system::{SystemHandle, SystemServices};
@@ -45,6 +47,10 @@ pub mod topics {
     pub const PLUGINS: &str = "plugins";
 }
 
+// Taking the handle out lets shutdown await D-Bus lease release even if a command or
+// bridge callback still has a temporary strong reference to the slot.
+type DesktopSlot = Mutex<Option<DesktopHandle>>;
+
 /// Running daemon assembly owning the config store, bus hub, domain services, and dual Unix socket server.
 pub struct DaemonApp {
     hub: BusHub,
@@ -53,10 +59,10 @@ pub struct DaemonApp {
     _wayland: Option<Arc<WaylandHandle>>,
     _system: Option<SystemHandle>,
     _clipboard: Arc<ClipboardService>,
-    _desktop: Option<Arc<DesktopHandle>>,
+    desktop: Option<Arc<DesktopSlot>>,
     _session: Arc<SessionService>,
     _session_drivers: Option<SessionRuntimeDrivers>,
-    _bridge: Option<CrossDomainBridge>,
+    bridge: Option<CrossDomainBridge>,
 }
 
 impl DaemonApp {
@@ -155,16 +161,31 @@ impl DaemonApp {
             } else {
                 OfflinePolicy::Online
             };
-            Arc::new(DesktopServices::install(&hub, &paths, offline_policy))
+            let handle = DesktopServices::install_with_options(
+                &hub,
+                &paths,
+                DesktopOptions {
+                    offline_policy,
+                    ime: settings.ime.clone(),
+                    ..DesktopOptions::default()
+                },
+            );
+            Arc::new(Mutex::new(Some(handle)))
         });
 
         let sleep_inhibitor = Arc::new(LazyLogindSleepInhibitor::new());
-        let session = Arc::new(SessionService::new(
-            hub.daemon_instance_id().to_owned(),
-            Arc::new(HelperAuthenticator::new(resolve_pam_helper_path())),
-            Arc::clone(&sleep_inhibitor) as Arc<dyn SleepInhibitor>,
-            &settings.idle,
-        ));
+        let session = Arc::new(
+            SessionService::new(
+                hub.daemon_instance_id().to_owned(),
+                Arc::new(HelperAuthenticator::new(resolve_pam_helper_path())),
+                Arc::clone(&sleep_inhibitor) as Arc<dyn SleepInhibitor>,
+                &settings.idle,
+            )
+            .with_lock_guard(CrossDomainBridge::lock_guard(
+                Arc::downgrade(&clipboard),
+                desktop.as_ref().map(Arc::downgrade),
+            )),
+        );
         session.install_on_bus(&hub);
 
         let session_drivers = SessionRuntimeDrivers::start(
@@ -173,8 +194,7 @@ impl DaemonApp {
             wayland.as_ref().map(Arc::downgrade),
         );
 
-        let bridge =
-            CrossDomainBridge::start(&hub, Arc::downgrade(&clipboard), Arc::downgrade(&session));
+        let bridge = CrossDomainBridge::start(&hub, Arc::downgrade(&session));
 
         register_plugin_commands(&hub, plugins);
         register_core_commands(
@@ -200,10 +220,10 @@ impl DaemonApp {
             _wayland: wayland,
             _system: system,
             _clipboard: clipboard,
-            _desktop: desktop,
+            desktop,
             _session: session,
             _session_drivers: session_drivers,
-            _bridge: bridge,
+            bridge,
         })
     }
 
@@ -219,13 +239,21 @@ impl DaemonApp {
         self.hub.clone()
     }
 
-    /// Runs the dual Unix socket accept loop until shutdown is signaled and active replies drain.
+    /// Runs the bus until shutdown, then waits for desktop D-Bus leases to be released.
     ///
     /// # Errors
     ///
     /// Returns an error if the underlying listener encounters a fatal I/O failure.
     pub async fn run(self) -> Result<()> {
-        self.server.serve().await.context("serving z-shelld bus")
+        let result = self.server.serve().await.context("serving z-shelld bus");
+        drop(self.bridge);
+        let desktop = self
+            .desktop
+            .and_then(|slot| slot.lock().expect("desktop slot mutex poisoned").take());
+        if let Some(desktop) = desktop {
+            desktop.shutdown().await;
+        }
+        result
     }
 }
 
@@ -333,7 +361,7 @@ fn register_core_commands(
     store: Arc<ConfigStore>,
     settings_cell: Arc<AsyncMutex<UserSettings>>,
     state_cell: Arc<AsyncMutex<RuntimeState>>,
-    desktop_ref: Option<Weak<DesktopHandle>>,
+    desktop_ref: Option<Weak<DesktopSlot>>,
     session_ref: Weak<SessionService>,
     shutdown: ShutdownHandle,
 ) {
@@ -469,19 +497,27 @@ fn register_core_commands(
                 }
                 let old_offline = guard.general.offline_mode;
                 let idle_changed = guard.idle != fresh.idle;
+                let ime_changed = guard.ime != fresh.ime;
                 let summary_changed = guard.public_summary() != fresh.public_summary();
                 *guard = fresh.clone();
                 let summary_json = serde_json::to_value(guard.public_summary())
                     .expect("PublicSettingsSummary serializes");
 
-                if old_offline != fresh.general.offline_mode
-                    && let Some(desktop) = desktop_ref.as_ref().and_then(Weak::upgrade)
+                if (old_offline != fresh.general.offline_mode || ime_changed)
+                    && let Some(slot) = desktop_ref.as_ref().and_then(Weak::upgrade)
+                    && let Some(desktop) =
+                        slot.lock().expect("desktop slot mutex poisoned").as_ref()
                 {
-                    desktop.set_offline_policy(if fresh.general.offline_mode {
-                        OfflinePolicy::Offline
-                    } else {
-                        OfflinePolicy::Online
-                    });
+                    if old_offline != fresh.general.offline_mode {
+                        desktop.set_offline_policy(if fresh.general.offline_mode {
+                            OfflinePolicy::Offline
+                        } else {
+                            OfflinePolicy::Online
+                        });
+                    }
+                    if ime_changed {
+                        desktop.set_ime_settings(fresh.ime.clone());
+                    }
                 }
                 if idle_changed && let Some(session) = session_ref.upgrade() {
                     session.apply_settings(&fresh.idle).await;
@@ -964,11 +1000,33 @@ struct CrossDomainBridge {
 }
 
 impl CrossDomainBridge {
-    fn start(
-        hub: &BusHub,
+    fn lock_guard(
         clipboard: Weak<ClipboardService>,
-        session: Weak<SessionService>,
-    ) -> Option<Self> {
+        desktop: Option<Weak<DesktopSlot>>,
+    ) -> impl Fn(LockPhaseName) {
+        // Do not route privacy transitions through a subscriber queue: a slow or
+        // reset subscription must not leave either domain unlocked.
+        move |phase| {
+            let (ime, clip) = match phase {
+                LockPhaseName::Unlocked | LockPhaseName::FallbackSpawned => {
+                    (ImeLockState::Unlocked, LockedState::Unlocked)
+                }
+                LockPhaseName::Locked | LockPhaseName::Engaging => {
+                    (ImeLockState::Locked, LockedState::Locked)
+                }
+            };
+            if let Some(slot) = desktop.as_ref().and_then(Weak::upgrade)
+                && let Some(desktop) = slot.lock().expect("desktop slot mutex poisoned").as_ref()
+            {
+                desktop.set_ime_locked(ime);
+            }
+            if let Some(clipboard) = clipboard.upgrade() {
+                clipboard.set_locked(clip);
+            }
+        }
+    }
+
+    fn start(hub: &BusHub, session: Weak<SessionService>) -> Option<Self> {
         let runtime = tokio::runtime::Handle::try_current().ok()?;
         let (client_id, outbound) = hub.register_client(ClientRole::Public)?;
         hub.handle_inline_message(
@@ -979,65 +1037,32 @@ impl CrossDomainBridge {
                 Some(json!({ "protocol_version": PROTOCOL_VERSION })),
             ),
         );
-        for (req_id, topic_name) in [(2_u64, LOCK_TOPIC), (3_u64, "desktop.media")] {
-            hub.handle_inline_message(
-                client_id,
-                ClientMessage::request(
-                    RequestId::Number(req_id),
-                    methods::TOPIC_SUBSCRIBE,
-                    Some(
-                        serde_json::to_value(TopicSubscribeParams {
-                            topic: topic(topic_name),
-                        })
-                        .expect("TopicSubscribeParams serializes"),
-                    ),
+        hub.handle_inline_message(
+            client_id,
+            ClientMessage::request(
+                RequestId::Number(2),
+                methods::TOPIC_SUBSCRIBE,
+                Some(
+                    serde_json::to_value(TopicSubscribeParams {
+                        topic: topic("desktop.media"),
+                    })
+                    .expect("TopicSubscribeParams serializes"),
                 ),
-            );
-        }
+            ),
+        );
 
         let task = runtime.spawn(async move {
             while let Some(line) = outbound.next_line().await {
                 let Ok(message) = decode_server_line(&line) else {
                     continue;
                 };
-                let Some((topic_name, data)) = extract_topic_payload(message) else {
+                let Some(playing) = media_playing(message) else {
                     continue;
                 };
-                match topic_name.as_str() {
-                    LOCK_TOPIC => {
-                        let Some(clipboard) = clipboard.upgrade() else {
-                            continue;
-                        };
-                        let phase = data
-                            .get("phase")
-                            .cloned()
-                            .and_then(|value| serde_json::from_value::<LockPhaseName>(value).ok());
-                        let locked =
-                            matches!(phase, Some(LockPhaseName::Locked | LockPhaseName::Engaging));
-                        clipboard.set_locked(if locked {
-                            LockedState::Locked
-                        } else {
-                            LockedState::Unlocked
-                        });
-                    }
-                    "desktop.media" => {
-                        let Some(session) = session.upgrade() else {
-                            continue;
-                        };
-                        let playing = data
-                            .get("any_playing")
-                            .and_then(Value::as_bool)
-                            .unwrap_or(false);
-                        session
-                            .set_media_playing(if playing {
-                                MediaPlayback::Playing
-                            } else {
-                                MediaPlayback::Idle
-                            })
-                            .await;
-                    }
-                    _ => {}
-                }
+                let Some(session) = session.upgrade() else {
+                    break;
+                };
+                session.set_media_playing(playing).await;
             }
         });
 
@@ -1056,18 +1081,18 @@ impl Drop for CrossDomainBridge {
     }
 }
 
-fn extract_topic_payload(message: ServerMessage) -> Option<(String, Value)> {
-    match message {
-        ServerMessage::Ok { result, .. } => {
-            let topic = result.get("topic")?.as_str()?.to_owned();
-            let data = result.get("data")?.clone();
-            Some((topic, data))
-        }
-        ServerMessage::Notification { method, params } if method == methods::TOPIC_UPDATE => {
-            let topic = params.get("topic")?.as_str()?.to_owned();
-            let data = params.get("data")?.clone();
-            Some((topic, data))
-        }
-        _ => None,
+fn media_playing(message: ServerMessage) -> Option<MediaPlayback> {
+    let frame = match message {
+        ServerMessage::Ok { result, .. } => result,
+        ServerMessage::Notification { method, params } if method == methods::TOPIC_UPDATE => params,
+        _ => return None,
+    };
+    if frame.get("topic")?.as_str()? != "desktop.media" {
+        return None;
     }
+    Some(if frame.get("data")?.get("any_playing")?.as_bool()? {
+        MediaPlayback::Playing
+    } else {
+        MediaPlayback::Idle
+    })
 }

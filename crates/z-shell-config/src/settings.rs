@@ -250,6 +250,56 @@ impl Default for IdleSettings {
     }
 }
 
+/// Runtime mode for Fcitx5 input method integration.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ImeMode {
+    /// Observe Fcitx5 via SNI + Controller1 without claiming `org.kde.impanel`.
+    #[default]
+    IndicatorOnly,
+    /// Claim `org.kde.impanel` (`DoNotQueue`) to render themed candidate panels and indicators.
+    Kimpanel,
+    /// Disable Fcitx5 input method integration completely.
+    Disabled,
+}
+
+/// Preferred layout direction for `kimpanel` candidate lists.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum CandidateLayout {
+    /// Follow the input method engine's layout hint (`SetLookupTable`).
+    #[default]
+    Auto,
+    /// Always arrange candidates horizontally.
+    Horizontal,
+    /// Always arrange candidates vertically.
+    Vertical,
+}
+
+/// Input method display and protocol preferences (`[ime]`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ImeSettings {
+    /// Integration mode (`indicator_only`, `kimpanel`, or `disabled`).
+    pub mode: ImeMode,
+    /// Candidate list layout preference for `kimpanel` mode.
+    pub candidate_layout: CandidateLayout,
+    /// Whether live input method switches should emit transient OSD hints.
+    pub switch_osd: bool,
+}
+
+impl Default for ImeSettings {
+    fn default() -> Self {
+        Self {
+            mode: ImeMode::IndicatorOnly,
+            candidate_layout: CandidateLayout::Auto,
+            switch_osd: true,
+        }
+    }
+}
+
 /// Public non-secret settings view broadcast on the `settings` topic (excludes plugin settings tables).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublicSettingsSummary {
@@ -259,6 +309,8 @@ pub struct PublicSettingsSummary {
     pub bar: BarSettings,
     /// Dynamic theme preferences.
     pub theme: ThemeSettings,
+    /// Input method display preferences.
+    pub ime: ImeSettings,
     /// Idle warning duration (omits host-only fallback argv).
     pub pre_action_fade_seconds: u32,
     /// Sorted list of plugin IDs that have configuration overrides in `settings.toml`.
@@ -275,6 +327,8 @@ pub struct UserSettings {
     pub bar: BarSettings,
     /// Dynamic theme preferences.
     pub theme: ThemeSettings,
+    /// Input method integration preferences.
+    pub ime: ImeSettings,
     /// Idle and lock preferences.
     pub idle: IdleSettings,
     /// Per-plugin configuration overrides keyed by canonical `author/plugin` ID.
@@ -289,6 +343,7 @@ impl UserSettings {
             general: self.general.clone(),
             bar: self.bar.clone(),
             theme: self.theme.clone(),
+            ime: self.ime.clone(),
             pre_action_fade_seconds: self.idle.pre_action_fade_seconds,
             configured_plugins: self.plugin_settings.keys().cloned().collect(),
         }

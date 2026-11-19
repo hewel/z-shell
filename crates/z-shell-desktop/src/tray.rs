@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task::{AbortHandle, Id, JoinSet};
 use tokio::time::timeout;
 use z_shell_bus::{BusHub, CommandCall, UpdateKind};
@@ -54,6 +54,7 @@ const MENU_PROPERTIES: &[&str] = &[
 pub(crate) struct Tray {
     hub: BusHub,
     media_dir: PathBuf,
+    ime_refresh: Arc<Notify>,
     state: Mutex<State>,
 }
 
@@ -222,10 +223,11 @@ struct MenuAction<'a> {
 }
 
 impl Tray {
-    pub(crate) fn install(hub: &BusHub, media_dir: PathBuf) -> Arc<Self> {
+    pub(crate) fn install(hub: &BusHub, media_dir: PathBuf, ime_refresh: Arc<Notify>) -> Arc<Self> {
         let tray = Arc::new(Self {
             hub: hub.clone(),
             media_dir,
+            ime_refresh,
             state: Mutex::new(State::default()),
         });
         tray.publish(&tray.state(), UpdateKind::SourceBaseline);
@@ -632,6 +634,7 @@ impl Monitor<'_> {
             state.items.push(item);
             self.tray.publish(&state, UpdateKind::Live);
         }
+        self.tray.ime_refresh.notify_one();
         Watcher::status_notifier_item_registered(emitter, &id).await?;
         let _ = reply.send(Ok(()));
         Ok(())
@@ -670,13 +673,14 @@ impl Monitor<'_> {
             (
                 ITEM | ITEM_FDO,
                 "NewTitle" | "NewIcon" | "NewAttentionIcon" | "NewOverlayIcon" | "NewToolTip"
-                | "NewStatus" | "NewMenu" | "NewIconThemePath",
+                | "NewStatus" | "NewMenu" | "NewIconThemePath" | "NewLabel" | "XAyatanaNewLabel",
             )
             | (PROPERTIES, "PropertiesChanged") => {
                 let mut state = self.tray.state();
                 for item in &mut state.items {
                     if item.endpoint.owner.as_str() == sender && item.endpoint.path == path {
                         self.refresh_properties(item);
+                        self.tray.ime_refresh.notify_one();
                     }
                 }
             }

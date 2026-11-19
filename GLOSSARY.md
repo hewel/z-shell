@@ -107,3 +107,11 @@ _Avoid_: Auth thread
 **Clipboard payload**:
 The original bytes of a Wayland clipboard selection paired with its advertised MIME type and encoding, preserved verbatim without lossy transcoding.
 _Avoid_: Clip, snippet
+
+**Input method**:
+The active text-input engine state—selected layout or engine label, icon, properties, and switchable group entries—exposed on a low-frequency desktop topic for bar indicators and menus.
+_Avoid_: Keyboard indicator, kimpanel status
+
+**Input method panel**:
+The high-frequency live composition view—preedit text, caret offset, auxiliary text, candidate lookup table, and compositor spot rectangle—published separately from input method status for candidate popups.
+_Avoid_: Candidate bar, kimpanel window, IME popup

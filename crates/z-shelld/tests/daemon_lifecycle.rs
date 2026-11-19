@@ -215,7 +215,7 @@ async fn enforces_host_trust_atomic_state_and_deduped_settings_reload() {
 }
 
 #[tokio::test]
-async fn wires_desktop_and_session_domains_and_locks_clipboard_on_session_lock() {
+async fn wires_desktop_settings_and_protects_clipboard_and_ime_on_session_lock() {
     let dir = TempDir::new().unwrap();
     let paths = ShellPaths::from_roots(
         dir.path().join("config"),
@@ -223,11 +223,13 @@ async fn wires_desktop_and_session_domains_and_locks_clipboard_on_session_lock()
         dir.path().join("runtime"),
         dir.path().join("runtime/bus.sock"),
     );
+    paths.ensure_dirs().unwrap();
+    std::fs::write(paths.settings_file(), "[ime]\nmode = \"disabled\"\n").unwrap();
 
     let app = DaemonApp::bootstrap(paths.clone()).unwrap();
     let server_task = tokio::spawn(async move { app.run().await });
 
-    let public_client = BusClient::connect(paths.socket_path()).await.unwrap();
+    let mut public_client = BusClient::connect(paths.socket_path()).await.unwrap();
     let mut host_client = BusClient::connect(paths.host_socket_path()).await.unwrap();
 
     let topics: Vec<String> = public_client
@@ -242,6 +244,8 @@ async fn wires_desktop_and_session_domains_and_locks_clipboard_on_session_lock()
         "desktop.tray",
         "desktop.media",
         "desktop.apps",
+        "desktop.ime",
+        "desktop.ime.panel",
         "session.lock",
         "session.idle",
     ] {
@@ -250,6 +254,63 @@ async fn wires_desktop_and_session_domains_and_locks_clipboard_on_session_lock()
             "missing expected core topic {expected} in {topics:?}"
         );
     }
+
+    let ime_snap = public_client
+        .subscribe(TopicName::try_new("desktop.ime").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(ime_snap.data["mode"], json!("disabled"));
+    assert_eq!(ime_snap.data["candidate_layout"], json!("auto"));
+    assert_eq!(ime_snap.data["switch_osd"], json!(true));
+
+    std::fs::write(
+        paths.settings_file(),
+        r#"
+[ime]
+mode = "indicator_only"
+candidate_layout = "vertical"
+switch_osd = false
+"#,
+    )
+    .unwrap();
+    let settings = public_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("settings.reload").unwrap(),
+            args: Vec::new(),
+            payload: None,
+        })
+        .await
+        .unwrap()
+        .data
+        .unwrap();
+    assert_eq!(
+        settings["ime"],
+        json!({
+            "mode": "indicator_only",
+            "candidate_layout": "vertical",
+            "switch_osd": false,
+        })
+    );
+
+    let Some(ServerMessage::Notification { method, params }) =
+        timeout(Duration::from_secs(2), public_client.next_notification())
+            .await
+            .expect("settings reload must publish an input method update")
+    else {
+        panic!("expected input method topic.update");
+    };
+    assert_eq!(method, methods::TOPIC_UPDATE);
+    let ime_update: TopicUpdate = serde_json::from_value(params).unwrap();
+    assert_eq!(ime_update.topic.as_str(), "desktop.ime");
+    assert!(ime_update.revision > ime_snap.revision);
+    assert!(ime_update.source_baseline);
+    assert_eq!(ime_update.data["mode"], json!("indicator_only"));
+    assert_eq!(ime_update.data["candidate_layout"], json!("vertical"));
+    assert_eq!(ime_update.data["switch_osd"], json!(false));
+    public_client
+        .unsubscribe(TopicName::try_new("desktop.ime").unwrap())
+        .await
+        .unwrap();
 
     // Public socket cannot call host.lock-ack or idle.configure (which can spawn commands).
     for (name, payload) in [
@@ -300,6 +361,18 @@ async fn wires_desktop_and_session_domains_and_locks_clipboard_on_session_lock()
     let lock_id = lock_req.data.unwrap()[0]["data"]["lock_id"]
         .as_u64()
         .unwrap();
+    let denied_while_engaging = public_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("ime.toggle").unwrap(),
+            args: Vec::new(),
+            payload: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        denied_while_engaging,
+        ClientError::Rpc(ref rpc) if rpc.code == ErrorCode::PermissionDenied
+    ));
     host_client
         .invoke_command(CommandInvokeParams {
             name: CommandName::try_new("host.lock-ack").unwrap(),
@@ -328,24 +401,31 @@ async fn wires_desktop_and_session_domains_and_locks_clipboard_on_session_lock()
         }
     }
 
-    // Public clipboard reads must now be denied while locked!
-    let denied_clip = public_client
-        .invoke_command(CommandInvokeParams {
-            name: CommandName::try_new("clipboard.list").unwrap(),
-            args: Vec::new(),
-            payload: None,
-        })
-        .await
-        .unwrap_err();
-    assert!(matches!(
-        denied_clip,
-        ClientError::Rpc(ref rpc) if rpc.code == ErrorCode::PermissionDenied
-    ));
+    // Public commands for both domains must be denied while locked.
+    for name in ["clipboard.list", "ime.toggle"] {
+        let denied = public_client
+            .invoke_command(CommandInvokeParams {
+                name: CommandName::try_new(name).unwrap(),
+                args: Vec::new(),
+                payload: None,
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&denied, ClientError::Rpc(rpc) if rpc.code == ErrorCode::PermissionDenied),
+            "expected PermissionDenied for locked {name}, got {denied:?}"
+        );
+    }
 
     // Reloading declarative [[idle.rules]] from settings.toml must update session.idle live!
     std::fs::write(
         paths.settings_file(),
         r#"
+[ime]
+mode = "indicator_only"
+candidate_layout = "vertical"
+switch_osd = false
+
 [idle]
 pre_action_fade_seconds = 3
 
@@ -386,7 +466,6 @@ action = "screen_off"
     // Subscribe public_client to session.lock, then drop host_client abruptly ->
     // Coordinator::host_disconnected must fire immediately (host_connected=false) while staying
     // fail-closed in phase="locked"!
-    let mut public_client = public_client;
     let lock_snap = public_client
         .subscribe(TopicName::try_new("session.lock").unwrap())
         .await

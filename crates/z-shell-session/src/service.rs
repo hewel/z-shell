@@ -68,6 +68,7 @@ struct Subscription {
 pub struct SessionService {
     coordinator: tokio::sync::Mutex<Coordinator>,
     lock_snapshot: Mutex<LockSnapshot>,
+    lock_guard: Option<Box<dyn Fn(LockPhaseName) + Send + Sync>>,
     host_client_id: Mutex<Option<u64>>,
     idle: Mutex<IdlePolicy>,
     authenticator: Arc<dyn Authenticator>,
@@ -117,6 +118,7 @@ impl SessionService {
         Self {
             coordinator: tokio::sync::Mutex::new(coordinator),
             lock_snapshot: Mutex::new(lock_snapshot),
+            lock_guard: None,
             host_client_id: Mutex::new(None),
             idle: Mutex::new(idle),
             authenticator,
@@ -125,6 +127,19 @@ impl SessionService {
             subscription: Mutex::new(None),
             effects,
         }
+    }
+
+    /// Installs a synchronous privacy guard before the service starts handling lock transitions.
+    ///
+    /// The guard runs before each lock snapshot is committed. It must not reenter the session
+    /// service or block on asynchronous work.
+    #[must_use]
+    pub fn with_lock_guard(
+        mut self,
+        guard: impl Fn(LockPhaseName) + Send + Sync + 'static,
+    ) -> Self {
+        self.lock_guard = Some(Box::new(guard));
+        self
     }
 
     /// Publishes topic baselines, registers all commands, and follows hub inhibitor changes.
@@ -228,12 +243,12 @@ impl SessionService {
 
     /// Applies a logind `PrepareForSleep` or wake transition.
     pub async fn handle_sleep_signal(self: &Arc<Self>, signal: SleepSignal) {
-        let (actions, snapshot) = {
+        let actions = {
             let mut coordinator = self.coordinator.lock().await;
             let actions = coordinator.on_sleep_signal(signal).await;
-            (actions, coordinator.snapshot())
+            self.publish_lock(coordinator.snapshot());
+            actions
         };
-        self.publish_lock(snapshot);
         let sleep = match signal {
             SleepSignal::PrepareForSleep => SleepState::Sleeping,
             SleepSignal::Wake => SleepState::Awake,
@@ -465,6 +480,9 @@ impl SessionService {
     }
 
     fn publish_lock(&self, snapshot: LockSnapshot) {
+        if let Some(guard) = &self.lock_guard {
+            guard(snapshot.phase);
+        }
         *self.lock_snapshot.lock().expect("lock snapshot poisoned") = snapshot.clone();
         if let Some(hub) = self.hub.lock().expect("session hub lock poisoned").as_ref() {
             hub.publish_core_topic(
@@ -790,14 +808,17 @@ async fn dispatch(
                 .map_err(coordinator_error)?;
             let credentials = Credentials::new(username, std::mem::take(&mut *password.0));
             let outcome = service.authenticator.authenticate(credentials).await;
-            let result = service.coordinator.lock().await.complete_authentication(
-                attempt,
-                lock_id,
-                ui_session_generation,
-                outcome,
-            );
-            let snapshot = service.coordinator.lock().await.snapshot();
-            service.publish_lock(snapshot);
+            let result = {
+                let mut coordinator = service.coordinator.lock().await;
+                let result = coordinator.complete_authentication(
+                    attempt,
+                    lock_id,
+                    ui_session_generation,
+                    outcome,
+                );
+                service.publish_lock(coordinator.snapshot());
+                result
+            };
             let approval = result.map_err(coordinator_error)?;
             Ok(serde_json::to_value(approval).expect("unlock approval serializes"))
         }

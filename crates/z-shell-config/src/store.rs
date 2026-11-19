@@ -381,4 +381,36 @@ pre_action_fade_seconds = 1
             Err(ConfigError::Validation(_))
         ));
     }
+
+    #[test]
+    fn loads_ime_settings_with_indicator_only_default() {
+        let (_dir, store) = test_store();
+        let defaults = store.load_settings().unwrap();
+        assert_eq!(defaults.ime.mode, crate::settings::ImeMode::IndicatorOnly);
+        assert_eq!(
+            defaults.ime.candidate_layout,
+            crate::settings::CandidateLayout::Auto
+        );
+        assert!(defaults.ime.switch_osd);
+
+        fs::create_dir_all(store.paths().config_dir()).unwrap();
+        fs::write(
+            store.paths().settings_file(),
+            r#"
+[ime]
+mode = "kimpanel"
+candidate_layout = "vertical"
+switch_osd = false
+"#,
+        )
+        .unwrap();
+        let loaded = store.load_settings().unwrap();
+        assert_eq!(loaded.ime.mode, crate::settings::ImeMode::Kimpanel);
+        assert_eq!(
+            loaded.ime.candidate_layout,
+            crate::settings::CandidateLayout::Vertical
+        );
+        assert!(!loaded.ime.switch_osd);
+        assert_eq!(loaded.public_summary().ime, loaded.ime);
+    }
 }

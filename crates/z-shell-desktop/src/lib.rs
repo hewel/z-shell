@@ -1,4 +1,4 @@
-//! Desktop protocol daemons for notifications, the system tray, MPRIS, and the XDG launcher.
+//! Desktop protocols for notifications, the system tray, MPRIS, Fcitx5, and the XDG launcher.
 //!
 //! Keep the [`DesktopHandle`] alive while serving these topics. Desktop bus
 //! daemons use separate session D-Bus connections: a missing bus or a name
@@ -27,6 +27,26 @@
 //! `media.next`, and `media.previous` act on the selected player or an explicit
 //! `{player_id}`. `media.seek` additionally takes a relative `{offset_us}`.
 //! `media.select-player` takes `{player_id}`; null restores automatic selection.
+//!
+//! ## Input method
+//!
+//! `[ime].mode = "indicator_only"` (default) leaves Fcitx5's native Wayland popup
+//! in place. `"kimpanel"` opts into shell-owned composition; `"disabled"` leaves
+//! both backends untouched. `candidate_layout` overrides the kimpanel layout
+//! hint unless set to `"auto"`; `switch_osd` is a hint for UI hosts.
+//!
+//! `desktop.ime` carries input method status, properties, group entries, and
+//! revisioned `exec_menu` requests. For switch OSDs, ignore source baselines and
+//! compare `active_im`, `enabled`, and `properties` on live updates.
+//! `desktop.ime.panel` carries live preedit, candidates, and the unmodified
+//! spot rectangle. Relative coordinates require compositor-specific placement
+//! information; fall back to a shell anchor when unavailable.
+//!
+//! `ime.toggle`, `ime.set-im {unique_name}`, `ime.reload-config`, and
+//! `ime.configure` control Fcitx5. `ime.trigger-property {key}`,
+//! `ime.select-candidate {index}`, `ime.page-up`, `ime.page-down`, and
+//! `ime.move-caret {position}` require kimpanel. Locking clears composition
+//! and denies all `ime.*` commands on the public bus channel.
 //!
 //! ## Apps and launcher
 //!
@@ -62,6 +82,7 @@
 
 mod apps;
 mod assets;
+mod ime;
 mod launcher;
 mod media;
 mod notifications;
@@ -76,11 +97,17 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::{sync::watch, task::JoinHandle, time};
+use tokio::{
+    sync::{Notify, watch},
+    task::JoinHandle,
+    time,
+};
 use z_shell_bus::{BusHub, CommandCall, UpdateKind};
-use z_shell_config::ShellPaths;
+use z_shell_config::{ImeSettings, ShellPaths};
 use z_shell_protocol::{CommandInvokeResult, CommandName, ErrorCode, RpcError, TopicName};
 use zbus::{Connection, connection::Builder};
+
+pub use ime::ImeLockState;
 
 /// Session D-Bus endpoint used by the desktop daemons.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -129,6 +156,8 @@ pub struct DesktopOptions {
     pub notifications: bool,
     /// Allow this daemon to claim `org.kde.StatusNotifierWatcher`.
     pub tray: bool,
+    /// Initial Fcitx5 integration settings; can be changed without restarting.
+    pub ime: ImeSettings,
     /// Initial network access policy for media covers.
     pub offline_policy: OfflinePolicy,
     /// XDG data roots in precedence order (not their `applications` subdirectories).
@@ -143,6 +172,7 @@ impl Default for DesktopOptions {
             session_bus: SessionBusAddress::Default,
             notifications: true,
             tray: true,
+            ime: ImeSettings::default(),
             offline_policy: OfflinePolicy::Online,
             xdg_data_dirs: apps::xdg_data_dirs(),
             icon_theme: apps::icon_theme(),
@@ -189,7 +219,9 @@ impl DesktopServices {
         options: DesktopOptions,
     ) -> DesktopHandle {
         let notifications = notifications::Notifications::install(hub, paths.media_dir());
-        let tray = tray::Tray::install(hub, paths.media_dir());
+        let ime_refresh = Arc::new(Notify::new());
+        let tray = tray::Tray::install(hub, paths.media_dir(), Arc::clone(&ime_refresh));
+        let ime = ime::Ime::install(hub, options.ime, ime_refresh);
         let media = media::Media::install(hub, paths.media_dir(), options.offline_policy);
         let launcher =
             launcher::Launcher::install(hub, paths, options.xdg_data_dirs, options.icon_theme);
@@ -214,10 +246,11 @@ impl DesktopServices {
                 )),
                 tokio::spawn(supervise(
                     DbusDomain::Media(media.clone()),
-                    options.session_bus,
-                    running,
+                    options.session_bus.clone(),
+                    running.clone(),
                     None,
                 )),
+                tokio::spawn(Arc::clone(&ime).run(options.session_bus, running)),
             ]);
         }
         DesktopHandle {
@@ -225,6 +258,7 @@ impl DesktopServices {
             workers,
             notifications_enabled,
             tray_enabled,
+            ime,
             media,
             launcher,
         }
@@ -238,6 +272,7 @@ pub struct DesktopHandle {
     workers: Vec<JoinHandle<()>>,
     notifications_enabled: watch::Sender<bool>,
     tray_enabled: watch::Sender<bool>,
+    ime: Arc<ime::Ime>,
     media: Arc<media::Media>,
     launcher: Arc<launcher::Launcher>,
 }
@@ -275,6 +310,16 @@ impl DesktopHandle {
     /// Enables tray watcher ownership or releases it asynchronously.
     pub fn set_tray(&self, toggle: ServiceToggle) {
         set_enabled(&self.tray_enabled, toggle.is_enabled());
+    }
+
+    /// Applies Fcitx5 preferences and switches backend ownership asynchronously.
+    pub fn set_ime_settings(&self, settings: ImeSettings) {
+        self.ime.set_settings(settings);
+    }
+
+    /// Applies the session privacy policy synchronously and clears locked composition.
+    pub fn set_ime_locked(&self, state: ImeLockState) {
+        self.ime.set_locked(state);
     }
 
     /// Stops the integrations and waits until the session D-Bus connections are closed.
