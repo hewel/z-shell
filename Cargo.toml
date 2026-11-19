@@ -4,6 +4,7 @@ members = [
     "crates/z-shell-protocol",
     "crates/z-shell-config",
     "crates/z-shell-bus",
+    "crates/z-shell-plugins",
     "crates/z-shelld",
     "crates/z-shell-cli",
 ]
@@ -24,11 +25,13 @@ all = "warn"
 [workspace.dependencies]
 z-shell-protocol = { path = "crates/z-shell-protocol" }
 z-shell-config = { path = "crates/z-shell-config" }
+z-shell-plugins = { path = "crates/z-shell-plugins" }
 z-shell-bus = { path = "crates/z-shell-bus" }
 anyhow = "1"
 rustix = { version = "1", features = ["fs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "time"] }

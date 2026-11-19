@@ -11,6 +11,9 @@ const APP_DIR_NAME: &str = "z-shell";
 const SETTINGS_FILE_NAME: &str = "settings.toml";
 const STATE_FILE_NAME: &str = "state.toml";
 const STATE_LOCK_FILE_NAME: &str = "state.lock";
+const PLUGINS_DIR_NAME: &str = "plugins";
+const PLUGINS_REGISTRY_FILE_NAME: &str = "registry.json";
+const PLUGINS_LOCK_FILE_NAME: &str = "plugins.lock";
 const MEDIA_DIR_NAME: &str = "media";
 
 /// Error returned while resolving or validating XDG shell directories.
@@ -59,17 +62,7 @@ impl ShellPaths {
     ///
     /// Returns [`PathError::MissingBaseDir`] if `XDG_RUNTIME_DIR` or config/state roots are unset.
     pub fn from_env() -> Result<Self, PathError> {
-        let home = env::var_os("HOME").map(PathBuf::from);
-        let config_base = env::var_os("XDG_CONFIG_HOME")
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from)
-            .or_else(|| home.as_ref().map(|h| h.join(".config")))
-            .ok_or(PathError::MissingBaseDir("XDG_CONFIG_HOME or HOME"))?;
-        let state_base = env::var_os("XDG_STATE_HOME")
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from)
-            .or_else(|| home.as_ref().map(|h| h.join(".local/state")))
-            .ok_or(PathError::MissingBaseDir("XDG_STATE_HOME or HOME"))?;
+        let (config_dir, state_dir) = config_and_state_dirs(None, None)?;
         let runtime_base = env::var_os("XDG_RUNTIME_DIR")
             .filter(|v| !v.is_empty())
             .map(PathBuf::from)
@@ -79,8 +72,6 @@ impl ShellPaths {
             .filter(|s| !s.is_empty() && !s.contains('/') && !s.contains(".."))
             .unwrap_or_else(|| "wayland-0".to_owned());
 
-        let config_dir = config_base.join(APP_DIR_NAME);
-        let state_dir = state_base.join(APP_DIR_NAME);
         let runtime_dir = runtime_base.join(APP_DIR_NAME);
         let socket_path = runtime_dir.join(format!("bus-{display}.sock"));
         let host_socket_path = runtime_dir.join(format!("host-{display}.sock"));
@@ -94,6 +85,24 @@ impl ShellPaths {
             host_socket_path,
             daemon_lock_path,
         })
+    }
+
+    /// Resolves settings and state for local commands without requiring `XDG_RUNTIME_DIR`.
+    ///
+    /// Overrides name the application directories directly. No sockets or runtime directories
+    /// are created; the runtime paths are anchored in the state directory for this local layout.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PathError::MissingBaseDir`] if settings or state paths cannot be resolved.
+    pub fn for_local_state(
+        config_dir: Option<PathBuf>,
+        state_dir: Option<PathBuf>,
+    ) -> Result<Self, PathError> {
+        let (config_dir, state_dir) = config_and_state_dirs(config_dir, state_dir)?;
+        let runtime = state_dir.join("runtime");
+        let socket = runtime.join("bus.sock");
+        Ok(Self::from_roots(config_dir, state_dir, runtime, socket))
     }
 
     /// Constructs explicit paths for tests or custom daemon invocations without consulting env vars.
@@ -159,6 +168,24 @@ impl ShellPaths {
         self.state_dir.join(STATE_LOCK_FILE_NAME)
     }
 
+    /// Returns the durable plugin directory.
+    #[must_use]
+    pub fn plugins_dir(&self) -> PathBuf {
+        self.state_dir.join(PLUGINS_DIR_NAME)
+    }
+
+    /// Returns the v1 plugin registry file path.
+    #[must_use]
+    pub fn plugins_registry_file(&self) -> PathBuf {
+        self.plugins_dir().join(PLUGINS_REGISTRY_FILE_NAME)
+    }
+
+    /// Returns the shared `flock` lockfile protecting plugin mutations.
+    #[must_use]
+    pub fn plugins_lock_file(&self) -> PathBuf {
+        self.plugins_dir().join(PLUGINS_LOCK_FILE_NAME)
+    }
+
     /// Returns the runtime directory (`$XDG_RUNTIME_DIR/z-shell`).
     #[must_use]
     pub fn runtime_dir(&self) -> &Path {
@@ -211,6 +238,27 @@ impl ShellPaths {
         }
         Ok(())
     }
+}
+
+fn config_and_state_dirs(
+    config_dir: Option<PathBuf>,
+    state_dir: Option<PathBuf>,
+) -> Result<(PathBuf, PathBuf), PathError> {
+    let home = env::var_os("HOME").map(PathBuf::from);
+    let resolve = |variable, fallback| {
+        env::var_os(variable)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| home.as_ref().map(|home| home.join(fallback)))
+            .map(|base| base.join(APP_DIR_NAME))
+    };
+    let config_dir = config_dir
+        .or_else(|| resolve("XDG_CONFIG_HOME", ".config"))
+        .ok_or(PathError::MissingBaseDir("XDG_CONFIG_HOME or HOME"))?;
+    let state_dir = state_dir
+        .or_else(|| resolve("XDG_STATE_HOME", ".local/state"))
+        .ok_or(PathError::MissingBaseDir("XDG_STATE_HOME or HOME"))?;
+    Ok((config_dir, state_dir))
 }
 
 fn current_uid() -> Result<u32, PathError> {

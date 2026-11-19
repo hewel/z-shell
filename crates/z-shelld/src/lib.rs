@@ -9,6 +9,7 @@ use z_shell_bus::{
     BusHub, BusLimits, BusServer, CommandCall, CommandHandler, ShutdownHandle, UpdateKind,
 };
 use z_shell_config::{ConfigStore, RuntimeState, ShellPaths, UserSettings};
+use z_shell_plugins::registry::{PluginError, PluginManager};
 use z_shell_protocol::{
     ClientRole, CommandInvokeResult, CommandName, ErrorCode, PluginId, RpcError, TopicName,
 };
@@ -21,6 +22,8 @@ pub mod topics {
     pub const SETTINGS: &str = "settings";
     /// Public non-secret summary of durable `state.toml`.
     pub const STATE: &str = "state";
+    /// Public non-secret summary of installed plugins at startup.
+    pub const PLUGINS: &str = "plugins";
 }
 
 /// Running daemon assembly owning the config store, bus hub, and dual Unix socket server.
@@ -56,6 +59,14 @@ impl DaemonApp {
         let runtime_state = store
             .load_state()
             .context("loading state.toml at startup")?;
+        let plugins = Arc::new(PluginManager::new(paths.clone()));
+        let plugin_summaries = match plugins.list() {
+            Ok(list) => list,
+            Err(err) => {
+                tracing::warn!(error = %err, "failed to load plugin registry at startup; continuing with empty plugins topic");
+                Vec::new()
+            }
+        };
 
         let hub = BusHub::with_limits(env!("CARGO_PKG_VERSION"), paths.media_dir(), limits);
         let server = BusServer::bind(
@@ -73,6 +84,12 @@ impl DaemonApp {
         let shared_state = Arc::new(AsyncMutex::new(runtime_state.clone()));
 
         publish_core_baselines(&hub, &settings, &runtime_state);
+        hub.publish_core_topic(
+            topic(topics::PLUGINS),
+            json!(plugin_summaries),
+            UpdateKind::SourceBaseline,
+        );
+        register_plugin_commands(&hub, plugins);
         register_core_commands(&hub, store, shared_settings, shared_state, shutdown);
 
         info!(
@@ -128,6 +145,71 @@ fn publish_core_baselines(hub: &BusHub, settings: &UserSettings, state: &Runtime
             .expect("PublicStateSummary serializes to JSON"),
         UpdateKind::SourceBaseline,
     );
+}
+
+fn register_plugin_commands(hub: &BusHub, plugins: Arc<PluginManager>) {
+    let list_plugins = Arc::clone(&plugins);
+    hub.register_core_command(
+        cmd("plugins.list"),
+        "List installed plugins without exposing settings or source credentials",
+        Arc::new(move |_| {
+            let plugins = Arc::clone(&list_plugins);
+            Box::pin(plugin_query(move || {
+                plugins.list().map(|summary| json!(summary))
+            }))
+        }),
+    );
+    hub.register_core_command(
+        cmd("plugins.audit"),
+        "Check a plugin's pinned content digest and capability approval",
+        Arc::new(move |call| {
+            let plugins = Arc::clone(&plugins);
+            Box::pin(async move {
+                let raw_id = match (call.params.args.as_slice(), call.params.payload.as_ref()) {
+                    ([id], None) => Some(id.as_str()),
+                    ([], Some(payload)) => payload.get("id").and_then(Value::as_str),
+                    _ => None,
+                }
+                .ok_or_else(|| {
+                    RpcError::new(
+                        ErrorCode::InvalidParams,
+                        "plugins.audit requires one plugin id argument or payload.id",
+                    )
+                })?;
+                let id: PluginId = raw_id
+                    .parse()
+                    .map_err(|_| RpcError::new(ErrorCode::InvalidParams, "invalid plugin id"))?;
+                plugin_query(move || plugins.audit(&id).map(|audit| json!(audit))).await
+            })
+        }),
+    );
+}
+
+async fn plugin_query(
+    query: impl FnOnce() -> Result<Value, PluginError> + Send + 'static,
+) -> Result<CommandInvokeResult, RpcError> {
+    let result = tokio::task::spawn_blocking(query).await.map_err(|_| {
+        RpcError::new(
+            ErrorCode::Internal,
+            "plugin registry query did not complete",
+        )
+    })?;
+    match result {
+        Ok(data) => Ok(CommandInvokeResult {
+            message: None,
+            data: Some(data),
+        }),
+        Err(err @ PluginError::NotFound(_)) => {
+            Err(RpcError::new(ErrorCode::NotFound, err.to_string()))
+        }
+        Err(err) => {
+            tracing::warn!(%err, "plugin registry query failed");
+            Err(RpcError::new(
+                ErrorCode::Internal,
+                "plugin registry query failed",
+            ))
+        }
+    }
 }
 
 fn require_host_role(call: &CommandCall, action: &str) -> Result<(), RpcError> {

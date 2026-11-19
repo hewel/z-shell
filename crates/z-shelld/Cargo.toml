@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 z-shell-bus = { workspace = true }
 z-shell-config = { workspace = true }
+z-shell-plugins = { workspace = true }
 z-shell-protocol = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
