@@ -9,6 +9,8 @@ members = [
     "crates/z-shell-theme",
     "crates/z-shell-system",
     "crates/z-shell-clipboard",
+    "crates/z-shell-desktop",
+    "crates/z-shell-session",
     "crates/z-shelld",
     "crates/z-shell-cli",
 ]
@@ -35,12 +37,15 @@ z-shell-wayland = { path = "crates/z-shell-wayland" }
 z-shell-theme = { path = "crates/z-shell-theme" }
 z-shell-system = { path = "crates/z-shell-system" }
 z-shell-clipboard = { path = "crates/z-shell-clipboard" }
+z-shell-desktop = { path = "crates/z-shell-desktop" }
+z-shell-session = { path = "crates/z-shell-session" }
 anyhow = "1"
 chacha20poly1305 = "0.10"
 getrandom = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 libloading = "0.8"
 secret-service = { version = "5", features = ["rt-tokio-crypto-rust"] }
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }

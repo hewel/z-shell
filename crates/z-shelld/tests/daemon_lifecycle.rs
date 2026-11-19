@@ -213,3 +213,138 @@ async fn enforces_host_trust_atomic_state_and_deduped_settings_reload() {
     assert!(!paths.socket_path().exists());
     assert!(!paths.host_socket_path().exists());
 }
+
+#[tokio::test]
+async fn wires_desktop_and_session_domains_and_locks_clipboard_on_session_lock() {
+    let dir = TempDir::new().unwrap();
+    let paths = ShellPaths::from_roots(
+        dir.path().join("config"),
+        dir.path().join("state"),
+        dir.path().join("runtime"),
+        dir.path().join("runtime/bus.sock"),
+    );
+
+    let app = DaemonApp::bootstrap(paths.clone()).unwrap();
+    let server_task = tokio::spawn(async move { app.run().await });
+
+    let public_client = BusClient::connect(paths.socket_path()).await.unwrap();
+    let mut host_client = BusClient::connect(paths.host_socket_path()).await.unwrap();
+
+    let topics: Vec<String> = public_client
+        .list_topics()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|entry| entry.topic.as_str().to_owned())
+        .collect();
+    for expected in [
+        "desktop.notifications",
+        "desktop.tray",
+        "desktop.media",
+        "desktop.apps",
+        "session.lock",
+        "session.idle",
+    ] {
+        assert!(
+            topics.iter().any(|name| name == expected),
+            "missing expected core topic {expected} in {topics:?}"
+        );
+    }
+
+    // Public socket cannot call host.lock-ack.
+    let denied = public_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("host.lock-ack").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({ "lock_id": 1, "ui_session_generation": 1 })),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        denied,
+        ClientError::Rpc(ref rpc) if rpc.code == ErrorCode::PermissionDenied
+    ));
+
+    // Subscribe to clipboard so we can observe the cross-domain lock transition.
+    let clipboard_snap = host_client
+        .subscribe(TopicName::try_new("clipboard").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(clipboard_snap.data["locked"], json!("unlocked"));
+
+    // Register host generation, request lock, and acknowledge it from host socket.
+    host_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("host.session-register").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({ "ui_session_generation": 7 })),
+        })
+        .await
+        .unwrap();
+    let lock_req = public_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("lock.request").unwrap(),
+            args: Vec::new(),
+            payload: None,
+        })
+        .await
+        .unwrap();
+    let lock_id = lock_req.data.unwrap()[0]["data"]["lock_id"]
+        .as_u64()
+        .unwrap();
+    host_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("host.lock-ack").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({ "lock_id": lock_id, "ui_session_generation": 7 })),
+        })
+        .await
+        .unwrap();
+
+    // Wait for CrossDomainBridge to propagate lock state to ClipboardService.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let Some(ServerMessage::Notification { method, params, .. }) = timeout(
+            deadline.saturating_duration_since(tokio::time::Instant::now()),
+            host_client.next_notification(),
+        )
+        .await
+        .unwrap() else {
+            panic!("expected clipboard topic.update");
+        };
+        if method == methods::TOPIC_UPDATE {
+            let update: TopicUpdate = serde_json::from_value(params).unwrap();
+            if update.topic.as_str() == "clipboard" && update.data["locked"] == json!("locked") {
+                break;
+            }
+        }
+    }
+
+    // Public clipboard reads must now be denied while locked!
+    let denied_clip = public_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("clipboard.list").unwrap(),
+            args: Vec::new(),
+            payload: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        denied_clip,
+        ClientError::Rpc(ref rpc) if rpc.code == ErrorCode::PermissionDenied
+    ));
+
+    host_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("quit").unwrap(),
+            args: Vec::new(),
+            payload: None,
+        })
+        .await
+        .unwrap();
+    timeout(Duration::from_secs(3), server_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}

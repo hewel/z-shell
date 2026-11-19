@@ -2,17 +2,27 @@
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
-use std::sync::Arc;
-use tokio::sync::Mutex as AsyncMutex;
+use std::path::PathBuf;
+use std::sync::{Arc, Weak};
+use tokio::sync::{Mutex as AsyncMutex, OnceCell};
 use tracing::info;
 use z_shell_bus::{
     BusHub, BusLimits, BusServer, CommandCall, CommandHandler, ShutdownHandle, UpdateKind,
 };
-use z_shell_clipboard::{ClipboardService, History as ClipboardHistory};
+use z_shell_clipboard::{ClipboardService, History as ClipboardHistory, LockedState};
 use z_shell_config::{ConfigStore, RuntimeState, ShellPaths, UserSettings};
+use z_shell_desktop::{DesktopHandle, DesktopServices, OfflinePolicy};
 use z_shell_plugins::registry::{PluginError, PluginManager};
 use z_shell_protocol::{
-    ClientRole, CommandInvokeResult, CommandName, ErrorCode, PluginId, RpcError, TopicName,
+    ClientMessage, ClientRole, CommandInvokeResult, CommandName, ErrorCode, PROTOCOL_VERSION,
+    PluginId, RequestId, RpcError, ServerMessage, TopicName, TopicSubscribeParams,
+    decode_server_line, methods,
+};
+use z_shell_session::{
+    coordinator::{InhibitorFuture, LogindSleepInhibitor, SleepInhibitor, SleepInhibitorError},
+    idle::MediaPlayback,
+    pam::HelperAuthenticator,
+    service::{LOCK_TOPIC, SessionService},
 };
 use z_shell_system::{SystemHandle, SystemServices};
 use z_shell_theme::{GtkLinker, ThemeEngine};
@@ -38,6 +48,9 @@ pub struct DaemonApp {
     _wayland: Option<WaylandHandle>,
     _system: Option<SystemHandle>,
     _clipboard: Arc<ClipboardService>,
+    _desktop: Option<Arc<DesktopHandle>>,
+    _session: Arc<SessionService>,
+    _bridge: Option<CrossDomainBridge>,
 }
 
 impl DaemonApp {
@@ -130,8 +143,34 @@ impl DaemonApp {
             tracing::info!(error = %err, "no Wayland clipboard transport available; staying memory-only");
         }
 
+        let desktop = tokio::runtime::Handle::try_current().ok().map(|_| {
+            Arc::new(DesktopServices::install(
+                &hub,
+                &paths,
+                settings.general.offline_mode,
+            ))
+        });
+
+        let session = Arc::new(SessionService::new(
+            hub.daemon_instance_id().to_owned(),
+            Arc::new(HelperAuthenticator::new(resolve_pam_helper_path())),
+            Arc::new(LazyLogindSleepInhibitor::new()),
+            &settings.idle,
+        ));
+        session.install_on_bus(&hub);
+
+        let bridge =
+            CrossDomainBridge::start(&hub, Arc::downgrade(&clipboard), Arc::downgrade(&session));
+
         register_plugin_commands(&hub, plugins);
-        register_core_commands(&hub, store, shared_settings, shared_state, shutdown);
+        register_core_commands(
+            &hub,
+            store,
+            shared_settings,
+            shared_state,
+            desktop.as_ref().map(Arc::downgrade),
+            shutdown,
+        );
 
         info!(
             public_socket = %paths.socket_path().display(),
@@ -146,6 +185,9 @@ impl DaemonApp {
             _wayland: wayland,
             _system: system,
             _clipboard: clipboard,
+            _desktop: desktop,
+            _session: session,
+            _bridge: bridge,
         })
     }
 
@@ -275,6 +317,7 @@ fn register_core_commands(
     store: Arc<ConfigStore>,
     settings_cell: Arc<AsyncMutex<UserSettings>>,
     state_cell: Arc<AsyncMutex<RuntimeState>>,
+    desktop_ref: Option<Weak<DesktopHandle>>,
     shutdown: ShutdownHandle,
 ) {
     // status (public) — receives `call.hub` at invocation time so BusHub holds zero Arc cycles!
@@ -384,9 +427,11 @@ fn register_core_commands(
     {
         let store_ref = Arc::clone(&store);
         let settings_ref = Arc::clone(&settings_cell);
+        let desktop_ref = desktop_ref.clone();
         let handler: CommandHandler = Arc::new(move |call: CommandCall| {
             let store_ref = Arc::clone(&store_ref);
             let settings_ref = Arc::clone(&settings_ref);
+            let desktop_ref = desktop_ref.clone();
             Box::pin(async move {
                 let mut guard = settings_ref.lock().await;
                 let fresh = store_ref.load_settings().map_err(|err| {
@@ -408,6 +453,16 @@ fn register_core_commands(
                 *guard = fresh.clone();
                 let summary_json = serde_json::to_value(guard.public_summary())
                     .expect("PublicSettingsSummary serializes");
+
+                if old_offline != fresh.general.offline_mode
+                    && let Some(desktop) = desktop_ref.as_ref().and_then(Weak::upgrade)
+                {
+                    desktop.set_offline_policy(if fresh.general.offline_mode {
+                        OfflinePolicy::Offline
+                    } else {
+                        OfflinePolicy::Online
+                    });
+                }
 
                 let msg = if summary_changed {
                     let rev = call.hub.publish_core_topic(
@@ -614,4 +669,168 @@ fn topic(name: &str) -> TopicName {
 
 fn cmd(name: &str) -> CommandName {
     CommandName::try_new(name).expect("hardcoded core command name is valid")
+}
+
+fn resolve_pam_helper_path() -> PathBuf {
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let sibling = dir.join("z-shell-pam-helper");
+        if sibling.is_file() {
+            return sibling;
+        }
+    }
+    PathBuf::from("z-shell-pam-helper")
+}
+
+#[derive(Debug)]
+struct LazyLogindSleepInhibitor {
+    inner: OnceCell<LogindSleepInhibitor>,
+}
+
+impl LazyLogindSleepInhibitor {
+    fn new() -> Self {
+        Self {
+            inner: OnceCell::new(),
+        }
+    }
+
+    async fn get_or_connect(&self) -> Result<&LogindSleepInhibitor, SleepInhibitorError> {
+        self.inner
+            .get_or_try_init(LogindSleepInhibitor::connect_system)
+            .await
+    }
+}
+
+impl SleepInhibitor for LazyLogindSleepInhibitor {
+    fn acquire(&self) -> InhibitorFuture<'_> {
+        Box::pin(async move { self.get_or_connect().await?.acquire().await })
+    }
+
+    fn release(&self) {
+        if let Some(inhibitor) = self.inner.get() {
+            inhibitor.release();
+        }
+    }
+
+    fn is_held(&self) -> bool {
+        self.inner.get().is_some_and(SleepInhibitor::is_held)
+    }
+
+    fn suspend(&self) -> InhibitorFuture<'_> {
+        Box::pin(async move { self.get_or_connect().await?.suspend().await })
+    }
+}
+
+struct CrossDomainBridge {
+    hub: BusHub,
+    client_id: u64,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl CrossDomainBridge {
+    fn start(
+        hub: &BusHub,
+        clipboard: Weak<ClipboardService>,
+        session: Weak<SessionService>,
+    ) -> Option<Self> {
+        let runtime = tokio::runtime::Handle::try_current().ok()?;
+        let (client_id, outbound) = hub.register_client(ClientRole::Public)?;
+        hub.handle_inline_message(
+            client_id,
+            ClientMessage::request(
+                RequestId::Number(1),
+                methods::BUS_HELLO,
+                Some(json!({ "protocol_version": PROTOCOL_VERSION })),
+            ),
+        );
+        for (req_id, topic_name) in [(2_u64, LOCK_TOPIC), (3_u64, "desktop.media")] {
+            hub.handle_inline_message(
+                client_id,
+                ClientMessage::request(
+                    RequestId::Number(req_id),
+                    methods::TOPIC_SUBSCRIBE,
+                    Some(
+                        serde_json::to_value(TopicSubscribeParams {
+                            topic: topic(topic_name),
+                        })
+                        .expect("TopicSubscribeParams serializes"),
+                    ),
+                ),
+            );
+        }
+
+        let task = runtime.spawn(async move {
+            while let Some(line) = outbound.next_line().await {
+                let Ok(message) = decode_server_line(&line) else {
+                    continue;
+                };
+                let Some((topic_name, data)) = extract_topic_payload(message) else {
+                    continue;
+                };
+                match topic_name.as_str() {
+                    LOCK_TOPIC => {
+                        let Some(clipboard) = clipboard.upgrade() else {
+                            continue;
+                        };
+                        let locked = matches!(
+                            data.get("phase").and_then(Value::as_str),
+                            Some("locked" | "engaging")
+                        );
+                        clipboard.set_locked(if locked {
+                            LockedState::Locked
+                        } else {
+                            LockedState::Unlocked
+                        });
+                    }
+                    "desktop.media" => {
+                        let Some(session) = session.upgrade() else {
+                            continue;
+                        };
+                        let playing = data
+                            .get("any_playing")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        session
+                            .set_media_playing(if playing {
+                                MediaPlayback::Playing
+                            } else {
+                                MediaPlayback::Idle
+                            })
+                            .await;
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        Some(Self {
+            hub: hub.clone(),
+            client_id,
+            task,
+        })
+    }
+}
+
+impl Drop for CrossDomainBridge {
+    fn drop(&mut self) {
+        self.task.abort();
+        self.hub.retire_client(self.client_id);
+    }
+}
+
+fn extract_topic_payload(message: ServerMessage) -> Option<(String, Value)> {
+    match message {
+        ServerMessage::Ok { result, .. } => {
+            let topic = result.get("topic")?.as_str()?.to_owned();
+            let data = result.get("data")?.clone();
+            Some((topic, data))
+        }
+        ServerMessage::Notification { method, params } if method == methods::TOPIC_UPDATE => {
+            let topic = params.get("topic")?.as_str()?.to_owned();
+            let data = params.get("data")?.clone();
+            Some((topic, data))
+        }
+        _ => None,
+    }
 }

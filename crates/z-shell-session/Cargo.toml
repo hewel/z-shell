@@ -1,0 +1,34 @@
+[package]
+name = "z-shell-session"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "z-shell-pam-helper"
+path = "src/bin/z-shell-pam-helper.rs"
+
+[dependencies]
+z-shell-bus = { workspace = true }
+z-shell-config = { workspace = true }
+z-shell-protocol = { workspace = true }
+getrandom = { workspace = true }
+libloading = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+wayland-client = { workspace = true }
+wayland-protocols = { workspace = true }
+zbus = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+wayland-server = { workspace = true }
+wayland-protocols = { version = "0.32", features = ["client", "server", "staging", "unstable"] }
+
+[lints]
+workspace = true
