@@ -61,12 +61,14 @@ const COMMANDS: [(&str, &str); 10] = [
 struct Subscription {
     client_id: u64,
     task: tokio::task::JoinHandle<()>,
+    disconnect_task: tokio::task::JoinHandle<()>,
 }
 
 /// Owns session state and all public/privileged bus command handlers.
 pub struct SessionService {
     coordinator: tokio::sync::Mutex<Coordinator>,
     lock_snapshot: Mutex<LockSnapshot>,
+    host_client_id: Mutex<Option<u64>>,
     idle: Mutex<IdlePolicy>,
     authenticator: Arc<dyn Authenticator>,
     sleep_inhibitor: Arc<dyn SleepInhibitor>,
@@ -111,6 +113,7 @@ impl SessionService {
         Self {
             coordinator: tokio::sync::Mutex::new(coordinator),
             lock_snapshot: Mutex::new(lock_snapshot),
+            host_client_id: Mutex::new(None),
             idle: Mutex::new(idle),
             authenticator,
             sleep_inhibitor,
@@ -338,10 +341,60 @@ impl SessionService {
                 service.apply_idle_effects(effects).await;
             }
         });
+        let weak_disconnect = Arc::downgrade(self);
+        let mut retired_rx = hub.subscribe_client_retired();
+        let disconnect_task = runtime.spawn(async move {
+            loop {
+                match retired_rx.recv().await {
+                    Ok(caller) if caller.role == ClientRole::PrivilegedHost => {
+                        let Some(service) = weak_disconnect.upgrade() else {
+                            break;
+                        };
+                        let should_disconnect = {
+                            let mut active = service
+                                .host_client_id
+                                .lock()
+                                .expect("host client id lock poisoned");
+                            if *active == Some(caller.client_id) {
+                                *active = None;
+                                true
+                            } else {
+                                false
+                            }
+                        };
+                        if should_disconnect {
+                            service.handle_host_disconnected().await;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
         *self
             .subscription
             .lock()
-            .expect("subscription lock poisoned") = Some(Subscription { client_id, task });
+            .expect("subscription lock poisoned") = Some(Subscription {
+            client_id,
+            task,
+            disconnect_task,
+        });
+    }
+
+    /// Marks the active privileged host disconnected, immediately invalidating any pending unlock
+    /// approval and aborting engaging suspends while keeping acknowledged locks fail-closed.
+    pub async fn handle_host_disconnected(self: &Arc<Self>) {
+        let actions = {
+            let mut coordinator = self.coordinator.lock().await;
+            let actions = coordinator.host_disconnected();
+            let snapshot = coordinator.snapshot();
+            self.publish_lock(snapshot);
+            actions
+        };
+        if let Err(error) = self.finish_coordinator_actions(actions).await {
+            tracing::warn!(%error, "host disconnect coordinator action reported error");
+        }
     }
 
     fn stop_inhibitor_sync(&self) {
@@ -352,6 +405,7 @@ impl SessionService {
             .take();
         if let Some(subscription) = subscription {
             subscription.task.abort();
+            subscription.disconnect_task.abort();
             if let Some(hub) = self.hub.lock().expect("session hub lock poisoned").as_ref() {
                 hub.retire_client(subscription.client_id);
             }
@@ -621,6 +675,7 @@ async fn dispatch(
             Ok(serde_json::to_value(service.idle_snapshot()).expect("idle snapshot serializes"))
         }
         "idle.configure" => {
+            require_host(call.caller.role)?;
             let config: IdleConfig = parse_params(call.params.payload)?;
             let effects = service
                 .idle
@@ -634,6 +689,10 @@ async fn dispatch(
         }
         "host.session-register" => {
             let params: SessionRegisterParams = parse_params(call.params.payload)?;
+            *service
+                .host_client_id
+                .lock()
+                .expect("host client id lock poisoned") = Some(call.caller.client_id);
             let actions = {
                 let mut coordinator = service.coordinator.lock().await;
                 let actions = coordinator.register_host(params.ui_session_generation);

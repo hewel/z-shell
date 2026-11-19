@@ -258,7 +258,7 @@ impl LockPhase {
 }
 
 /// Non-secret lock phase published on `session.lock`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LockPhaseName {
     /// No lock is active.

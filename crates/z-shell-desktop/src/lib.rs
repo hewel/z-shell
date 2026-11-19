@@ -104,6 +104,22 @@ pub enum OfflinePolicy {
     Offline,
 }
 
+/// Explicit toggle for optional desktop D-Bus name ownership.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ServiceToggle {
+    /// Claim and serve the domain's session D-Bus well-known name.
+    #[default]
+    Enabled,
+    /// Release the domain's well-known name without stopping other desktop services.
+    Disabled,
+}
+
+impl ServiceToggle {
+    fn is_enabled(self) -> bool {
+        matches!(self, Self::Enabled)
+    }
+}
+
 /// Overrides desktop sources and runtime policy for a daemon invocation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopOptions {
@@ -144,16 +160,16 @@ impl DesktopServices {
     /// # Panics
     ///
     /// Requires a Tokio runtime with time and I/O enabled.
-    pub fn install(hub: &BusHub, paths: &ShellPaths, offline_mode: bool) -> DesktopHandle {
+    pub fn install(
+        hub: &BusHub,
+        paths: &ShellPaths,
+        offline_policy: OfflinePolicy,
+    ) -> DesktopHandle {
         Self::install_with_options(
             hub,
             paths,
             DesktopOptions {
-                offline_policy: if offline_mode {
-                    OfflinePolicy::Offline
-                } else {
-                    OfflinePolicy::Online
-                },
+                offline_policy,
                 ..DesktopOptions::default()
             },
         )
@@ -252,13 +268,13 @@ impl DesktopHandle {
     }
 
     /// Enables notification ownership or releases it asynchronously.
-    pub fn set_notifications_enabled(&self, enabled: bool) {
-        set_enabled(&self.notifications_enabled, enabled);
+    pub fn set_notifications(&self, toggle: ServiceToggle) {
+        set_enabled(&self.notifications_enabled, toggle.is_enabled());
     }
 
     /// Enables tray watcher ownership or releases it asynchronously.
-    pub fn set_tray_enabled(&self, enabled: bool) {
-        set_enabled(&self.tray_enabled, enabled);
+    pub fn set_tray(&self, toggle: ServiceToggle) {
+        set_enabled(&self.tray_enabled, toggle.is_enabled());
     }
 
     /// Stops the integrations and waits until the session D-Bus connections are closed.

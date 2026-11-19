@@ -14,10 +14,13 @@
   "scripts": {
     "typecheck": "bun --bun run tsrs --project tsconfig.quickjs.json && bun --bun run tsrs --project packages/composer/tsconfig.json",
     "test:rust": "cargo test --workspace && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo doc --workspace --no-deps",
-    "test:ts": "cargo build --bins && bun test --timeout=30000 packages/",
+    "test:ts": "cargo build --bins && bun test --timeout=30000 packages/ plugins/",
     "check": "cargo fmt --check && bun run typecheck && bun run test:rust && bun run test:ts"
   },
   "devDependencies": {
+    "@z-shell/composer": "workspace:*",
+    "@z-shell/plugin-api": "workspace:*",
+    "@z-shell/sdk": "workspace:*",
     "tsrs": "7.1.0-beta.tsrs2"
   }
 }

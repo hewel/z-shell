@@ -18,6 +18,11 @@
     "packages/sdk/src/transport.ts",
     "packages/sdk/src/client.ts",
     "packages/sdk/src/fixture.ts",
-    "packages/plugin-api/src/index.ts"
+    "packages/plugin-api/src/index.ts",
+    "plugins/ai-usage/src/service.ts",
+    "plugins/niri-overview/src/service.ts",
+    "plugins/niri-overview/src/socket.ts",
+    "plugins/nosleep/src/service.ts",
+    "plugins/theme-bridges/src/service.ts"
   ]
 }

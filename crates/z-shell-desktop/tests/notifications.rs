@@ -349,7 +349,7 @@ async fn an_existing_owner_is_not_replaced_and_disabling_releases_the_name() {
         signal.body().deserialize::<(u32, &str)>().unwrap(),
         (id, "open")
     );
-    desktop.set_notifications_enabled(false);
+    desktop.set_notifications(z_shell_desktop::ServiceToggle::Disabled);
     assert_eq!(next_update(&stream).await["available"], false);
     assert!(!dbus.name_has_owner(name).await.unwrap());
 }

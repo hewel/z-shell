@@ -1,0 +1,42 @@
+id = "z-shell/theme-bridges"
+name = "Theme Bridges"
+version = "0.1.0"
+plugin_api = 1
+author = "z-shell"
+license = "MIT"
+description = "Subscribes to the z-shell theme topic to drive optional ShojiWM theme.set UDS and reversible Zen Browser chrome styling"
+
+[host_capabilities]
+control_channel = true
+
+[bus_permissions]
+topics_read = ["theme"]
+topics_publish = ["plugin.z-shell.theme-bridges.status"]
+commands_register = ["plugin.z-shell.theme-bridges.reapply", "plugin.z-shell.theme-bridges.revert"]
+inhibitors = false
+
+[[setting]]
+key = "enable_shojiwm"
+type = "boolean"
+default = false
+
+[[setting]]
+key = "enable_zen_browser"
+type = "boolean"
+default = false
+
+[[setting]]
+key = "shojiwm_socket"
+type = "string"
+default = ""
+
+[[setting]]
+key = "zen_chrome_dir"
+type = "string"
+default = ""
+
+[[service]]
+id = "service"
+entry = "src/service.ts"
+title = "External Theme Bridges"
+description = "Propagates z-shell Material 3 palette updates to optional ShojiWM and Zen Browser targets with conflict detection"

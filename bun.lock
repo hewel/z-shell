@@ -5,6 +5,9 @@
     "": {
       "name": "z-shell",
       "devDependencies": {
+        "@z-shell/composer": "workspace:*",
+        "@z-shell/plugin-api": "workspace:*",
+        "@z-shell/sdk": "workspace:*",
         "tsrs": "7.1.0-beta.tsrs2",
       },
     },

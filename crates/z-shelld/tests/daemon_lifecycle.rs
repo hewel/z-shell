@@ -251,19 +251,27 @@ async fn wires_desktop_and_session_domains_and_locks_clipboard_on_session_lock()
         );
     }
 
-    // Public socket cannot call host.lock-ack.
-    let denied = public_client
-        .invoke_command(CommandInvokeParams {
-            name: CommandName::try_new("host.lock-ack").unwrap(),
-            args: Vec::new(),
-            payload: Some(json!({ "lock_id": 1, "ui_session_generation": 1 })),
-        })
-        .await
-        .unwrap_err();
-    assert!(matches!(
-        denied,
-        ClientError::Rpc(ref rpc) if rpc.code == ErrorCode::PermissionDenied
-    ));
+    // Public socket cannot call host.lock-ack or idle.configure (which can spawn commands).
+    for (name, payload) in [
+        (
+            "host.lock-ack",
+            json!({ "lock_id": 1, "ui_session_generation": 1 }),
+        ),
+        ("idle.configure", json!({ "rules": [] })),
+    ] {
+        let denied = public_client
+            .invoke_command(CommandInvokeParams {
+                name: CommandName::try_new(name).unwrap(),
+                args: Vec::new(),
+                payload: Some(payload),
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(denied, ClientError::Rpc(ref rpc) if rpc.code == ErrorCode::PermissionDenied),
+            "expected PermissionDenied for public {name}, got {denied:?}"
+        );
+    }
 
     // Subscribe to clipboard so we can observe the cross-domain lock transition.
     let clipboard_snap = host_client
@@ -334,7 +342,40 @@ async fn wires_desktop_and_session_domains_and_locks_clipboard_on_session_lock()
         ClientError::Rpc(ref rpc) if rpc.code == ErrorCode::PermissionDenied
     ));
 
-    host_client
+    // Subscribe public_client to session.lock, then drop host_client abruptly ->
+    // Coordinator::host_disconnected must fire immediately (host_connected=false) while staying
+    // fail-closed in phase="locked"!
+    let mut public_client = public_client;
+    let lock_snap = public_client
+        .subscribe(TopicName::try_new("session.lock").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(lock_snap.data["host_connected"], json!(true));
+    assert_eq!(lock_snap.data["phase"], json!("locked"));
+
+    drop(host_client);
+    let disconnect_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let Some(ServerMessage::Notification { method, params, .. }) = timeout(
+            disconnect_deadline.saturating_duration_since(tokio::time::Instant::now()),
+            public_client.next_notification(),
+        )
+        .await
+        .unwrap() else {
+            panic!("expected session.lock topic.update after host disconnect");
+        };
+        if method == methods::TOPIC_UPDATE {
+            let update: TopicUpdate = serde_json::from_value(params).unwrap();
+            if update.topic.as_str() == "session.lock" {
+                assert_eq!(update.data["host_connected"], json!(false));
+                assert_eq!(update.data["phase"], json!("locked"));
+                break;
+            }
+        }
+    }
+
+    let shutdown_host = BusClient::connect(paths.host_socket_path()).await.unwrap();
+    shutdown_host
         .invoke_command(CommandInvokeParams {
             name: CommandName::try_new("quit").unwrap(),
             args: Vec::new(),

@@ -492,8 +492,27 @@ fn authenticate_inner(credentials: &Credentials) -> Result<AuthOutcome, String> 
     if started != PAM_SUCCESS || handle.is_null() {
         return Err(format!("pam_start failed with status {started}"));
     }
+
+    struct PamHandleGuard<'a> {
+        api: &'a PamApi,
+        handle: *mut c_void,
+        status: c_int,
+    }
+    impl Drop for PamHandleGuard<'_> {
+        fn drop(&mut self) {
+            // SAFETY: Balances the successful pam_start exactly once on normal return or unwind.
+            unsafe { (self.api.end)(self.handle, self.status) };
+        }
+    }
+
+    let mut guard = PamHandleGuard {
+        api: &api,
+        handle,
+        status: PAM_SUCCESS,
+    };
     // SAFETY: handle came from pam_start and the conversation remains alive through this call.
-    let code = unsafe { (api.authenticate)(handle, 0) };
+    let code = unsafe { (api.authenticate)(guard.handle, 0) };
+    guard.status = code;
     let outcome = match code {
         PAM_SUCCESS => AuthOutcome::Authenticated,
         PAM_AUTH_ERR | PAM_MAXTRIES => {
@@ -507,8 +526,8 @@ fn authenticate_inner(credentials: &Credentials) -> Result<AuthOutcome, String> 
             }
         }
         other => {
-            // SAFETY: handle remains valid until pam_end and pam_strerror returns static/PAM text.
-            let message = unsafe { (api.strerror)(handle, other) };
+            // SAFETY: handle remains valid until PamHandleGuard drops and pam_strerror returns static/PAM text.
+            let message = unsafe { (api.strerror)(guard.handle, other) };
             let reason = if message.is_null() {
                 format!("pam_authenticate failed with status {other}")
             } else {
@@ -520,8 +539,7 @@ fn authenticate_inner(credentials: &Credentials) -> Result<AuthOutcome, String> 
             AuthOutcome::Unavailable { reason }
         }
     };
-    // SAFETY: This balances the successful pam_start exactly once.
-    unsafe { (api.end)(handle, code) };
+    drop(guard);
     Ok(outcome)
 }
 

@@ -282,6 +282,7 @@ struct HubInner {
     next_topic_instance_id: AtomicU64,
     next_call_id: AtomicU64,
     next_inhibitor_cookie: AtomicU64,
+    retired_clients: tokio::sync::broadcast::Sender<CallerContext>,
     state: Mutex<HubState>,
 }
 
@@ -329,6 +330,7 @@ impl BusHub {
             .map_or(0, |d| d.as_nanos());
         let daemon_instance_id = format!("zsd-{}-{boot_seq}-{nanos:x}", std::process::id());
 
+        let (retired_clients, _) = tokio::sync::broadcast::channel(64);
         Self {
             inner: Arc::new(HubInner {
                 daemon_version: daemon_version.into(),
@@ -339,6 +341,7 @@ impl BusHub {
                 next_topic_instance_id: AtomicU64::new(2),
                 next_call_id: AtomicU64::new(1),
                 next_inhibitor_cookie: AtomicU64::new(1),
+                retired_clients,
                 state: Mutex::new(HubState {
                     clients: HashMap::new(),
                     topics,
@@ -394,15 +397,26 @@ impl BusHub {
         }
     }
 
+    /// Subscribes to connection retirement events carrying the disconnected client's ID and role.
+    #[must_use]
+    pub fn subscribe_client_retired(&self) -> tokio::sync::broadcast::Receiver<CallerContext> {
+        self.inner.retired_clients.subscribe()
+    }
+
     /// Retires a connection owner atomically, rejecting any future commits from it, notifying
     /// subscribers of removed plugin topics, failing its in-flight delegated commands, and releasing
     /// all inhibitors it acquired.
     pub fn retire_client(&self, client_id: u64) {
         let mut failed_calls = Vec::new();
+        let mut retired_caller = None;
 
         {
             let mut state = self.inner.state.lock().expect("hub state lock poisoned");
             if let Some(mut client) = state.clients.remove(&client_id) {
+                retired_caller = Some(CallerContext {
+                    client_id,
+                    role: client.role,
+                });
                 client.closed = true;
                 client.notify.notify_one();
             }
@@ -484,6 +498,10 @@ impl BusHub {
                 ErrorCode::NotFound,
                 "command owner disconnected before replying",
             )));
+        }
+
+        if let Some(caller) = retired_caller {
+            let _ = self.inner.retired_clients.send(caller);
         }
     }
 

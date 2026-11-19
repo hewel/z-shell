@@ -19,7 +19,9 @@ use z_shell_protocol::{
     decode_server_line, methods,
 };
 use z_shell_session::{
-    coordinator::{InhibitorFuture, LogindSleepInhibitor, SleepInhibitor, SleepInhibitorError},
+    coordinator::{
+        InhibitorFuture, LockPhaseName, LogindSleepInhibitor, SleepInhibitor, SleepInhibitorError,
+    },
     idle::MediaPlayback,
     pam::HelperAuthenticator,
     service::{LOCK_TOPIC, SessionService},
@@ -144,11 +146,12 @@ impl DaemonApp {
         }
 
         let desktop = tokio::runtime::Handle::try_current().ok().map(|_| {
-            Arc::new(DesktopServices::install(
-                &hub,
-                &paths,
-                settings.general.offline_mode,
-            ))
+            let offline_policy = if settings.general.offline_mode {
+                OfflinePolicy::Offline
+            } else {
+                OfflinePolicy::Online
+            };
+            Arc::new(DesktopServices::install(&hub, &paths, offline_policy))
         });
 
         let session = Arc::new(SessionService::new(
@@ -773,10 +776,12 @@ impl CrossDomainBridge {
                         let Some(clipboard) = clipboard.upgrade() else {
                             continue;
                         };
-                        let locked = matches!(
-                            data.get("phase").and_then(Value::as_str),
-                            Some("locked" | "engaging")
-                        );
+                        let phase = data
+                            .get("phase")
+                            .cloned()
+                            .and_then(|value| serde_json::from_value::<LockPhaseName>(value).ok());
+                        let locked =
+                            matches!(phase, Some(LockPhaseName::Locked | LockPhaseName::Engaging));
                         clipboard.set_locked(if locked {
                             LockedState::Locked
                         } else {

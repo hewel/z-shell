@@ -1,0 +1,42 @@
+id = "z-shell/ai-usage"
+name = "AI Usage"
+version = "0.1.0"
+plugin_api = 1
+author = "z-shell"
+license = "MIT"
+description = "Publishes AI account quota windows and optional public Codex reset information."
+dependencies = ["ai-usagebar"]
+
+[host_capabilities]
+commands = ["ai-usagebar"]
+control_channel = true
+
+[bus_permissions]
+topics_read = ["daemon.status"]
+topics_publish = ["plugin.z-shell.ai-usage.quotas"]
+commands_register = ["plugin.z-shell.ai-usage.refresh"]
+inhibitors = false
+
+[[setting]]
+key = "refresh_seconds"
+type = "integer"
+default = 300
+min = 30
+max = 3600
+
+[[setting]]
+key = "codex_resets_url"
+type = "string"
+default = ""
+
+[[setting]]
+key = "timeout_ms"
+type = "integer"
+default = 5000
+min = 500
+max = 30000
+
+[[service]]
+id = "service"
+entry = "src/service.ts"
+title = "AI Usage Poller"
