@@ -8,11 +8,13 @@ use tracing::info;
 use z_shell_bus::{
     BusHub, BusLimits, BusServer, CommandCall, CommandHandler, ShutdownHandle, UpdateKind,
 };
+use z_shell_clipboard::{ClipboardService, History as ClipboardHistory};
 use z_shell_config::{ConfigStore, RuntimeState, ShellPaths, UserSettings};
 use z_shell_plugins::registry::{PluginError, PluginManager};
 use z_shell_protocol::{
     ClientRole, CommandInvokeResult, CommandName, ErrorCode, PluginId, RpcError, TopicName,
 };
+use z_shell_system::{SystemHandle, SystemServices};
 use z_shell_theme::{GtkLinker, ThemeEngine};
 use z_shell_wayland::WaylandHandle;
 
@@ -34,6 +36,8 @@ pub struct DaemonApp {
     server: BusServer,
     _theme: ThemeEngine,
     _wayland: Option<WaylandHandle>,
+    _system: Option<SystemHandle>,
+    _clipboard: Arc<ClipboardService>,
 }
 
 impl DaemonApp {
@@ -116,6 +120,16 @@ impl DaemonApp {
             }
         };
 
+        let system = tokio::runtime::Handle::try_current()
+            .ok()
+            .map(|_| SystemServices::install(&hub, &paths));
+
+        let clipboard = Arc::new(ClipboardService::new(ClipboardHistory::memory()));
+        clipboard.install_on_bus(&hub);
+        if let Err(err) = clipboard.connect_from_env() {
+            tracing::info!(error = %err, "no Wayland clipboard transport available; staying memory-only");
+        }
+
         register_plugin_commands(&hub, plugins);
         register_core_commands(&hub, store, shared_settings, shared_state, shutdown);
 
@@ -130,6 +144,8 @@ impl DaemonApp {
             server,
             _theme: theme,
             _wayland: wayland,
+            _system: system,
+            _clipboard: clipboard,
         })
     }
 

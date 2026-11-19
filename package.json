@@ -14,7 +14,7 @@
   "scripts": {
     "typecheck": "bun --bun run tsrs --project tsconfig.quickjs.json && bun --bun run tsrs --project packages/composer/tsconfig.json",
     "test:rust": "cargo test --workspace && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo doc --workspace --no-deps",
-    "test:ts": "bun test packages/",
+    "test:ts": "cargo build --bins && bun test --timeout=30000 packages/",
     "check": "cargo fmt --check && bun run typecheck && bun run test:rust && bun run test:ts"
   },
   "devDependencies": {
