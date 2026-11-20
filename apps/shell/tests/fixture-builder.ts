@@ -19,6 +19,11 @@ export const SHELL_TOPIC_ORDER = [
   "system.network",
   "system.bluetooth",
   "system.power",
+  "clipboard",
+  "system.brightness",
+  "system.telemetry",
+  "system.user",
+  "session.idle",
 ] as const;
 
 type ShellTopic = (typeof SHELL_TOPIC_ORDER)[number];
@@ -153,6 +158,42 @@ function defaultTopicSnapshots(): Record<ShellTopic, unknown> {
       on_ac: null,
       battery: null,
       profiles: { available: false, active_profile: null, profiles: [] },
+    },
+    clipboard: {
+      persistence: { mode: "encrypted" },
+      transport: { status: "ready" },
+      locked: "unlocked",
+      entry_count: 0,
+      entries: [],
+    },
+    "system.brightness": {
+      available: true,
+      devices: [
+        {
+          device: "intel_backlight",
+          brightness: 760,
+          max_brightness: 1000,
+          controllable: true,
+        },
+      ],
+    },
+    "system.telemetry": {
+      cpu_usage_percent: 18.0,
+      memory: {
+        total_bytes: 34359738368,
+        available_bytes: 22119081984,
+        used_bytes: 12240656384,
+      },
+      temperatures: [{ zone: 0, kind: "x86_pkg_temp", temperature_millicelsius: 46000 }],
+    },
+    "system.user": { uid: 1000, username: "hewel", display_name: "hewel", avatar: null },
+    "session.idle": {
+      caffeine: false,
+      media_playing: false,
+      active_inhibitors: [],
+      warning: null,
+      rules: [],
+      service_status: { status: "running" },
     },
   };
 }

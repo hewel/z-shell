@@ -1,6 +1,6 @@
 import {
   Button, For, Image, LayerSurface, Show, createEffect, createMemo, createSignal, getWindowRect, onCleanup,
-  type Accessor, type ButtonProps, type Monitor, type NativeNode, type NativeStyle, type NativeWheelEvent, type NativeWindowRect,
+  type Accessor, type ButtonProps, type Monitor, type NativeEvent, type NativeNode, type NativeStyle, type NativeWheelEvent, type NativeWindowRect,
 } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShojiIcon } from "../icons.tsx";
@@ -135,12 +135,13 @@ function TrayButton(props: { item: TrayItem; surfaceName: string; fallbackRect: 
   );
 }
 
-function ClockPill(props: { vertical: boolean; clock: Accessor<BarClock>; seconds: boolean }) {
+function ClockPill(props: { vertical: boolean; clock: Accessor<BarClock>; seconds: boolean; surfaceName: string; fallbackRect: NativeWindowRect }) {
   const { notifications, togglePanel } = useShellStore();
   const count = () => notifications.data()?.history.length ?? 0;
   const dnd = () => notifications.data()?.dnd ?? false;
   return (
-    <Button testId="bar-clock" ariaLabel={props.clock().horizontal} onClick={() => togglePanel("calendar")}
+    <Button testId="bar-clock" ariaLabel={props.clock().horizontal}
+      onClick={event => togglePanel("calendar", { parentSurface: props.surfaceName, anchorRect: getWindowRect(event.currentTarget) ?? props.fallbackRect })}
       style={props.vertical ? { ...verticalPill, gap: "2px", padding: "8px 0", fontWeight: 700, lineHeight: 1.2 }
         : { ...horizontalPill, gap: "8px", padding: "0 12px", whiteSpace: "nowrap" }}>
       <Show when={props.vertical} fallback={<text testId="bar-clock-text">{props.clock().horizontal}</text>}>
@@ -163,7 +164,9 @@ function ClockPill(props: { vertical: boolean; clock: Accessor<BarClock>; second
 
 function SystemPill(props: { vertical: boolean; surfaceName: string; fallbackRect: NativeWindowRect }) {
   const { ime, privacy, network, bluetooth, audio, power, togglePanel, invokePublic, openImeMenu } = useShellStore();
-  const quickSettings = () => togglePanel("quick-settings");
+  const quickSettings = (event: NativeEvent) => togglePanel("quick-settings", {
+    parentSurface: props.surfaceName, anchorRect: getWindowRect(event.currentTarget) ?? props.fallbackRect,
+  });
   const networkIcon = createMemo(() => {
     const state = network.data();
     if (!state?.available) return "wifiOff";
@@ -223,7 +226,8 @@ function SystemPill(props: { vertical: boolean; surfaceName: string; fallbackRec
       </Button>
       <Show when={power.data()?.battery}>
         {battery => (
-          <Button testId="bar-battery" ariaLabel="Battery" onClick={() => togglePanel("battery")}
+          <Button testId="bar-battery" ariaLabel="Battery"
+            onClick={event => togglePanel("battery", { parentSurface: props.surfaceName, anchorRect: getWindowRect(event.currentTarget) ?? props.fallbackRect })}
             style={{ ...center, flexDirection: props.vertical ? "column" : "row", gap: props.vertical ? "2px" : "4px", flexShrink: 0 }}>
             <ShojiIcon name={battery().state === "charging" || battery().state === "full" ? "batteryCharging" : "battery"}
               color={battery().state === "discharging" && (battery().percentage ?? 100) < 20
@@ -253,6 +257,12 @@ function BarContent(props: {
     y: vertical() ? Math.max(0, props.layout.height - 40) : 8,
     width: 26,
     height: 22,
+  }));
+  const clockFallbackRect = createMemo(() => ({
+    x: Math.round((props.layout.width - 32) / 2),
+    y: Math.round((props.layout.height - 32) / 2),
+    width: 32,
+    height: 32,
   }));
   const workspaces = createMemo(() => filterWorkspacesForMonitor(store.workspaces.data(), store.outputs.data(), props.monitor.name));
   const activeWindow = createMemo(() => findActiveWindowForMonitor(store.windows.data(), store.outputs.data(), props.monitor.name));
@@ -305,7 +315,7 @@ function BarContent(props: {
           )}
         </Show>
       </box>
-      <ClockPill vertical={vertical()} clock={props.clock} seconds={props.seconds} />
+      <ClockPill vertical={vertical()} clock={props.clock} seconds={props.seconds} surfaceName={surfaceName()} fallbackRect={clockFallbackRect()} />
       <box style={{ ...(vertical() ? verticalGroup : group), justifyContent: "flex-end" }}>
         <Show when={slots().length > 0}>
           <box testId="bar-plugin-slots" style={vertical() ? { ...verticalPill, gap: "4px", padding: "6px 0" }
@@ -316,7 +326,7 @@ function BarContent(props: {
         <Show when={player()}>
           {active => (
             <Button testId="bar-media" ariaLabel={mediaLabel()} style={vertical() ? verticalCircle : horizontalLabelPill}
-              onClick={() => togglePanel("media")}
+              onClick={event => togglePanel("media", { parentSurface: surfaceName(), anchorRect: getWindowRect(event.currentTarget) ?? fallbackRect() })}
               {...secondaryAction(() => {
                 void invokePublic("media.play-pause", { player_id: active().id });
               })}

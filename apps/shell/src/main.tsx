@@ -1,4 +1,5 @@
 import { renderShell } from "@hewel/zgui";
+import { ShellPanels } from "./panels/ShellPanels.tsx";
 import { createShellStore, ShellProvider } from "./store.ts";
 import { BarPopups } from "./surfaces/BarPopups.tsx";
 import { StatusBar } from "./surfaces/StatusBar.tsx";
@@ -11,6 +12,7 @@ function ShellApp() {
       <WallpaperLayer />
       <StatusBar />
       <BarPopups />
+      <ShellPanels />
     </ShellProvider>
   );
 }

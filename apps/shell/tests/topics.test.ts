@@ -4,9 +4,16 @@ import {
   DEFAULT_BAR_SETTINGS,
   TOP_BAR_HEIGHT,
   VERTICAL_BAR_WIDTH,
+  buildMonthCalendarGrid,
   filterWorkspacesForMonitor,
   findActiveWindowForMonitor,
   formatBarClock,
+  formatBytesGiB,
+  formatDurationSeconds,
+  formatFullDate,
+  formatMonthYear,
+  formatTrackTimeUs,
+  maxThermalCelsius,
   resolveBarLayout,
   resolveMonitorWallpaper,
   selectActiveMediaPlayer,
@@ -403,5 +410,113 @@ describe("formatBarClock", () => {
     expect(clock.minutes).toBe("08");
     expect(clock.seconds).toBe("06");
     expect(clock.dateShort).toBe("Sun 7 Jan");
+  });
+});
+
+describe("buildMonthCalendarGrid", () => {
+  test("builds 42 cells in Monday-first order with adjacent-month dates", () => {
+    const grid = buildMonthCalendarGrid(2024, 8, { year: 2024, month: 9, day: 15 });
+
+    expect(grid).toHaveLength(42);
+    expect(grid[0]).toEqual({ year: 2024, month: 8, day: 26, inMonth: false, isToday: false });
+    expect(grid.slice(0, 7).map(cell => cell.day)).toEqual([26, 27, 28, 29, 30, 31, 1]);
+    expect(grid[6]).toEqual({ year: 2024, month: 9, day: 1, inMonth: true, isToday: false });
+    expect(grid.filter(cell => cell.inMonth)).toHaveLength(30);
+    expect(grid[41]).toEqual({ year: 2024, month: 10, day: 6, inMonth: false, isToday: false });
+  });
+
+  test("includes all 29 days of February in a leap year", () => {
+    const grid = buildMonthCalendarGrid(2024, 1, { year: 2024, month: 1, day: 1 });
+    const februaryDays = grid.filter(cell => cell.inMonth).map(cell => cell.day);
+
+    expect(grid[0]).toMatchObject({ year: 2024, month: 1, day: 29, inMonth: false });
+    expect(februaryDays).toEqual(Array.from({ length: 29 }, (_, index) => index + 1));
+    expect(grid[31]).toMatchObject({ year: 2024, month: 2, day: 29, inMonth: true });
+    expect(grid[32]).toMatchObject({ year: 2024, month: 3, day: 1, inMonth: false });
+  });
+
+  test("marks only today's cell, including when it belongs to an adjacent month", () => {
+    const grid = buildMonthCalendarGrid(2024, 2, { year: 2024, month: 2, day: 29 });
+
+    expect(grid.filter(cell => cell.isToday)).toEqual([
+      { year: 2024, month: 2, day: 29, inMonth: false, isToday: true },
+    ]);
+  });
+});
+
+describe("formatMonthYear", () => {
+  test("formats the full month name and year", () => {
+    expect(formatMonthYear(2024, 1)).toBe("February 2024");
+    expect(formatMonthYear(2025, 11)).toBe("December 2025");
+  });
+});
+
+describe("formatFullDate", () => {
+  test("formats the weekday, unpadded day, full month, and year", () => {
+    expect(formatFullDate(new Date(2024, 1, 29).getTime())).toBe("Thursday, 29 February 2024");
+    expect(formatFullDate(new Date(2024, 0, 7).getTime())).toBe("Sunday, 7 January 2024");
+  });
+});
+
+describe("formatDurationSeconds", () => {
+  test("returns an empty string for missing values and clamps negative durations", () => {
+    expect(formatDurationSeconds(null)).toBe("");
+    expect(formatDurationSeconds(undefined)).toBe("");
+    expect(formatDurationSeconds(-1)).toBe("0m");
+  });
+
+  test("formats whole minutes and omits zero hour or minute components", () => {
+    expect(formatDurationSeconds(0)).toBe("0m");
+    expect(formatDurationSeconds(59)).toBe("0m");
+    expect(formatDurationSeconds(60)).toBe("1m");
+    expect(formatDurationSeconds(3599)).toBe("59m");
+    expect(formatDurationSeconds(3600)).toBe("1h");
+    expect(formatDurationSeconds(3660)).toBe("1h 1m");
+    expect(formatDurationSeconds(7325)).toBe("2h 2m");
+  });
+});
+
+describe("formatTrackTimeUs", () => {
+  test("returns an empty string for missing values and clamps negative times", () => {
+    expect(formatTrackTimeUs(null)).toBe("");
+    expect(formatTrackTimeUs(undefined)).toBe("");
+    expect(formatTrackTimeUs(-1)).toBe("0:00");
+  });
+
+  test("formats microseconds as minutes and zero-padded seconds", () => {
+    expect(formatTrackTimeUs(0)).toBe("0:00");
+    expect(formatTrackTimeUs(999_999)).toBe("0:00");
+    expect(formatTrackTimeUs(1_000_000)).toBe("0:01");
+    expect(formatTrackTimeUs(61_000_000)).toBe("1:01");
+    expect(formatTrackTimeUs(3_599_999_999)).toBe("59:59");
+  });
+
+  test("includes hours and pads minutes for tracks at least one hour long", () => {
+    expect(formatTrackTimeUs(3_600_000_000)).toBe("1:00:00");
+    expect(formatTrackTimeUs(3_661_000_000)).toBe("1:01:01");
+    expect(formatTrackTimeUs(36_000_000_000)).toBe("10:00:00");
+  });
+});
+
+describe("formatBytesGiB", () => {
+  test("converts bytes to binary GiB with one decimal place", () => {
+    expect(formatBytesGiB(0)).toBe("0.0 GiB");
+    expect(formatBytesGiB(1024 ** 3)).toBe("1.0 GiB");
+    expect(formatBytesGiB(32 * 1024 ** 3)).toBe("32.0 GiB");
+    expect(formatBytesGiB(1.25 * 1024 ** 3)).toBe("1.3 GiB");
+  });
+});
+
+describe("maxThermalCelsius", () => {
+  test("returns null without thermal zones", () => {
+    expect(maxThermalCelsius([])).toBeNull();
+  });
+
+  test("returns the rounded maximum temperature in Celsius", () => {
+    expect(maxThermalCelsius([
+      { zone: 0, kind: "x86_pkg_temp", temperature_millicelsius: 46_000 },
+      { zone: 1, kind: "nvme", temperature_millicelsius: 72_500 },
+      { zone: 2, kind: "gpu", temperature_millicelsius: 71_000 },
+    ])).toBe(73);
   });
 });

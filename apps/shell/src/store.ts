@@ -4,17 +4,23 @@ import { getResolvedCapabilities, onControlMessage, type JsonValue } from "@hewe
 import { ZShellClient, type BusHelloResult, type BusTransport, type CommandInvokeResult } from "@z-shell/sdk";
 import { createZguiSocketTransport, useTopic, type TopicState } from "@z-shell/sdk/zgui";
 import type { ThemeTopicSnapshot } from "./theme.ts";
+import { resolveBarLayout } from "./topics.ts";
 import type {
+  ClipboardSnapshot,
   DesktopImeSnapshot,
   DesktopMediaSnapshot,
   DesktopNotificationsSnapshot,
   DesktopTraySnapshot,
+  IdleSnapshot,
   PublicSettingsSummary,
   SystemAudioSnapshot,
   SystemBluetoothSnapshot,
+  SystemBrightnessSnapshot,
   SystemNetworkSnapshot,
   SystemPowerSnapshot,
   SystemPrivacySnapshot,
+  SystemTelemetrySnapshot,
+  SystemUserSnapshot,
   WallpaperSnapshot,
   WaylandOutputsSnapshot,
   WaylandWindowsSnapshot,
@@ -26,6 +32,7 @@ export const SHELL_SUBSCRIBED_TOPICS = [
   "wayland.outputs", "wayland.workspaces", "wayland.windows",
   "desktop.media", "desktop.tray", "desktop.notifications", "desktop.ime",
   "system.audio", "system.privacy", "system.network", "system.bluetooth", "system.power",
+  "clipboard", "system.brightness", "system.telemetry", "system.user", "session.idle",
 ] as const;
 
 export type SocketStatus = "disconnected" | "connecting" | "ready" | "error";
@@ -37,6 +44,14 @@ export type ShellSocketPaths = {
 
 const PANEL_IDS = ["launcher", "overview", "calendar", "media", "quick-settings", "battery", "clipboard"] as const;
 export type PanelId = typeof PANEL_IDS[number];
+
+export type PanelTarget = {
+  readonly id: PanelId;
+  readonly parentSurface: string;
+  readonly anchorRect: NativeWindowRect;
+};
+
+type PanelAnchor = Omit<PanelTarget, "id">;
 
 export type TrayMenuTarget = {
   readonly itemId: string;
@@ -56,7 +71,7 @@ export type PluginBarWidgetSlot = {
 };
 
 type BarOverlay =
-  | { readonly kind: "panel"; readonly panel: PanelId }
+  | { readonly kind: "panel"; readonly target: PanelTarget }
   | { readonly kind: "tray"; readonly target: TrayMenuTarget }
   | { readonly kind: "ime"; readonly target: ImeMenuTarget };
 
@@ -88,6 +103,11 @@ interface ShellTopics {
   readonly network: TopicState<SystemNetworkSnapshot>;
   readonly bluetooth: TopicState<SystemBluetoothSnapshot>;
   readonly power: TopicState<SystemPowerSnapshot>;
+  readonly clipboard: TopicState<ClipboardSnapshot>;
+  readonly brightness: TopicState<SystemBrightnessSnapshot>;
+  readonly telemetry: TopicState<SystemTelemetrySnapshot>;
+  readonly user: TopicState<SystemUserSnapshot>;
+  readonly idle: TopicState<IdleSnapshot>;
 }
 
 export interface ShellStore extends ShellTopics {
@@ -102,7 +122,8 @@ export interface ShellStore extends ShellTopics {
   invokePublic(name: string, payload?: unknown): Promise<CommandInvokeResult | undefined>;
   invokeHost(name: string, payload?: unknown): Promise<CommandInvokeResult | undefined>;
   readonly activePanel: Accessor<PanelId | null>;
-  togglePanel(id: PanelId): void;
+  readonly activePanelTarget: Accessor<PanelTarget | null>;
+  togglePanel(id: PanelId, target?: PanelAnchor): void;
   closePanels(): void;
   readonly activeTrayMenu: Accessor<TrayMenuTarget | null>;
   openTrayMenu(target: TrayMenuTarget): void;
@@ -120,10 +141,11 @@ export function createShellStore(): ShellStore {
   const [lastError, setLastError] = createSignal<string>();
   let disposed = false;
   const [overlay, setOverlay] = createSignal<BarOverlay | null>(null);
-  const activePanel = () => {
+  const activePanelTarget = () => {
     const active = overlay();
-    return active?.kind === "panel" ? active.panel : null;
+    return active?.kind === "panel" ? active.target : null;
   };
+  const activePanel = () => activePanelTarget()?.id ?? null;
   const activeTrayMenu = () => {
     const active = overlay();
     return active?.kind === "tray" ? active.target : null;
@@ -132,8 +154,25 @@ export function createShellStore(): ShellStore {
     const active = overlay();
     return active?.kind === "ime" ? active.target : null;
   };
-  const togglePanel = (panel: PanelId) => {
-    setOverlay(active => active?.kind === "panel" && active.panel === panel ? null : { kind: "panel", panel });
+  function defaultPanelAnchor(id: PanelId, outputs: readonly Monitor[]): PanelAnchor {
+    const monitor = outputs[0];
+    const size = 32;
+    // Keep the logical panel state available to control callers without an output.
+    if (!monitor) return { parentSurface: "", anchorRect: { x: 0, y: 0, width: size, height: size } };
+    const { width, height, isVertical } = resolveBarLayout(topics.settings.data()?.bar, monitor);
+    const length = isVertical ? height : width;
+    const along = id === "calendar" || id === "clipboard" ? Math.round((length - size) / 2)
+      : id === "launcher" || id === "overview" ? 14 : length - size - 14;
+    const across = Math.round(((isVertical ? width : height) - size) / 2);
+    return {
+      parentSurface: `bar-${monitor.id}`,
+      anchorRect: { x: isVertical ? across : along, y: isVertical ? along : across, width: size, height: size },
+    };
+  }
+  const togglePanel = (id: PanelId, target?: PanelAnchor) => {
+    setOverlay(active => active?.kind === "panel" && active.target.id === id
+      && (target === undefined || active.target.parentSurface === target.parentSurface)
+      ? null : { kind: "panel", target: { ...(target ?? defaultPanelAnchor(id, monitors())), id } });
   };
   const closeOverlay = (kind: BarOverlay["kind"]) => {
     setOverlay(active => active?.kind === kind ? null : active);
@@ -239,6 +278,11 @@ export function createShellStore(): ShellStore {
       network: useTopic<SystemNetworkSnapshot>(publicClient, "system.network"),
       bluetooth: useTopic<SystemBluetoothSnapshot>(publicClient, "system.bluetooth"),
       power: useTopic<SystemPowerSnapshot>(publicClient, "system.power"),
+      clipboard: useTopic<ClipboardSnapshot>(publicClient, "clipboard"),
+      brightness: useTopic<SystemBrightnessSnapshot>(publicClient, "system.brightness"),
+      telemetry: useTopic<SystemTelemetrySnapshot>(publicClient, "system.telemetry"),
+      user: useTopic<SystemUserSnapshot>(publicClient, "system.user"),
+      idle: useTopic<IdleSnapshot>(publicClient, "session.idle"),
     };
   }));
 
@@ -256,14 +300,10 @@ export function createShellStore(): ShellStore {
       case "ping":
         return "pong";
       case "panel": {
-        if (args[1] === "close") {
-          setOverlay(null);
-          return { activePanel: null };
-        }
         const panel = PANEL_IDS.find(id => id === args[1]);
-        if (panel !== undefined) {
+        if (args[1] === "close" || panel !== undefined) {
           // Solid commits signal writes after the callback unless we flush before replying.
-          flush(() => togglePanel(panel));
+          flush(() => panel === undefined ? setOverlay(null) : togglePanel(panel));
           return { activePanel: activePanel() };
         }
         break;
@@ -277,6 +317,7 @@ export function createShellStore(): ShellStore {
     invokePublic: (name, payload) => invoke(publicClient(), name, payload),
     invokeHost: (name, payload) => invoke(hostClient(), name, payload),
     activePanel,
+    activePanelTarget,
     togglePanel,
     closePanels: () => closeOverlay("panel"),
     activeTrayMenu,

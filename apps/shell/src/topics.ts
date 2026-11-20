@@ -415,6 +415,134 @@ export interface SystemPowerSnapshot {
   };
 }
 
+export interface CatalogEntry {
+  readonly id: string;
+  readonly name: string;
+  readonly source_path: string;
+  readonly width: number;
+  readonly height: number;
+  readonly thumbnail: MediaRef;
+}
+
+export interface WallpaperListResponse {
+  readonly items: readonly CatalogEntry[];
+  readonly total: number;
+}
+
+export type PersistenceMode =
+  | { readonly mode: "encrypted" }
+  | { readonly mode: "memory_only"; readonly reason: string };
+
+export type TransportStatus =
+  | { readonly status: "ready" }
+  | { readonly status: "unavailable"; readonly reason: string };
+
+export interface ClipboardEntrySummary {
+  readonly id: number;
+  readonly kind: "text" | "image";
+  readonly mime: string;
+  readonly preview: string;
+  readonly pinned: boolean;
+  readonly byte_len: number;
+  readonly dimensions?: {
+    readonly width: number;
+    readonly height: number;
+  };
+  readonly media?: MediaRef;
+}
+
+export interface ClipboardSnapshot {
+  readonly persistence: PersistenceMode;
+  readonly transport: TransportStatus;
+  readonly locked: "unlocked" | "locked";
+  readonly entry_count: number;
+  readonly entries: readonly ClipboardEntrySummary[];
+}
+
+export interface Backlight {
+  readonly device: string;
+  readonly brightness: number;
+  readonly max_brightness: number;
+  readonly controllable: boolean;
+}
+
+export interface SystemBrightnessSnapshot {
+  readonly available: boolean;
+  readonly devices: readonly Backlight[];
+}
+
+export interface TelemetryMemory {
+  readonly total_bytes: number;
+  readonly available_bytes: number;
+  readonly used_bytes: number;
+}
+
+export interface ThermalZone {
+  readonly zone: number;
+  readonly kind: string;
+  readonly temperature_millicelsius: number;
+}
+
+export interface SystemTelemetrySnapshot {
+  readonly cpu_usage_percent: number | null;
+  readonly memory: TelemetryMemory | null;
+  readonly temperatures: readonly ThermalZone[];
+}
+
+export interface SystemUserSnapshot {
+  readonly uid: number;
+  readonly username: string | null;
+  readonly display_name: string | null;
+  readonly avatar: MediaRef | null;
+}
+
+export type IdleAction =
+  | "lock"
+  | "screen_off"
+  | "suspend"
+  | "lock_and_suspend"
+  | { readonly custom_command: readonly string[] };
+
+export interface IdleRule {
+  readonly name: string;
+  readonly enabled: boolean;
+  readonly timeout_seconds: number;
+  readonly locked_timeout_seconds: number | null;
+  readonly action: IdleAction;
+  readonly resume_command: readonly string[] | null;
+  readonly pre_action_fade_seconds: number;
+}
+
+export interface IdleInhibitor {
+  readonly source:
+    | { readonly source: "caffeine" }
+    | { readonly source: "media_playback" }
+    | { readonly source: "screen_saver"; readonly connection: string; readonly cookie: number }
+    | { readonly source: "bus_plugin"; readonly cookie: number };
+  readonly scope: "idle" | "sleep" | "lock";
+  readonly reason: string;
+}
+
+export interface WarningFade {
+  readonly token: number;
+  readonly fade_seconds: number;
+  readonly rules: readonly string[];
+}
+
+export type IdleServiceStatus =
+  | { readonly status: "running" }
+  | { readonly status: "unavailable"; readonly reason: string }
+  | { readonly status: "stopped" };
+
+export interface IdleSnapshot {
+  readonly caffeine: boolean;
+  readonly media_playing: boolean;
+  readonly active_inhibitors: readonly IdleInhibitor[];
+  readonly warning: WarningFade | null;
+  readonly rules: readonly IdleRule[];
+  readonly service_status: IdleServiceStatus;
+}
+
 export const TOP_BAR_HEIGHT = 48;
 export const VERTICAL_BAR_WIDTH = 52;
 
@@ -562,6 +690,21 @@ export function selectActiveMediaPlayer(media: DesktopMediaSnapshot | undefined)
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+const FULL_WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
+const FULL_MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+] as const;
 
 function pad2(value: number): string {
   return String(value).padStart(2, "0");
@@ -586,4 +729,94 @@ export function formatBarClock(
     ? `${hours}:${minutes}${options.clockSeconds ? `:${seconds}` : ""}`
     : `${date.getHours() % 12 || 12}:${minutes}${options.clockSeconds ? `:${seconds}` : ""} ${date.getHours() < 12 ? "AM" : "PM"}`;
   return { horizontal: `${dateShort} · ${time}`, hours, minutes, seconds, dateShort };
+}
+
+export interface CalendarCell {
+  readonly year: number;
+  readonly month: number;
+  readonly day: number;
+  readonly inMonth: boolean;
+  readonly isToday: boolean;
+}
+
+export function buildMonthCalendarGrid(
+  year: number,
+  monthIndex0: number,
+  today: { readonly year: number; readonly month: number; readonly day: number },
+): readonly CalendarCell[] {
+  const firstOfMonth = new Date(year, monthIndex0, 1);
+  const leadingDays = (firstOfMonth.getDay() + 6) % 7;
+  const gridStart = new Date(year, monthIndex0, 1 - leadingDays);
+  const gridYear = gridStart.getFullYear();
+  const gridMonth = gridStart.getMonth();
+  const gridDay = gridStart.getDate();
+  const cells: CalendarCell[] = [];
+
+  for (let index = 0; index < 42; index += 1) {
+    const date = new Date(gridYear, gridMonth, gridDay + index);
+    const cellYear = date.getFullYear();
+    const cellMonth = date.getMonth() + 1;
+    const cellDay = date.getDate();
+    cells.push({
+      year: cellYear,
+      month: cellMonth,
+      day: cellDay,
+      inMonth: date.getMonth() === firstOfMonth.getMonth()
+        && cellYear === firstOfMonth.getFullYear(),
+      isToday: cellYear === today.year && cellMonth === today.month && cellDay === today.day,
+    });
+  }
+
+  return cells;
+}
+
+export function formatMonthYear(year: number, monthIndex0: number): string {
+  const date = new Date(year, monthIndex0, 1);
+  return `${FULL_MONTHS[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+export function formatFullDate(nowMs: number): string {
+  const date = new Date(nowMs);
+  return `${FULL_WEEKDAYS[date.getDay()]}, ${date.getDate()} ${FULL_MONTHS[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+export function formatDurationSeconds(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined) {
+    return "";
+  }
+  const totalMinutes = Math.max(0, Math.floor(seconds / 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+  return `${minutes}m`;
+}
+
+export function formatTrackTimeUs(us: number | null | undefined): string {
+  if (us === null || us === undefined) {
+    return "";
+  }
+  const totalSeconds = Math.max(0, Math.floor(us / 1_000_000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor(totalSeconds / 60) % 60;
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${hours}:${pad2(minutes)}:${pad2(seconds)}`
+    : `${Math.floor(totalSeconds / 60)}:${pad2(seconds)}`;
+}
+
+export function formatBytesGiB(bytes: number): string {
+  return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
+}
+
+export function maxThermalCelsius(zones: readonly ThermalZone[]): number | null {
+  if (zones.length === 0) {
+    return null;
+  }
+  let maximum = -Infinity;
+  for (const zone of zones) {
+    maximum = Math.max(maximum, zone.temperature_millicelsius);
+  }
+  return Math.round(maximum / 1000);
 }

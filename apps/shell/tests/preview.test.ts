@@ -7,7 +7,7 @@ import { inflateSync } from "node:zlib";
 
 import { buildShellApplication } from "@z-shell/composer";
 import type { PublishedApplication } from "@hewel/zgui-build";
-import { buildShellPreviewFixture } from "./fixture-builder.ts";
+import { buildShellPreviewFixture, makeTinyPngBytes } from "./fixture-builder.ts";
 
 const shellDir = resolve(import.meta.dir, "..");
 const repoRoot = resolve(shellDir, "../..");
@@ -304,6 +304,461 @@ describe("apps/shell preview", () => {
       expect(treeNode(bar.tree, "bar-root-dp-1").boundsDevice?.width).toBe(52);
       expect(treeNode(bar.tree, "ws-2").text).toBe("2");
       expect(pixel(bar.image, 0, 0)).toEqual([0, 0, 0, 0]);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  previewTest("Quick Settings popup + Wi-Fi password, Sound, Wallpaper Picker subpages, and popupDone dismiss", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "z-shell-preview-quick-settings-"));
+    const out = join(workspace, "out");
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-quick-settings-panels",
+        initialTopics: {
+          "system.network": {
+            available: true,
+            connectivity: "full",
+            wifi: {
+              enabled: true,
+              hardware_enabled: true,
+              scanning: false,
+              devices: [{
+                id: "wlan0",
+                interface: "wlan0",
+                active_ap_id: null,
+                active_connection: null,
+                access_points: [{
+                  id: "ap-shoji-lab",
+                  ssid: "Shoji-Lab",
+                  ssid_bytes: [],
+                  bssid: "00:11:22:33:44:55",
+                  strength: 91,
+                  security: "wpa_sae",
+                }],
+              }],
+              profiles: [],
+            },
+            ethernet: [],
+            vpn: [],
+          },
+          "system.audio": {
+            availability: "available",
+            default_sink: "sink-1",
+            default_source: "source-1",
+            sinks: [{ index: 7, name: "sink-1", description: "Speakers", channels: 2, volume: 0.65, muted: false }],
+            sources: [{ index: 8, name: "source-1", description: "Microphone", channels: 1, volume: 0.5, muted: false }],
+            sink_inputs: [],
+            source_outputs: [],
+          },
+          "system.power": {
+            available: true,
+            on_ac: true,
+            battery: {
+              percentage: 84,
+              state: "charging",
+              time_to_empty_seconds: null,
+              time_to_full_seconds: 3600,
+              energy_rate_watts: 12,
+              capacity_percent: 100,
+              charge_cycles: 42,
+            },
+            profiles: { available: true, active_profile: "balanced", profiles: ["power-saver", "balanced", "performance"] },
+          },
+          wallpaper: {
+            available: true,
+            fit: "cover",
+            sync_theme: true,
+            slideshow_seconds: 300,
+            catalog_count: 1,
+            current: null,
+            per_output: {},
+            last_error: null,
+          },
+        },
+        commands: [
+          {
+            socket: "host",
+            id: 2,
+            name: "network.wifi.connect",
+            payload: { device_id: "wlan0", ap_id: "ap-shoji-lab", password: "shoji-secret" },
+            atMs: 45,
+          },
+          {
+            id: 22,
+            name: "wallpaper.list",
+            payload: { offset: 0, limit: 24 },
+            atMs: 50,
+            result: {
+              data: {
+                items: [{
+                  id: "aurora",
+                  name: "Aurora",
+                  source_path: "/wallpapers/aurora.png",
+                  width: 1,
+                  height: 1,
+                  thumbnail: { kind: "blob_handle", token: "wallpaper-aurora-thumb", mime: "image/png", byte_len: 70 },
+                }],
+                total: 1,
+              },
+            },
+          },
+          {
+            socket: "host",
+            id: 3,
+            name: "wallpaper.fetch-blob",
+            payload: { token: "wallpaper-aurora-thumb" },
+            atMs: 55,
+            result: { data: { bytes: makeTinyPngBytes(0x7c, 0xd4, 0xff) } },
+          },
+          {
+            id: 23,
+            name: "wallpaper.set",
+            payload: { path: "/wallpapers/aurora.png", output: null, fit: "cover" },
+            atMs: 60,
+          },
+        ],
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-quick-settings-panels",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: [
+          {
+            id: "outputs",
+            op: "monitors.set",
+            monitors: [{
+              id: "dp-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900,
+              scale: 1, refreshRateMilliHz: 60000,
+            }],
+          },
+          { id: "daemon-events", op: "clock.advance", byMs: 30 },
+          { id: "ready", op: "settle" },
+          {
+            id: "open-quick-settings",
+            op: "pointer.click",
+            target: { surface: "bar-dp-1", testId: "bar-audio" },
+            button: "primary",
+          },
+          { id: "present-quick-settings", op: "clock.advance", byMs: 10 },
+          { id: "capture-quick-settings", op: "capture", surface: "panel-quick-settings", captureId: "panel-quick-settings" },
+          {
+            id: "open-wifi",
+            op: "pointer.click",
+            target: { surface: "panel-quick-settings", testId: "qs-open-wifi" },
+            button: "primary",
+          },
+          {
+            id: "select-secured-ap",
+            op: "pointer.click",
+            target: { surface: "panel-quick-settings", testId: "wifi-ap-Shoji-Lab" },
+            button: "primary",
+          },
+          {
+            id: "focus-wifi-password",
+            op: "pointer.click",
+            target: { surface: "panel-quick-settings", testId: "wifi-password-input" },
+            button: "primary",
+          },
+          { id: "enter-wifi-password", op: "text.commit", surface: "panel-quick-settings", text: "shoji-secret" },
+          {
+            id: "connect-wifi",
+            op: "pointer.click",
+            target: { surface: "panel-quick-settings", testId: "wifi-password-connect" },
+            button: "primary",
+          },
+          { id: "wifi-connect-reply", op: "clock.advance", byMs: 5 },
+          {
+            id: "wifi-back",
+            op: "pointer.click",
+            target: { surface: "panel-quick-settings", testId: "qs-back" },
+            button: "primary",
+          },
+          {
+            id: "open-sound",
+            op: "pointer.click",
+            target: { surface: "panel-quick-settings", testId: "qs-open-sound" },
+            button: "primary",
+          },
+          {
+            id: "sound-visible",
+            op: "assert",
+            target: { surface: "panel-quick-settings", testId: "qs-page-sound" },
+            check: { property: "exists", equals: true },
+          },
+          {
+            id: "sound-back",
+            op: "pointer.click",
+            target: { surface: "panel-quick-settings", testId: "qs-back" },
+            button: "primary",
+          },
+          {
+            id: "open-wallpaper",
+            op: "pointer.click",
+            target: { surface: "panel-quick-settings", testId: "qs-tile-wallpaper" },
+            button: "primary",
+          },
+          { id: "wallpaper-list-reply", op: "clock.advance", byMs: 5 },
+          { id: "wallpaper-thumbnail-reply", op: "clock.advance", byMs: 5 },
+          {
+            id: "select-wallpaper",
+            op: "pointer.click",
+            target: { surface: "panel-quick-settings", testId: "wp-thumb-aurora" },
+            button: "primary",
+          },
+          { id: "wallpaper-set-reply", op: "clock.advance", byMs: 5 },
+          { id: "dismiss-quick-settings", op: "popupDone", surface: "panel-quick-settings" },
+          { id: "dismiss-settled", op: "settle" },
+          {
+            id: "bar-healthy-after-dismiss",
+            op: "assert",
+            target: { surface: "bar-dp-1", testId: "bar-audio" },
+            check: { property: "exists", equals: true },
+          },
+        ],
+      }, null, 2));
+
+      const result = runPreview(fixture, scenario, out);
+      expectCleanPreview(result, 1, 2);
+      const quickSettings = readCapture(out, "panel-quick-settings", "panel-quick-settings");
+      expect(quickSettings.frame.renderer.alphaMode).toBe("PreMultiplied");
+      expect([quickSettings.image.width, quickSettings.image.height]).toEqual([396, 620]);
+      expect(pixel(quickSettings.image, 0, 0)).toEqual([0, 0, 0, 0]);
+      expect(treeNode(quickSettings.tree, "qs-main").boundsDevice).toBeDefined();
+      expect(treeNode(quickSettings.tree, "qs-tile-wifi").boundsDevice).toBeDefined();
+      expect(treeNode(quickSettings.tree, "qs-tile-wallpaper").boundsDevice).toBeDefined();
+      expect(quickSettings.tree.nodes.some(node => node.text === "hewel")).toBe(true);
+      expect(quickSettings.tree.nodes.some(node => node.text === "84%")).toBe(true);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  previewTest("Calendar/Notifications, Media Player, Battery, and Clipboard panels with clipboard.fetch-blob PNG decoding", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "z-shell-preview-panels-"));
+    const out = join(workspace, "out");
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-calendar-media-battery-clipboard",
+        initialTopics: {
+          "desktop.notifications": {
+            available: true,
+            dnd: false,
+            popups: [],
+            history: [1, 2].map(id => ({
+              id,
+              revision: 1,
+              app_name: "Shoji",
+              summary: `Notification ${id}`,
+              body: "Phase 2 preview",
+              icon: null,
+              attachment: null,
+              actions: [],
+              urgency: 1,
+            })),
+          },
+          "desktop.media": {
+            available: true,
+            players: [{
+              id: "nujabes",
+              identity: "Nujabes",
+              playback_status: "playing",
+              position_us: 42_000_000,
+              metadata: {
+                track_id: "feather",
+                title: "Feather",
+                album: "Modal Soul",
+                artists: ["Nujabes"],
+                length_us: 174_000_000,
+              },
+              capabilities: {
+                can_control: true,
+                can_play: true,
+                can_pause: true,
+                can_go_next: true,
+                can_go_previous: true,
+                can_seek: true,
+              },
+            }],
+            selected_player_id: "nujabes",
+            any_playing: true,
+            cover: null,
+          },
+          "system.power": {
+            available: true,
+            on_ac: true,
+            battery: {
+              percentage: 84,
+              state: "charging",
+              time_to_empty_seconds: null,
+              time_to_full_seconds: 3600,
+              energy_rate_watts: 12,
+              capacity_percent: 100,
+              charge_cycles: 42,
+            },
+            profiles: { available: true, active_profile: "balanced", profiles: ["power-saver", "balanced", "performance"] },
+          },
+          clipboard: {
+            persistence: { mode: "encrypted" },
+            transport: { status: "ready" },
+            locked: "unlocked",
+            entry_count: 2,
+            entries: [
+              {
+                id: 11,
+                kind: "text",
+                mime: "text/plain",
+                preview: "Pinned launch note",
+                pinned: true,
+                byte_len: 17,
+              },
+              {
+                id: 12,
+                kind: "image",
+                mime: "image/png",
+                preview: "green.png",
+                pinned: false,
+                byte_len: 70,
+                dimensions: { width: 1, height: 1 },
+                media: { kind: "blob_handle", token: "clipboard-green", mime: "image/png", byte_len: 70 },
+              },
+            ],
+          },
+        },
+        commands: [
+          { id: 22, name: "notifications.set-dnd", payload: { dnd: true }, atMs: 40 },
+          { id: 23, name: "media.play-pause", payload: { player_id: "nujabes" }, atMs: 50 },
+          { id: 24, name: "power.set-profile", payload: { profile: "performance" }, atMs: 60 },
+          {
+            socket: "host",
+            id: 2,
+            name: "clipboard.fetch-blob",
+            payload: { token: "clipboard-green" },
+            atMs: 70,
+            result: { data: { bytes: makeTinyPngBytes(0x22, 0xc5, 0x5e) } },
+          },
+          { id: 25, name: "clipboard.copy", payload: { id: 11 }, atMs: 90 },
+        ],
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-calendar-media-battery-clipboard",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: [
+          {
+            id: "outputs",
+            op: "monitors.set",
+            monitors: [{
+              id: "dp-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900,
+              scale: 1, refreshRateMilliHz: 60000,
+            }],
+          },
+          { id: "daemon-events", op: "clock.advance", byMs: 30 },
+          { id: "ready", op: "settle" },
+          {
+            id: "open-calendar",
+            op: "pointer.click",
+            target: { surface: "bar-dp-1", testId: "bar-clock" },
+            button: "primary",
+          },
+          {
+            id: "toggle-dnd",
+            op: "pointer.click",
+            target: { surface: "panel-calendar", testId: "cal-dnd-toggle" },
+            button: "primary",
+          },
+          { id: "dnd-reply", op: "clock.advance", byMs: 10 },
+          { id: "capture-calendar", op: "capture", surface: "panel-calendar", captureId: "panel-calendar" },
+          {
+            id: "open-media",
+            op: "pointer.click",
+            target: { surface: "bar-dp-1", testId: "bar-media" },
+            button: "primary",
+          },
+          {
+            id: "toggle-media-playback",
+            op: "pointer.click",
+            target: { surface: "panel-media", testId: "media-play-pause" },
+            button: "primary",
+          },
+          { id: "media-reply", op: "clock.advance", byMs: 10 },
+          { id: "capture-media", op: "capture", surface: "panel-media", captureId: "panel-media" },
+          {
+            id: "open-battery",
+            op: "pointer.click",
+            target: { surface: "bar-dp-1", testId: "bar-battery" },
+            button: "primary",
+          },
+          {
+            id: "select-power-profile",
+            op: "pointer.click",
+            target: { surface: "panel-battery", testId: "battery-profile-performance" },
+            button: "primary",
+          },
+          { id: "power-profile-reply", op: "clock.advance", byMs: 10 },
+          { id: "capture-battery", op: "capture", surface: "panel-battery", captureId: "panel-battery" },
+          {
+            id: "open-clipboard",
+            op: "service.emit",
+            channel: "control.message",
+            value: { args: ["panel", "clipboard"], reply: { text: "{\"activePanel\":\"clipboard\"}" } },
+          },
+          { id: "clipboard-blob-reply", op: "clock.advance", byMs: 10 },
+          { id: "clipboard-image-ready", op: "clock.advance", byMs: 5 },
+          { id: "capture-clipboard", op: "capture", surface: "panel-clipboard", captureId: "panel-clipboard" },
+          {
+            id: "filter-clipboard-text",
+            op: "pointer.click",
+            target: { surface: "panel-clipboard", testId: "clipboard-filter-text" },
+            button: "primary",
+          },
+          { id: "clipboard-filter-settled", op: "clock.advance", byMs: 5 },
+          {
+            id: "copy-text-entry",
+            op: "pointer.click",
+            target: { surface: "panel-clipboard", testId: "clip-copy-11" },
+            button: "primary",
+          },
+          { id: "clipboard-copy-reply", op: "clock.advance", byMs: 10 },
+          { id: "clipboard-close-settled", op: "settle" },
+          {
+            id: "bar-healthy-after-clipboard-close",
+            op: "assert",
+            target: { surface: "bar-dp-1", testId: "bar-clock" },
+            check: { property: "exists", equals: true },
+          },
+        ],
+      }, null, 2));
+
+      const result = runPreview(fixture, scenario, out);
+      expectCleanPreview(result, 4, 1);
+      const calendar = readCapture(out, "panel-calendar", "panel-calendar");
+      const media = readCapture(out, "panel-media", "panel-media");
+      const battery = readCapture(out, "panel-battery", "panel-battery");
+      const clipboard = readCapture(out, "panel-clipboard", "panel-clipboard");
+      for (const capture of [calendar, media, battery, clipboard]) {
+        expect(capture.frame.renderer.alphaMode).toBe("PreMultiplied");
+        expect(capture.image.width).toBeGreaterThan(0);
+        expect(capture.image.height).toBeGreaterThan(0);
+        expect(pixel(capture.image, 0, 0)).toEqual([0, 0, 0, 0]);
+      }
+
+      expect(treeNode(calendar.tree, "cal-month-title").text).toBe("November 2023");
+      expect(treeNode(calendar.tree, "cal-today-cell").text).toBe("14");
+      expect(treeNode(calendar.tree, "cal-notif-count").text).toBe("2");
+      expect(calendar.tree.nodes.some(node => node.text === "18%")).toBe(true);
+      expect(calendar.tree.nodes.some(node => node.text === "46°C")).toBe(true);
+      expect(treeNode(media.tree, "media-title").text).toBe("Feather");
+      expect(treeNode(battery.tree, "battery-percent").text).toBe("84%");
+      expect(treeNode(clipboard.tree, "clip-entry-11").boundsDevice).toBeDefined();
+      expect(treeNode(clipboard.tree, "clipboard-count").text).toBe("2 kept");
+      expect(clipboard.tree.nodes.some(node => node.text === "Pinned launch note")).toBe(true);
+      expect(centerPixel(clipboard.image, treeNode(clipboard.tree, "clip-image-12").boundsDevice))
+        .toEqual([0x22, 0xc5, 0x5e, 255]);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }

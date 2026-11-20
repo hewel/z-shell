@@ -32,10 +32,15 @@
           "{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"system.network\"}}",
           "{\"jsonrpc\":\"2.0\",\"id\":15,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"system.bluetooth\"}}",
           "{\"jsonrpc\":\"2.0\",\"id\":16,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"system.power\"}}",
-          "{\"jsonrpc\":\"2.0\",\"id\":17,\"method\":\"command.invoke\",\"params\":{\"name\":\"wayland.workspace.activate\",\"args\":[],\"payload\":{\"workspace_id\":3}}}",
-          "{\"jsonrpc\":\"2.0\",\"id\":18,\"method\":\"command.invoke\",\"params\":{\"name\":\"audio.set-volume\",\"args\":[],\"payload\":{\"kind\":\"sink\",\"index\":7,\"volume\":0.6}}}",
-          "{\"jsonrpc\":\"2.0\",\"id\":19,\"method\":\"command.invoke\",\"params\":{\"name\":\"ime.toggle\",\"args\":[],\"payload\":{}}}",
-          "{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"command.invoke\",\"params\":{\"name\":\"tray.menu-item\",\"args\":[],\"payload\":{\"id\":\"discord\",\"menu_id\":101}}}"
+          "{\"jsonrpc\":\"2.0\",\"id\":17,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"clipboard\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":18,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"system.brightness\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":19,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"system.telemetry\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"system.user\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"session.idle\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":22,\"method\":\"command.invoke\",\"params\":{\"name\":\"wayland.workspace.activate\",\"args\":[],\"payload\":{\"workspace_id\":3}}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":23,\"method\":\"command.invoke\",\"params\":{\"name\":\"audio.set-volume\",\"args\":[],\"payload\":{\"kind\":\"sink\",\"index\":7,\"volume\":0.6}}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":24,\"method\":\"command.invoke\",\"params\":{\"name\":\"ime.toggle\",\"args\":[],\"payload\":{}}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":25,\"method\":\"command.invoke\",\"params\":{\"name\":\"tray.menu-item\",\"args\":[],\"payload\":{\"id\":\"discord\",\"menu_id\":101}}}"
         ],
         "events": [
           {
@@ -120,6 +125,31 @@
           },
           {
             "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":17,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":16,\"topic\":\"clipboard\",\"revision\":1,\"data\":{\"persistence\":{\"mode\":\"encrypted\"},\"transport\":{\"status\":\"ready\"},\"locked\":\"unlocked\",\"entry_count\":0,\"entries\":[]}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":18,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":17,\"topic\":\"system.brightness\",\"revision\":1,\"data\":{\"available\":true,\"devices\":[{\"device\":\"intel_backlight\",\"brightness\":760,\"max_brightness\":1000,\"controllable\":true}]}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":19,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":18,\"topic\":\"system.telemetry\",\"revision\":1,\"data\":{\"cpu_usage_percent\":18,\"memory\":{\"total_bytes\":34359738368,\"available_bytes\":22119081984,\"used_bytes\":12240656384},\"temperatures\":[{\"zone\":0,\"kind\":\"x86_pkg_temp\",\"temperature_millicelsius\":46000}]}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":20,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":19,\"topic\":\"system.user\",\"revision\":1,\"data\":{\"uid\":1000,\"username\":\"hewel\",\"display_name\":\"hewel\",\"avatar\":null}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":21,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":20,\"topic\":\"session.idle\",\"revision\":1,\"data\":{\"caffeine\":false,\"media_playing\":false,\"active_inhibitors\":[],\"warning\":null,\"rules\":[],\"service_status\":{\"status\":\"running\"}}}}"
+          },
+          {
+            "kind": "message",
             "atMs": 8,
             "text": "{\"jsonrpc\":\"2.0\",\"method\":\"topic.update\",\"params\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":8,\"topic\":\"desktop.tray\",\"revision\":2,\"source_baseline\":false,\"data\":{\"available\":true,\"items\":[{\"id\":\"discord\",\"title\":\"Discord\",\"category\":\"application\",\"status\":\"active\",\"icon_name\":null,\"item_is_menu\":true,\"tooltip\":null,\"icon\":{\"kind\":\"blob_handle\",\"token\":\"tray-discord\",\"mime\":\"image/png\",\"byte_len\":70},\"menu\":{\"revision\":1,\"root\":{\"id\":0,\"label\":null,\"enabled\":true,\"visible\":true,\"separator\":false,\"toggle_type\":null,\"toggle_state\":null,\"children\":[{\"id\":101,\"label\":\"Mute\",\"enabled\":true,\"visible\":true,\"separator\":false,\"toggle_type\":null,\"toggle_state\":null,\"children\":[]}]}}}]}}}"
           },
@@ -131,22 +161,22 @@
           {
             "kind": "message",
             "atMs": 31,
-            "text": "{\"jsonrpc\":\"2.0\",\"id\":17,\"result\":{}}"
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":22,\"result\":{}}"
           },
           {
             "kind": "message",
             "atMs": 31,
-            "text": "{\"jsonrpc\":\"2.0\",\"id\":18,\"result\":{}}"
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":23,\"result\":{}}"
           },
           {
             "kind": "message",
             "atMs": 31,
-            "text": "{\"jsonrpc\":\"2.0\",\"id\":19,\"result\":{}}"
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":24,\"result\":{}}"
           },
           {
             "kind": "message",
             "atMs": 51,
-            "text": "{\"jsonrpc\":\"2.0\",\"id\":20,\"result\":{}}"
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":25,\"result\":{}}"
           }
         ]
       },
