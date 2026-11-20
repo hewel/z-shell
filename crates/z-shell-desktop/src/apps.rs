@@ -26,6 +26,7 @@ type Sections<'a> = HashMap<&'a str, HashMap<&'a str, &'a str>>;
 pub(crate) struct App {
     pub(crate) title: String,
     pub(crate) subtitle: Option<String>,
+    pub(crate) startup_wm_class: Option<String>,
     pub(crate) icon: Option<MediaRef>,
     pub(crate) actions: Vec<Action>,
     search_name: String,
@@ -313,11 +314,15 @@ fn desktop_entry(
             .flat_map(char::to_lowercase),
     );
     let icon = icon_name.as_deref().and_then(|name| icons.resolve(name));
+    let startup_wm_class = field("StartupWMClass")
+        .map(unescape)
+        .and_then(|value| display_text(&value, 200));
     Some(App {
         search_name: title.to_lowercase(),
         search_fields,
         title,
         subtitle,
+        startup_wm_class,
         icon,
         exec,
         actions,

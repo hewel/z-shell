@@ -48,11 +48,24 @@ struct State {
     last_request_id: u64,
 }
 
+const MAX_APP_SUMMARIES: usize = 1024;
+
+#[derive(Serialize)]
+struct AppSummary<'a> {
+    id: &'a str,
+    title: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    startup_wm_class: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    icon: Option<&'a MediaRef>,
+}
+
 #[derive(Serialize)]
 struct AppStatus<'a> {
     available: bool,
     count: usize,
     pinned_apps: &'a [String],
+    apps: Vec<AppSummary<'a>>,
 }
 
 #[derive(Debug)]
@@ -215,10 +228,27 @@ impl State {
     }
 
     fn status(&self) -> AppStatus<'_> {
+        let apps = self
+            .apps
+            .as_ref()
+            .map(|catalog| {
+                catalog
+                    .iter()
+                    .take(MAX_APP_SUMMARIES)
+                    .map(|(id, app)| AppSummary {
+                        id: id.as_str(),
+                        title: app.title.as_str(),
+                        startup_wm_class: app.startup_wm_class.as_deref(),
+                        icon: app.icon.as_ref(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         AppStatus {
             available: self.apps.is_some(),
             count: self.apps.as_ref().map_or(0, Catalog::len),
             pinned_apps: &self.pinned_apps,
+            apps,
         }
     }
 

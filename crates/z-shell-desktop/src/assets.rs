@@ -85,14 +85,24 @@ pub(crate) fn cache_icon(dir: &Path, path: &Path) -> Option<MediaRef> {
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("svg"))
     {
-        let svg = std::str::from_utf8(&bytes)
+        let mut svg = std::str::from_utf8(&bytes)
             .ok()?
             .trim_start_matches('\u{feff}')
             .trim_start();
-        let svg = svg
-            .strip_prefix("<?xml")
-            .and_then(|xml| xml.split_once("?>"))
-            .map_or(svg, |(_, rest)| rest.trim_start());
+        for _ in 0..32 {
+            if let Some(rest) = svg.strip_prefix("<?").and_then(|s| s.split_once("?>")) {
+                svg = rest.1.trim_start();
+            } else if let Some(rest) = svg.strip_prefix("<!--").and_then(|s| s.split_once("-->")) {
+                svg = rest.1.trim_start();
+            } else if let Some(rest) = svg
+                .strip_prefix("<!DOCTYPE")
+                .and_then(|s| s.split_once('>'))
+            {
+                svg = rest.1.trim_start();
+            } else {
+                break;
+            }
+        }
         if svg.starts_with("<svg")
             && svg[4..].starts_with(|c: char| c.is_ascii_whitespace() || matches!(c, '>' | '/'))
         {

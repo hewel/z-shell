@@ -50,7 +50,7 @@
 //!
 //! ## Apps and launcher
 //!
-//! The `desktop.apps` topic carries `{available, count, pinned_apps}`. `apps.list`
+//! The `desktop.apps` topic carries `{available, count, pinned_apps, apps}`. `apps.list`
 //! pages `{items, total}` with optional `offset` and `limit`; `apps.pin` (host only)
 //! persists `{id, pinned}`.
 //!

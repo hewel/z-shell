@@ -144,7 +144,7 @@ async fn xdg_precedence_ranking_cache_and_action_argv() {
         &home,
         "applications/vendor/editor.desktop",
         &format!(
-            "[Desktop Entry]\nType=Application\nName=Markdown Editor\nIcon=proof\nExec=/bin/true --launch-option\nActions=Proof;Missing;\n[Desktop Action Proof]\nName=Write proof\nExec=\"{}\" \"{}\" %f %F %u %U %% %c %k %i \"literal ; $(false)\"\n",
+            "[Desktop Entry]\nType=Application\nName=Markdown Editor\nStartupWMClass=MarkdownEditor\nIcon=proof\nExec=/bin/true --launch-option\nActions=Proof;Missing;\n[Desktop Action Proof]\nName=Write proof\nExec=\"{}\" \"{}\" %f %F %u %U %% %c %k %i \"literal ; $(false)\"\n",
             exe.display(),
             record.display(),
         ),
@@ -162,7 +162,7 @@ async fn xdg_precedence_ranking_cache_and_action_argv() {
     put(
         &system,
         "icons/parent/scalable/apps/proof.svg",
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"><rect width=\"1\" height=\"1\"/></svg>",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!-- leading comment -->\n<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" \"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\">\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"><rect width=\"1\" height=\"1\"/></svg>",
     );
 
     let hub = BusHub::new("test", paths.media_dir());
@@ -182,6 +182,18 @@ async fn xdg_precedence_ranking_cache_and_action_argv() {
         "shadowed, NoDisplay, and missing TryExec entries must not leak"
     );
     assert_eq!(baseline["pinned_apps"], json!(["vendor-editor.desktop"]));
+    let summary = baseline["apps"]
+        .as_array()
+        .expect("apps summary array")
+        .iter()
+        .find(|entry| entry["id"] == "vendor-editor.desktop")
+        .expect("vendor-editor summary in desktop.apps");
+    assert_eq!(summary["title"], "Markdown Editor");
+    assert_eq!(summary["startup_wm_class"], "MarkdownEditor");
+    assert!(
+        summary["icon"].is_object(),
+        "desktop.apps summary includes resolved icon: {summary}"
+    );
     let pinned = invoke(&hub, ClientRole::Public, "apps.list", json!({}))
         .await
         .expect("list apps");
