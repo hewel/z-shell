@@ -14,14 +14,21 @@ import {
   formatDurationSeconds,
   formatFullDate,
   formatMonthYear,
+  formatSurfaceName,
   formatTrackTimeUs,
+  hasWindowsOnMonitor,
   maxThermalCelsius,
+  resolveActiveMonitor,
   resolveBarLayout,
+  resolveBarPopupAnchor,
+  resolveDesktopApp,
+  resolveMonitorLogicalSize,
   resolveMonitorWallpaper,
   selectActiveMediaPlayer,
   type ActiveWallpaper,
   type BarPosition,
   type BarSettings,
+  type DesktopAppSummary,
   type DesktopMediaSnapshot,
   type EdgeOverrides,
   type MediaPlayer,
@@ -614,5 +621,168 @@ describe("maxThermalCelsius", () => {
       { zone: 1, kind: "nvme", temperature_millicelsius: 72_500 },
       { zone: 2, kind: "gpu", temperature_millicelsius: 71_000 },
     ])).toBe(73);
+  });
+});
+
+describe("formatSurfaceName", () => {
+  test("lowercases real Wayland connector names and sanitizes invalid characters", () => {
+    expect(formatSurfaceName("bar", "DP-1")).toBe("bar-dp-1");
+    expect(formatSurfaceName("bar", "HDMI-A-2")).toBe("bar-hdmi-a-2");
+    expect(formatSurfaceName("wallpaper", "dp-1")).toBe("wallpaper-dp-1");
+    expect(formatSurfaceName("plugin-panel", "AI Quota/Panel")).toBe("plugin-panel-ai-quota-panel");
+    expect(formatSurfaceName("bar", "   ")).toBe("bar-default");
+  });
+
+  test("enforces the 128-byte limit and valid character set", () => {
+    const formatted = formatSurfaceName("bar", "DP-".repeat(60));
+    expect(formatted.length).toBeLessThanOrEqual(128);
+    expect(formatted).toMatch(/^[a-z0-9][a-z0-9._-]*$/);
+  });
+});
+
+describe("resolveMonitorLogicalSize", () => {
+  test("prefers xdg_output logical dimensions from wayland.outputs under fractional scaling", () => {
+    const outputs = makeOutputs({
+      ...makeOutput(11, "DP-2"),
+      width: 2194,
+      height: 1234,
+      mode_width: 3840,
+      mode_height: 2160,
+      scale: 2,
+    });
+    const monitor = { id: "DP-2", name: "DP-2", width: 3840, height: 2160 };
+
+    expect(resolveMonitorLogicalSize(monitor, outputs)).toEqual({ width: 2194, height: 1234 });
+    expect(resolveBarLayout(makeBarSettings("top", 14), monitor, outputs).width).toBe(2166);
+  });
+
+  test("falls back to host monitor logicalWidth/logicalHeight, then raw width/height", () => {
+    const scaled = { id: "DP-1", name: "DP-1", width: 3840, height: 2160, logicalWidth: 2194, logicalHeight: 1234 };
+    expect(resolveMonitorLogicalSize(scaled, undefined)).toEqual({ width: 2194, height: 1234 });
+
+    const monitor = { id: "DP-1", name: "DP-1", width: 1440, height: 900 };
+    expect(resolveMonitorLogicalSize(monitor, undefined)).toEqual({ width: 1440, height: 900 });
+    expect(resolveMonitorLogicalSize(monitor, makeOutputs(makeOutput(22, "HDMI-A-2")))).toEqual({
+      width: 1440,
+      height: 900,
+    });
+  });
+});
+
+describe("resolveActiveMonitor", () => {
+  const monitors = [
+    { id: "DP-1", name: "DP-1", x: 0, y: 0, width: 3840, height: 2160, logicalWidth: 2194, logicalHeight: 1234, scale: 2, refreshRateMilliHz: 60000 },
+    { id: "DP-2", name: "DP-2", x: 0, y: 1235, width: 3840, height: 2160, logicalWidth: 2194, logicalHeight: 1234, scale: 2, refreshRateMilliHz: 60000 },
+    { id: "HDMI-A-2", name: "HDMI-A-2", x: 2195, y: 1235, width: 1440, height: 2160, logicalWidth: 823, logicalHeight: 1234, scale: 2, refreshRateMilliHz: 60000 },
+  ] as const;
+  const outputs = makeOutputs(makeOutput(11, "DP-1"), makeOutput(22, "DP-2"), makeOutput(33, "HDMI-A-2"));
+
+  test("prefers explicit monitor, then focused window output, then last interaction, then first output", () => {
+    const focusedOnDp2 = makeWindows(makeWindow(1, false, [11]), makeWindow(2, true, [22]));
+
+    expect(resolveActiveMonitor(monitors, {
+      preferredMonitorId: "HDMI-A-2",
+      windows: focusedOnDp2,
+      outputs,
+      lastMonitorId: "DP-1",
+    })?.id).toBe("HDMI-A-2");
+
+    expect(resolveActiveMonitor(monitors, {
+      windows: focusedOnDp2,
+      outputs,
+      lastMonitorId: "DP-1",
+    })?.id).toBe("DP-2");
+
+    expect(resolveActiveMonitor(monitors, {
+      windows: makeWindows(makeWindow(1, false, [11])),
+      outputs,
+      lastMonitorId: "HDMI-A-2",
+    })?.id).toBe("HDMI-A-2");
+
+    expect(resolveActiveMonitor(monitors)?.id).toBe("DP-1");
+  });
+});
+
+describe("resolveBarPopupAnchor", () => {
+  test("spans full top-bar height and aligns end/center/target cleanly", () => {
+    const layout = { isVertical: false, width: 1412, height: TOP_BAR_HEIGHT };
+    expect(resolveBarPopupAnchor(layout, {
+      align: "end",
+      targetRect: { x: 1288, y: 15, width: 16, height: 18 },
+    })).toEqual({ x: 1411, y: 0, width: 1, height: TOP_BAR_HEIGHT });
+
+    expect(resolveBarPopupAnchor(layout, {
+      align: "center",
+      targetRect: { x: 616, y: 8, width: 178, height: 32 },
+    })).toEqual({ x: 616, y: 0, width: 178, height: TOP_BAR_HEIGHT });
+
+    expect(resolveBarPopupAnchor(layout, {
+      align: "target",
+      targetRect: { x: 1020, y: 8, width: 156, height: 32 },
+    })).toEqual({ x: 1020, y: 0, width: 156, height: TOP_BAR_HEIGHT });
+  });
+
+  test("spans full vertical-bar width along cross axis", () => {
+    const layout = { isVertical: true, width: VERTICAL_BAR_WIDTH, height: 900 };
+    expect(resolveBarPopupAnchor(layout, {
+      align: "end",
+      targetRect: { x: 8, y: 780, width: 36, height: 26 },
+    })).toEqual({ x: 0, y: 780, width: VERTICAL_BAR_WIDTH, height: 26 });
+  });
+});
+
+describe("resolveDesktopApp and buildDockItems with catalog", () => {
+  const catalog: readonly DesktopAppSummary[] = [
+    {
+      id: "Alacritty.desktop",
+      title: "Alacritty",
+      startup_wm_class: "Alacritty",
+      icon: { kind: "runtime_path", path: "/run/user/1000/z-shell/media/alacritty.svg", mime: "image/svg+xml", revision: 1 },
+    },
+    {
+      id: "app.zen_browser.zen.desktop",
+      title: "Zen Browser",
+      startup_wm_class: "zen",
+      icon: { kind: "runtime_path", path: "/run/user/1000/z-shell/media/zen.png", mime: "image/png", revision: 2 },
+    },
+  ];
+
+  test("resolves desktop apps by exact ID, case-insensitive ID, StartupWMClass, and reverse-DNS tail", () => {
+    expect(resolveDesktopApp(catalog, "Alacritty.desktop")?.title).toBe("Alacritty");
+    expect(resolveDesktopApp(catalog, "alacritty")?.title).toBe("Alacritty");
+    expect(resolveDesktopApp(catalog, "zen")?.id).toBe("app.zen_browser.zen.desktop");
+    expect(resolveDesktopApp(catalog, "unknown-app")).toBeUndefined();
+  });
+
+  test("attaches icons and deduplicates pinned and running windows via StartupWMClass", () => {
+    const result = buildDockItems(
+      ["app.zen_browser.zen.desktop"],
+      [
+        { ...makeWindow(1, true, [11]), app_id: "zen", title: "Home — Zen Browser" },
+        { ...makeWindow(2, false, [11]), app_id: "Alacritty", title: "Shell" },
+      ],
+      catalog,
+    );
+    expect(result.pinned).toHaveLength(1);
+    expect(result.pinned[0]?.title).toBe("Zen Browser");
+    expect(result.pinned[0]?.icon?.kind).toBe("runtime_path");
+    expect(result.pinned[0]?.focused).toBe(true);
+    expect(result.runningOnly).toHaveLength(1);
+    expect(result.runningOnly[0]?.title).toBe("Alacritty");
+    expect(result.runningOnly[0]?.icon?.kind).toBe("runtime_path");
+  });
+});
+
+describe("hasWindowsOnMonitor", () => {
+  const outputs = makeOutputs(makeOutput(11, "DP-1"), makeOutput(22, "DP-2"));
+
+  test("checks non-minimized window presence per monitor", () => {
+    const windows = makeWindows(
+      { ...makeWindow(1, true, [11]), minimized: false },
+      { ...makeWindow(2, false, [22]), minimized: true },
+    );
+    expect(hasWindowsOnMonitor(windows, outputs, "DP-1")).toBe(true);
+    expect(hasWindowsOnMonitor(windows, outputs, "DP-2")).toBe(false);
+    expect(hasWindowsOnMonitor(makeWindows(), outputs, "DP-1")).toBe(false);
   });
 });

@@ -4,7 +4,7 @@ import { getResolvedCapabilities, onControlMessage, type JsonValue } from "@hewe
 import { ZShellClient, type BusHelloResult, type BusTransport, type CommandInvokeResult } from "@z-shell/sdk";
 import { createZguiSocketTransport, useTopic, type TopicState } from "@z-shell/sdk/zgui";
 import type { ThemeTopicSnapshot } from "./theme.ts";
-import { resolveBarLayout } from "./topics.ts";
+import { formatSurfaceName, resolveActiveMonitor, resolveBarLayout, resolveBarPopupAnchor } from "./topics.ts";
 import type {
   ClipboardSnapshot,
   DesktopAppsSnapshot,
@@ -57,19 +57,26 @@ export type PanelTarget = {
   readonly id: PanelId;
   readonly parentSurface: string;
   readonly anchorRect: NativeWindowRect;
+  readonly monitorId?: string;
 };
 
-type PanelAnchor = Omit<PanelTarget, "id">;
+export type PanelAnchor = {
+  readonly parentSurface?: string;
+  readonly anchorRect?: NativeWindowRect;
+  readonly monitorId?: string;
+};
 
 export type TrayMenuTarget = {
   readonly itemId: string;
   readonly parentSurface: string;
   readonly anchorRect: NativeWindowRect;
+  readonly monitorId?: string;
 };
 
 export type ImeMenuTarget = {
   readonly parentSurface: string;
   readonly anchorRect: NativeWindowRect;
+  readonly monitorId?: string;
 };
 
 export type PluginBarWidgetSlot = {
@@ -81,7 +88,8 @@ export type PluginBarWidgetSlot = {
 type BarOverlay =
   | { readonly kind: "panel"; readonly target: PanelTarget }
   | { readonly kind: "tray"; readonly target: TrayMenuTarget }
-  | { readonly kind: "ime"; readonly target: ImeMenuTarget };
+  | { readonly kind: "ime"; readonly target: ImeMenuTarget }
+  | { readonly kind: "plugin"; readonly instanceId: string; readonly monitorId?: string };
 
 export function resolveShellSocketPaths(unixSockets: readonly string[]): ShellSocketPaths {
   const find = (kind: "bus" | "host") => {
@@ -124,6 +132,9 @@ interface ShellTopics {
 
 export interface ShellStore extends ShellTopics {
   readonly monitors: Accessor<readonly Monitor[]>;
+  readonly activeMonitor: Accessor<Monitor | undefined>;
+  readonly powerDialogMonitor: Accessor<Monitor | undefined>;
+  recordActiveMonitor(monitorId: string): void;
   readonly publicClient: Accessor<ZShellClient | undefined>;
   readonly hostClient: Accessor<ZShellClient | undefined>;
   readonly publicStatus: Accessor<SocketStatus>;
@@ -140,6 +151,10 @@ export interface ShellStore extends ShellTopics {
   readonly activePanelTarget: Accessor<PanelTarget | null>;
   togglePanel(id: PanelId, target?: PanelAnchor): void;
   closePanels(): void;
+  dismissOverlay(): void;
+  readonly activePluginPanelId: Accessor<string | null>;
+  openPluginPanel(instanceId: string, monitorId?: string): void;
+  closePluginPanel(): void;
   readonly activeTrayMenu: Accessor<TrayMenuTarget | null>;
   openTrayMenu(target: TrayMenuTarget): void;
   closeTrayMenu(): void;
@@ -147,7 +162,7 @@ export interface ShellStore extends ShellTopics {
   openImeMenu(target: ImeMenuTarget): void;
   closeImeMenu(): void;
   readonly pendingPowerAction: Accessor<PowerConfirmAction | null>;
-  readonly requestPowerDialog: (action: PowerConfirmAction) => void;
+  readonly requestPowerDialog: (action: PowerConfirmAction, monitorId?: string) => void;
   readonly closePowerDialog: () => void;
   readonly activeOsd: Accessor<OsdPayload | null>;
   showOsd(osd: Omit<OsdPayload, "seq">): void;
@@ -159,8 +174,24 @@ export function createShellStore(): ShellStore {
   const monitors = useMonitors();
   const { publicSocket, hostSocket } = resolveShellSocketPaths(getResolvedCapabilities().unixSockets);
   const [lastError, setLastError] = createSignal<string>();
+  const [lastMonitorId, setLastMonitorId] = createSignal<string | null>(null);
+  const [powerDialogMonitorId, setPowerDialogMonitorId] = createSignal<string | null>(null);
   let disposed = false;
   const [overlay, setOverlay] = createSignal<BarOverlay | null>(null);
+  const recordActiveMonitor = (monitorId: string) => {
+    if (monitorId.length > 0) setLastMonitorId(monitorId);
+  };
+  const activeMonitor = () => resolveActiveMonitor(monitors(), {
+    windows: topics?.windows.data(),
+    outputs: topics?.outputs.data(),
+    lastMonitorId: lastMonitorId(),
+  });
+  const powerDialogMonitor = () => resolveActiveMonitor(monitors(), {
+    preferredMonitorId: powerDialogMonitorId(),
+    windows: topics?.windows.data(),
+    outputs: topics?.outputs.data(),
+    lastMonitorId: lastMonitorId(),
+  });
   const activePanelTarget = () => {
     const active = overlay();
     return active?.kind === "panel" ? active.target : null;
@@ -174,36 +205,81 @@ export function createShellStore(): ShellStore {
     const active = overlay();
     return active?.kind === "ime" ? active.target : null;
   };
-  function defaultPanelAnchor(id: PanelId, outputs: readonly Monitor[]): PanelAnchor {
-    const monitor = outputs[0];
+  const activePluginPanelId = () => {
+    const active = overlay();
+    return active?.kind === "plugin" ? active.instanceId : null;
+  };
+  function inferMonitorId(parentSurface: string | undefined, outputs: readonly Monitor[]): string | undefined {
+    if (!parentSurface) return undefined;
+    return outputs.find(monitor => formatSurfaceName("bar", monitor.id) === parentSurface)?.id;
+  }
+  function overlayMonitorId(active: BarOverlay | null, outputs: readonly Monitor[]): string | undefined {
+    if (!active) return undefined;
+    if (active.kind === "plugin") return active.monitorId;
+    return active.target.monitorId ?? inferMonitorId(active.target.parentSurface, outputs);
+  }
+  function defaultPanelAnchor(
+    id: PanelId,
+    outputs: readonly Monitor[],
+    preferredMonitorId?: string | null,
+  ): Omit<PanelTarget, "id"> {
+    const monitor = resolveActiveMonitor(outputs, {
+      preferredMonitorId,
+      windows: topics?.windows.data(),
+      outputs: topics?.outputs.data(),
+      lastMonitorId: lastMonitorId(),
+    });
     const size = 32;
     // Keep the logical panel state available to control callers without an output.
     if (!monitor) return { parentSurface: "", anchorRect: { x: 0, y: 0, width: size, height: size } };
-    const { width, height, isVertical } = resolveBarLayout(topics.settings.data()?.bar, monitor);
-    const length = isVertical ? height : width;
-    const along = id === "calendar" || id === "clipboard" ? Math.round((length - size) / 2)
-      : id === "launcher" || id === "overview" ? 14 : length - size - 14;
-    const across = Math.round(((isVertical ? width : height) - size) / 2);
+    const layout = resolveBarLayout(topics.settings.data()?.bar, monitor, topics.outputs.data());
+    const align = id === "calendar" || id === "clipboard" ? "center" : "end";
     return {
-      parentSurface: `bar-${monitor.id}`,
-      anchorRect: { x: isVertical ? across : along, y: isVertical ? along : across, width: size, height: size },
+      parentSurface: formatSurfaceName("bar", monitor.id),
+      anchorRect: resolveBarPopupAnchor(layout, { align }),
+      monitorId: monitor.id,
     };
   }
   const togglePanel = (id: PanelId, target?: PanelAnchor) => {
-    setOverlay(active => active?.kind === "panel" && active.target.id === id
-      && (target === undefined || active.target.parentSurface === target.parentSurface)
-      ? null : { kind: "panel", target: { ...(target ?? defaultPanelAnchor(id, monitors())), id } });
+    const currentOutputs = monitors();
+    const explicitMonitorId = target?.monitorId ?? inferMonitorId(target?.parentSurface, currentOutputs);
+    if (explicitMonitorId) recordActiveMonitor(explicitMonitorId);
+    setOverlay(active => {
+      const activeMonitorId = overlayMonitorId(active, currentOutputs);
+      const resolved = target?.parentSurface !== undefined && target.anchorRect !== undefined
+        ? {
+          parentSurface: target.parentSurface,
+          anchorRect: target.anchorRect,
+          ...(explicitMonitorId ? { monitorId: explicitMonitorId } : {}),
+        }
+        : defaultPanelAnchor(id, currentOutputs, explicitMonitorId ?? activeMonitorId);
+      if (active?.kind === "panel" && active.target.id === id
+        && (target === undefined || active.target.parentSurface === resolved.parentSurface)) {
+        return null;
+      }
+      return { kind: "panel", target: { ...resolved, id } };
+    });
   };
   const closeOverlay = (kind: BarOverlay["kind"]) => {
     setOverlay(active => active?.kind === kind ? null : active);
   };
 
   const [pendingPowerAction, setPendingPowerAction] = createSignal<PowerConfirmAction | null>(null);
-  const requestPowerDialog = (action: PowerConfirmAction) => {
+  const requestPowerDialog = (action: PowerConfirmAction, monitorId?: string) => {
+    const currentOutputs = monitors();
+    const active = overlay();
+    const targetMonitorId = monitorId
+      ?? overlayMonitorId(active, currentOutputs)
+      ?? null;
+    if (targetMonitorId) recordActiveMonitor(targetMonitorId);
+    setPowerDialogMonitorId(targetMonitorId);
     setOverlay(null);
     setPendingPowerAction(action);
   };
-  const closePowerDialog = () => { setPendingPowerAction(null); };
+  const closePowerDialog = () => {
+    setPendingPowerAction(null);
+    setPowerDialogMonitorId(null);
+  };
 
   const [activeOsd, setActiveOsd] = createSignal<OsdPayload | null>(null);
   let osdSeq = 0;
@@ -419,7 +495,8 @@ export function createShellStore(): ShellStore {
   });
 
   return {
-    monitors, publicClient, hostClient, publicStatus, hostStatus, publicHello, hostHello, lastError,
+    monitors, activeMonitor, powerDialogMonitor, recordActiveMonitor,
+    publicClient, hostClient, publicStatus, hostStatus, publicHello, hostHello, lastError,
     ...topics,
     invokePublic: (name, payload) => invoke(publicClient(), name, payload),
     invokeHost: (name, payload) => invoke(hostClient(), name, payload),
@@ -435,12 +512,27 @@ export function createShellStore(): ShellStore {
     activePanel,
     activePanelTarget,
     togglePanel,
-    closePanels: () => closeOverlay("panel"),
+    closePanels: () => setOverlay(active => active?.kind === "panel" || active?.kind === "plugin" ? null : active),
+    dismissOverlay: () => setOverlay(null),
+    activePluginPanelId,
+    openPluginPanel: (instanceId, monitorId) => {
+      if (monitorId) recordActiveMonitor(monitorId);
+      setOverlay({ kind: "plugin", instanceId, ...(monitorId ? { monitorId } : {}) });
+    },
+    closePluginPanel: () => closeOverlay("plugin"),
     activeTrayMenu,
-    openTrayMenu: target => setOverlay({ kind: "tray", target }),
+    openTrayMenu: target => {
+      const monitorId = target.monitorId ?? inferMonitorId(target.parentSurface, monitors());
+      if (monitorId) recordActiveMonitor(monitorId);
+      setOverlay({ kind: "tray", target });
+    },
     closeTrayMenu: () => closeOverlay("tray"),
     activeImeMenu,
-    openImeMenu: target => setOverlay({ kind: "ime", target }),
+    openImeMenu: target => {
+      const monitorId = target.monitorId ?? inferMonitorId(target.parentSurface, monitors());
+      if (monitorId) recordActiveMonitor(monitorId);
+      setOverlay({ kind: "ime", target });
+    },
     closeImeMenu: () => closeOverlay("ime"),
     pendingPowerAction,
     requestPowerDialog,

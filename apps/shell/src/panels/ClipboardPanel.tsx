@@ -115,8 +115,8 @@ export function ClipboardPanel() {
         </row>
       }>
         <TextField testId="clipboard-search" class="clipboard-search" ariaLabel={searchPlaceholder} placeholder={searchPlaceholder} value={query()}
-          onInput={event => setQuery(event.value)} style={{ display: "flex", alignItems: "center", width: "100%", height: "38px", flexShrink: 0,
-            borderRadius: "19px", padding: "0 14px", backgroundColor: containerHigh, color: onSurface }} />
+          onInput={event => setQuery(event.value)} style={{ width: "100%", height: "38px", lineHeight: "18px", flexShrink: 0,
+            borderRadius: "19px", padding: "10px 14px", backgroundColor: containerHigh, color: onSurface }} />
         <row style={{ gap: "6px", flexWrap: "wrap" }}>
           <For each={filters} keyed={false}>
             {chip => {
@@ -132,7 +132,7 @@ export function ClipboardPanel() {
             }}
           </For>
         </row>
-        <scroll style={{ flexGrow: 1, flexBasis: "0px", minHeight: "0px", width: "100%", overflow: "auto" }}>
+        <scroll style={{ flexGrow: 1, flexBasis: "0px", minHeight: "0px", width: "100%", overflow: "hidden auto" }}>
           <column style={{ gap: "6px" }}>
             <Show when={filtered().length > 0} fallback={<text style={{ color: muted, padding: "10px 0" }}>{entries().length ? "No matching entries" : "Clipboard is empty"}</text>}>
               <For each={filtered()} keyed={entry => entry.id}>{entry => <ClipboardRow entry={entry} />}</For>

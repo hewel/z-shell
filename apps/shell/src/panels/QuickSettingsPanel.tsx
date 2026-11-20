@@ -17,6 +17,7 @@ const card = { borderRadius: "20px", backgroundColor: container, padding: "12px"
 const row = { alignItems: "center", gap: "8px" } as const;
 const grow = { flexGrow: 1, flexBasis: "0px", minWidth: "0px" } as const;
 const clipped = { minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
+const hiddenSection = { display: "none" } as const;
 const avatarStyle = { width: "36px", height: "36px", borderRadius: "18px", flexShrink: 0, "object-fit": "cover" } as const;
 
 const powerActions = [
@@ -47,7 +48,7 @@ function QuickTile(props: {
 }): NativeChild {
   const color = () => props.active ? onPrimary : onSurface;
   return (
-    <row style={{ ...grow, height: "56px", borderRadius: "28px", alignItems: "center",
+    <row data-qs-tile="true" style={{ ...grow, height: "56px", borderRadius: "28px", alignItems: "center",
       backgroundColor: props.active ? primary : container }}>
       <Button testId={`qs-tile-${props.id}`} ariaLabel={props.label} checked={props.toggle ? props.active ?? false : null}
         disabled={props.disabled} onClick={props.onClick} style={{
@@ -61,7 +62,7 @@ function QuickTile(props: {
           <text style={{ ...clipped, fontSize: "11px", color: props.active ? onPrimary : muted }}>{props.detail}</text>
         </column>
       </Button>
-      <Show when={props.open !== undefined}>
+      <Show when={props.open !== undefined} fallback={<box style={hiddenSection} />}>
         <QuickSettingsIconButton testId={`qs-open-${props.id}`} label={`Open ${props.label}`} icon="chevronRight"
           fill={props.active ? "var(--color-primary-container)" : containerHigh}
           color={props.active ? "var(--color-on-primary-container)" : onSurface}
@@ -114,9 +115,9 @@ function PercentTrack(props: {
           }
           event.preventDefault();
         }}
-        style={{ ...grow, height: "26px", justifyContent: "center", opacity: props.disabled ? 0.5 : 1 }}>
+        style={{ ...grow, display: "flex", flexDirection: "column", height: "26px", justifyContent: "center", opacity: props.disabled ? 0.5 : 1 }}>
         <box ariaHidden style={{ width: "100%", height: "12px", borderRadius: "6px", backgroundColor: containerHigh }}>
-          <box style={{ width: `${value()}%`, height: "100%", borderRadius: "6px", backgroundColor: primary }} />
+          <box data-percent-fill="true" style={{ width: `${value()}%`, height: "100%", borderRadius: "6px", backgroundColor: primary }} />
         </box>
       </box>
       <row style={{ width: "36px", flexShrink: 0, justifyContent: "flex-end" }}>
@@ -150,7 +151,7 @@ function Sliders(props: { openSound: () => void }): NativeChild {
         }} />
         <QuickSettingsIconButton testId="qs-open-sound" label="Open sound mixer" icon="chevronRight" onClick={props.openSound} />
       </row>
-      <Show when={backlight()}>
+      <Show when={backlight()} fallback={<box style={hiddenSection} />}>
         {device => (
           <row style={row}>
             <row style={{ width: "34px", justifyContent: "center", flexShrink: 0 }}><ShojiIcon name="brightness" size={18} /></row>
@@ -170,7 +171,7 @@ function Sliders(props: { openSound: () => void }): NativeChild {
 function BatterySummary(): NativeChild {
   const { power } = useShellStore();
   return (
-    <Show when={power.data()?.battery}>
+    <Show when={power.data()?.battery} fallback={<box style={hiddenSection} />}>
       {battery => {
         const charging = () => battery().state === "charging" || battery().state === "pending_charge";
         const duration = () => formatDurationSeconds(charging() ? battery().time_to_full_seconds : battery().time_to_empty_seconds);
@@ -283,7 +284,7 @@ function MainPage(props: {
         <QuickSettingsIconButton testId="qs-power-toggle" label="Power menu" icon="power" fill={primary} color={onPrimary}
           expanded={props.powerMenuOpen} onClick={props.togglePowerMenu} />
       </row>
-      <Show when={props.powerMenuOpen}>
+      <Show when={props.powerMenuOpen} fallback={<box style={hiddenSection} />}>
         <row testId="qs-power-menu" style={{ ...card, gap: "4px" }}>
           <For each={powerActions} keyed={entry => entry.action}>
             {action => {

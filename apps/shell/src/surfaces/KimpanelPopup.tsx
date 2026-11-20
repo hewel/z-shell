@@ -2,7 +2,7 @@ import { Button, For, LayerSurface, Show, createMemo, type Accessor, type Monito
 import { ShojiIcon } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
-import { clampOverlayPosition, type DesktopImePanelSnapshot, type ImeLookupTable } from "../topics.ts";
+import { clampOverlayPosition, resolveMonitorLogicalSize, type DesktopImePanelSnapshot, type ImeLookupTable } from "../topics.ts";
 
 const primary = "var(--color-primary)";
 const onSurface = "var(--color-on-surface)";
@@ -116,7 +116,7 @@ function CandidateCard(props: {
 }
 
 function PopupOnMonitor(props: { monitor: Monitor; panel: Accessor<DesktopImePanelSnapshot> }) {
-  const { ime } = useShellStore();
+  const { ime, outputs } = useShellStore();
   const vertical = () => {
     const hint = props.panel().lookup_table.layout;
     return (hint === "auto" ? ime.data()?.candidate_layout : hint) === "vertical";
@@ -124,7 +124,7 @@ function PopupOnMonitor(props: { monitor: Monitor; panel: Accessor<DesktopImePan
   const placement = createMemo(() => {
     const panel = props.panel();
     const table = panel.lookup_table;
-    const monitor = props.monitor;
+    const size = resolveMonitorLogicalSize(props.monitor, outputs.data());
     const count = table.texts.length;
     const headerLines = Number(panel.preedit.length > 0) + Number(panel.aux.length > 0);
     const header = headerLines * 18 + (headerLines === 2 ? 4 : 0);
@@ -133,9 +133,9 @@ function PopupOnMonitor(props: { monitor: Monitor; panel: Accessor<DesktopImePan
     const sections = Number(header > 0) + Number(list > 0) + Number(pager > 0);
     const width = vertical() ? 260 : Math.max(180, Math.min(640, 22 + count * 96));
     const height = 22 + header + list + pager + Math.max(0, sections - 1) * 8;
-    const popupWidth = Math.max(1, Math.min(width, monitor.width - 16));
-    const popupHeight = Math.max(1, Math.min(height, monitor.height - 16));
-    const pos = clampOverlayPosition(panel.spot_rect, popupWidth, popupHeight, monitor);
+    const popupWidth = Math.max(1, Math.min(width, size.width - 16));
+    const popupHeight = Math.max(1, Math.min(height, size.height - 16));
+    const pos = clampOverlayPosition(panel.spot_rect, popupWidth, popupHeight, size);
     return { popupWidth, popupHeight, margin: { top: Math.round(pos.y), left: Math.round(pos.x) } };
   });
 
@@ -148,12 +148,19 @@ function PopupOnMonitor(props: { monitor: Monitor; panel: Accessor<DesktopImePan
 }
 
 export function KimpanelPopup(): NativeChild {
-  const { ime, imePanel, monitors } = useShellStore();
+  const { activeMonitor, ime, imePanel, monitors } = useShellStore();
+  const targetMonitorId = () => ime.data()?.mode === "kimpanel" && imePanel.data()?.visible === true
+    ? activeMonitor()?.id
+    : undefined;
   return (
-    <Show when={ime.data()?.mode === "kimpanel" && monitors()[0]}>
-      {monitor => (
-        <Show when={imePanel.data()?.visible === true && imePanel.data()}>
-          {panel => <PopupOnMonitor monitor={monitor()} panel={panel} />}
+    <Show when={targetMonitorId()} keyed>
+      {output => (
+        <Show when={monitors().find(candidate => candidate.id === output)}>
+          {monitor => (
+            <Show when={imePanel.data()?.visible === true && imePanel.data()}>
+              {panel => <PopupOnMonitor monitor={monitor()} panel={panel} />}
+            </Show>
+          )}
         </Show>
       )}
     </Show>

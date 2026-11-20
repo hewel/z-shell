@@ -8,7 +8,8 @@ import { useShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import {
   DEFAULT_BAR_SETTINGS, TOP_BAR_HEIGHT, VERTICAL_BAR_WIDTH, filterWorkspacesForMonitor, findActiveWindowForMonitor,
-  formatBarClock, resolveBarLayout, selectActiveMediaPlayer, type ResolvedBarLayout, type TrayItem, type WaylandWorkspace,
+  formatBarClock, formatSurfaceName, resolveBarLayout, resolveBarPopupAnchor, resolveDesktopApp, selectActiveMediaPlayer,
+  type ResolvedBarLayout, type TrayItem, type WaylandWindow, type WaylandWorkspace,
 } from "../topics.ts";
 
 const primary = "var(--color-primary)";
@@ -39,8 +40,10 @@ const horizontalCircle = { ...horizontalPill, width: "32px" } as const;
 const verticalCircle = { ...verticalPill, height: "40px" } as const;
 const horizontalLabelPill = { ...horizontalPill, justifyContent: "flex-start", padding: "0 12px", gap: "8px", flexShrink: 1, minWidth: "0px", overflow: "hidden" } as const;
 const clippedText = { minWidth: "0px", maxWidth: "224px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
-const iconButton = { ...center, width: "20px", height: "22px", flexShrink: 0 } as const;
-const compactIconButton = { ...iconButton, width: "16px", height: "18px" } as const;
+const iconButton = { ...center, width: "28px", height: "32px", flexShrink: 0 } as const;
+const verticalIconButton = { ...center, width: "36px", height: "28px", flexShrink: 0 } as const;
+const compactIconButton = { ...center, width: "26px", height: "32px", flexShrink: 0 } as const;
+const verticalCompactIconButton = { ...center, width: "36px", height: "26px", flexShrink: 0 } as const;
 const notificationBadge = { ...center, gap: "4px", backgroundColor: primaryContainer, color: onPrimaryContainer, borderRadius: "10px", padding: "2px 6px" } as const;
 const outline = "var(--color-outline-variant)";
 
@@ -87,15 +90,24 @@ function WorkspaceButton(props: { workspace: WaylandWorkspace; vertical: boolean
     <Button testId={`ws-${props.workspace.workspace_id}`} ariaLabel={`Workspace ${label()}`} onClick={props.activate} style={{
       ...center,
       flexShrink: 0,
-      width: props.vertical ? "22px" : props.workspace.active ? "24px" : "8px",
-      height: props.vertical ? (props.workspace.active ? "32px" : "18px") : props.workspace.active ? "10px" : "8px",
-      borderRadius: props.vertical ? "11px" : props.workspace.active ? "5px" : "4px",
-      backgroundColor: props.vertical && !props.workspace.active ? "transparent" : fill(),
-      opacity: props.workspace.active || props.workspace.urgent ? 1 : 0.55,
+      width: props.vertical ? "28px" : props.workspace.active ? "28px" : "18px",
+      height: props.vertical ? (props.workspace.active ? "32px" : "22px") : "32px",
+      borderRadius: props.vertical ? "14px" : "10px",
+      backgroundColor: props.vertical && props.workspace.active ? fill() : "transparent",
       color: props.workspace.urgent ? "var(--color-on-error)" : "var(--color-on-primary)",
     }}>
-      <Show when={props.vertical}>
-        <Show when={props.workspace.active} fallback={<box ariaHidden style={{ width: "6px", height: "6px", borderRadius: "3px", backgroundColor: fill() }} />}>
+      <Show when={props.vertical} fallback={
+        <box ariaHidden data-ws-pill="true" style={{
+          width: props.workspace.active ? "24px" : "8px",
+          height: props.workspace.active ? "10px" : "8px",
+          borderRadius: props.workspace.active ? "5px" : "4px",
+          backgroundColor: fill(),
+          opacity: props.workspace.active || props.workspace.urgent ? 1 : 0.55,
+        }} />
+      }>
+        <Show when={props.workspace.active} fallback={
+          <box ariaHidden data-ws-pill="true" style={{ width: "6px", height: "6px", borderRadius: "3px", backgroundColor: fill(), opacity: props.workspace.urgent ? 1 : 0.55 }} />
+        }>
           <text style={activeLabel}>{label()}</text>
         </Show>
       </Show>
@@ -103,15 +115,35 @@ function WorkspaceButton(props: { workspace: WaylandWorkspace; vertical: boolean
   );
 }
 
-function TrayButton(props: { item: TrayItem; surfaceName: string; fallbackRect: NativeWindowRect }) {
+function ActiveWindowPill(props: { window: Accessor<WaylandWindow>; vertical: boolean }) {
+  const { apps, hostClient } = useShellStore();
+  const app = createMemo(() => resolveDesktopApp(apps.data()?.apps, props.window().app_id));
+  const { src } = useDaemonMedia(hostClient, () => app()?.icon, { fetchCommand: "launcher.fetch-blob" });
+  return (
+    <box testId="bar-active-window" ariaLabel={props.window().title} style={props.vertical ? verticalCircle : horizontalLabelPill}>
+      <Show when={src()} fallback={<ShojiIcon name="terminal" color={primary} />}>
+        {image => <Image ariaHidden src={image()} style={{ width: "16px", height: "16px", borderRadius: "4px", flexShrink: 0, "object-fit": "contain" }} />}
+      </Show>
+      <Show when={!props.vertical}>
+        <text testId="bar-active-window-title" style={clippedText}>{props.window().title ?? app()?.title ?? props.window().app_id}</text>
+      </Show>
+    </box>
+  );
+}
+
+function TrayButton(props: { item: TrayItem; vertical: boolean; monitorId: string; surfaceName: string; layout: ResolvedBarLayout }) {
   const { hostClient, invokePublic, openTrayMenu } = useShellStore();
   const { src } = useDaemonMedia(hostClient, () => props.item.icon, { fetchCommand: "tray.fetch-blob" });
+  const anchorFor = (node: NativeNode): NativeWindowRect =>
+    resolveBarPopupAnchor(props.layout, { align: "target", targetRect: getWindowRect(node) });
   return (
-    <Button testId={`tray-item-${props.item.id}`} ariaLabel={props.item.title || props.item.id} style={compactIconButton}
+    <Button testId={`tray-item-${props.item.id}`} ariaLabel={props.item.title || props.item.id}
+      style={props.vertical ? verticalCompactIconButton : compactIconButton}
       onClick={event => {
         const item = props.item;
         if (item.item_is_menu && item.menu) {
-          openTrayMenu({ itemId: item.id, parentSurface: props.surfaceName, anchorRect: getWindowRect(event.currentTarget) ?? props.fallbackRect });
+          event.stopPropagation();
+          openTrayMenu({ itemId: item.id, monitorId: props.monitorId, parentSurface: props.surfaceName, anchorRect: anchorFor(event.currentTarget) });
         } else {
           void invokePublic("tray.activate", { id: item.id });
         }
@@ -119,7 +151,7 @@ function TrayButton(props: { item: TrayItem; surfaceName: string; fallbackRect: 
       {...secondaryAction(node => {
         const item = props.item;
         if (item.menu) {
-          openTrayMenu({ itemId: item.id, parentSurface: props.surfaceName, anchorRect: getWindowRect(node) ?? props.fallbackRect });
+          openTrayMenu({ itemId: item.id, monitorId: props.monitorId, parentSurface: props.surfaceName, anchorRect: anchorFor(node) });
         } else {
           void invokePublic("tray.context-menu", { id: item.id });
         }
@@ -135,13 +167,20 @@ function TrayButton(props: { item: TrayItem; surfaceName: string; fallbackRect: 
   );
 }
 
-function ClockPill(props: { vertical: boolean; clock: Accessor<BarClock>; seconds: boolean; surfaceName: string; fallbackRect: NativeWindowRect }) {
+function ClockPill(props: { vertical: boolean; clock: Accessor<BarClock>; seconds: boolean; monitorId: string; surfaceName: string; layout: ResolvedBarLayout }) {
   const { notifications, togglePanel } = useShellStore();
   const count = () => notifications.data()?.history.length ?? 0;
   const dnd = () => notifications.data()?.dnd ?? false;
   return (
     <Button testId="bar-clock" ariaLabel={props.clock().horizontal}
-      onClick={event => togglePanel("calendar", { parentSurface: props.surfaceName, anchorRect: getWindowRect(event.currentTarget) ?? props.fallbackRect })}
+      onClick={event => {
+        event.stopPropagation();
+        togglePanel("calendar", {
+          monitorId: props.monitorId,
+          parentSurface: props.surfaceName,
+          anchorRect: resolveBarPopupAnchor(props.layout, { align: "center", targetRect: getWindowRect(event.currentTarget) }),
+        });
+      }}
       style={props.vertical ? { ...verticalPill, gap: "2px", padding: "8px 0", fontWeight: 700, lineHeight: 1.2 }
         : { ...horizontalPill, gap: "8px", padding: "0 12px", whiteSpace: "nowrap" }}>
       <Show when={props.vertical} fallback={<text testId="bar-clock-text">{props.clock().horizontal}</text>}>
@@ -162,11 +201,17 @@ function ClockPill(props: { vertical: boolean; clock: Accessor<BarClock>; second
   );
 }
 
-function SystemPill(props: { vertical: boolean; surfaceName: string; fallbackRect: NativeWindowRect }) {
+function SystemPill(props: { vertical: boolean; monitorId: string; surfaceName: string; layout: ResolvedBarLayout }) {
   const { ime, privacy, network, bluetooth, audio, power, togglePanel, invokePublic, openImeMenu } = useShellStore();
-  const quickSettings = (event: NativeEvent) => togglePanel("quick-settings", {
-    parentSurface: props.surfaceName, anchorRect: getWindowRect(event.currentTarget) ?? props.fallbackRect,
-  });
+  const quickSettings = (event: NativeEvent) => {
+    event.stopPropagation();
+    togglePanel("quick-settings", {
+      monitorId: props.monitorId,
+      parentSurface: props.surfaceName,
+      anchorRect: resolveBarPopupAnchor(props.layout, { align: "end", targetRect: getWindowRect(event.currentTarget) }),
+    });
+  };
+  const btnStyle = () => props.vertical ? verticalCompactIconButton : compactIconButton;
   const networkIcon = createMemo(() => {
     const state = network.data();
     if (!state?.available) return "wifiOff";
@@ -184,14 +229,18 @@ function SystemPill(props: { vertical: boolean; surfaceName: string; fallbackRec
     return !device || device.muted || device.volume <= 0 ? "volumeMute" : device.volume < 0.5 ? "volumeLow" : "volumeHigh";
   });
   return (
-    <box testId="bar-system" style={props.vertical ? { ...verticalPill, gap: "3px", padding: "4px 0" }
-      : { ...horizontalPill, gap: "4px", padding: "0 6px" }}>
+    <box testId="bar-system" style={props.vertical ? { ...verticalPill, gap: "2px", padding: "4px 0" }
+      : { ...horizontalPill, gap: "2px", padding: "0 4px" }}>
       <Show when={ime.data()?.available && ime.data()?.mode !== "disabled"}>
         <Button testId="bar-ime" ariaLabel="Input method" ariaHasPopup="menu"
-          style={{ ...center, width: "26px", height: "22px", borderRadius: "11px", backgroundColor: primaryContainer, color: onPrimaryContainer, fontWeight: 700 }}
+          style={{ ...center, minWidth: "28px", height: "24px", padding: "0 6px", borderRadius: "12px", backgroundColor: primaryContainer, color: onPrimaryContainer, fontWeight: 700 }}
           onClick={() => { void invokePublic("ime.toggle", {}); }}
           {...secondaryAction(node => {
-            openImeMenu({ parentSurface: props.surfaceName, anchorRect: getWindowRect(node) ?? props.fallbackRect });
+            openImeMenu({
+              monitorId: props.monitorId,
+              parentSurface: props.surfaceName,
+              anchorRect: resolveBarPopupAnchor(props.layout, { align: "target", targetRect: getWindowRect(node) }),
+            });
           })}>
           <text>{ime.data()?.active_im?.short_label || "EN"}</text>
         </Button>
@@ -202,14 +251,14 @@ function SystemPill(props: { vertical: boolean; surfaceName: string; fallbackRec
           <ShojiIcon name="mic" size={13} color={error} />
         </box>
       </Show>
-      <Button testId="bar-network" ariaLabel="Network settings" style={compactIconButton} onClick={quickSettings}>
+      <Button testId="bar-network" ariaLabel="Network settings" style={btnStyle()} onClick={quickSettings}>
         <ShojiIcon name={networkIcon()} color={networkIcon() === "wifiOff" ? muted : onSurface} />
       </Button>
-      <Button testId="bar-bluetooth" ariaLabel="Bluetooth settings" style={compactIconButton} onClick={quickSettings}>
+      <Button testId="bar-bluetooth" ariaLabel="Bluetooth settings" style={btnStyle()} onClick={quickSettings}>
         <ShojiIcon name={bluetoothPowered() || bluetoothConnected() ? "bluetooth" : "bluetoothOff"}
           color={bluetoothConnected() ? primary : bluetoothPowered() ? onSurface : muted} />
       </Button>
-      <Button testId="bar-audio" ariaLabel="Audio settings" style={compactIconButton} onClick={quickSettings}
+      <Button testId="bar-audio" ariaLabel="Audio settings" style={btnStyle()} onClick={quickSettings}
         onWheel={event => {
           const device = sink();
           const direction = wheelDirection(event);
@@ -227,8 +276,22 @@ function SystemPill(props: { vertical: boolean; surfaceName: string; fallbackRec
       <Show when={power.data()?.battery}>
         {battery => (
           <Button testId="bar-battery" ariaLabel="Battery"
-            onClick={event => togglePanel("battery", { parentSurface: props.surfaceName, anchorRect: getWindowRect(event.currentTarget) ?? props.fallbackRect })}
-            style={{ ...center, flexDirection: props.vertical ? "column" : "row", gap: props.vertical ? "2px" : "4px", flexShrink: 0 }}>
+            onClick={event => {
+              event.stopPropagation();
+              togglePanel("battery", {
+                monitorId: props.monitorId,
+                parentSurface: props.surfaceName,
+                anchorRect: resolveBarPopupAnchor(props.layout, { align: "end", targetRect: getWindowRect(event.currentTarget) }),
+              });
+            }}
+            style={{
+              ...center,
+              flexDirection: props.vertical ? "column" : "row",
+              gap: props.vertical ? "2px" : "4px",
+              height: props.vertical ? "auto" : "32px",
+              padding: props.vertical ? "4px 0" : "0 4px",
+              flexShrink: 0,
+            }}>
             <ShojiIcon name={battery().state === "charging" || battery().state === "full" ? "batteryCharging" : "battery"}
               color={battery().state === "discharging" && (battery().percentage ?? 100) < 20
                 ? error : battery().state === "charging" ? primary : onSurface} />
@@ -248,22 +311,10 @@ function BarContent(props: {
   seconds: boolean;
 }) {
   const store = useShellStore();
-  const { activePanel, togglePanel, invokePublic } = store;
+  const { activePanel, togglePanel, dismissOverlay, invokePublic } = store;
   useShellTheme(store.theme.data);
   const vertical = createMemo(() => props.layout.isVertical);
-  const surfaceName = () => `bar-${props.monitor.id}`;
-  const fallbackRect = createMemo(() => ({
-    x: vertical() ? 6 : Math.max(0, props.layout.width - 40),
-    y: vertical() ? Math.max(0, props.layout.height - 40) : 8,
-    width: 26,
-    height: 22,
-  }));
-  const clockFallbackRect = createMemo(() => ({
-    x: Math.round((props.layout.width - 32) / 2),
-    y: Math.round((props.layout.height - 32) / 2),
-    width: 32,
-    height: 32,
-  }));
+  const surfaceName = () => formatSurfaceName("bar", props.monitor.id);
   const workspaces = createMemo(() => filterWorkspacesForMonitor(store.workspaces.data(), store.outputs.data(), props.monitor.name));
   const activeWindow = createMemo(() => findActiveWindowForMonitor(store.windows.data(), store.outputs.data(), props.monitor.name));
   const player = createMemo(() => selectActiveMediaPlayer(store.media.data()));
@@ -280,15 +331,20 @@ function BarContent(props: {
   return (
     <box testId={`bar-root-${props.monitor.id}`} data-theme-rev={String(store.theme.revision())}
       data-position={props.layout.position} data-active-panel={activePanel() ?? "none"}
+      onClick={() => dismissOverlay()}
       style={rootStyle()}>
       <box style={vertical() ? verticalGroup : group}>
         <Show when={props.launcher}>
-          <Button testId="bar-launcher" ariaLabel="Launcher" style={vertical() ? verticalCircle : horizontalCircle} onClick={() => togglePanel("launcher")}>
+          <Button testId="bar-launcher" ariaLabel="Launcher" style={vertical() ? verticalCircle : horizontalCircle}
+            onClick={event => {
+              event.stopPropagation();
+              togglePanel("launcher", { monitorId: props.monitor.id });
+            }}>
             <ShojiIcon name="shojiEmblem" size={20} color={primary} />
           </Button>
         </Show>
-        <box testId="bar-workspaces" style={vertical() ? { ...verticalPill, gap: "4px", padding: "6px 0" }
-          : { ...horizontalPill, gap: "8px", padding: "0 10px" }}
+        <box testId="bar-workspaces" style={vertical() ? { ...verticalPill, gap: "2px", padding: "6px 0" }
+          : { ...horizontalPill, gap: "2px", padding: "0 6px" }}
           onWheel={event => {
             const direction = wheelDirection(event);
             const items = workspaces();
@@ -302,23 +358,22 @@ function BarContent(props: {
             {workspace => <WorkspaceButton workspace={workspace()} vertical={vertical()} activate={() => activateWorkspace(workspace().workspace_id)} />}
           </For>
           <Divider vertical={vertical()} />
-          <Button testId="bar-overview" ariaLabel="Overview" style={iconButton} onClick={() => togglePanel("overview")}>
+          <Button testId="bar-overview" ariaLabel="Overview" style={vertical() ? verticalIconButton : iconButton}
+            onClick={event => {
+              event.stopPropagation();
+              togglePanel("overview", { monitorId: props.monitor.id });
+            }}>
             <ShojiIcon name="overview" color={muted} />
           </Button>
         </box>
         <Show when={activeWindow()}>
-          {window => (
-            <box testId="bar-active-window" ariaLabel={window().title} style={vertical() ? verticalCircle : horizontalLabelPill}>
-              <ShojiIcon name="terminal" color={primary} />
-              <Show when={!vertical()}><text testId="bar-active-window-title" style={clippedText}>{window().title ?? window().app_id}</text></Show>
-            </box>
-          )}
+          {window => <ActiveWindowPill window={window} vertical={vertical()} />}
         </Show>
       </box>
-      <ClockPill vertical={vertical()} clock={props.clock} seconds={props.seconds} surfaceName={surfaceName()} fallbackRect={clockFallbackRect()} />
+      <ClockPill vertical={vertical()} clock={props.clock} seconds={props.seconds} monitorId={props.monitor.id} surfaceName={surfaceName()} layout={props.layout} />
       <box style={{ ...(vertical() ? verticalGroup : group), justifyContent: "flex-end" }}>
         <Show when={slots().length > 0}>
-          <box testId="bar-plugin-slots" style={vertical() ? { ...verticalPill, gap: "4px", padding: "6px 0" }
+          <box testId="bar-plugin-slots" onClick={event => event.stopPropagation()} style={vertical() ? { ...verticalPill, gap: "4px", padding: "6px 0" }
             : { ...horizontalPill, gap: "6px", padding: "0 8px" }}>
             <For each={slots()}>{slot => () => slot.render({ vertical: vertical() })}</For>
           </box>
@@ -326,7 +381,14 @@ function BarContent(props: {
         <Show when={player()}>
           {active => (
             <Button testId="bar-media" ariaLabel={mediaLabel()} style={vertical() ? verticalCircle : horizontalLabelPill}
-              onClick={event => togglePanel("media", { parentSurface: surfaceName(), anchorRect: getWindowRect(event.currentTarget) ?? fallbackRect() })}
+              onClick={event => {
+                event.stopPropagation();
+                togglePanel("media", {
+                  monitorId: props.monitor.id,
+                  parentSurface: surfaceName(),
+                  anchorRect: resolveBarPopupAnchor(props.layout, { align: "target", targetRect: getWindowRect(event.currentTarget) }),
+                });
+              }}
               {...secondaryAction(() => {
                 void invokePublic("media.play-pause", { player_id: active().id });
               })}
@@ -343,20 +405,20 @@ function BarContent(props: {
         </Show>
         <Show when={(store.tray.data()?.items.length ?? 0) > 0}>
           <box testId="bar-tray" style={vertical() ? { ...verticalPill, gap: "2px", padding: "4px 0" }
-            : { ...horizontalPill, gap: "4px", padding: "0 6px" }}>
+            : { ...horizontalPill, gap: "2px", padding: "0 4px" }}>
             <For each={store.tray.data()?.items} keyed={item => item.id}>
-              {item => <TrayButton item={item()} surfaceName={surfaceName()} fallbackRect={fallbackRect()} />}
+              {item => <TrayButton item={item()} vertical={vertical()} monitorId={props.monitor.id} surfaceName={surfaceName()} layout={props.layout} />}
             </For>
           </box>
         </Show>
-        <SystemPill vertical={vertical()} surfaceName={surfaceName()} fallbackRect={fallbackRect()} />
+        <SystemPill vertical={vertical()} monitorId={props.monitor.id} surfaceName={surfaceName()} layout={props.layout} />
       </box>
     </box>
   );
 }
 
 export function StatusBar() {
-  const { monitors, settings } = useShellStore();
+  const { monitors, outputs, settings } = useShellStore();
   const barSettings = () => settings.data()?.bar ?? DEFAULT_BAR_SETTINGS;
   const [now, setNow] = createSignal(Date.now());
   const clockSeconds = () => barSettings().clock_seconds;
@@ -379,9 +441,9 @@ export function StatusBar() {
   return (
     <For each={monitors()} keyed={monitor => monitor.id}>
       {monitor => {
-        const layout = createMemo(() => resolveBarLayout(barSettings(), monitor()));
+        const layout = createMemo(() => resolveBarLayout(barSettings(), monitor(), outputs.data()));
         return (
-          <LayerSurface name={`bar-${monitor().id}`} output={monitor().id} layer="top" anchor={[...layout().anchor]}
+          <LayerSurface name={formatSurfaceName("bar", monitor().id)} output={monitor().id} layer="top" anchor={[...layout().anchor]}
             width={layout().width} height={layout().height} margin={layout().margin} exclusiveZone={layout().exclusiveZone} keyboard="none">
             <BarContent monitor={monitor()} layout={layout()} launcher={barSettings().launcher_enabled !== false} clock={clock} seconds={clockSeconds()} />
           </LayerSurface>

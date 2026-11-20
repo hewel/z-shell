@@ -97,7 +97,7 @@ export function CalendarPanel() {
   }
 
   return (
-    <scroll testId="panel-calendar" style={{ width: "100%", height: "100%", maxHeight: "calc(100vh - 2px)", overflow: "auto", backgroundColor: "var(--color-surface)", color: onSurface, fontFamily: "system-ui", fontSize: "13px" }}>
+    <scroll testId="panel-calendar" style={{ width: "100%", height: "100%", maxHeight: "calc(100vh - 2px)", overflow: "hidden auto", backgroundColor: "var(--color-surface)", color: onSurface, fontFamily: "system-ui", fontSize: "13px" }}>
       <column style={{ padding: "16px", gap: "12px", flexDirection: "column" }}>
         <row style={{ alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
           <column style={{ gap: "2px" }}>

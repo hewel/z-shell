@@ -1,7 +1,7 @@
 import { For, LayerSurface, Show, createEffect, createMemo, createSignal, createSpring, onSettled, type Accessor, type Monitor, type NativeChild } from "@hewel/zgui";
 import { ShojiIcon } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
-import type { OsdPayload, WarningFade } from "../topics.ts";
+import { formatSurfaceName, resolveMonitorLogicalSize, type OsdPayload, type WarningFade } from "../topics.ts";
 
 const primary = "var(--color-primary)";
 const onSurface = "var(--color-on-surface)";
@@ -30,7 +30,10 @@ function OsdPill({ osd }: { osd: Accessor<OsdPayload> }): NativeChild {
 
   return (
     <row role="status" ariaLabel={osd().label} style={{
-      ...capsule, width: "280px", height: "48px", padding: "0 8px", gap: "10px", alignItems: "center", opacity: opacity(),
+      ...capsule, width: "280px", height: "48px", padding: "0 8px", gap: "10px", alignItems: "center",
+      opacity: Math.max(0, Math.min(1, opacity() * 1.35)),
+      transform: `translateY(${((1 - opacity()) * 12).toFixed(2)}px) scale(${(0.94 + opacity() * 0.06).toFixed(4)})`,
+      transformOrigin: "bottom center",
     }}>
       <box style={{
         display: "flex", width: "34px", height: "34px", borderRadius: "17px", flexShrink: 0,
@@ -44,7 +47,7 @@ function OsdPill({ osd }: { osd: Accessor<OsdPayload> }): NativeChild {
             flexGrow: 1, minWidth: "0px", height: "6px", borderRadius: "3px", overflow: "hidden",
             backgroundColor: "var(--color-surface-container-highest)",
           }}>
-            <box style={{ width: `${Math.max(0, Math.min(value(), 100))}%`, height: "100%", borderRadius: "3px", backgroundColor: primary }} />
+            <box data-percent-fill="true" style={{ width: `${Math.max(0, Math.min(value(), 100))}%`, height: "100%", borderRadius: "3px", backgroundColor: primary }} />
           </box>
           <row style={{ minWidth: "44px", justifyContent: "center" }}>
             <text testId="osd-value" style={{ fontSize: "13px", fontWeight: 600 }}>{value()}%</text>
@@ -83,6 +86,7 @@ function IdleScrim({ monitorId, warning, seconds }: {
 }
 
 function IdleWarning({ warning, monitors }: { warning: Accessor<WarningFade>; monitors: Accessor<readonly Monitor[]> }): NativeChild {
+  const { outputs } = useShellStore();
   const [seconds, setSeconds] = createSignal(warning().fade_seconds);
   // Unrelated idle snapshots can repeat a token; don't restart its countdown.
   const token = createMemo(() => warning().token);
@@ -101,27 +105,32 @@ function IdleWarning({ warning, monitors }: { warning: Accessor<WarningFade>; mo
 
   return (
     <For each={monitors()} keyed={monitor => monitor.id}>
-      {monitor => (
-        <LayerSurface name={`idle-fade-${monitor().id}`} output={monitor().id} layer="overlay"
-          anchor={["top", "bottom", "left", "right"]} width={monitor().width} height={monitor().height}
-          exclusiveZone={-1} keyboard="none" inputRegion="empty">
-          <IdleScrim monitorId={monitor().id} warning={warning} seconds={seconds} />
-        </LayerSurface>
-      )}
+      {monitor => {
+        const size = createMemo(() => resolveMonitorLogicalSize(monitor(), outputs.data()));
+        return (
+          <LayerSurface name={formatSurfaceName("idle-fade", monitor().id)} output={monitor().id} layer="overlay"
+            anchor={["top", "bottom", "left", "right"]} width={size().width} height={size().height}
+            exclusiveZone={-1} keyboard="none" inputRegion="empty">
+            <IdleScrim monitorId={monitor().id} warning={warning} seconds={seconds} />
+          </LayerSurface>
+        );
+      }}
     </For>
   );
 }
 
 export function OsdOverlay(): NativeChild {
-  const { activeOsd, monitors, idle } = useShellStore();
-  const primaryMonitor = () => monitors()[0];
+  const { activeOsd, activeMonitor, monitors, idle } = useShellStore();
+  const targetMonitorId = () => activeOsd() ? activeMonitor()?.id : undefined;
   return (
     <>
-      <Show when={activeOsd() && primaryMonitor()}>
-        <LayerSurface name="osd-overlay" output={primaryMonitor()!.id} layer="overlay" anchor={["bottom"]}
-          margin={{ bottom: 88 }} width={280} height={48} keyboard="none" inputRegion="empty">
-          <OsdPill osd={() => activeOsd()!} />
-        </LayerSurface>
+      <Show when={targetMonitorId()} keyed>
+        {output => (
+          <LayerSurface name="osd-overlay" output={output} layer="overlay" anchor={["bottom"]}
+            margin={{ bottom: 88 }} width={280} height={48} keyboard="none" inputRegion="empty">
+            <OsdPill osd={() => activeOsd()!} />
+          </LayerSurface>
+        )}
       </Show>
       <Show when={idle.data()?.warning}>
         {warning => <IdleWarning warning={warning} monitors={monitors} />}

@@ -1,6 +1,7 @@
 import { Button, For, Image, LayerSurface, Show, createSignal, onCleanup, type Accessor, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShojiIcon } from "../icons.tsx";
+import { TOAST_SPRING, createEnterProgress } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import type { NotificationItem } from "../topics.ts";
 
@@ -33,10 +34,14 @@ function ToastCard({ toast, track }: { toast: Accessor<NotificationItem>; track:
     return typeof ref === "string" ? null : ref;
   }, notificationMedia);
   const attachment = useDaemonMedia(hostClient, () => toast().attachment, notificationMedia);
+  const enter = createEnterProgress(TOAST_SPRING);
 
   return (
     <column ref={trackedRef(track)} testId={`toast-card-${toast().id}`} style={{
       borderRadius: "20px", backgroundColor: container, border: outline, padding: "14px", gap: "10px", color: onSurface,
+      opacity: Math.max(0, Math.min(1, enter() * 1.35)),
+      transform: `translateX(${((1 - enter()) * 24).toFixed(2)}px) scale(${(0.96 + enter() * 0.04).toFixed(4)})`,
+      transformOrigin: "top right",
     }}>
       <row style={{ gap: "10px", alignItems: "center" }}>
         <Show when={icon.src()} fallback={
@@ -117,11 +122,10 @@ function ToastSurface({ output, popups }: { output: string; popups: Accessor<rea
 }
 
 export function NotificationToasts(): NativeChild {
-  const { monitors, notifications } = useShellStore();
-  const primaryMonitor = () => monitors()[0];
+  const { activeMonitor, notifications } = useShellStore();
   const popups = () => notifications.data()?.popups ?? [];
   return (
-    <Show when={!notifications.data()?.dnd && popups().length > 0 && primaryMonitor()?.id} keyed>
+    <Show when={!notifications.data()?.dnd && popups().length > 0 && activeMonitor()?.id} keyed>
       {output => <ToastSurface output={output} popups={popups} />}
     </Show>
   );

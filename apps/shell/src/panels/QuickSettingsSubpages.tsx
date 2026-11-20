@@ -1,6 +1,7 @@
 import { Button, For, Image, Match, Show, Switch, TextField, createEffect, createMemo, createSignal, type Accessor, type NativeChild } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShojiIcon, type ShojiIconName } from "../icons.tsx";
+import { createEnterProgress } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { resolveMonitorWallpaper, type AudioDevice, type CatalogEntry, type WallpaperFit, type WallpaperListResponse } from "../topics.ts";
 import type { QuickSettingsPage } from "./QuickSettingsPanel.tsx";
@@ -29,8 +30,8 @@ const thumbImage = { width: "108px", maxWidth: "100%", height: "68px", borderRad
 export function QuickSettingsScroll(props: { testId: string; label: string; children: NativeChild }): NativeChild {
   return (
     <scroll testId={props.testId} role="scrollView" ariaLabel={props.label} style={{ width: "100%", height: "100%", minHeight: "0px",
-      overflow: "auto", backgroundColor: "var(--color-surface)", color: onSurface, fontFamily: "system-ui", fontSize: "13px" }}>
-      <column style={{ padding: "16px", gap: "12px", flexDirection: "column" }}>{props.children}</column>
+      overflow: "hidden auto", backgroundColor: "var(--color-surface)", color: onSurface, fontFamily: "system-ui", fontSize: "13px" }}>
+      <column style={{ width: "100%", padding: "16px", gap: "12px", flexDirection: "column" }}>{props.children}</column>
     </scroll>
   );
 }
@@ -68,7 +69,7 @@ function Toggle(props: { label: string; checked: boolean; disabled?: boolean; on
       disabled={props.disabled} onClick={props.onClick} style={{ ...row, padding: "4px 8px", borderRadius: "16px",
         flexShrink: 0, minHeight: "30px", backgroundColor: container, opacity: props.disabled ? 0.45 : 1 }}>
       <text style={{ fontSize: "12px" }}>{props.label}</text>
-      <row ariaHidden style={{ width: "28px", height: "16px", borderRadius: "8px", padding: "2px", alignItems: "center",
+      <row ariaHidden data-switch-track="true" style={{ width: "28px", height: "16px", borderRadius: "8px", padding: "2px", alignItems: "center",
         justifyContent: props.checked ? "flex-end" : "flex-start", backgroundColor: props.checked ? primary : "var(--color-outline-variant)" }}>
         <box style={{ width: "12px", height: "12px", borderRadius: "6px", backgroundColor: props.checked ? "var(--color-on-primary)" : muted }} />
       </row>
@@ -86,14 +87,21 @@ function Section(props: { title: string; children: NativeChild }): NativeChild {
 }
 
 function Page(props: { page: Subpage; onBack: () => void; controls?: NativeChild; children: NativeChild }): NativeChild {
+  const enter = createEnterProgress({ stiffness: 420, damping: 32 });
   return (
     <QuickSettingsScroll testId={`qs-page-${props.page}`} label={titles[props.page]}>
-      <row style={row}>
-        <QuickSettingsIconButton testId="qs-back" label="Back" icon="arrowLeft" onClick={props.onBack} />
-        <text role="heading" style={{ ...grow, ...clipped, fontSize: "18px", fontWeight: "600" }}>{titles[props.page]}</text>
-        {props.controls}
-      </row>
-      {props.children}
+      <column style={{
+        width: "100%", gap: "12px",
+        opacity: Math.max(0, Math.min(1, enter() * 1.35)),
+        transform: `translateX(${((1 - enter()) * 16).toFixed(2)}px)`,
+      }}>
+        <row style={row}>
+          <QuickSettingsIconButton testId="qs-back" label="Back" icon="arrowLeft" onClick={props.onBack} />
+          <text role="heading" style={{ ...grow, ...clipped, fontSize: "18px", fontWeight: "600" }}>{titles[props.page]}</text>
+          {props.controls}
+        </row>
+        {props.children}
+      </column>
     </QuickSettingsScroll>
   );
 }
@@ -108,8 +116,10 @@ function WifiPassword(props: { ssid: string; onCancel: () => void; onConnect: (p
   return (
     <column style={itemCard}>
       <TextField testId="wifi-password-input" secure ariaLabel={`Password for ${props.ssid}`} placeholder="Wi-Fi password"
-        value={password()} onInput={event => setPassword(event.value)} style={{ minHeight: "34px", padding: "0 8px",
-          borderRadius: "8px", backgroundColor: "var(--color-surface)", color: onSurface }} />
+        value={password()} onInput={event => setPassword(event.value)} style={{
+          height: "34px", lineHeight: "18px", padding: "8px 10px",
+          borderRadius: "8px", backgroundColor: "var(--color-surface)", color: onSurface,
+        }} />
       <row style={{ ...row, justifyContent: "flex-end" }}>
         <Action label="Cancel" onClick={() => { setPassword(""); props.onCancel(); }} />
         <Action testId="wifi-password-connect" label="Connect" active disabled={!password()} onClick={connect} />
@@ -377,7 +387,7 @@ function WallpaperPage(props: { onBack: () => void }): NativeChild {
     return result;
   });
 
-  createEffect(() => [publicClient(), scanRevision()] as const, ([client]) => {
+  createEffect(() => [publicClient(), scanRevision(), wallpaper.data()?.available, wallpaper.data()?.catalog_count] as const, ([client]) => {
     if (!client) return;
     let live = true;
     setCatalogFailed(false);

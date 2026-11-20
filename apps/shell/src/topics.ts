@@ -148,10 +148,18 @@ export interface WaylandWindowsSnapshot {
   readonly windows: readonly WaylandWindow[];
 }
 
+export interface DesktopAppSummary {
+  readonly id: string;
+  readonly title: string;
+  readonly startup_wm_class?: string;
+  readonly icon?: MediaRef;
+}
+
 export interface DesktopAppsSnapshot {
   readonly available: boolean;
   readonly count: number;
   readonly pinned_apps: readonly string[];
+  readonly apps?: readonly DesktopAppSummary[];
 }
 
 export interface LauncherAction {
@@ -178,6 +186,7 @@ export interface LauncherQueryResponse {
 export interface DockEntry {
   readonly appId: string;
   readonly title: string;
+  readonly icon?: MediaRef;
   readonly pinned: boolean;
   readonly windows: readonly WaylandWindow[];
   readonly focused: boolean;
@@ -712,6 +721,97 @@ export interface IdleSnapshot {
 export const TOP_BAR_HEIGHT = 48;
 export const VERTICAL_BAR_WIDTH = 52;
 
+const MAX_SURFACE_NAME_LEN = 128;
+
+/**
+ * Formats a shell surface identifier (`LayerSurface`, `PopupSurface`, `SessionLockSurface`)
+ * to match zgui-js's lowercase `[a-z0-9][a-z0-9._-]{0,127}` and non-`"main"` contract while
+ * keeping raw Wayland output names intact for the `output` prop.
+ */
+export function formatSurfaceName(prefix: string, id: string): string {
+  const cleanPrefix = prefix
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[^a-z0-9]+|-+$/g, "");
+  const cleanId = id
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const combined = `${cleanPrefix || "surface"}-${cleanId || "default"}`.slice(0, MAX_SURFACE_NAME_LEN);
+  return combined === "main" ? "surface-main" : combined;
+}
+
+export interface LogicalSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * Resolves a monitor's logical Wayland pixel size for `LayerSurface` geometry.
+ * Prefers `wayland.outputs` (`xdg_output` logical size, accurate under fractional scaling)
+ * and falls back to the host `Monitor` dimensions when `wayland.outputs` is unavailable.
+ */
+export function resolveMonitorLogicalSize(
+  monitor: Pick<Monitor, "width" | "height"> & {
+    readonly name?: string;
+    readonly id?: string;
+    readonly logicalWidth?: number;
+    readonly logicalHeight?: number;
+  },
+  outputs?: WaylandOutputsSnapshot,
+): LogicalSize {
+  const matched = outputs?.outputs.find(
+    output => output.name !== null
+      && (output.name === monitor.name || output.name === monitor.id)
+      && output.width !== null && output.width > 0
+      && output.height !== null && output.height > 0,
+  );
+  if (matched && matched.width !== null && matched.height !== null) {
+    return { width: matched.width, height: matched.height };
+  }
+  if (
+    monitor.logicalWidth !== undefined && monitor.logicalWidth > 0
+    && monitor.logicalHeight !== undefined && monitor.logicalHeight > 0
+  ) {
+    return { width: monitor.logicalWidth, height: monitor.logicalHeight };
+  }
+  return { width: monitor.width, height: monitor.height };
+}
+
+export function resolveActiveMonitor(
+  monitors: readonly Monitor[],
+  options: {
+    readonly preferredMonitorId?: string | null;
+    readonly windows?: WaylandWindowsSnapshot;
+    readonly outputs?: WaylandOutputsSnapshot;
+    readonly lastMonitorId?: string | null;
+  } = {},
+): Monitor | undefined {
+  if (monitors.length === 0) return undefined;
+  if (options.preferredMonitorId) {
+    const preferred = monitors.find(monitor => monitor.id === options.preferredMonitorId);
+    if (preferred) return preferred;
+  }
+  const activated = options.windows?.windows.find(window => window.activated);
+  if (activated && options.outputs) {
+    for (const outputInstanceId of activated.output_instance_ids) {
+      const output = options.outputs.outputs.find(
+        candidate => candidate.output_instance_id === outputInstanceId,
+      );
+      if (!output?.name) continue;
+      const matched = monitors.find(
+        monitor => monitor.name === output.name || monitor.id === output.name,
+      );
+      if (matched) return matched;
+    }
+  }
+  if (options.lastMonitorId) {
+    const remembered = monitors.find(monitor => monitor.id === options.lastMonitorId);
+    if (remembered) return remembered;
+  }
+  return monitors[0];
+}
+
 export interface ResolvedBarLayout {
   readonly position: BarPosition;
   readonly isVertical: boolean;
@@ -729,10 +829,17 @@ export interface ResolvedBarLayout {
 
 export function resolveBarLayout(
   bar: BarSettings | undefined,
-  monitor: Pick<Monitor, "width" | "height">,
+  monitor: Pick<Monitor, "width" | "height"> & {
+    readonly name?: string;
+    readonly id?: string;
+    readonly logicalWidth?: number;
+    readonly logicalHeight?: number;
+  },
+  outputs?: WaylandOutputsSnapshot,
 ): ResolvedBarLayout {
   const settings = bar ?? DEFAULT_BAR_SETTINGS;
   const { edge_overrides: edges, gaps } = settings;
+  const size = resolveMonitorLogicalSize(monitor, outputs);
 
   if (settings.position === "top") {
     const margin = {
@@ -746,7 +853,7 @@ export function resolveBarLayout(
       isVertical: false,
       anchor: ["top", "left", "right"],
       margin,
-      width: Math.max(240, monitor.width - margin.left - margin.right),
+      width: Math.max(240, size.width - margin.left - margin.right),
       height: TOP_BAR_HEIGHT,
       exclusiveZone: TOP_BAR_HEIGHT + margin.top,
     };
@@ -765,7 +872,7 @@ export function resolveBarLayout(
       anchor: ["left", "top", "bottom"],
       margin,
       width: VERTICAL_BAR_WIDTH,
-      height: Math.max(240, monitor.height - margin.top - margin.bottom),
+      height: Math.max(240, size.height - margin.top - margin.bottom),
       exclusiveZone: VERTICAL_BAR_WIDTH + margin.left,
     };
   }
@@ -782,7 +889,7 @@ export function resolveBarLayout(
     anchor: ["right", "top", "bottom"],
     margin,
     width: VERTICAL_BAR_WIDTH,
-    height: Math.max(240, monitor.height - margin.top - margin.bottom),
+    height: Math.max(240, size.height - margin.top - margin.bottom),
     exclusiveZone: VERTICAL_BAR_WIDTH + margin.right,
   };
 }
@@ -854,38 +961,193 @@ export function selectActiveMediaPlayer(media: DesktopMediaSnapshot | undefined)
     ?? null;
 }
 
+export interface BarAnchorBox {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * Aligns a bar popup anchor to the bar's outer cross-axis extent so `PopupSurface`
+ * offsets create a clean gap outside the bar instead of overlapping inner pills.
+ */
+export function resolveBarPopupAnchor(
+  layout: Pick<ResolvedBarLayout, "isVertical" | "width" | "height">,
+  options: {
+    readonly align: "center" | "end" | "target";
+    readonly targetRect?: BarAnchorBox | null;
+  },
+): BarAnchorBox {
+  const { align, targetRect } = options;
+  if (layout.isVertical) {
+    if (align === "center") {
+      return {
+        x: 0,
+        y: targetRect ? targetRect.y : Math.max(0, Math.round(layout.height / 2) - 16),
+        width: layout.width,
+        height: targetRect ? Math.max(1, targetRect.height) : 32,
+      };
+    }
+    if (align === "target" && targetRect) {
+      return {
+        x: 0,
+        y: targetRect.y,
+        width: layout.width,
+        height: Math.max(1, targetRect.height),
+      };
+    }
+    return {
+      x: 0,
+      y: targetRect ? targetRect.y : Math.max(0, layout.height - 1),
+      width: layout.width,
+      height: targetRect ? Math.max(1, targetRect.height) : 1,
+    };
+  }
+
+  if (align === "end") {
+    return {
+      x: Math.max(0, layout.width - 1),
+      y: 0,
+      width: 1,
+      height: layout.height,
+    };
+  }
+  if (align === "center") {
+    return {
+      x: targetRect ? targetRect.x : Math.max(0, Math.round(layout.width / 2) - 1),
+      y: 0,
+      width: targetRect ? Math.max(1, targetRect.width) : 2,
+      height: layout.height,
+    };
+  }
+  if (targetRect) {
+    return {
+      x: targetRect.x,
+      y: 0,
+      width: Math.max(1, targetRect.width),
+      height: layout.height,
+    };
+  }
+  return {
+    x: Math.max(0, layout.width - 1),
+    y: 0,
+    width: 1,
+    height: layout.height,
+  };
+}
+
+export function hasWindowsOnMonitor(
+  windowsSnapshot: WaylandWindowsSnapshot | undefined,
+  outputsSnapshot: WaylandOutputsSnapshot | undefined,
+  monitorName: string,
+): boolean {
+  const openWindows = windowsSnapshot?.windows.filter(window => !window.minimized) ?? [];
+  if (openWindows.length === 0) {
+    return false;
+  }
+  const output = outputsSnapshot?.outputs.find(candidate => candidate.name === monitorName);
+  if (!output) {
+    return true;
+  }
+  return openWindows.some(window =>
+    window.output_instance_ids.length === 0
+    || window.output_instance_ids.includes(output.output_instance_id),
+  );
+}
+
 function normalizeDockAppId(appId: string): string {
-  const normalized = appId.toLowerCase();
+  const normalized = appId.trim().toLowerCase();
   return normalized.endsWith(".desktop") ? normalized.slice(0, -".desktop".length) : normalized;
+}
+
+function tailSegment(id: string): string {
+  const dot = id.lastIndexOf(".");
+  return dot >= 0 ? id.slice(dot + 1) : id;
+}
+
+export function resolveDesktopApp(
+  catalog: readonly DesktopAppSummary[] | undefined,
+  appId: string | null | undefined,
+): DesktopAppSummary | undefined {
+  if (!catalog || catalog.length === 0 || !appId) {
+    return undefined;
+  }
+  const trimmed = appId.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  const withDesktop = trimmed.toLowerCase().endsWith(".desktop") ? trimmed : `${trimmed}.desktop`;
+  const exact = catalog.find(entry => entry.id === trimmed || entry.id === withDesktop);
+  if (exact) {
+    return exact;
+  }
+
+  const normalized = normalizeDockAppId(trimmed);
+  const byId = catalog.find(entry => normalizeDockAppId(entry.id) === normalized);
+  if (byId) {
+    return byId;
+  }
+
+  const byWmClass = catalog.find(entry =>
+    entry.startup_wm_class !== undefined
+    && normalizeDockAppId(entry.startup_wm_class) === normalized,
+  );
+  if (byWmClass) {
+    return byWmClass;
+  }
+
+  const targetTail = tailSegment(normalized);
+  if (targetTail.length < 2) {
+    return undefined;
+  }
+  return catalog.find(entry => {
+    const entryTail = tailSegment(normalizeDockAppId(entry.id));
+    if (entryTail === targetTail) {
+      return true;
+    }
+    return entry.startup_wm_class !== undefined
+      && tailSegment(normalizeDockAppId(entry.startup_wm_class)) === targetTail;
+  });
 }
 
 export function buildDockItems(
   pinnedApps: readonly string[],
   windows: readonly WaylandWindow[],
+  catalog?: readonly DesktopAppSummary[],
 ): {
   readonly pinned: readonly DockEntry[];
   readonly runningOnly: readonly DockEntry[];
 } {
-  const groups = new Map<string, { appId: string; windows: WaylandWindow[] }>();
+  const canonicalKey = (appId: string): string => {
+    const resolved = resolveDesktopApp(catalog, appId);
+    return normalizeDockAppId(resolved?.id ?? appId);
+  };
+
+  const groups = new Map<string, { appId: string; app?: DesktopAppSummary; windows: WaylandWindow[] }>();
   for (const window of windows) {
     if (window.app_id === null) {
       continue;
     }
-    const key = normalizeDockAppId(window.app_id);
+    const resolved = resolveDesktopApp(catalog, window.app_id);
+    const key = normalizeDockAppId(resolved?.id ?? window.app_id);
     const group = groups.get(key);
     if (group) {
       group.windows.push(window);
+      if (!group.app && resolved) group.app = resolved;
     } else {
-      groups.set(key, { appId: window.app_id, windows: [window] });
+      groups.set(key, { appId: window.app_id, app: resolved, windows: [window] });
     }
   }
 
-  const pinnedKeys = new Set(pinnedApps.map(normalizeDockAppId));
+  const pinnedKeys = new Set(pinnedApps.map(canonicalKey));
   const pinned = pinnedApps.map(appId => {
-    const appWindows = groups.get(normalizeDockAppId(appId))?.windows ?? [];
+    const resolved = resolveDesktopApp(catalog, appId);
+    const appWindows = groups.get(canonicalKey(appId))?.windows ?? [];
     return {
       appId,
-      title: appId,
+      title: resolved?.title ?? appId,
+      ...(resolved?.icon ? { icon: resolved.icon } : {}),
       pinned: true,
       windows: appWindows,
       focused: appWindows.some(window => window.activated),
@@ -898,7 +1160,8 @@ export function buildDockItems(
     }
     runningOnly.push({
       appId: group.appId,
-      title: group.windows[0]?.title ?? group.appId,
+      title: group.app?.title ?? group.windows[0]?.title ?? group.appId,
+      ...(group.app?.icon ? { icon: group.app.icon } : {}),
       pinned: false,
       windows: group.windows,
       focused: group.windows.some(window => window.activated),

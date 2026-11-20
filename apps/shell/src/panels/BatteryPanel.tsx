@@ -12,6 +12,7 @@ const containerHigh = "var(--color-surface-container-high)";
 const card = { borderRadius: "20px", backgroundColor: container, padding: "12px", gap: "10px" } as const;
 const metric = { flexBasis: "0px", flexGrow: 1, minWidth: "0px", borderRadius: "12px", padding: "8px", gap: "2px" } as const;
 const pill = { display: "flex", borderRadius: "16px", minHeight: "32px", padding: "0 10px", alignItems: "center", justifyContent: "center" } as const;
+const hiddenSection = { display: "none" } as const;
 const defaultProfiles = ["power-saver", "balanced", "performance"] as const;
 const profileLabels: Readonly<Record<string, string>> = { "power-saver": "Power Saver", balanced: "Balanced", performance: "Performance" };
 const batteryLabels: Readonly<Record<BatteryState, string>> = {
@@ -35,7 +36,7 @@ function TelemetryCard(props: { icon: ShojiIconName; label: string; value: strin
         <text style={{ color: muted, fontSize: "11px" }}>{props.label}</text>
       </row>
       <text style={{ fontSize: "16px", fontWeight: 600 }}>{props.value}</text>
-      <Show when={props.detail}>
+      <Show when={props.detail} fallback={<box style={hiddenSection} />}>
         <text style={{ color: muted, fontSize: "10px" }}>{props.detail}</text>
       </Show>
     </column>
@@ -79,7 +80,7 @@ export function BatteryPanel() {
   const watts = () => battery()?.energy_rate_watts?.toFixed(1);
 
   return (
-    <scroll testId="panel-battery" style={{ width: "100%", height: "100%", maxHeight: "calc(100vh - 2px)", overflow: "auto", backgroundColor: "var(--color-surface)", color: onSurface, fontFamily: "system-ui", fontSize: "13px" }}>
+    <scroll testId="panel-battery" style={{ width: "100%", height: "100%", maxHeight: "calc(100vh - 2px)", overflow: "hidden auto", backgroundColor: "var(--color-surface)", color: onSurface, fontFamily: "system-ui", fontSize: "13px" }}>
       <column style={{ padding: "16px", gap: "12px", flexDirection: "column" }}>
         <column style={{ ...card, padding: "14px" }}>
           <row style={{ alignItems: "center", gap: "8px" }}>

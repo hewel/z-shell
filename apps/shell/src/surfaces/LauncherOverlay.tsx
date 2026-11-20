@@ -1,7 +1,8 @@
 import { Button, For, Image, LayerSurface, Show, TextField, createEffect, createSignal, flush, focus, onCleanup, type Accessor, type NativeChild, type NativeKeyEvent } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
+import { DIALOG_SPRING, createEnterProgress, dialogMotionStyle } from "../motion.ts";
 import { useShellStore } from "../store.ts";
-import type { LauncherItem, LauncherQueryResponse } from "../topics.ts";
+import { resolveActiveMonitor, resolveMonitorLogicalSize, type LauncherItem, type LauncherQueryResponse } from "../topics.ts";
 
 const columns = 6;
 const iconTile = { width: "44px", height: "44px", flexShrink: 0, borderRadius: "12px" } as const;
@@ -101,22 +102,27 @@ function LauncherContent(props: { allocateQueryId: () => number }): NativeChild 
     flush(() => setSelectedIndex(index => Math.max(0, Math.min(index + delta, items().length - 1))));
   }
 
+  const enter = createEnterProgress(DIALOG_SPRING);
+
   return (
     <box testId="launcher-backdrop" onClick={dismiss} style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
-      display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "rgba(11, 13, 18, 0.45)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      backgroundColor: `rgba(11, 13, 18, ${(0.45 * Math.max(0, Math.min(1, enter()))).toFixed(3)})`,
     }}>
       <box testId="launcher-card" role="dialog" ariaLabel="Launcher" ariaModal onClick={event => event.stopPropagation()} style={{
         display: "flex", flexDirection: "column", width: "652px", height: "410px", borderRadius: "24px",
         backgroundColor: "var(--color-surface)", border: "1px solid var(--color-outline-variant)",
         padding: "18px", gap: "14px", fontFamily: "system-ui",
+        ...dialogMotionStyle(enter()),
       }}>
         <TextField testId="launcher-search" placeholder="Search apps" value={query()} onInput={event => setQuery(event.value)}
           onKeyDown={handleKeyDown} ref={node => focus(node)} style={{
-            width: "100%", height: "44px", borderRadius: "22px", paddingLeft: "18px", paddingRight: "18px", flexShrink: 0,
+            width: "100%", height: "44px", borderRadius: "22px",
+            padding: "12px 18px", lineHeight: "20px", flexShrink: 0,
             backgroundColor: "var(--color-surface-container-high)", color: "var(--color-on-surface)", fontSize: "14px",
           }} />
-        <scroll style={{ flexGrow: 1, width: "100%" }}>
+        <scroll style={{ flexGrow: 1, width: "100%", overflow: "hidden auto" }}>
           <row style={{ width: "100%", flexWrap: "wrap", gap: "6px", justifyContent: "flex-start" }}>
             <For each={items()} keyed={item => item}>
               {(item, index) => <LauncherTile item={item()} selected={index() === selectedIndex()} activate={activateItem} />}
@@ -129,21 +135,36 @@ function LauncherContent(props: { allocateQueryId: () => number }): NativeChild 
 }
 
 export function LauncherOverlay(): NativeChild {
-  const { activePanel, monitors } = useShellStore();
-  const primaryMonitor = () => monitors()[0];
+  const { activePanel, activePanelTarget, activeMonitor, monitors, outputs, windows } = useShellStore();
+  const targetMonitor = () => {
+    if (activePanel() !== "launcher") return undefined;
+    return resolveActiveMonitor(monitors(), {
+      preferredMonitorId: activePanelTarget()?.monitorId,
+      windows: windows.data(),
+      outputs: outputs.data(),
+      lastMonitorId: activeMonitor()?.id,
+    });
+  };
   // IDs must keep increasing on the same bus connection, including after reopening the overlay.
   let nextQueryId = 1;
   const allocateQueryId = () => nextQueryId++;
 
   return (
-    <Show when={activePanel() === "launcher" && primaryMonitor()}>
-      {monitor => (
-        <LayerSurface name="launcher-overlay" output={monitor().id} layer="overlay"
-          anchor={["top", "bottom", "left", "right"]} width={monitor().width} height={monitor().height}
-          exclusiveZone={-1} keyboard="exclusive">
-          <LauncherContent allocateQueryId={allocateQueryId} />
-        </LayerSurface>
-      )}
+    <Show when={targetMonitor()?.id} keyed>
+      {output => {
+        const monitor = () => monitors().find(candidate => candidate.id === output);
+        const size = () => {
+          const current = monitor();
+          return current ? resolveMonitorLogicalSize(current, outputs.data()) : { width: 1280, height: 720 };
+        };
+        return (
+          <LayerSurface name="launcher-overlay" output={output} layer="overlay"
+            anchor={["top", "bottom", "left", "right"]} width={size().width} height={size().height}
+            exclusiveZone={-1} keyboard="exclusive">
+            <LauncherContent allocateQueryId={allocateQueryId} />
+          </LayerSurface>
+        );
+      }}
     </Show>
   );
 }

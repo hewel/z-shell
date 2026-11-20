@@ -1,4 +1,5 @@
 import { createEffect, getSessionGeneration, mountShellStylesheet, onCleanup, type Accessor } from "@hewel/zgui";
+import { SHELL_MOTION_CSS } from "./motion.ts";
 
 export const SHOJI_DEFAULT_SCHEME = Object.freeze({
   surface: "#111318",
@@ -62,13 +63,14 @@ const sessionThemes = new Map<number, {
   snapshot?: ThemeTopicSnapshot;
   css?: string;
   dispose?: () => void;
+  disposeMotion?: () => void;
 }>();
 
 export function useShellTheme(theme: Accessor<ThemeTopicSnapshot | undefined>): void {
   const generation = getSessionGeneration();
   let session = sessionThemes.get(generation);
   if (session === undefined) {
-    session = { users: 0 };
+    session = { users: 0, disposeMotion: mountShellStylesheet("z-shell-motion", SHELL_MOTION_CSS) };
     sessionThemes.set(generation, session);
   }
   const registration = session;
@@ -79,6 +81,7 @@ export function useShellTheme(theme: Accessor<ThemeTopicSnapshot | undefined>): 
     if (--registration.users !== 0) return;
     sessionThemes.delete(generation);
     registration.dispose?.();
+    registration.disposeMotion?.();
   });
   createEffect(theme, snapshot => {
     if (registration.css !== undefined && registration.snapshot === snapshot) return;

@@ -7,7 +7,7 @@ import { Input as TextField } from "@hewel/zgui/components";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShojiIcon } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
-import { formatBarClock, formatFullDate, resolveMonitorWallpaper, selectActiveMediaPlayer, type UnlockApproval } from "../topics.ts";
+import { formatBarClock, formatFullDate, formatSurfaceName, resolveMonitorWallpaper, selectActiveMediaPlayer, type UnlockApproval } from "../topics.ts";
 
 type LockScope = { readonly lockId: number; readonly daemonId: string | undefined };
 type ActiveLock = LockScope & { readonly request: SessionLockRequest; confirmed: boolean };
@@ -147,10 +147,10 @@ function LockScreen(props: {
 }
 
 function LockSurfaces(props: { readonly controls: LockControls }): NativeChild {
-  const { monitors, hostClient, user } = useShellStore();
+  const { activeMonitor, monitors, hostClient, user } = useShellStore();
   const avatar = useDaemonMedia(hostClient, () => user.data()?.avatar, { fetchCommand: "user.fetch-blob" });
-  // Monitor has no primary flag; the shell uses the first output as primary.
-  const primaryId = () => monitors()[0]?.id;
+  // Monitor has no primary flag; focus the active output, falling back to the first output.
+  const primaryId = () => activeMonitor()?.id ?? monitors()[0]?.id;
   const [now, setNow] = createSignal(Date.now());
   const clock = createMemo(() => {
     const time = now();
@@ -166,7 +166,7 @@ function LockSurfaces(props: { readonly controls: LockControls }): NativeChild {
   onCleanup(() => clearTimeout(timer));
 
   return <For each={monitors()} keyed={monitor => monitor.id}>{monitor => (
-    <SessionLockSurface name={`lock-${monitor().id}`} output={monitor().id}>
+    <SessionLockSurface name={formatSurfaceName("lock", monitor().id)} output={monitor().id}>
       <LockScreen monitor={monitor} primary={() => monitor().id === primaryId()} clock={clock} avatar={avatar.src} controls={props.controls} />
     </SessionLockSurface>
   )}</For>;

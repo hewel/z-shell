@@ -1,6 +1,8 @@
 import { PopupSurface, Show, createMemo, type NativeChild, type PopupSurfacePlacement } from "@hewel/zgui";
+import { createEnterProgress, panelMotionStyle } from "../motion.ts";
 import { useShellStore, type PanelId, type ShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
+import type { BarPosition } from "../topics.ts";
 import { BatteryPanel } from "./BatteryPanel.tsx";
 import { CalendarPanel } from "./CalendarPanel.tsx";
 import { ClipboardPanel } from "./ClipboardPanel.tsx";
@@ -15,8 +17,15 @@ const panels = {
   clipboard: { width: 560, height: 518, Component: ClipboardPanel },
 };
 
-function PanelContent(props: { id: PanelId; theme: ShellStore["theme"]; children: NativeChild }) {
+function PanelContent(props: {
+  id: PanelId;
+  position: BarPosition;
+  centered: boolean;
+  theme: ShellStore["theme"];
+  children: NativeChild;
+}) {
   useShellTheme(props.theme.data);
+  const progress = createEnterProgress();
   return (
     <box testId={`panel-root-${props.id}`} data-theme-rev={String(props.theme.revision())} style={{
       // Resolve percentages against the popup viewport, not the content-sized native root.
@@ -30,6 +39,7 @@ function PanelContent(props: { id: PanelId; theme: ShellStore["theme"]; children
       border: "1px solid var(--color-outline-variant)",
       overflow: "hidden",
       fontFamily: "system-ui",
+      ...panelMotionStyle(progress(), props.position, props.centered),
     }}>
       {props.children}
     </box>
@@ -61,10 +71,11 @@ export function ShellPanels(): NativeChild {
               };
           }
         });
+        const position = (): BarPosition => settings.data()?.bar.position ?? "top";
         return (
           <PopupSurface name={`panel-${target.id}`} parent={target.parentSurface} anchorRect={target.anchorRect}
             width={width} height={height} placement={geometry().placement} offset={geometry().offset} grab onDismiss={closePanels}>
-            <PanelContent id={target.id} theme={theme}><Component /></PanelContent>
+            <PanelContent id={target.id} position={position()} centered={centered} theme={theme}><Component /></PanelContent>
           </PopupSurface>
         );
       }}

@@ -1,7 +1,8 @@
 import { Button, LayerSurface, Show, createMemo, focus, registerDismissLayer, type Accessor, type NativeChild } from "@hewel/zgui";
 import { ShojiIcon } from "../icons.tsx";
+import { DIALOG_SPRING, createEnterProgress, dialogMotionStyle } from "../motion.ts";
 import { useShellStore } from "../store.ts";
-import { POWER_DIALOG_COPY, type PowerConfirmAction } from "../topics.ts";
+import { POWER_DIALOG_COPY, resolveMonitorLogicalSize, type PowerConfirmAction } from "../topics.ts";
 
 const footerButton = {
   display: "flex", alignItems: "center", justifyContent: "center",
@@ -23,10 +24,13 @@ function PowerDialogContent(props: { action: Accessor<PowerConfirmAction> }): Na
     closePowerDialog();
   }
 
+  const enter = createEnterProgress(DIALOG_SPRING);
+
   return (
     <box testId="power-dialog-backdrop" onClick={closePowerDialog} style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
-      display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "rgba(11, 13, 18, 0.55)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      backgroundColor: `rgba(11, 13, 18, ${(0.55 * Math.max(0, Math.min(1, enter()))).toFixed(3)})`,
     }}>
       <box testId="power-dialog-card" role="dialog" ariaLabel={copy().title} ariaModal
         ref={node => { registerDismissLayer(node, closePowerDialog, { layer: "modal", dismissOnOutsidePress: false }); }}
@@ -34,6 +38,7 @@ function PowerDialogContent(props: { action: Accessor<PowerConfirmAction> }): Na
           display: "flex", flexDirection: "column", alignItems: "center", width: "340px", borderRadius: "24px",
           backgroundColor: "var(--color-surface)", border: "1px solid var(--color-outline-variant)",
           padding: "24px", gap: "14px", fontFamily: "system-ui", color: "var(--color-on-surface)",
+          ...dialogMotionStyle(enter()),
         }}>
         <box style={{
           display: "flex", alignItems: "center", justifyContent: "center", width: "56px", height: "56px", borderRadius: "28px",
@@ -61,21 +66,30 @@ function PowerDialogContent(props: { action: Accessor<PowerConfirmAction> }): Na
 }
 
 export function PowerDialog(): NativeChild {
-  const { monitors, pendingPowerAction, sessionLock } = useShellStore();
+  const { monitors, outputs, pendingPowerAction, powerDialogMonitor, sessionLock } = useShellStore();
+  const targetMonitorId = () => (sessionLock.data()?.phase ?? "unlocked") === "unlocked" && pendingPowerAction()
+    ? powerDialogMonitor()?.id
+    : undefined;
 
   return (
-    <Show when={(sessionLock.data()?.phase ?? "unlocked") === "unlocked" && monitors()[0]}>
-      {primaryMonitor => (
-        <Show when={pendingPowerAction()}>
-          {action => (
-            <LayerSurface name="power-dialog" output={primaryMonitor().id} layer="overlay"
-              anchor={["top", "bottom", "left", "right"]} width={primaryMonitor().width} height={primaryMonitor().height}
-              exclusiveZone={-1} keyboard="exclusive">
-              <PowerDialogContent action={action} />
-            </LayerSurface>
-          )}
-        </Show>
-      )}
+    <Show when={targetMonitorId()} keyed>
+      {output => {
+        const size = createMemo(() => {
+          const monitor = monitors().find(candidate => candidate.id === output);
+          return monitor ? resolveMonitorLogicalSize(monitor, outputs.data()) : { width: 1280, height: 720 };
+        });
+        return (
+          <Show when={pendingPowerAction()}>
+            {action => (
+              <LayerSurface name="power-dialog" output={output} layer="overlay"
+                anchor={["top", "bottom", "left", "right"]} width={size().width} height={size().height}
+                exclusiveZone={-1} keyboard="exclusive">
+                <PowerDialogContent action={action} />
+              </LayerSurface>
+            )}
+          </Show>
+        );
+      }}
     </Show>
   );
 }

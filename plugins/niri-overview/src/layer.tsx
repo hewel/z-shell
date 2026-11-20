@@ -116,6 +116,11 @@ function OverviewCard(props: {
   );
 }
 
+function formatOverviewSurfaceName(id: string): string {
+  const normalized = id.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  return `niri-overview-${normalized || "default"}`.slice(0, 128);
+}
+
 export default function NiriOverviewLayer(props: { readonly client: Accessor<ZShellClient | undefined> }): NativeChild {
   const { data: snapshot } = useTopic<NiriOverviewSnapshot>(props.client, "plugin.z-shell.niri-overview.state");
   const monitors = useMonitors();
@@ -123,13 +128,26 @@ export default function NiriOverviewLayer(props: { readonly client: Accessor<ZSh
   return (
     <Show when={snapshot()?.open === true}>
       <For each={monitors()} keyed={m => m.id}>
-        {monitor => (
-          <LayerSurface name={`niri-overview-${monitor().id}`} output={monitor().id} layer="overlay"
-            anchor={["top", "bottom", "left", "right"]} width={monitor().width} height={monitor().height}
-            exclusiveZone={-1} keyboard="exclusive">
-            <OverviewCard monitor={monitor()} snapshot={snapshot} client={props.client} />
-          </LayerSurface>
-        )}
+        {monitor => {
+          const size = createMemo(() => {
+            const current = monitor();
+            const logical = snapshot()?.outputs.find(output => output.name === current.name || output.name === current.id);
+            if (logical && logical.width > 0 && logical.height > 0) {
+              return { width: logical.width, height: logical.height };
+            }
+            if (current.logicalWidth > 0 && current.logicalHeight > 0) {
+              return { width: current.logicalWidth, height: current.logicalHeight };
+            }
+            return { width: current.width, height: current.height };
+          });
+          return (
+            <LayerSurface name={formatOverviewSurfaceName(monitor().id)} output={monitor().id} layer="overlay"
+              anchor={["top", "bottom", "left", "right"]} width={size().width} height={size().height}
+              exclusiveZone={-1} keyboard="exclusive">
+              <OverviewCard monitor={monitor()} snapshot={snapshot} client={props.client} />
+            </LayerSurface>
+          );
+        }}
       </For>
     </Show>
   );

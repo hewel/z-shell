@@ -3,7 +3,7 @@ import type { MediaRef } from "@z-shell/sdk";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { useShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
-import { resolveMonitorWallpaper, type ActiveWallpaper } from "../topics.ts";
+import { formatSurfaceName, resolveMonitorLogicalSize, resolveMonitorWallpaper, type ActiveWallpaper } from "../topics.ts";
 
 type WallpaperRequest = { readonly wallpaper: ActiveWallpaper };
 type WallpaperSource = { readonly request: WallpaperRequest; readonly src: string };
@@ -91,18 +91,19 @@ function WallpaperContent(props: { readonly monitor: Accessor<Monitor>; readonly
 }
 
 function MonitorWallpaper(props: { readonly monitor: Accessor<Monitor> }): NativeChild {
-  const { wallpaper } = useShellStore();
+  const { outputs, wallpaper } = useShellStore();
   const { monitor } = props;
   const active = () => resolveMonitorWallpaper(wallpaper.data(), monitor().name);
+  const size = createMemo(() => resolveMonitorLogicalSize(monitor(), outputs.data()));
   return (
     <Show when={active()}>
       <LayerSurface
-        name={`wallpaper-${monitor().id}`}
+        name={formatSurfaceName("wallpaper", monitor().id)}
         output={monitor().id}
         layer="background"
         anchor={["top", "bottom", "left", "right"]}
-        width={monitor().width}
-        height={monitor().height}
+        width={size().width}
+        height={size().height}
         exclusiveZone={-1}
         keyboard="none"
         inputRegion="empty"
