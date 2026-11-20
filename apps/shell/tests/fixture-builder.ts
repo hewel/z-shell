@@ -1,7 +1,48 @@
 import { deflateSync } from "node:zlib";
 
-import { DEFAULT_BAR_SETTINGS } from "../src/topics.ts";
-import { SHOJI_DEFAULT_SCHEME, type ThemeTopicSnapshot } from "../src/theme.ts";
+const DEFAULT_FIXTURE_SCHEME = Object.freeze({
+  surface: "#111318",
+  surface_dim: "#111318",
+  surface_bright: "#37393E",
+  surface_container_lowest: "#0C0E13",
+  surface_container_low: "#191C20",
+  surface_container: "#1D2024",
+  surface_container_high: "#272A2F",
+  surface_container_highest: "#32353A",
+  on_surface: "#E2E2E9",
+  on_surface_variant: "#C3C6CF",
+  inverse_surface: "#E2E2E9",
+  inverse_on_surface: "#2E3036",
+  outline: "#8D9199",
+  outline_variant: "#43474E",
+  scrim: "#000000",
+  primary: "#A6C8FF",
+  on_primary: "#08305F",
+  primary_container: "#254777",
+  on_primary_container: "#D4E3FF",
+  secondary: "#BCC7DC",
+  on_secondary: "#263141",
+  secondary_container: "#3C4759",
+  on_secondary_container: "#D6E3F8",
+  tertiary: "#D8BDE4",
+  on_tertiary: "#3C2947",
+  tertiary_container: "#533F5F",
+  on_tertiary_container: "#F5D9FF",
+  error: "#FFB4AB",
+  on_error: "#690005",
+  error_container: "#93000A",
+  on_error_container: "#FFDAD6",
+});
+
+const DEFAULT_FIXTURE_BAR_SETTINGS = {
+  position: "top",
+  gaps: 14,
+  edge_overrides: { top: null, right: null, bottom: null, left: null },
+  launcher_enabled: true,
+  dock_enabled: true,
+  clock_24h: true,
+  clock_seconds: false,
+} as const;
 
 export const SHELL_TOPIC_ORDER = [
   "theme",
@@ -69,9 +110,9 @@ export interface ShellPreviewFixtureOptions {
 
 const DAEMON_INSTANCE_ID = "preview-daemon";
 
-export function makeSampleThemeSnapshot(primaryHex = "#7CD4FF"): ThemeTopicSnapshot {
+export function makeSampleThemeSnapshot(primaryHex = "#7CD4FF") {
   return {
-    scheme: { ...SHOJI_DEFAULT_SCHEME, primary: primaryHex },
+    scheme: { ...DEFAULT_FIXTURE_SCHEME, primary: primaryHex },
     dark: true,
     variant: "tonal",
     backend: "builtin",
@@ -84,7 +125,7 @@ function defaultTopicSnapshots(): Record<ShellTopic, unknown> {
     theme: makeSampleThemeSnapshot(),
     settings: {
       general: { offline_mode: false, log_level: "info" },
-      bar: DEFAULT_BAR_SETTINGS,
+      bar: DEFAULT_FIXTURE_BAR_SETTINGS,
       theme: {
         mode: "dark",
         variant: "tonal",

@@ -220,7 +220,11 @@ export function createNiriOverviewPlugin(
       title: "Niri Overview",
       version: "0.1.0",
       pluginApi: 1,
-      entries: [{ name: "service", kind: "service", title: "Niri Overview Coordinator" }],
+      entries: [
+        { name: "service", kind: "service", title: "Niri Overview Coordinator" },
+        { name: "overview", kind: "layer", title: "Niri Workspace Overview" },
+      ],
+      hostCapabilities: { shellSurfaces: true, controlChannel: true, namedSockets: ["niri"] },
       defaults: { zoom_scale: 0.5, max_queue_depth: 64 },
     },
     async setup(ctx) {

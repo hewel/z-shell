@@ -94,13 +94,16 @@ async function mount(transport: NiriSocketTransport, overrides?: Partial<NiriOve
   };
 }
 
-test("manifest requests shell surfaces and only the overview Bus operations", () => {
+test("manifest exposes the Niri layer, named socket and only the overview Bus operations", () => {
   const manifest = parsePluginManifest(`${import.meta.dir}/..`);
   expect(manifest.id).toBe("z-shell/niri-overview");
-  expect(manifest.hostCapabilities).toEqual({ shellSurfaces: true, controlChannel: true });
+  expect(manifest.hostCapabilities).toEqual({ shellSurfaces: true, controlChannel: true, namedSockets: ["niri"] });
   expect(manifest.busPermissions).toEqual({ topicsRead: [],
     topicsPublish: [topic], commandsRegister: [prefix + "toggle", prefix + "refresh"], inhibitors: false });
-  expect(manifest.entries[0]).toMatchObject({ kind: "service", entry: "src/service.ts", title: "Niri Overview Coordinator" });
+  expect(manifest.entries).toMatchObject([
+    { kind: "service", entry: "src/zgui-adapter.ts", title: "Niri Overview Coordinator" },
+    { kind: "layer", id: "overview", entry: "src/layer.tsx", title: "Niri Workspace Overview" },
+  ]);
 });
 
 test("unsupported environments publish empty state without attempting Niri IPC", async () => {

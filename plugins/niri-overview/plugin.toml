@@ -9,6 +9,8 @@ description = "Publishes an output-local workspace and window overview for Niri.
 [host_capabilities]
 shell_surfaces = true
 control_channel = true
+# Bind niri to the compositor's NIRI_SOCKET path at host launch.
+named_sockets = ["niri"]
 
 [bus_permissions]
 topics_read = []
@@ -32,5 +34,10 @@ max = 256
 
 [[service]]
 id = "service"
-entry = "src/service.ts"
+entry = "src/zgui-adapter.ts"
 title = "Niri Overview Coordinator"
+
+[[layer]]
+id = "overview"
+entry = "src/layer.tsx"
+title = "Niri Workspace Overview"

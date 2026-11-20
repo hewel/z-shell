@@ -140,6 +140,11 @@ describe("z-shell/nosleep plugin", () => {
       "plugin.z-shell.nosleep.toggle",
       "plugin.z-shell.nosleep.status",
     ]);
+    expect(manifest.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "service", kind: "service", entry: "src/zgui-adapter.ts", title: "NoSleep Inhibitor Service" }),
+      expect.objectContaining({ id: "bar-indicator", kind: "widget", entry: "src/widget.tsx", title: "NoSleep Bar Indicator" }),
+      expect.objectContaining({ id: "panel", kind: "panel", entry: "src/panel.tsx", title: "NoSleep Panel" }),
+    ]));
     expect(computeContentDigest(PLUGIN_ROOT)).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 

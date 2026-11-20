@@ -34,6 +34,16 @@ default = "sleep"
 
 [[service]]
 id = "service"
-entry = "src/service.ts"
+entry = "src/zgui-adapter.ts"
 title = "NoSleep Inhibitor Service"
 description = "Reconciles manual toggles and active agent markers into one z-shelld bus inhibitor lease"
+
+[[widget]]
+id = "bar-indicator"
+entry = "src/widget.tsx"
+title = "NoSleep Bar Indicator"
+
+[[panel]]
+id = "panel"
+entry = "src/panel.tsx"
+title = "NoSleep Panel"

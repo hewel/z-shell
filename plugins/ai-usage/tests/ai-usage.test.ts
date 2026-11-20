@@ -93,13 +93,17 @@ async function mount(options: { offline?: boolean; config?: Partial<AiUsageConfi
   };
 }
 
-test("manifest resolves an approved command, service entry, and digest", () => {
+test("manifest resolves an approved command, service and UI entries, and digest", () => {
   const manifest = parsePluginManifest(pluginDir);
   expect(manifest.id).toBe("z-shell/ai-usage");
   expect(manifest.hostCapabilities).toEqual({ commands: ["ai-usagebar"], controlChannel: true });
   expect(manifest.busPermissions).toEqual({ topicsRead: ["daemon.status"], topicsPublish: [topic],
     commandsRegister: [command], inhibitors: false });
-  expect(manifest.entries[0]).toMatchObject({ kind: "service", entry: "src/service.ts", title: "AI Usage Poller" });
+  expect(manifest.entries).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: "service", kind: "service", entry: "src/zgui-adapter.ts", title: "AI Usage Poller" }),
+    expect.objectContaining({ id: "bar-quota", kind: "widget", entry: "src/widget.tsx", title: "AI Usage Bar Quota" }),
+    expect.objectContaining({ id: "panel", kind: "panel", entry: "src/panel.tsx", title: "AI Usage Panel" }),
+  ]));
   expect(computeContentDigest(pluginDir)).toMatch(/^sha256:[0-9a-f]{64}$/);
 });
 

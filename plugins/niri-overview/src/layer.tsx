@@ -1,0 +1,136 @@
+import {
+  Button, For, LayerSurface, Show, createMemo, createSignal, focus, useMonitors,
+  type Accessor, type Monitor, type NativeChild, type NativeStyle,
+} from "@hewel/zgui";
+import type { ZShellClient } from "@z-shell/sdk";
+import { useTopic } from "@z-shell/sdk/zgui";
+import type { NiriOverviewSnapshot, WorkspaceViewportLayout } from "./service.ts";
+
+const actionStyle: NativeStyle = {
+  padding: "8px 14px", borderRadius: "999px", minHeight: "40px", fontSize: "14px",
+  backgroundColor: "var(--color-secondary-container)", color: "var(--color-on-secondary-container)",
+};
+
+function WorkspaceCard(props: {
+  readonly workspace: WorkspaceViewportLayout;
+  readonly close: () => void;
+}): NativeChild {
+  const ws = () => props.workspace;
+  const windows = createMemo(() => ws().windows.filter(win => win.width > 0 && win.height > 0));
+  const percent = (fraction: number) => `${fraction * 100}%`;
+
+  return (
+    <Button testId={`niri-ws-${ws().workspaceId}`} onClick={props.close} style={{
+      display: "flex", flexDirection: "column", alignItems: "stretch", gap: "8px", padding: "10px",
+      width: "204px", maxWidth: "100%", borderRadius: "16px",
+      backgroundColor: ws().focused ? "var(--color-primary-container)" : "var(--color-surface-container)",
+      color: ws().focused ? "var(--color-on-primary-container)" : "var(--color-on-surface)",
+    }}>
+      <text style={{ fontSize: "14px", fontWeight: "600" }}>Workspace {ws().index}</text>
+      <box style={{
+        position: "relative", height: "96px", overflow: "hidden", borderRadius: "8px",
+        backgroundColor: "var(--color-surface-container-lowest)",
+      }}>
+        <For each={windows()} keyed={win => win.id}>
+          {win => <box testId={`niri-win-${win().id}`} style={{
+            position: "absolute", borderRadius: "4px",
+            // The service publishes output-canvas coordinates; rebase to this workspace's viewport.
+            left: percent((win().x - ws().x) / ws().width), top: percent((win().y - ws().y) / ws().height),
+            width: percent(win().width / ws().width), height: percent(win().height / ws().height),
+            backgroundColor: win().focused ? "var(--color-primary)" : "var(--color-surface-container-highest)",
+          }} />}
+        </For>
+      </box>
+    </Button>
+  );
+}
+
+function OverviewCard(props: {
+  readonly monitor: Monitor;
+  readonly snapshot: Accessor<NiriOverviewSnapshot | undefined>;
+  readonly client: Accessor<ZShellClient | undefined>;
+}): NativeChild {
+  const workspaces = createMemo(() => {
+    const layouts = props.snapshot()?.layouts;
+    const name = props.monitor.name;
+    const local = layouts?.filter(ws => ws.output === name);
+    return local?.length ? local : layouts;
+  });
+  const [commandError, setCommandError] = createSignal<string>();
+
+  async function invoke(action: "refresh" | "toggle", payload?: { open: false }): Promise<void> {
+    const client = props.client();
+    if (!client) return;
+    setCommandError(undefined);
+    try {
+      await client.invokeCommand(`plugin.z-shell.niri-overview.${action}`, [], payload);
+    } catch (error) {
+      setCommandError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  // Closing must not reopen the overview when two outputs dismiss before receiving the update.
+  const close = () => void invoke("toggle", { open: false });
+
+  return (
+    <box testId="niri-overview-backdrop" onClick={close} style={{
+      position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: "12px",
+      backgroundColor: "rgba(11, 13, 18, 0.55)",
+    }}>
+      <column testId="niri-overview-card" role="dialog" ariaLabel="Workspace Overview" ariaModal tabIndex={-1}
+        ref={node => focus(node)} onClick={event => event.stopPropagation()} onKeyDown={event => {
+          if (event.key === "Escape" && !event.repeat) {
+            event.preventDefault();
+            close();
+          }
+        }} style={{
+          width: "684px", maxWidth: "100%", maxHeight: "100%", padding: "18px", gap: "14px", borderRadius: "24px",
+          backgroundColor: "var(--color-surface)", color: "var(--color-on-surface)",
+          border: "1px solid var(--color-outline-variant)",
+        }}>
+        <row style={{ alignItems: "center", flexShrink: 0, flexWrap: "wrap", gap: "8px" }}>
+          <text role="heading" style={{ fontSize: "22px", fontWeight: "600" }}>Workspace Overview</text>
+          <text style={{
+            padding: "4px 10px", fontSize: "12px", borderRadius: "999px",
+            backgroundColor: "var(--color-surface-container-highest)", color: "var(--color-on-surface-variant)",
+          }}>{props.monitor.name}</text>
+          <box style={{ flexGrow: 1 }} />
+          <Button testId="niri-overview-refresh" style={actionStyle} onClick={() => void invoke("refresh")}>Refresh</Button>
+          <Button testId="niri-overview-close" style={actionStyle} onClick={close}>Close</Button>
+        </row>
+        <Show when={commandError()} fallback={<box style={{ display: "none" }} />}>
+          {message => <text role="alert" style={{ color: "var(--color-error)" }}>{message()}</text>}
+        </Show>
+        <Show when={workspaces()?.length} fallback={<text>No workspaces available</text>}>
+          <scroll style={{ minHeight: "0px", flexShrink: 1 }}>
+            <row style={{ flexWrap: "wrap", gap: "10px" }}>
+              <For each={workspaces()} keyed={ws => ws.workspaceId}>
+                {ws => <WorkspaceCard workspace={ws()} close={close} />}
+              </For>
+            </row>
+          </scroll>
+        </Show>
+      </column>
+    </box>
+  );
+}
+
+export default function NiriOverviewLayer(props: { readonly client: Accessor<ZShellClient | undefined> }): NativeChild {
+  const { data: snapshot } = useTopic<NiriOverviewSnapshot>(props.client, "plugin.z-shell.niri-overview.state");
+  const monitors = useMonitors();
+
+  return (
+    <Show when={snapshot()?.open === true}>
+      <For each={monitors()} keyed={m => m.id}>
+        {monitor => (
+          <LayerSurface name={`niri-overview-${monitor().id}`} output={monitor().id} layer="overlay"
+            anchor={["top", "bottom", "left", "right"]} width={monitor().width} height={monitor().height}
+            exclusiveZone={-1} keyboard="exclusive">
+            <OverviewCard monitor={monitor()} snapshot={snapshot} client={props.client} />
+          </LayerSurface>
+        )}
+      </For>
+    </Show>
+  );
+}

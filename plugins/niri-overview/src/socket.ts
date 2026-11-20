@@ -14,7 +14,6 @@ interface NiriHost {
 }
 
 const host = globalThis as {
-  readonly __zguiServices?: NiriHost;
   setTimeout?(cb: () => void, delayMs: number): unknown;
   clearTimeout?(timer: unknown): void;
 };
@@ -109,9 +108,9 @@ function event(value: unknown): NiriEvent | undefined {
   return undefined;
 }
 
-/** `socketPath` must be the canonical, host-approved path resolved from NIRI_SOCKET by the composition. */
+/** `socketPath` must be the canonical, host-approved endpoint. */
 export function createNiriSocketTransport(
-  socketPath: string | undefined, native: NiriHost | undefined = host.__zguiServices,
+  socketPath: string | undefined, native?: NiriHost,
 ): NiriSocketTransport {
   let baseline: Promise<NiriState> | undefined;
   let closeActive: (() => void) | undefined;

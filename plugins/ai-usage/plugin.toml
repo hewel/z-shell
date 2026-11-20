@@ -38,5 +38,15 @@ max = 30000
 
 [[service]]
 id = "service"
-entry = "src/service.ts"
+entry = "src/zgui-adapter.ts"
 title = "AI Usage Poller"
+
+[[widget]]
+id = "bar-quota"
+entry = "src/widget.tsx"
+title = "AI Usage Bar Quota"
+
+[[panel]]
+id = "panel"
+entry = "src/panel.tsx"
+title = "AI Usage Panel"

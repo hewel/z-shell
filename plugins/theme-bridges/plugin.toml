@@ -8,6 +8,8 @@ description = "Subscribes to the z-shell theme topic to drive optional ShojiWM t
 
 [host_capabilities]
 control_channel = true
+# The configured shojiwm_socket must match a path authorized by the composed host.
+unix_sockets = ["$XDG_RUNTIME_DIR/shojiwm-${WAYLAND_DISPLAY}.sock"]
 
 [bus_permissions]
 topics_read = ["theme"]
@@ -37,6 +39,11 @@ default = ""
 
 [[service]]
 id = "service"
-entry = "src/service.ts"
+entry = "src/zgui-adapter.ts"
 title = "External Theme Bridges"
 description = "Propagates z-shell Material 3 palette updates to optional ShojiWM and Zen Browser targets with conflict detection"
+
+[[settings_page]]
+id = "bridges"
+entry = "src/settings-page.tsx"
+title = "Theme Bridges"

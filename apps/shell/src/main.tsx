@@ -1,5 +1,6 @@
 import { renderShell } from "@hewel/zgui";
 import { ShellPanels } from "./panels/ShellPanels.tsx";
+import { PluginHost } from "./plugins/PluginHost.tsx";
 import { createShellStore, ShellProvider } from "./store.ts";
 import { BarPopups } from "./surfaces/BarPopups.tsx";
 import { DockSurface } from "./surfaces/DockSurface.tsx";
@@ -19,6 +20,7 @@ function ShellApp() {
   useShellTheme(store.theme.data);
   return (
     <ShellProvider value={store}>
+      <PluginHost />
       <WallpaperLayer />
       <StatusBar />
       <DockSurface />

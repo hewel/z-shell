@@ -221,10 +221,12 @@ export function createThemeBridgesPlugin(
           description:
             "Propagates z-shell Material 3 palette updates to optional ShojiWM and Zen Browser targets with conflict detection",
         },
+        { name: "bridges", kind: "settings_page", title: "Theme Bridges" },
       ],
       defaults: THEME_BRIDGES_DEFAULTS,
       hostCapabilities: {
         controlChannel: true,
+        unixSockets: ["$XDG_RUNTIME_DIR/shojiwm-${WAYLAND_DISPLAY}.sock"],
       },
       busPermissions: {
         topicsRead: ["theme"],

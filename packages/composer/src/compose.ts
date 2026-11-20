@@ -197,8 +197,10 @@ function compareUtf8(left: string, right: string): number {
 
 function descriptor(entry: ParsedPluginEntry, settings: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {
+    id: entry.id,
     entryId: entry.entryId,
     kind: entry.kind,
+    entry: entry.entry,
     settings: redactSecretSettings(entry.settings, settings),
   };
   if (entry.title !== undefined) result.title = entry.title;
