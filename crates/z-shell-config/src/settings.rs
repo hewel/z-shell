@@ -57,6 +57,18 @@ pub enum BarPosition {
     Right,
 }
 
+/// Visual chrome mode for the shell bar (`DESIGN.md` Floating Islands vs Docked Flush Bar).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum BarStyle {
+    /// Separate floating pill islands with outer screen margins (`46px` top / `54px` vertical strut).
+    #[default]
+    Floating,
+    /// Full-bleed edge-to-edge flush strip with an inner hairline (`38px` top / `44px` vertical strut).
+    Docked,
+}
+
 /// Light/dark scheduling mode for dynamic palettes.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -133,6 +145,8 @@ pub struct EdgeOverrides {
 pub struct BarSettings {
     /// Screen edge where the bar is anchored.
     pub position: BarPosition,
+    /// Floating islands or flush docked strip.
+    pub style: BarStyle,
     /// Shared gap spacing in logical pixels (`0..=64`).
     pub gaps: u16,
     /// Optional per-edge spacing overrides.
@@ -151,6 +165,7 @@ impl Default for BarSettings {
     fn default() -> Self {
         Self {
             position: BarPosition::Top,
+            style: BarStyle::Floating,
             gaps: DEFAULT_GAPS_PX,
             edge_overrides: EdgeOverrides::default(),
             launcher_enabled: true,

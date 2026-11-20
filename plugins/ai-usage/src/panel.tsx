@@ -5,9 +5,12 @@ import type { AiUsageSnapshot, QuotaEntry } from "./service.ts";
 
 const muted = "var(--color-on-surface-variant)";
 const primary = "var(--color-primary)";
+const container = "var(--color-surface-container)";
+const containerHigh = "var(--color-surface-container-high)";
+const containerHighest = "var(--color-surface-container-highest)";
 const subcard = {
-  flexDirection: "column", gap: "6px", padding: "10px", borderRadius: "10px",
-  backgroundColor: "var(--color-surface-container-high)",
+  flexDirection: "column", gap: "8px", padding: "12px", borderRadius: "16px",
+  backgroundColor: containerHigh,
 } as const;
 const heading = { fontWeight: 600 } as const;
 
@@ -20,14 +23,20 @@ function QuotaWindow(props: { readonly quota: Accessor<QuotaEntry> }) {
   return (
     <column style={subcard}>
       <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-        <text style={heading}>{`${props.quota().provider} · ${props.quota().label}`}</text>
-        <text style={{ ...heading, color: primary }}>{formatPercent(remaining())}</text>
+        <text style={{ ...heading, fontSize: "13px" }}>{`${props.quota().provider} · ${props.quota().label}`}</text>
+        <text data-tabular="true" style={{
+          ...heading, fontFamily: "var(--font-mono)", fontSize: "12px", color: primary, fontVariantNumeric: "tabular-nums",
+        }}>
+          {formatPercent(remaining())}
+        </text>
       </row>
       <box role="progressIndicator" ariaLabel="Quota remaining" ariaValueMin={0} ariaValueMax={100} ariaValueNow={remaining()}
-        style={{ height: "4px", borderRadius: "2px", overflow: "hidden", backgroundColor: "var(--color-surface-container-highest)" }}>
-        <box style={{ width: `${remaining() ?? 0}%`, height: "100%", borderRadius: "2px", backgroundColor: primary }} />
+        style={{ height: "6px", borderRadius: "3px", overflow: "hidden", backgroundColor: containerHighest }}>
+        <box data-percent-fill="true" style={{ width: `${remaining() ?? 0}%`, height: "100%", borderRadius: "3px", backgroundColor: primary }} />
       </box>
-      <text style={{ color: muted }}>{props.quota().resetsAt ? `Resets: ${props.quota().resetsAt}` : "Reset time unavailable"}</text>
+      <text style={{ color: muted, fontFamily: "var(--font-mono)", fontSize: "11px" }}>
+        {props.quota().resetsAt ? `Resets: ${props.quota().resetsAt}` : "Reset time unavailable"}
+      </text>
     </column>
   );
 }
@@ -44,14 +53,20 @@ export default function Panel(props: {
 
   return (
     <column testId="plugin-ai-usage-panel" style={{
-      width: "100%", padding: "16px", gap: "12px", flexDirection: "column", borderRadius: "16px",
-      backgroundColor: "var(--color-surface-container)", color: "var(--color-on-surface)",
+      width: "100%", padding: "14px", gap: "10px", flexDirection: "column",
+      backgroundColor: container, color: "var(--color-on-surface)",
       fontFamily: "var(--font-sans)", fontSize: "13px",
     }}>
       <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-        <text role="heading" style={{ fontSize: "16px", fontWeight: 700 }}>AI Usage</text>
+        <column style={{ gap: "2px" }}>
+          <text role="heading" style={{ fontSize: "18px", fontWeight: 600 }}>AI Usage</text>
+          <text style={{ fontSize: "11px", color: muted }}>Rolling provider quota telemetry</text>
+        </column>
         <Button testId="ai-usage-refresh" onClick={() => void props.client()?.invokeCommand("plugin.z-shell.ai-usage.refresh").catch(() => undefined)}
-          style={{ padding: "6px 10px", borderRadius: "14px", backgroundColor: "var(--color-primary-container)", color: "var(--color-on-primary-container)" }}>
+          style={{
+            padding: "6px 12px", borderRadius: "10px",
+            backgroundColor: "var(--color-primary-container)", color: "var(--color-on-primary-container)", fontSize: "12px",
+          }}>
           <text style={heading}>Refresh</text>
         </Button>
       </row>
@@ -66,16 +81,26 @@ export default function Panel(props: {
       </For>
       <Show when={snapshot()?.codexResets}>
         {resets => (
-          <column style={subcard}>
-            <text role="heading" style={heading}>Codex Resets</text>
-            <text style={{ color: muted }}>{`Forecast chance: ${formatPercent(resets().forecastChancePercent)}`}</text>
-            <Show when={resets().latest}>
-              {event => <text style={{ color: muted }}>{`Latest: ${resetDetail(event().kind, event().announcedAt ?? event().scheduledFor)}`}</text>}
-            </Show>
-            <Show when={resets().scheduled}>
-              {event => <text style={{ color: muted }}>{`Scheduled: ${resetDetail(event().kind, event().scheduledFor ?? event().announcedAt)}`}</text>}
-            </Show>
-          </column>
+          <>
+            <box ariaHidden style={{ width: "100%", height: "1px", backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 45%, transparent)" }} />
+            <column style={subcard}>
+              <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                <text role="heading" style={{ ...heading, fontSize: "13px" }}>Codex resets</text>
+                <text data-tabular="true" style={{
+                  fontFamily: "var(--font-mono)", fontSize: "11px", padding: "2px 8px", borderRadius: "8px",
+                  backgroundColor: containerHighest, color: primary, fontVariantNumeric: "tabular-nums",
+                }}>
+                  {`Forecast ${formatPercent(resets().forecastChancePercent)}`}
+                </text>
+              </row>
+              <Show when={resets().latest}>
+                {event => <text style={{ color: muted, fontFamily: "var(--font-mono)", fontSize: "11px" }}>{`Latest: ${resetDetail(event().kind, event().announcedAt ?? event().scheduledFor)}`}</text>}
+              </Show>
+              <Show when={resets().scheduled}>
+                {event => <text style={{ color: muted, fontFamily: "var(--font-mono)", fontSize: "11px" }}>{`Scheduled: ${resetDetail(event().kind, event().scheduledFor ?? event().announcedAt)}`}</text>}
+              </Show>
+            </column>
+          </>
         )}
       </Show>
     </column>

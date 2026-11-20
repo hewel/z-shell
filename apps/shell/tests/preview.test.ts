@@ -260,8 +260,8 @@ describe("apps/shell preview", () => {
         expect(capture.frame.renderer.alphaMode).toBe("PreMultiplied");
       }
 
-      expect([dpBar.image.width, dpBar.image.height]).toEqual([1412, 48]);
-      expect([hdmiBar.image.width, hdmiBar.image.height]).toEqual([1252, 48]);
+      expect([dpBar.image.width, dpBar.image.height]).toEqual([1412, 32]);
+      expect([hdmiBar.image.width, hdmiBar.image.height]).toEqual([1252, 32]);
       expect(pixel(dpBar.image, 0, 0)).toEqual([0, 0, 0, 0]);
       expect(pixel(hdmiBar.image, 0, 0)).toEqual([0, 0, 0, 0]);
       expect(centerPixel(dpBar.image, treeNode(dpBar.tree, "ws-2").boundsDevice))
@@ -356,8 +356,8 @@ describe("apps/shell preview", () => {
       expectCleanPreview(result, 1, 1);
       const bar = readCapture(out, "bar-dp-1", "bar-dp-1");
       expect(bar.frame.renderer.alphaMode).toBe("PreMultiplied");
-      expect([bar.image.width, bar.image.height]).toEqual([52, 872]);
-      expect(treeNode(bar.tree, "bar-root-dp-1").boundsDevice?.width).toBe(52);
+      expect([bar.image.width, bar.image.height]).toEqual([40, 872]);
+      expect(treeNode(bar.tree, "bar-root-dp-1").boundsDevice?.width).toBe(40);
       expect(treeNode(bar.tree, "ws-2").text).toBe("2");
       expect(pixel(bar.image, 0, 0)).toEqual([0, 0, 0, 0]);
     } finally {
@@ -561,11 +561,16 @@ describe("apps/shell preview", () => {
           {
             id: "select-wallpaper",
             op: "pointer.click",
-            target: { surface: "panel-quick-settings", testId: "wp-thumb-aurora" },
+            target: { surface: "settings-window", testId: "settings-wp-aurora" },
             button: "primary",
           },
           { id: "wallpaper-set-reply", op: "clock.advance", byMs: 5 },
-          { id: "dismiss-quick-settings", op: "popupDone", surface: "panel-quick-settings" },
+          {
+            id: "close-settings-window",
+            op: "pointer.click",
+            target: { surface: "settings-window", testId: "settings-window-close" },
+            button: "primary",
+          },
           { id: "dismiss-settled", op: "settle" },
           {
             id: "bar-healthy-after-dismiss",
@@ -580,7 +585,9 @@ describe("apps/shell preview", () => {
       expectCleanPreview(result, 1, 2);
       const quickSettings = readCapture(out, "panel-quick-settings", "panel-quick-settings");
       expect(quickSettings.frame.renderer.alphaMode).toBe("PreMultiplied");
-      expect([quickSettings.image.width, quickSettings.image.height]).toEqual([396, 620]);
+      expect(quickSettings.image.width).toBe(396);
+      expect(quickSettings.image.height).toBeGreaterThan(200);
+      expect(quickSettings.image.height).toBeLessThanOrEqual(760);
       expect(pixel(quickSettings.image, 0, 0)).toEqual([0, 0, 0, 0]);
       expect(treeNode(quickSettings.tree, "qs-main").boundsDevice).toBeDefined();
       expect(treeNode(quickSettings.tree, "qs-tile-wifi").boundsDevice).toBeDefined();
@@ -1774,6 +1781,15 @@ describe("apps/shell preview", () => {
             source_outputs: [],
           },
         },
+        commands: [
+          {
+            id: 26,
+            name: "wallpaper.list",
+            payload: { offset: 0, limit: 16 },
+            atMs: 1850,
+            result: { total: 0, items: [] },
+          },
+        ],
       }), null, 2));
       writeFileSync(scenario, JSON.stringify({
         schemaVersion: 1,
@@ -1787,6 +1803,18 @@ describe("apps/shell preview", () => {
           { id: "open-qs", op: "pointer.click", target: { surface: "bar-hdmi-a-1", testId: "bar-audio" }, button: "primary" },
           { id: "qs-settle", op: "clock.advance", byMs: 600 },
           { id: "capture-qs", op: "capture", surface: "panel-quick-settings", captureId: "qs" },
+          { id: "open-calendar", op: "pointer.click", target: { surface: "bar-hdmi-a-1", testId: "bar-clock" }, button: "primary" },
+          { id: "cal-settle", op: "clock.advance", byMs: 600 },
+          { id: "capture-cal", op: "capture", surface: "panel-calendar", captureId: "cal" },
+          { id: "open-media", op: "pointer.click", target: { surface: "bar-hdmi-a-1", testId: "bar-media" }, button: "primary" },
+          { id: "media-settle", op: "clock.advance", byMs: 600 },
+          { id: "capture-media", op: "capture", surface: "panel-media", captureId: "media" },
+          {
+            id: "open-settings", op: "service.emit", channel: "control.message",
+            value: { args: ["settings", "appearance"], reply: { text: "{\"settingsWindowOpen\":true,\"settingsWindowTab\":\"appearance\"}" } },
+          },
+          { id: "settings-settle", op: "clock.advance", byMs: 300 },
+          { id: "capture-settings", op: "capture", surface: "settings-window", captureId: "settings" },
           {
             id: "open-power-dialog", op: "service.emit", channel: "control.message",
             value: { args: ["power", "poweroff"], reply: { text: "{\"pendingPowerAction\":\"poweroff\"}" } },
@@ -1797,13 +1825,23 @@ describe("apps/shell preview", () => {
       }, null, 2));
 
       const result = runPreview(fixture, scenario, out);
-      expectCleanPreview(result, 3, 0);
+      expectCleanPreview(result, 6, 0);
       const bar = readCapture(out, "bar-hdmi-a-1", "bar");
       const qs = readCapture(out, "panel-quick-settings", "qs");
+      const cal = readCapture(out, "panel-calendar", "cal");
+      const media = readCapture(out, "panel-media", "media");
+      const settings = readCapture(out, "settings-window", "settings");
       const power = readCapture(out, "power-dialog", "power");
 
       // WCAG 2.2 SC 2.5.8: every visible interactive control must meet >= 24x24px hit area.
-      for (const [label, tree] of [["bar", bar.tree], ["quick-settings", qs.tree], ["power-dialog", power.tree]] as const) {
+      for (const [label, tree] of [
+        ["bar", bar.tree],
+        ["quick-settings", qs.tree],
+        ["calendar", cal.tree],
+        ["media", media.tree],
+        ["settings", settings.tree],
+        ["power-dialog", power.tree],
+      ] as const) {
         const controls = tree.nodes.filter(node => node.role && interactiveRoles.has(node.role) && node.boundsLogical);
         expect(controls.length, label).toBeGreaterThan(0);
         for (const node of controls) {
@@ -1816,9 +1854,9 @@ describe("apps/shell preview", () => {
       // Top bar anti-collision at 1280px with long window title and long media label.
       const activeWin = treeNode(bar.tree, "bar-active-window").boundsLogical!;
       const clock = treeNode(bar.tree, "bar-clock").boundsLogical!;
-      const media = treeNode(bar.tree, "bar-media").boundsLogical!;
+      const mediaBar = treeNode(bar.tree, "bar-media").boundsLogical!;
       expect(activeWin.x + activeWin.width).toBeLessThanOrEqual(clock.x);
-      expect(clock.x + clock.width).toBeLessThanOrEqual(media.x);
+      expect(clock.x + clock.width).toBeLessThanOrEqual(mediaBar.x);
 
       // Precision sliders in Quick Settings share identical horizontal track bounds (Vertical Lane Alignment).
       const sliders = qs.tree.nodes.filter(node => node.role === "slider" && node.boundsLogical);
@@ -1829,14 +1867,29 @@ describe("apps/shell preview", () => {
         expect(slider.boundsLogical!.width).toBe(firstSlider.width);
       }
 
-      // Settled surface width tiers match DESIGN.md (Standard Popover 396px, Compact Power Dialog 360px).
+      // Settled surface width tiers and Zero-Scroll auto-height match DESIGN.md.
       expect(Math.round(treeNode(qs.tree, "panel-root-quick-settings").boundsLogical!.width)).toBe(396);
+      expect(qs.image.height).toBeLessThanOrEqual(760);
+      expect(Math.round(treeNode(cal.tree, "panel-root-calendar").boundsLogical!.width)).toBe(396);
+      expect(cal.image.height).toBeLessThanOrEqual(760);
+      expect(Math.round(treeNode(media.tree, "panel-root-media").boundsLogical!.width)).toBe(396);
+      expect(media.image.height).toBeLessThanOrEqual(420);
       expect(Math.round(treeNode(power.tree, "power-dialog-card").boundsLogical!.width)).toBe(360);
 
-      // Zero-Scroll Popover check when upstream zgui-js scrollMetrics (commit 33c0fab+) is present.
-      const qsScroll = treeNode(qs.tree, "qs-main");
-      if (qsScroll.scrollMetrics) {
-        expect(qsScroll.scrollMetrics.overflowY).toBe(false);
+      // Settings WindowSurface (820x600 with 1px outer border -> 216px left sidebar + 602px content pane).
+      expect([settings.image.width, settings.image.height]).toEqual([820, 600]);
+      expect(Math.round(treeNode(settings.tree, "settings-sidebar").boundsLogical!.width)).toBe(216);
+      expect(Math.round(treeNode(settings.tree, "settings-content-pane").boundsLogical!.width)).toBe(602);
+
+      // Zero-Scroll Popover Rule verified via upstream zgui-js scrollMetrics (commit 33c0fab+).
+      for (const [label, capture, testId] of [
+        ["quick-settings", qs, "qs-main"],
+        ["calendar", cal, "panel-calendar"],
+      ] as const) {
+        const node = treeNode(capture.tree, testId);
+        if (node.scrollMetrics) {
+          expect(node.scrollMetrics.overflowY, `${label} overflowY`).toBe(false);
+        }
       }
     } finally {
       rmSync(workspace, { recursive: true, force: true });

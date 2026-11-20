@@ -36,7 +36,9 @@ function PowerDialogContent(props: { action: Accessor<PowerConfirmAction> }): Na
         ref={node => { registerDismissLayer(node, closePowerDialog, { layer: "modal", dismissOnOutsidePress: false }); }}
         onClick={event => event.stopPropagation()} style={{
           display: "flex", flexDirection: "column", alignItems: "center", width: "360px", borderRadius: "22px",
-          backgroundColor: "var(--color-surface)", border: "1px solid var(--color-outline-variant)",
+          backgroundColor: "var(--color-surface-container)",
+          border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
+          boxShadow: "0 20px 56px rgba(0, 0, 0, 0.60)",
           padding: "24px", gap: "14px", fontFamily: "var(--font-sans)", color: "var(--color-on-surface)",
           ...dialogMotionStyle(enter()),
         }}>

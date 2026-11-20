@@ -8,7 +8,8 @@ const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
 const capsule = {
   backgroundColor: "var(--color-surface-container)",
-  border: "1px solid var(--color-outline-variant)",
+  border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
+  boxShadow: "0 14px 36px rgba(0, 0, 0, 0.50)",
   borderRadius: "999px",
   color: onSurface,
 } as const;
@@ -22,7 +23,7 @@ function createReveal(): Accessor<number> {
 
 function OsdPill({ osd }: { osd: Accessor<OsdPayload> }): NativeChild {
   const opacity = createReveal();
-  const value = () => osd().value ?? 0;
+  const value = () => Math.max(0, Math.min(100, osd().value ?? 0));
   const icon = () => {
     const { kind, muted } = osd();
     return kind === "brightness" ? "brightness" : kind === "ime" ? "terminal" : muted ? "volumeMute" : "volumeHigh";
@@ -30,27 +31,38 @@ function OsdPill({ osd }: { osd: Accessor<OsdPayload> }): NativeChild {
 
   return (
     <row role="status" ariaLabel={osd().label} style={{
-      ...capsule, width: "280px", height: "48px", padding: "0 8px", gap: "10px", alignItems: "center",
+      ...capsule, width: "280px", height: "48px", padding: "0 10px 0 8px", gap: "10px", alignItems: "center",
       opacity: Math.max(0, Math.min(1, opacity() * 1.35)),
       transform: `translateY(${((1 - opacity()) * 12).toFixed(2)}px) scale(${(0.94 + opacity() * 0.06).toFixed(4)})`,
       transformOrigin: "bottom center",
     }}>
       <box style={{
-        display: "flex", width: "34px", height: "34px", borderRadius: "999px", flexShrink: 0,
+        display: "flex", width: "32px", height: "32px", borderRadius: "999px", flexShrink: 0,
         alignItems: "center", justifyContent: "center", backgroundColor: primary,
       }}>
         <ShellIcon name={icon()} size={18} color="var(--color-on-primary)" />
       </box>
       <Show when={osd().kind === "ime"} fallback={
         <>
-          <box style={{
-            flexGrow: 1, minWidth: "0px", height: "6px", borderRadius: "3px", overflow: "hidden",
-            backgroundColor: "var(--color-surface-container-highest)",
-          }}>
-            <box data-percent-fill="true" style={{ width: `${Math.max(0, Math.min(value(), 100))}%`, height: "100%", borderRadius: "3px", backgroundColor: primary }} />
+          <box style={{ flexGrow: 1, minWidth: "0px", height: "20px", display: "flex", alignItems: "center", position: "relative" }}>
+            <box style={{
+              width: "100%", height: "6px", borderRadius: "3px", overflow: "hidden",
+              backgroundColor: "var(--color-surface-container-highest)",
+            }}>
+              <box data-percent-fill="true" style={{ width: `${value()}%`, height: "100%", borderRadius: "3px", backgroundColor: primary }} />
+            </box>
+            <box ariaHidden style={{
+              position: "absolute", left: `${Math.max(0, Math.min(92, value() - 4))}%`,
+              width: "14px", height: "14px", borderRadius: "999px",
+              backgroundColor: primary, border: "2px solid var(--color-surface-container)",
+            }} />
           </box>
-          <row style={{ minWidth: "44px", justifyContent: "center" }}>
-            <text testId="osd-value" style={{ fontSize: "13px", fontWeight: 600 }}>{value()}%</text>
+          <row style={{ width: "36px", flexShrink: 0, justifyContent: "flex-end" }}>
+            <text testId="osd-value" data-tabular="true" style={{
+              fontFamily: "var(--font-mono)", fontSize: "12px", fontWeight: 600, fontVariantNumeric: "tabular-nums",
+            }}>
+              {value()}%
+            </text>
           </row>
         </>
       }>
@@ -79,7 +91,9 @@ function IdleScrim({ monitorId, warning, seconds }: {
         ...capsule, padding: "10px 16px", gap: "10px", maxWidth: "90%", alignItems: "center",
       }}>
         <text style={{ fontSize: "13px" }}>{warning().rules.join(", ")}</text>
-        <text style={{ color: muted, flexShrink: 0, fontSize: "12px" }}>{seconds()}s</text>
+        <text data-tabular="true" style={{ color: muted, flexShrink: 0, fontFamily: "var(--font-mono)", fontSize: "12px", fontVariantNumeric: "tabular-nums" }}>
+          {seconds()}s
+        </text>
       </row>
     </box>
   );

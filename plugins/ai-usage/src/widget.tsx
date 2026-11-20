@@ -1,4 +1,4 @@
-import { Button, createMemo, type Accessor, type NativeChild } from "@hewel/zgui";
+import { Button, Show, createMemo, type Accessor, type NativeChild } from "@hewel/zgui";
 import type { ZShellClient } from "@z-shell/sdk";
 import { useTopic } from "@z-shell/sdk/zgui";
 import type { AiUsageSnapshot } from "./service.ts";
@@ -13,6 +13,27 @@ function compactReset(reset: string): string {
   return hours < 24 ? `${hours}h` : `${Math.ceil(hours / 24)}d`;
 }
 
+const TRACK_RING_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>`;
+// Material Icons 24x24 `auto_awesome` glyph (DESIGN.md Material-First Icon Rule).
+const MATERIAL_AUTO_AWESOME_PATH =
+  "M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z";
+
+function buildQuotaArcSvg(percent: number | null): string {
+  const clamped = Math.max(0, Math.min(100, percent ?? 0));
+  const r = 9.2;
+  let arc = "";
+  if (clamped >= 99.5) {
+    arc = `<circle cx="12" cy="12" r="${r}" fill="none" stroke="currentColor" stroke-width="2.2"/>`;
+  } else if (clamped > 0.5) {
+    const theta = (clamped / 100) * Math.PI * 2 - Math.PI / 2;
+    const x = (12 + r * Math.cos(theta)).toFixed(2);
+    const y = (12 + r * Math.sin(theta)).toFixed(2);
+    const largeArc = clamped > 50 ? 1 : 0;
+    arc = `<path d="M12 2.8A${r} ${r} 0 ${largeArc} 1 ${x} ${y}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>`;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">${arc}<g transform="translate(6 6) scale(0.5)"><path d="${MATERIAL_AUTO_AWESOME_PATH}" fill="currentColor"/></g></svg>`;
+}
+
 export default function Widget(props: {
   readonly client: Accessor<ZShellClient | undefined>;
   readonly vertical: boolean;
@@ -21,11 +42,12 @@ export default function Widget(props: {
   const { data: snapshot } = useTopic<AiUsageSnapshot>(props.client, "plugin.z-shell.ai-usage.quotas");
   const summary = createMemo(() => {
     const quota = snapshot()?.quotas[0];
-    const remaining = quota?.remainingPercent;
+    const remaining = quota?.remainingPercent ?? null;
     const percent = remaining == null ? "—" : `${Math.round(remaining)}%`;
     const reset = quota?.resetsAt;
-    return { percent, horizontal: reset ? `${percent} · ${compactReset(reset)}` : percent };
+    return { remaining, percent, horizontal: reset ? `${percent} · ${compactReset(reset)}` : percent };
   });
+  const ringSize = () => props.vertical ? "24px" : "20px";
 
   return (
     <Button testId="plugin-ai-usage-widget" ariaLabel={`AI Usage: ${summary().horizontal}`}
@@ -34,16 +56,30 @@ export default function Widget(props: {
         else void props.client()?.invokeCommand("plugin.z-shell.ai-usage.refresh").catch(() => undefined);
       }}
       style={{
-        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-        width: props.vertical ? "32px" : "auto", height: "32px", borderRadius: "16px",
-        padding: props.vertical ? "0" : "0 10px",
-        border: props.vertical ? "2px solid var(--color-primary)" : "none",
-        backgroundColor: "var(--color-surface-container)", color: "var(--color-on-surface)",
+        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, gap: "6px",
+        width: props.vertical ? "28px" : "auto", height: props.vertical ? "28px" : "26px", borderRadius: "999px",
+        padding: props.vertical ? "0" : "0 6px",
+        backgroundColor: "transparent", color: "var(--color-on-surface)",
         opacity: snapshot()?.stale || snapshot()?.offlineBlocked ? 0.55 : 1,
       }}>
-      <text style={{ fontSize: props.vertical ? "10px" : "12px", fontWeight: 600, whiteSpace: "nowrap" }}>
-        {props.vertical ? summary().percent : summary().horizontal}
-      </text>
+      <box ariaHidden style={{ position: "relative", width: ringSize(), height: ringSize(), flexShrink: 0 }}>
+        <vector svg={TRACK_RING_SVG} style={{
+          position: "absolute", inset: "0px", width: ringSize(), height: ringSize(),
+          color: "var(--color-surface-container-highest)",
+        }} />
+        <vector svg={buildQuotaArcSvg(summary().remaining)} style={{
+          position: "absolute", inset: "0px", width: ringSize(), height: ringSize(),
+          color: "var(--color-primary)",
+        }} />
+      </box>
+      <Show when={!props.vertical}>
+        <text data-tabular="true" style={{
+          fontFamily: "var(--font-mono)", fontSize: "11px", fontWeight: 500, whiteSpace: "nowrap",
+          fontVariantNumeric: "tabular-nums",
+        }}>
+          {summary().horizontal}
+        </text>
+      </Show>
     </Button>
   );
 }

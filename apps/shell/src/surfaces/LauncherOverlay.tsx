@@ -1,5 +1,6 @@
 import { Button, For, Image, LayerSurface, Show, TextField, createEffect, createSignal, flush, focus, onCleanup, type NativeChild, type NativeKeyEvent } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
+import { ShellIcon } from "../icons.tsx";
 import { DIALOG_SPRING, createEnterProgress, dialogMotionStyle, scrimBackdrop } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { resolveActiveMonitor, resolveMonitorLogicalSize, type LauncherItem, type LauncherQueryResponse } from "../topics.ts";
@@ -21,9 +22,10 @@ function LauncherTile(props: { item: LauncherItem; selected: boolean; activate: 
     <Button testId={`launcher-item-${item.provider_id}-${item.item_id}`} tabIndex={-1}
       data-selected={props.selected ? "true" : null} onClick={() => props.activate(item)} style={{
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        width: "96px", height: "92px", flexShrink: 0, borderRadius: "16px", padding: "8px", gap: "6px",
-        backgroundColor: props.selected ? "var(--color-secondary-container)" : "transparent",
-        color: props.selected ? "var(--color-on-secondary-container)" : "var(--color-on-surface)",
+        width: "96px", height: "94px", flexShrink: 0, borderRadius: "14px", padding: "8px", gap: "6px",
+        backgroundColor: props.selected ? "var(--color-primary-container)" : "transparent",
+        border: props.selected ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
+        color: props.selected ? "var(--color-on-primary-container)" : "var(--color-on-surface)",
       }}>
       <Show when={src()} fallback={
         <box style={{
@@ -33,11 +35,11 @@ function LauncherTile(props: { item: LauncherItem; selected: boolean; activate: 
           <text style={{ fontSize: "20px", fontWeight: 600 }}>{initial}</text>
         </box>
       }>
-        {image => <Image src={image()} style={iconTile} />}
+        {image => <Image src={image()} style={{ ...iconTile, objectFit: "contain" }} />}
       </Show>
-      <text style={{ ...clipped, fontSize: "12px", lineHeight: "14px" }}>{item.title}</text>
+      <text style={{ ...clipped, fontSize: "12px", lineHeight: "15px", fontWeight: props.selected ? 600 : 500 }}>{item.title}</text>
       <Show when={item.provider_id !== "desktop"}>
-        <text style={{ ...clipped, fontSize: "10px", lineHeight: "10px", color: "var(--color-on-surface-variant)" }}>{item.provider_id}</text>
+        <text style={{ ...clipped, fontSize: "10px", lineHeight: "12px", color: "var(--color-on-surface-variant)" }}>{item.provider_id}</text>
       </Show>
     </Button>
   );
@@ -115,16 +117,25 @@ function LauncherContent(props: { allocateQueryId: () => number }): NativeChild 
     }}>
       <box testId="launcher-card" role="dialog" ariaLabel="Launcher" ariaModal onClick={event => event.stopPropagation()} style={{
         display: "flex", flexDirection: "column", width: "652px", height: "410px", borderRadius: "22px",
-        backgroundColor: "var(--color-surface)", border: "1px solid var(--color-outline-variant)",
-        padding: "18px", gap: "14px", fontFamily: "var(--font-sans)",
+        backgroundColor: "var(--color-surface-container)",
+        border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
+        boxShadow: "0 20px 56px rgba(0, 0, 0, 0.60)",
+        padding: "18px", gap: "14px", fontFamily: "var(--font-sans)", color: "var(--color-on-surface)",
         ...dialogMotionStyle(enter()),
       }}>
-        <TextField testId="launcher-search" placeholder="Search apps" value={query()} onInput={event => setQuery(event.value)}
-          onKeyDown={handleKeyDown} ref={node => focus(node)} style={{
-            width: "100%", height: "44px", borderRadius: "22px",
-            padding: "12px 18px", lineHeight: "20px", flexShrink: 0,
-            backgroundColor: "var(--color-surface-container-high)", color: "var(--color-on-surface)", fontSize: "14px",
-          }} />
+        <row style={{
+          width: "100%", height: "46px", borderRadius: "14px", padding: "0 14px", gap: "10px",
+          alignItems: "center", flexShrink: 0, backgroundColor: "var(--color-surface-container-high)",
+          border: "1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent)",
+        }}>
+          <ShellIcon name="search" size={20} color="var(--color-on-surface-variant)" />
+          <TextField testId="launcher-search" placeholder="Search apps" value={query()} onInput={event => setQuery(event.value)}
+            onKeyDown={handleKeyDown} ref={node => focus(node)} style={{
+              flexGrow: 1, flexBasis: "0px", minWidth: "0px", height: "38px",
+              padding: "9px 0", lineHeight: "20px", backgroundColor: "transparent",
+              color: "var(--color-on-surface)", fontSize: "14px",
+            }} />
+        </row>
         <scroll style={{ flexGrow: 1, width: "100%", overflow: "hidden auto" }}>
           <row style={{ width: "100%", flexWrap: "wrap", gap: "6px", justifyContent: "flex-start" }}>
             <For each={items()} keyed={item => item}>
@@ -132,6 +143,14 @@ function LauncherContent(props: { allocateQueryId: () => number }): NativeChild 
             </For>
           </row>
         </scroll>
+        <row style={{ justifyContent: "space-between", alignItems: "center", paddingTop: "2px", flexShrink: 0 }}>
+          <text style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--color-on-surface-variant)" }}>
+            ↑↓←→ Move · Enter Launch · Esc Close
+          </text>
+          <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--color-on-surface-variant)", fontVariantNumeric: "tabular-nums" }}>
+            {items().length} apps
+          </text>
+        </row>
       </box>
     </box>
   );

@@ -6,7 +6,7 @@ import {
 import { Input as TextField } from "@hewel/zgui/components";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
-import { SHELL_ROSETTE_PATH } from "../shapes.ts";
+import { LOCK_MORPH_SHAPES, SHELL_ROSETTE_CLIP_104, SHELL_ROSETTE_PATH } from "../shapes.ts";
 import { useShellStore } from "../store.ts";
 import { formatBarClock, formatFullDate, formatSurfaceName, resolveMonitorWallpaper, selectActiveMediaPlayer, type UnlockApproval } from "../topics.ts";
 
@@ -27,6 +27,15 @@ type LockControls = {
 const clockFormat = { clock24h: true, clockSeconds: false };
 const cover = { position: "absolute", inset: "0px", width: "100%", height: "100%", pointerEvents: "none" } as const;
 const centeredColumn = { display: "flex", flexDirection: "column", alignItems: "center" } as const;
+const MORPH_SEQUENCE = [
+  LOCK_MORPH_SHAPES.Cookie4,
+  LOCK_MORPH_SHAPES.Clover4,
+  LOCK_MORPH_SHAPES.Sunny,
+  LOCK_MORPH_SHAPES.Circle,
+  LOCK_MORPH_SHAPES.Cookie6,
+  LOCK_MORPH_SHAPES.Flower5,
+] as const;
+const MAX_VISIBLE_DOTS = 14;
 
 function LockScreen(props: {
   readonly monitor: Accessor<Monitor>;
@@ -44,8 +53,16 @@ function LockScreen(props: {
     return player?.playback_status === "playing" ? player : null;
   };
   const [field, setField] = createSignal<NativeNode>();
+  const [passwordFocused, setPasswordFocused] = createSignal(false);
   createEffect(() => props.primary() && !controls.disabled() ? field() : undefined, node => {
     if (node) focus(node);
+  });
+  const morphDots = createMemo(() => {
+    const count = Math.min(controls.password().length, MAX_VISIBLE_DOTS);
+    return Array.from({ length: count }, (_, index) => ({
+      index,
+      shape: MORPH_SEQUENCE[index % MORPH_SEQUENCE.length]!,
+    }));
   });
 
   return (
@@ -67,73 +84,106 @@ function LockScreen(props: {
         });
         return (
           <row testId={`lock-battery-${monitor().id}`} style={{
-            position: "absolute", zIndex: 2, top: "20px", right: "24px", alignItems: "center", gap: "5px",
+            position: "absolute", zIndex: 2, top: "28px", right: "36px", alignItems: "center", gap: "6px",
             borderRadius: "16px", backgroundColor: "color-mix(in srgb, var(--color-on-surface) 10%, transparent)", padding: "5px 10px",
           }}>
-            <ShellIcon name={battery().state === "charging" ? "batteryCharging" : "battery"} color="inherit" />
-            <text style={{ fontSize: "13px" }}>{label()}</text>
+            <ShellIcon name={battery().state === "charging" ? "batteryCharging" : "battery"} size={18} color="inherit" />
+            <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "14px", fontWeight: 500, fontVariantNumeric: "tabular-nums" }}>
+              {label()}
+            </text>
           </row>
         );
       }}</Show>
-      <box style={{ ...centeredColumn, position: "relative", zIndex: 2, justifyContent: "center", flexGrow: 2, flexBasis: "0px" }}>
-        <text testId={`lock-clock-${monitor().id}`} style={{ fontSize: "72px", fontWeight: 300, lineHeight: 1 }}>
+      <box style={{ ...centeredColumn, position: "relative", zIndex: 2, justifyContent: "center", flexGrow: 2, flexBasis: "0px", gap: "6px" }}>
+        <text testId={`lock-clock-${monitor().id}`} style={{
+          fontSize: "112px", fontWeight: 300, lineHeight: "124px", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums",
+        }}>
           {props.clock().time}
         </text>
-        <text style={{ fontSize: "17px", marginTop: "6px" }}>{props.clock().date}</text>
+        <text style={{ fontSize: "22px", lineHeight: "28px", opacity: 0.85 }}>{props.clock().date}</text>
       </box>
       <box style={{
         ...centeredColumn, position: "relative", zIndex: 2,
-        justifyContent: "center", flexGrow: 3, flexBasis: "0px", gap: "8px", maxWidth: "100%",
+        justifyContent: "center", flexGrow: 3, flexBasis: "0px", gap: "16px", maxWidth: "100%",
       }}>
         <box ariaHidden style={{
-          width: "64px", height: "64px", flexShrink: 0, position: "relative",
+          width: "104px", height: "104px", flexShrink: 0, position: "relative",
           display: "flex", alignItems: "center", justifyContent: "center",
         }}>
           <vector ariaHidden d={SHELL_ROSETTE_PATH} viewBox="0 0 64 64"
             style={{ ...cover, zIndex: 0, color: "var(--color-primary-container)" }} />
           <Show when={props.avatar()} fallback={
-            <text style={{ position: "relative", zIndex: 1, fontSize: "25px", fontWeight: 600, color: "var(--color-on-primary-container)" }}>
-              {String.fromCodePoint(controls.username().codePointAt(0) ?? 63).toUpperCase()}
-            </text>
+            <ShellIcon name="person" size={46} color="var(--color-on-primary-container)" />
           }>{src => <Image ariaHidden src={src()} style={{
-            position: "relative", zIndex: 1, width: "54px", height: "54px", borderRadius: "999px", objectFit: "cover",
+            position: "relative", zIndex: 1, width: "104px", height: "104px", objectFit: "cover", clipPath: SHELL_ROSETTE_CLIP_104,
           }} />}</Show>
         </box>
-        <text testId={`lock-user-${monitor().id}`} style={{ fontSize: "17px", fontWeight: 600 }}>{controls.username()}</text>
+        <text testId={`lock-user-${monitor().id}`} style={{ fontSize: "22px", fontWeight: 500, lineHeight: "28px" }}>
+          {controls.username()}
+        </text>
         <row style={{
-          width: "300px", maxWidth: "100%", height: "46px", flexShrink: 0, alignItems: "center", gap: "8px",
-          borderRadius: "999px", backgroundColor: "color-mix(in srgb, var(--color-on-surface) 10%, transparent)",
-          border: "1px solid var(--color-outline-variant)", padding: "0px 12px",
+          position: "relative", width: "340px", maxWidth: "100%", height: "56px", flexShrink: 0,
+          alignItems: "center", justifyContent: "space-between", gap: "8px",
+          borderRadius: "999px",
+          backgroundColor: "color-mix(in srgb, var(--color-on-surface) 14%, transparent)",
+          border: passwordFocused()
+            ? "2px solid var(--color-primary)"
+            : "1px solid color-mix(in srgb, var(--color-on-surface) 24%, transparent)",
+          padding: "0px 12px",
         }}>
+          <box ariaHidden style={{ width: "36px", height: "32px", flexShrink: 0 }} />
+          <row testId="lock-morph-dots" ariaHidden style={{
+            flexGrow: 1, flexBasis: "0px", minWidth: "0px", alignItems: "center", justifyContent: "center",
+            gap: "12px", overflow: "hidden", pointerEvents: "none",
+          }}>
+            <Show when={morphDots().length > 0} fallback={
+              <text style={{ fontSize: "14px", color: "var(--color-on-surface-variant)", opacity: 0.78 }}>Enter password</text>
+            }>
+              <For each={morphDots()} keyed={dot => dot.index}>
+                {dot => (
+                  <vector ariaHidden d={dot().shape.d} viewBox={dot().shape.viewBox}
+                    style={{ width: "14px", height: "14px", flexShrink: 0, color: "var(--color-on-surface)" }} />
+                )}
+              </For>
+            </Show>
+          </row>
           <TextField testId="lock-password" secure placeholder="Password" ariaLabel="Password"
             disabled={controls.disabled()} value={controls.password()} onValueChange={value => controls.setPassword(value)}
+            onFocus={() => setPasswordFocused(true)} onBlur={() => setPasswordFocused(false)}
             ref={node => { setField(node); }} onKeyDown={e => {
               if (e.key === "Enter") {
                 e.preventDefault();
                 void controls.submit();
               }
             }} style={{
-              height: "100%", minWidth: "0px", flexGrow: 1, flexBasis: "0px", padding: "0px",
-              border: "0px", backgroundColor: "transparent", color: "inherit", fontSize: "14px",
-              boxShadow: "none", "--zui-color-muted-foreground": "inherit",
+              position: "absolute", left: "12px", top: "4px", right: "92px", bottom: "4px",
+              padding: "0px", border: "0px", backgroundColor: "transparent", color: "transparent",
+              opacity: 0, fontSize: "14px", boxShadow: "none",
             }} />
-          <text style={{
-            fontSize: "11px", borderRadius: "8px", padding: "2px 5px", flexShrink: 0,
-            backgroundColor: "color-mix(in srgb, var(--color-on-surface) 12%, transparent)",
-          }}>{ime.data()?.active_im?.short_label || "EN"}</text>
-          <Button testId="lock-submit" ariaLabel="Unlock" disabled={controls.disabled()} onClick={() => void controls.submit()}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: "0px",
-              width: "28px", height: "28px", borderRadius: "14px", border: "0px",
-              backgroundColor: "var(--color-primary)", opacity: controls.disabled() ? 0.45 : 1,
+          <row style={{ alignItems: "center", gap: "6px", flexShrink: 0, position: "relative", zIndex: 2 }}>
+            <box style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              minWidth: "36px", height: "32px", padding: "0 10px", borderRadius: "16px",
+              backgroundColor: "color-mix(in srgb, var(--color-on-surface) 14%, transparent)",
             }}>
-            <ShellIcon name="chevronRight" color="var(--color-on-primary)" size={18} />
-          </Button>
+              <text style={{ fontFamily: "var(--font-mono)", fontSize: "12px", fontWeight: 600 }}>
+                {ime.data()?.active_im?.short_label || "EN"}
+              </text>
+            </box>
+            <Button testId="lock-submit" ariaLabel="Unlock" disabled={controls.disabled()} onClick={() => void controls.submit()}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: "0px",
+                width: "32px", height: "32px", borderRadius: "999px", border: "0px",
+                backgroundColor: "var(--color-primary)", opacity: controls.disabled() ? 0.45 : 1,
+              }}>
+              <ShellIcon name="chevronRight" color="var(--color-on-primary)" size={18} />
+            </Button>
+          </row>
         </row>
         <Show when={controls.sleepHold()}><text testId="lock-sleep-hold">Preparing for sleep…</text></Show>
         <Show when={controls.error()}><text testId="lock-error" role="alert" style={{ color: "var(--color-error)" }}>{controls.error()}</text></Show>
         <Show when={playing()}>{player => (
-          <row style={{ gap: "5px", alignItems: "center", maxWidth: "300px", opacity: 0.8 }}>
+          <row style={{ gap: "6px", alignItems: "center", maxWidth: "320px", opacity: 0.8 }}>
             <ShellIcon name="play" size={14} color="inherit" />
             <text style={{ fontSize: "12px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {player().metadata.title ?? player().identity}

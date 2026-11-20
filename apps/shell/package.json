@@ -5,6 +5,10 @@
   "type": "module",
   "zgui": {
     "id": "dev.zshell.shell",
+    "fonts": [
+      { "family": "Roboto Flex", "path": "assets/fonts/RobotoFlex-Variable.ttf" },
+      { "family": "JetBrains Mono", "path": "assets/fonts/JetBrainsMono-Variable.ttf" }
+    ],
     "capabilities": {
       "shellSurfaces": true,
       "sessionLock": true,

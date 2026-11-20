@@ -1,12 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { LOCK_MORPH_SHAPES, SHELL_ROSETTE_PATH } from "../src/shapes.ts";
 import { SHELL_DEFAULT_SCHEME, buildThemeStylesheet } from "../src/theme.ts";
-import { DEFAULT_BAR_SETTINGS } from "../src/topics.ts";
+import {
+  DEFAULT_BAR_SETTINGS,
+  DOCKED_TOP_BAR_HEIGHT,
+  DOCKED_VERTICAL_BAR_WIDTH,
+  TOP_BAR_HEIGHT,
+  VERTICAL_BAR_WIDTH,
+} from "../src/topics.ts";
 
 const shellDir = resolve(import.meta.dir, "..");
 const repoRoot = resolve(shellDir, "../..");
@@ -221,6 +227,41 @@ describe("zshell oxlint design plugin", () => {
     const goodIconGrid = lintSnippet("icons.tsx", `export const ICONS = { mediaEq: { viewBox: "0 0 24 24", d: "M7 18h2V6H7v12z" }, shellEmblem: { viewBox: "0 0 64 64", d: p } };`, "zshell/material-icon-grid");
     expect(goodIconGrid.status, goodIconGrid.output).toBe(0);
   });
+
+  test("zshell/single-owner-ia blocks Notifications/DND in QuickSettingsPanel and SystemTelemetryCards in CalendarPanel", () => {
+    const badQsDnd = lintSnippet("QuickSettingsPanel.tsx", `export const x = { cmd: "notifications.set-dnd", label: "Do Not Disturb" };`, "zshell/single-owner-ia");
+    expect(badQsDnd.status).not.toBe(0);
+
+    const badCalTelemetry = lintSnippet("CalendarPanel.tsx", `export const x = <SystemTelemetryCards />;`, "zshell/single-owner-ia");
+    expect(badCalTelemetry.status).not.toBe(0);
+
+    const goodCal = lintSnippet("CalendarPanel.tsx", `export const x = { cmd: "notifications.set-dnd" };`, "zshell/single-owner-ia");
+    expect(goodCal.status, goodCal.output).toBe(0);
+  });
+
+  test("zshell/split-action-divider requires a vertical hairline divider on split QuickTiles", () => {
+    const badSplit = lintSnippet("QuickSettingsPanel.tsx", `export const x = <row data-qs-tile="true"><Button testId="qs-open-wifi" /></row>;`, "zshell/split-action-divider");
+    expect(badSplit.status).not.toBe(0);
+
+    const goodSplit = lintSnippet("QuickSettingsPanel.tsx", `export const x = <row data-qs-tile="true"><box data-split-divider="true" /><Button testId="qs-open-wifi" /></row>;`, "zshell/split-action-divider");
+    expect(goodSplit.status, goodSplit.output).toBe(0);
+  });
+
+  test("zshell/tabular-readout enforces tabular-nums on monospace numeric readout slots", () => {
+    const badReadout = lintSnippet("OsdOverlay.tsx", `export const x = <text data-tabular="true" style={{ fontFamily: "var(--font-mono)" }}>68%</text>;`, "zshell/tabular-readout");
+    expect(badReadout.status).not.toBe(0);
+
+    const goodReadout = lintSnippet("OsdOverlay.tsx", `export const x = <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>68%</text>;`, "zshell/tabular-readout");
+    expect(goodReadout.status, goodReadout.output).toBe(0);
+  });
+
+  test("zshell/bluetooth-safe-action forbids unguarded Remove button on connected Bluetooth rows", () => {
+    const badBt = lintSnippet("QuickSettingsSubpages.tsx", `export function BluetoothPage() { return <Action label="Remove" />; }`, "zshell/bluetooth-safe-action");
+    expect(badBt.status).not.toBe(0);
+
+    const goodBt = lintSnippet("QuickSettingsSubpages.tsx", `export function BluetoothPage() { return <Show when={!dev().connected}><Action label="Remove" /></Show>; }`, "zshell/bluetooth-safe-action");
+    expect(goodBt.status, goodBt.output).toBe(0);
+  });
 });
 
 function parseCubicPoints(d: string): { x: number; y: number }[] {
@@ -318,14 +359,37 @@ describe("DESIGN.md token and surface contract sync", () => {
     for (const [name, value] of Object.entries(frontmatter.spacing ?? {})) {
       expect(appCss, `app.css --spacing-${name}`).toContain(`--spacing-${name}: ${value};`);
     }
-    expect(appCss).toMatch(/--font-sans:\s*[^;]+;/);
-    expect(appCss).toMatch(/--font-mono:\s*[^;]+;/);
+    expect(appCss).toContain(`--font-sans: "Roboto Flex"`);
+    expect(appCss).toContain(`--font-mono: "JetBrains Mono"`);
     expect(appCss).not.toContain("--radius-20:");
     expect(appCss).not.toContain("--radius-30:");
+
+    const pkg = JSON.parse(readFileSync(join(shellDir, "package.json"), "utf8")) as {
+      zgui?: { fonts?: { family: string; path: string }[] };
+    };
+    const fonts = pkg.zgui?.fonts ?? [];
+    expect(fonts.map(f => f.family)).toEqual(["Roboto Flex", "JetBrains Mono"]);
+    for (const font of fonts) {
+      expect(existsSync(join(shellDir, font.path)), `missing bundled font ${font.path}`).toBe(true);
+    }
   });
 
-  test("bar default disables 1Hz clock seconds (No-1Hz-Flicker Rule)", () => {
+  test("bar strut constants and auto-height popover / SettingsWindow tiers match DESIGN.md", () => {
     expect(DEFAULT_BAR_SETTINGS.clock_seconds).toBe(false);
+    expect(DEFAULT_BAR_SETTINGS.style).toBe("floating");
+    expect(TOP_BAR_HEIGHT).toBe(32);
+    expect(VERTICAL_BAR_WIDTH).toBe(40);
+    expect(DOCKED_TOP_BAR_HEIGHT).toBe(38);
+    expect(DOCKED_VERTICAL_BAR_WIDTH).toBe(44);
+
+    const shellPanels = readFileSync(join(shellDir, "src/panels/ShellPanels.tsx"), "utf8");
+    const pluginHost = readFileSync(join(shellDir, "src/plugins/PluginHost.tsx"), "utf8");
+    const settingsWin = readFileSync(join(shellDir, "src/surfaces/SettingsWindow.tsx"), "utf8");
+    expect(shellPanels).toContain(`height="auto"`);
+    expect(pluginHost).toContain(`height="auto"`);
+    expect(settingsWin).toContain("width={820}");
+    expect(settingsWin).toContain("height={600}");
+    expect(settingsWin).toContain(`width: "216px"`);
   });
 
   test("surface width tiers match DESIGN.md (Compact 360, Standard 396, Clipboard 560, Launcher 652, Overview 684)", () => {

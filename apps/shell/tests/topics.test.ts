@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 
 import {
   DEFAULT_BAR_SETTINGS,
+  DOCKED_TOP_BAR_HEIGHT,
+  DOCKED_VERTICAL_BAR_WIDTH,
   TOP_BAR_HEIGHT,
   VERTICAL_BAR_WIDTH,
   buildDockItems,
@@ -189,39 +191,65 @@ function makeMedia(
 }
 
 describe("resolveBarLayout", () => {
-  test("resolves a top bar with custom gaps", () => {
+  test("resolves a floating top bar with custom gaps (32px islands + margin = 46px strut at gap 14)", () => {
     expect(resolveBarLayout(makeBarSettings("top", 10), { width: 1280, height: 720 })).toEqual({
       position: "top",
+      style: "floating",
       isVertical: false,
       anchor: ["top", "left", "right"],
       margin: { top: 10, right: 10, bottom: 0, left: 10 },
       width: 1260,
       height: TOP_BAR_HEIGHT,
-      exclusiveZone: 58,
+      exclusiveZone: 42,
     });
   });
 
-  test("resolves a left vertical bar", () => {
+  test("resolves a floating left vertical bar (40px islands + margin = 54px strut at gap 14)", () => {
     expect(resolveBarLayout(makeBarSettings("left", 12), { width: 1920, height: 1080 })).toEqual({
       position: "left",
+      style: "floating",
       isVertical: true,
       anchor: ["left", "top", "bottom"],
       margin: { top: 12, right: 0, bottom: 12, left: 12 },
       width: VERTICAL_BAR_WIDTH,
       height: 1056,
-      exclusiveZone: 64,
+      exclusiveZone: 52,
     });
   });
 
-  test("resolves a right vertical bar", () => {
+  test("resolves a floating right vertical bar", () => {
     expect(resolveBarLayout(makeBarSettings("right", 12), { width: 1920, height: 1080 })).toEqual({
       position: "right",
+      style: "floating",
       isVertical: true,
       anchor: ["right", "top", "bottom"],
       margin: { top: 12, right: 12, bottom: 12, left: 0 },
       width: VERTICAL_BAR_WIDTH,
       height: 1056,
-      exclusiveZone: 64,
+      exclusiveZone: 52,
+    });
+  });
+
+  test("resolves docked top (38px flush) and docked left (44px flush) bars with zero outer margin", () => {
+    expect(resolveBarLayout({ ...makeBarSettings("top", 14), style: "docked" }, { width: 1440, height: 900 })).toEqual({
+      position: "top",
+      style: "docked",
+      isVertical: false,
+      anchor: ["top", "left", "right"],
+      margin: { top: 0, right: 0, bottom: 0, left: 0 },
+      width: 1440,
+      height: DOCKED_TOP_BAR_HEIGHT,
+      exclusiveZone: 38,
+    });
+    expect(resolveBarLayout({ ...makeBarSettings("left", 14), style: "docked" }, { width: 1440, height: 900 })).toEqual({
+      position: "left",
+      style: "docked",
+      isVertical: true,
+      anchor: ["left", "top", "bottom"],
+      margin: { top: 0, right: 0, bottom: 0, left: 0 },
+      width: DOCKED_VERTICAL_BAR_WIDTH,
+      height: 900,
+      exclusiveZone: 44,
     });
   });
 
@@ -233,16 +261,18 @@ describe("resolveBarLayout", () => {
 
     expect(layout.margin).toEqual({ top: 3, right: 14, bottom: 9, left: 14 });
     expect(layout.width).toBe(1252);
-    expect(layout.exclusiveZone).toBe(51);
+    expect(layout.exclusiveZone).toBe(35);
   });
 
   test("uses default settings and enforces the minimum bar extent", () => {
     const layout = resolveBarLayout(undefined, { width: 200, height: 200 });
 
     expect(layout.position).toBe("top");
+    expect(layout.style).toBe("floating");
     expect(layout.margin).toEqual({ top: 14, right: 14, bottom: 0, left: 14 });
     expect(layout.width).toBe(240);
     expect(layout.height).toBe(TOP_BAR_HEIGHT);
+    expect(layout.exclusiveZone).toBe(46);
   });
 });
 

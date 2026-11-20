@@ -11,6 +11,7 @@ import { OsdOverlay } from "./surfaces/OsdOverlay.tsx";
 import { PolkitDialog } from "./surfaces/PolkitDialog.tsx";
 import { PowerDialog } from "./surfaces/PowerDialog.tsx";
 import { SessionLockOverlay } from "./surfaces/SessionLockOverlay.tsx";
+import { SettingsWindow } from "./surfaces/SettingsWindow.tsx";
 import { StatusBar } from "./surfaces/StatusBar.tsx";
 import { WallpaperLayer } from "./surfaces/WallpaperLayer.tsx";
 import { useShellTheme } from "./theme.ts";
@@ -32,6 +33,7 @@ function ShellApp() {
       <LauncherOverlay />
       <PowerDialog />
       <PolkitDialog />
+      <SettingsWindow />
       <SessionLockOverlay />
     </ShellProvider>
   );

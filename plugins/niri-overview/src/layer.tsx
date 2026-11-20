@@ -7,7 +7,7 @@ import { useTopic } from "@z-shell/sdk/zgui";
 import type { NiriOverviewSnapshot, WorkspaceViewportLayout } from "./service.ts";
 
 const actionStyle: NativeStyle = {
-  padding: "8px 14px", borderRadius: "999px", minHeight: "40px", fontSize: "14px",
+  padding: "6px 12px", borderRadius: "10px", minHeight: "34px", fontSize: "12px", fontWeight: 500,
   backgroundColor: "var(--color-secondary-container)", color: "var(--color-on-secondary-container)",
 };
 
@@ -21,19 +21,30 @@ function WorkspaceCard(props: {
 
   return (
     <Button testId={`niri-ws-${ws().workspaceId}`} onClick={props.close} style={{
-      display: "flex", flexDirection: "column", alignItems: "stretch", gap: "8px", padding: "10px",
-      width: "204px", maxWidth: "100%", borderRadius: "16px",
-      backgroundColor: ws().focused ? "var(--color-primary-container)" : "var(--color-surface-container)",
+      display: "flex", flexDirection: "column", alignItems: "stretch", gap: "10px", padding: "12px",
+      width: "316px", maxWidth: "100%", borderRadius: "16px",
+      backgroundColor: ws().focused ? "var(--color-primary-container)" : "var(--color-surface-container-high)",
+      border: ws().focused
+        ? "1px solid color-mix(in srgb, var(--color-primary) 35%, transparent)"
+        : "1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent)",
       color: ws().focused ? "var(--color-on-primary-container)" : "var(--color-on-surface)",
     }}>
-      <text style={{ fontSize: "14px", fontWeight: "600" }}>Workspace {ws().index}</text>
+      <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+        <text style={{ fontSize: "14px", fontWeight: 600 }}>Workspace {ws().index}</text>
+        <text data-tabular="true" style={{
+          fontFamily: "var(--font-mono)", fontSize: "11px", fontVariantNumeric: "tabular-nums",
+          color: ws().focused ? "var(--color-on-primary-container)" : "var(--color-on-surface-variant)",
+        }}>
+          {`${windows().length} ${windows().length === 1 ? "win" : "wins"}`}
+        </text>
+      </row>
       <box style={{
-        position: "relative", height: "96px", overflow: "hidden", borderRadius: "8px",
+        position: "relative", height: "164px", overflow: "hidden", borderRadius: "10px",
         backgroundColor: "var(--color-surface-container-lowest)",
       }}>
         <For each={windows()} keyed={win => win.id}>
           {win => <box testId={`niri-win-${win().id}`} style={{
-            position: "absolute", borderRadius: "4px",
+            position: "absolute", borderRadius: "6px",
             // The service publishes output-canvas coordinates; rebase to this workspace's viewport.
             left: percent((win().x - ws().x) / ws().width), top: percent((win().y - ws().y) / ws().height),
             width: percent(win().width / ws().width), height: percent(win().height / ws().height),
@@ -75,7 +86,7 @@ function OverviewCard(props: {
   return (
     <box testId="niri-overview-backdrop" onClick={close} style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
-      display: "flex", alignItems: "center", justifyContent: "center", padding: "12px",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: "14px",
       backgroundColor: "color-mix(in srgb, var(--color-scrim) 55%, transparent)",
     }}>
       <column testId="niri-overview-card" role="dialog" ariaLabel="Workspace Overview" ariaModal tabIndex={-1}
@@ -86,25 +97,29 @@ function OverviewCard(props: {
           }
         }} style={{
           width: "684px", maxWidth: "100%", maxHeight: "100%", padding: "18px", gap: "14px", borderRadius: "22px",
-          backgroundColor: "var(--color-surface)", color: "var(--color-on-surface)",
-          border: "1px solid var(--color-outline-variant)",
+          backgroundColor: "var(--color-surface-container)", color: "var(--color-on-surface)",
+          border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
+          boxShadow: "0 20px 56px rgba(0, 0, 0, 0.60)",
         }}>
-        <row style={{ alignItems: "center", flexShrink: 0, flexWrap: "wrap", gap: "8px" }}>
-          <text role="heading" style={{ fontSize: "22px", fontWeight: "600" }}>Workspace Overview</text>
-          <text style={{
-            padding: "4px 10px", fontSize: "12px", borderRadius: "999px",
-            backgroundColor: "var(--color-surface-container-highest)", color: "var(--color-on-surface-variant)",
-          }}>{props.monitor.name}</text>
-          <box style={{ flexGrow: 1 }} />
+        <row style={{ alignItems: "center", flexShrink: 0, gap: "10px" }}>
+          <column style={{ flexGrow: 1, minWidth: "0px", gap: "2px" }}>
+            <row style={{ alignItems: "center", gap: "8px" }}>
+              <text role="heading" style={{ fontSize: "20px", fontWeight: 600 }}>Workspace Overview</text>
+              <text style={{
+                padding: "3px 8px", fontSize: "11px", borderRadius: "999px", fontFamily: "var(--font-mono)",
+                backgroundColor: "var(--color-surface-container-highest)", color: "var(--color-on-surface-variant)",
+              }}>{props.monitor.name}</text>
+            </row>
+          </column>
           <Button testId="niri-overview-refresh" style={actionStyle} onClick={() => void invoke("refresh")}>Refresh</Button>
           <Button testId="niri-overview-close" style={actionStyle} onClick={close}>Close</Button>
         </row>
         <Show when={commandError()} fallback={<box style={{ display: "none" }} />}>
           {message => <text role="alert" style={{ color: "var(--color-error)" }}>{message()}</text>}
         </Show>
-        <Show when={workspaces()?.length} fallback={<text>No workspaces available</text>}>
+        <Show when={workspaces()?.length} fallback={<text style={{ color: "var(--color-on-surface-variant)" }}>No workspaces available</text>}>
           <scroll style={{ minHeight: "0px", flexShrink: 1 }}>
-            <row style={{ flexWrap: "wrap", gap: "10px" }}>
+            <row style={{ flexWrap: "wrap", gap: "14px" }}>
               <For each={workspaces()} keyed={ws => ws.workspaceId}>
                 {ws => <WorkspaceCard workspace={ws()} close={close} />}
               </For>

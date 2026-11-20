@@ -85,6 +85,13 @@ export type PluginBarWidgetSlot = {
   readonly render: (props: { readonly vertical: boolean }) => NativeChild;
 };
 
+export type PluginSettingsPageEntry = {
+  readonly id: string;
+  readonly pluginId: string;
+  readonly title: string;
+  readonly render: () => NativeChild;
+};
+
 type BarOverlay =
   | { readonly kind: "panel"; readonly target: PanelTarget }
   | { readonly kind: "tray"; readonly target: TrayMenuTarget }
@@ -168,6 +175,12 @@ export interface ShellStore extends ShellTopics {
   showOsd(osd: Omit<OsdPayload, "seq">): void;
   readonly pluginBarWidgets: Accessor<readonly PluginBarWidgetSlot[]>;
   registerPluginBarWidget(slot: PluginBarWidgetSlot): () => void;
+  readonly pluginSettingsPages: Accessor<readonly PluginSettingsPageEntry[]>;
+  registerPluginSettingsPage(page: PluginSettingsPageEntry): () => void;
+  readonly settingsWindowOpen: Accessor<boolean>;
+  readonly settingsWindowTab: Accessor<string>;
+  openSettingsWindow(tab?: string): void;
+  closeSettingsWindow(): void;
 }
 
 export function createShellStore(): ShellStore {
@@ -301,6 +314,26 @@ export function createShellStore(): ShellStore {
     return () => setPluginBarWidgets(slots => slots.includes(registration)
       ? slots.filter(candidate => candidate !== registration)
       : slots);
+  }
+
+  const [pluginSettingsPages, setPluginSettingsPages] = createSignal<readonly PluginSettingsPageEntry[]>([]);
+  function registerPluginSettingsPage(page: PluginSettingsPageEntry): () => void {
+    const registration = { ...page };
+    setPluginSettingsPages(pages => [...pages, registration]);
+    return () => setPluginSettingsPages(pages => pages.includes(registration)
+      ? pages.filter(candidate => candidate !== registration)
+      : pages);
+  }
+
+  const [settingsWindowOpen, setSettingsWindowOpen] = createSignal(false);
+  const [settingsWindowTab, setSettingsWindowTab] = createSignal("appearance");
+  function openSettingsWindow(tab?: string): void {
+    if (tab) setSettingsWindowTab(tab);
+    setOverlay(null);
+    setSettingsWindowOpen(true);
+  }
+  function closeSettingsWindow(): void {
+    setSettingsWindowOpen(false);
   }
 
   function reportError(error: unknown): string {
@@ -479,6 +512,15 @@ export function createShellStore(): ShellStore {
         }
         break;
       }
+      case "settings": {
+        const action = args[1];
+        if (action === "close") {
+          flush(closeSettingsWindow);
+          return { settingsWindowOpen: false };
+        }
+        flush(() => openSettingsWindow(typeof action === "string" && action !== "open" ? action : undefined));
+        return { settingsWindowOpen: settingsWindowOpen(), settingsWindowTab: settingsWindowTab() };
+      }
       case "power": {
         const action = args[1];
         if (action === "close") {
@@ -541,6 +583,12 @@ export function createShellStore(): ShellStore {
     showOsd,
     pluginBarWidgets,
     registerPluginBarWidget,
+    pluginSettingsPages,
+    registerPluginSettingsPage,
+    settingsWindowOpen,
+    settingsWindowTab,
+    openSettingsWindow,
+    closeSettingsWindow,
   };
 }
 

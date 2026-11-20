@@ -2,7 +2,7 @@ import { PopupSurface, Show, createMemo, type NativeChild, type PopupSurfacePlac
 import { createEnterProgress, panelMotionStyle } from "../motion.ts";
 import { useShellStore, type PanelId, type ShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
-import type { BarPosition } from "../topics.ts";
+import type { BarPosition, BarStyle } from "../topics.ts";
 import { BatteryPanel } from "./BatteryPanel.tsx";
 import { CalendarPanel } from "./CalendarPanel.tsx";
 import { ClipboardPanel } from "./ClipboardPanel.tsx";
@@ -10,12 +10,53 @@ import { MediaPanel } from "./MediaPanel.tsx";
 import { QuickSettingsPanel } from "./QuickSettingsPanel.tsx";
 
 const panels = {
-  "quick-settings": { width: 396, height: 620, Component: QuickSettingsPanel },
-  calendar: { width: 396, height: 620, Component: CalendarPanel },
-  media: { width: 396, height: 302, Component: MediaPanel },
-  battery: { width: 360, height: 400, Component: BatteryPanel },
-  clipboard: { width: 560, height: 518, Component: ClipboardPanel },
+  "quick-settings": { width: 396, maxHeight: 760, Component: QuickSettingsPanel },
+  calendar: { width: 396, maxHeight: 760, Component: CalendarPanel },
+  media: { width: 396, maxHeight: 420, Component: MediaPanel },
+  battery: { width: 360, maxHeight: 520, Component: BatteryPanel },
+  clipboard: { width: 560, maxHeight: 620, Component: ClipboardPanel },
 };
+
+export const POPOVER_FRAME_STYLE = {
+  width: "100%",
+  maxHeight: "100vh",
+  borderRadius: "22px",
+  backgroundColor: "var(--color-surface-container)",
+  border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
+  boxShadow: "0 14px 36px rgba(0, 0, 0, 0.50)",
+  overflow: "hidden",
+  fontFamily: "var(--font-sans)",
+} as const;
+
+export function resolvePopoverGeometry(
+  position: BarPosition,
+  style: BarStyle,
+  centered = false,
+): { readonly placement: PopupSurfacePlacement; readonly offset: { readonly x: number; readonly y: number } } {
+  const offsetPx = style === "docked" ? 10 : 12;
+  switch (position) {
+    case "left":
+      // Bottom-align popovers triggered from the bottom-left Status Island (DESIGN.md D3/D10/D16).
+      return {
+        placement: centered
+          ? { anchor: "right", gravity: "right", flip: true, slide: true }
+          : { anchor: "bottom-right", gravity: "top-right", flip: true, slide: true },
+        offset: { x: offsetPx, y: 0 },
+      };
+    case "right":
+      return {
+        placement: centered
+          ? { anchor: "left", gravity: "left", flip: true, slide: true }
+          : { anchor: "bottom-left", gravity: "top-left", flip: true, slide: true },
+        offset: { x: -offsetPx, y: 0 },
+      };
+    default:
+      return {
+        placement: { anchor: centered ? "bottom" : "bottom-right", gravity: centered ? "bottom" : "bottom-left", flip: true, slide: true },
+        offset: { x: 0, y: offsetPx },
+      };
+  }
+}
 
 function PanelContent(props: {
   id: PanelId;
@@ -28,17 +69,7 @@ function PanelContent(props: {
   const progress = createEnterProgress();
   return (
     <box testId={`panel-root-${props.id}`} data-theme-rev={String(props.theme.revision())} style={{
-      // Resolve percentages against the popup viewport, not the content-sized native root.
-      position: "fixed",
-      left: "0px",
-      top: "0px",
-      width: "100%",
-      height: "100%",
-      borderRadius: "22px",
-      backgroundColor: "var(--color-surface)",
-      border: "1px solid var(--color-outline-variant)",
-      overflow: "hidden",
-      fontFamily: "var(--font-sans)",
+      ...POPOVER_FRAME_STYLE,
       ...panelMotionStyle(progress(), props.position, props.centered),
     }}>
       {props.children}
@@ -56,25 +87,15 @@ export function ShellPanels(): NativeChild {
 
   return (
     <Show when={popup()} keyed>
-      {({ target, panel: { width, height, Component } }) => {
+      {({ target, panel: { width, maxHeight, Component } }) => {
         const centered = target.id === "calendar" || target.id === "clipboard";
-        const geometry = createMemo((): { placement: PopupSurfacePlacement; offset: { x: number; y: number } } => {
-          switch (settings.data()?.bar.position) {
-            case "left":
-              return { placement: { anchor: "right", gravity: "right", flip: true, slide: true }, offset: { x: 8, y: 0 } };
-            case "right":
-              return { placement: { anchor: "left", gravity: "left", flip: true, slide: true }, offset: { x: -8, y: 0 } };
-            default:
-              return {
-                placement: { anchor: centered ? "bottom" : "bottom-right", gravity: centered ? "bottom" : "bottom-left", flip: true, slide: true },
-                offset: { x: 0, y: 8 },
-              };
-          }
-        });
         const position = (): BarPosition => settings.data()?.bar.position ?? "top";
+        const barStyle = (): BarStyle => settings.data()?.bar.style ?? "floating";
+        const geometry = createMemo(() => resolvePopoverGeometry(position(), barStyle(), centered));
         return (
           <PopupSurface name={`panel-${target.id}`} parent={target.parentSurface} anchorRect={target.anchorRect}
-            width={width} height={height} placement={geometry().placement} offset={geometry().offset} grab onDismiss={closePanels}>
+            width={width} height="auto" minHeight={80} maxHeight={maxHeight}
+            placement={geometry().placement} offset={geometry().offset} grab onDismiss={closePanels}>
             <PanelContent id={target.id} position={position()} centered={centered} theme={theme}><Component /></PanelContent>
           </PopupSurface>
         );

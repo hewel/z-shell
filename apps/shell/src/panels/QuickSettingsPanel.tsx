@@ -1,97 +1,85 @@
 import { Button, For, Image, Show, createSignal, focus, getWindowRect, type NativeChild } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon, type ShellIconName } from "../icons.tsx";
+import { SHELL_ROSETTE_CLIP_40, SHELL_ROSETTE_PATH } from "../shapes.ts";
 import { useShellStore } from "../store.ts";
 import { formatDurationSeconds, type BatteryState, type PowerConfirmAction } from "../topics.ts";
-import { QuickSettingsIconButton, QuickSettingsScroll, QuickSettingsSubpage } from "./QuickSettingsSubpages.tsx";
+import { QuickSettingsIconButton, QuickSettingsSubpage } from "./QuickSettingsSubpages.tsx";
 
-export type QuickSettingsPage = "main" | "wifi" | "bluetooth" | "sound" | "wallpaper" | "settings";
+export type QuickSettingsPage = "main" | "wifi" | "bluetooth" | "sound";
 
 const primary = "var(--color-primary)";
-const onPrimary = "var(--color-on-primary)";
 const primaryContainer = "var(--color-primary-container)";
 const onPrimaryContainer = "var(--color-on-primary-container)";
 const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
-const container = "var(--color-surface-container)";
 const containerHigh = "var(--color-surface-container-high)";
-const card = { borderRadius: "16px", backgroundColor: container, padding: "12px", gap: "10px" } as const;
+const containerHighest = "var(--color-surface-container-highest)";
+const card = { borderRadius: "16px", backgroundColor: containerHigh, padding: "10px 12px", gap: "6px" } as const;
 const row = { alignItems: "center", gap: "8px" } as const;
 const grow = { flexGrow: 1, flexBasis: "0px", minWidth: "0px" } as const;
 const clipped = { minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
 const hiddenSection = { display: "none" } as const;
-const avatarStyle = { width: "36px", height: "36px", borderRadius: "999px", flexShrink: 0, "object-fit": "cover" } as const;
+const iconWell = {
+  display: "flex", width: "30px", height: "30px", borderRadius: "10px",
+  alignItems: "center", justifyContent: "center", flexShrink: 0,
+} as const;
+const headerBtn = {
+  display: "flex", width: "36px", height: "36px", borderRadius: "10px",
+  alignItems: "center", justifyContent: "center", flexShrink: 0,
+} as const;
 
-const powerActions = [
+const safePowerActions = [
   { label: "Lock", icon: "lock", action: "lock" },
-  { label: "Log out", icon: "logout", action: "logout" },
   { label: "Suspend", icon: "sleep", action: "suspend" },
-  { label: "Reboot", icon: "reboot", action: "reboot" },
+] as const satisfies readonly { label: string; icon: ShellIconName; action: PowerConfirmAction }[];
+
+const sessionPowerActions = [
+  { label: "Log out", icon: "logout", action: "logout", danger: false },
+  { label: "Reboot", icon: "reboot", action: "reboot", danger: false },
   { label: "Power off", icon: "power", action: "poweroff", danger: true },
-] as const satisfies readonly {
-  label: string; icon: ShellIconName; action: PowerConfirmAction; danger?: boolean;
-}[];
+] as const satisfies readonly { label: string; icon: ShellIconName; action: PowerConfirmAction; danger: boolean }[];
 
 const batteryLabels: Readonly<Record<BatteryState, string>> = {
   unknown: "Unknown", charging: "Charging", discharging: "Discharging", full: "Full",
   pending_charge: "Pending charge", pending_discharge: "Pending discharge",
 };
 
-function QuickTile(props: {
-  id: string;
-  label: string;
-  detail: string;
-  icon: ShellIconName;
-  active?: boolean;
-  toggle?: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  open?: () => void;
-}): NativeChild {
-  const color = () => props.active ? onPrimaryContainer : onSurface;
-  return (
-    <row data-qs-tile="true" style={{ ...grow, height: "50px", borderRadius: "14px", alignItems: "center",
-      backgroundColor: props.active ? primaryContainer : containerHigh,
-      border: props.active ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent" }}>
-      <Button testId={`qs-tile-${props.id}`} ariaLabel={props.label} checked={props.toggle ? props.active ?? false : null}
-        disabled={props.disabled ?? false} onClick={props.onClick} style={{
-          ...row, ...grow, display: "flex", flexDirection: "row", height: "100%", borderRadius: "14px",
-          padding: props.open ? "0 0 0 10px" : "0 10px",
-          color: color(), opacity: props.disabled ? 0.55 : 1,
-        }}>
-        <ShellIcon name={props.icon} size={18} color={color()} />
-        <column style={{ ...grow, gap: "2px" }}>
-          <text style={{ ...clipped, fontSize: "13px", fontWeight: "600" }}>{props.label}</text>
-          <text style={{ ...clipped, fontSize: "11px", color: props.active ? onPrimaryContainer : muted, opacity: props.active ? 0.78 : 1 }}>{props.detail}</text>
-        </column>
-      </Button>
-      <Show when={props.open !== undefined} fallback={<box style={hiddenSection} />}>
-        <QuickSettingsIconButton testId={`qs-open-${props.id}`} label={`Open ${props.label}`} icon="chevronRight"
-          fill={props.active ? "color-mix(in srgb, var(--color-primary) 18%, transparent)" : "var(--color-surface-container-highest)"}
-          color={props.active ? onPrimaryContainer : onSurface}
-          onClick={() => props.open?.()} />
-        <box style={{ width: "6px", flexShrink: 0 }} />
-      </Show>
-    </row>
-  );
-}
-
 const clampPercent = (value: number) => Math.max(0, Math.min(100, value));
 
-function PercentTrack(props: {
+export function PrecisionSliderRow(props: {
   label: string;
+  icon: ShellIconName;
+  iconLabel?: string;
   value: number;
   disabled?: boolean;
+  onIconClick?: () => void;
   onChange: (value: number) => void;
+  trailingTestId?: string;
+  trailingLabel?: string;
+  onTrailingClick?: () => void;
+  showTrailingSlot?: boolean;
 }): NativeChild {
   const value = () => clampPercent(props.value);
   const change = (next: number) => {
     const percent = clampPercent(Math.round(next));
-    if (percent !== props.value) props.onChange(percent);
+    if (percent !== Math.round(props.value)) props.onChange(percent);
   };
+  const thumbLeft = () => `${Math.max(0, Math.min(92, value() - 4))}%`;
+
   return (
-    <>
-      <box role="slider" tabIndex={props.disabled ? -1 : 0} disabled={props.disabled ?? false} ariaLabel={props.label}
+    <row style={{ alignItems: "center", gap: "10px", height: "34px", flexShrink: 0 }}>
+      <Show when={props.onIconClick} fallback={
+        <box ariaHidden style={{ ...iconWell, backgroundColor: containerHighest }}>
+          <ShellIcon name={props.icon} size={16} color={onSurface} />
+        </box>
+      }>
+        <Button ariaLabel={props.iconLabel ?? props.label} disabled={props.disabled} onClick={() => props.onIconClick?.()}
+          style={{ ...iconWell, backgroundColor: containerHighest, opacity: props.disabled ? 0.45 : 1 }}>
+          <ShellIcon name={props.icon} size={16} color={onSurface} />
+        </Button>
+      </Show>
+      <box role="slider" tabIndex={props.disabled ? -1 : 0} disabled={props.disabled} ariaLabel={props.label}
         ariaValueMin={0} ariaValueMax={100} ariaValueNow={value()} ariaValueStep={5}
         onPointerDown={event => {
           if (props.disabled || !event.primary || !(event.button === "primary" || (event.button === null && event.pointerKind !== "mouse"))) return;
@@ -118,15 +106,92 @@ function PercentTrack(props: {
           }
           event.preventDefault();
         }}
-        style={{ ...grow, display: "flex", flexDirection: "column", height: "26px", justifyContent: "center", opacity: props.disabled ? 0.5 : 1 }}>
-        <box ariaHidden style={{ width: "100%", height: "12px", borderRadius: "6px", backgroundColor: containerHigh }}>
-          <box data-percent-fill="true" style={{ width: `${value()}%`, height: "100%", borderRadius: "6px", backgroundColor: primary }} />
+        style={{
+          ...grow, display: "flex", alignItems: "center", height: "24px", position: "relative",
+          opacity: props.disabled ? 0.45 : 1,
+        }}>
+        <box ariaHidden style={{ width: "100%", height: "6px", borderRadius: "3px", backgroundColor: containerHighest, overflow: "hidden" }}>
+          <box data-percent-fill="true" style={{ width: `${value()}%`, height: "100%", borderRadius: "3px", backgroundColor: primary }} />
         </box>
+        <box ariaHidden style={{
+          position: "absolute", left: thumbLeft(), width: "14px", height: "14px", borderRadius: "999px",
+          backgroundColor: primary, border: `2px solid ${containerHigh}`,
+        }} />
       </box>
-      <row style={{ width: "36px", flexShrink: 0, justifyContent: "flex-end" }}>
-        <text style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: muted }}>{Math.round(props.value)}%</text>
+      <row style={{ width: "34px", flexShrink: 0, justifyContent: "flex-end" }}>
+        <text data-tabular="true" style={{
+          fontFamily: "var(--font-mono)", fontSize: "11px", fontWeight: 500, color: muted,
+          fontVariantNumeric: "tabular-nums",
+        }}>
+          {Math.round(props.value)}%
+        </text>
       </row>
-    </>
+      <Show when={props.showTrailingSlot !== false}>
+        <Show when={props.onTrailingClick} fallback={<box ariaHidden style={{ width: "26px", height: "26px", flexShrink: 0 }} />}>
+          <Button testId={props.trailingTestId} ariaLabel={props.trailingLabel ?? `Open ${props.label}`}
+            onClick={() => props.onTrailingClick?.()}
+            style={{
+              display: "flex", width: "26px", height: "26px", borderRadius: "8px", flexShrink: 0,
+              alignItems: "center", justifyContent: "center", backgroundColor: containerHighest,
+            }}>
+            <ShellIcon name="chevronRight" size={16} color={muted} />
+          </Button>
+        </Show>
+      </Show>
+    </row>
+  );
+}
+
+function QuickTile(props: {
+  id: string;
+  label: string;
+  detail: string;
+  icon: ShellIconName;
+  active?: boolean;
+  toggle?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  open?: () => void;
+}): NativeChild {
+  const ink = () => props.active ? onPrimaryContainer : onSurface;
+  const subInk = () => props.active ? onPrimaryContainer : muted;
+  return (
+    <row data-qs-tile="true" style={{
+      ...grow, height: "50px", borderRadius: "14px", alignItems: "center",
+      backgroundColor: props.active ? primaryContainer : containerHigh,
+      border: props.active ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
+    }}>
+      <Button testId={`qs-tile-${props.id}`} ariaLabel={props.label} checked={props.toggle ? props.active ?? false : null}
+        disabled={props.disabled} onClick={props.onClick} style={{
+          ...row, ...grow, display: "flex", flexDirection: "row", height: "100%", borderRadius: "14px",
+          padding: props.open ? "0 6px 0 10px" : "0 10px",
+          color: ink(), opacity: props.disabled ? 0.55 : 1,
+        }}>
+        <box ariaHidden style={{
+          ...iconWell,
+          backgroundColor: props.active ? "color-mix(in srgb, var(--color-primary) 18%, transparent)" : containerHighest,
+        }}>
+          <ShellIcon name={props.icon} size={16} color={props.active ? primary : muted} />
+        </box>
+        <column style={{ ...grow, gap: "1px" }}>
+          <text style={{ ...clipped, fontSize: "13px", fontWeight: 500, lineHeight: "17px" }}>{props.label}</text>
+          <text style={{ ...clipped, fontSize: "11px", lineHeight: "14px", color: subInk(), opacity: props.active ? 0.78 : 1 }}>{props.detail}</text>
+        </column>
+      </Button>
+      <Show when={props.open !== undefined} fallback={<box style={hiddenSection} />}>
+        <box ariaHidden data-split-divider="true" style={{
+          width: "1px", height: "22px", flexShrink: 0,
+          backgroundColor: props.active
+            ? "color-mix(in srgb, var(--color-on-primary-container) 22%, transparent)"
+            : "var(--color-outline-variant)",
+        }} />
+        <QuickSettingsIconButton testId={`qs-open-${props.id}`} label={`Open ${props.label}`} icon="chevronRight"
+          size={26} fill="transparent"
+          color={props.active ? onPrimaryContainer : muted}
+          onClick={() => props.open?.()} />
+        <box style={{ width: "4px", flexShrink: 0 }} />
+      </Show>
+    </row>
   );
 }
 
@@ -142,100 +207,111 @@ function Sliders(props: { openSound: () => void }): NativeChild {
   };
   return (
     <column style={card}>
-      <row style={row}>
-        <QuickSettingsIconButton label={sink()?.muted ? "Unmute output" : "Mute output"}
-          icon={sink()?.muted ? "volumeMute" : "volumeHigh"} disabled={!sink()} onClick={() => {
-            const device = sink();
-            if (device) void invokePublic("audio.set-mute", { kind: "sink", index: device.index, muted: !device.muted });
-          }} />
-        <PercentTrack label="Volume" value={(sink()?.volume ?? 0) * 100} disabled={!sink()?.channels} onChange={percent => {
+      <PrecisionSliderRow
+        label="Volume"
+        icon={sink()?.muted ? "volumeMute" : "volumeHigh"}
+        iconLabel={sink()?.muted ? "Unmute output" : "Mute output"}
+        value={(sink()?.volume ?? 0) * 100}
+        disabled={!sink()?.channels}
+        onIconClick={() => {
+          const device = sink();
+          if (device) void invokePublic("audio.set-mute", { kind: "sink", index: device.index, muted: !device.muted });
+        }}
+        onChange={percent => {
           const device = sink();
           if (device) void invokePublic("audio.set-volume", { kind: "sink", index: device.index, volume: percent / 100 });
-        }} />
-        <QuickSettingsIconButton testId="qs-open-sound" label="Open sound mixer" icon="chevronRight" onClick={props.openSound} />
-      </row>
+        }}
+        trailingTestId="qs-open-sound"
+        trailingLabel="Open sound mixer"
+        onTrailingClick={props.openSound}
+      />
       <Show when={backlight()} fallback={<box style={hiddenSection} />}>
         {device => (
-          <row style={row}>
-            <row style={{ width: "34px", justifyContent: "center", flexShrink: 0 }}><ShellIcon name="brightness" size={18} /></row>
-            <PercentTrack label="Brightness" value={device().max_brightness > 0 ? device().brightness * 100 / device().max_brightness : 0}
-              disabled={!device().controllable || device().max_brightness <= 0} onChange={percent => {
-                const { device: id, max_brightness } = device();
-                void invokePublic("brightness.set", { device: id, value: Math.round(percent * max_brightness / 100) });
-              }} />
-            <box style={{ width: "34px", flexShrink: 0 }} />
-          </row>
+          <PrecisionSliderRow
+            label="Brightness"
+            icon="brightness"
+            value={device().max_brightness > 0 ? device().brightness * 100 / device().max_brightness : 0}
+            disabled={!device().controllable || device().max_brightness <= 0}
+            onChange={percent => {
+              const { device: id, max_brightness } = device();
+              void invokePublic("brightness.set", { device: id, value: Math.round(percent * max_brightness / 100) });
+            }}
+          />
         )}
       </Show>
     </column>
   );
 }
 
-function BatterySummary(): NativeChild {
-  const { power } = useShellStore();
+function BatteryCompactRow(): NativeChild {
+  const { power, openSettingsWindow } = useShellStore();
   return (
     <Show when={power.data()?.battery} fallback={<box style={hiddenSection} />}>
       {battery => {
         const charging = () => battery().state === "charging" || battery().state === "pending_charge";
         const duration = () => formatDurationSeconds(charging() ? battery().time_to_full_seconds : battery().time_to_empty_seconds);
+        const detail = () => {
+          const parts: string[] = [];
+          const time = duration();
+          if (time) parts.push(charging() ? `${time} until full` : `${time} remaining`);
+          if (battery().energy_rate_watts != null) parts.push(`${battery().energy_rate_watts!.toFixed(1)} W`);
+          return parts.join(" · ") || batteryLabels[battery().state];
+        };
         return (
-          <column style={card}>
-            <row style={row}>
-              <ShellIcon name={charging() ? "batteryCharging" : "battery"} size={20} color={primary} />
-              <text style={{ fontSize: "20px", fontWeight: "600" }}>
-                {battery().percentage == null ? "—" : `${Math.round(battery().percentage ?? 0)}%`}
-              </text>
-              <text style={{ ...grow, fontSize: "12px", color: muted }}>{duration()}</text>
-              <text style={{ borderRadius: "10px", padding: "4px 8px", fontSize: "11px", backgroundColor: "var(--color-secondary-container)",
-                color: "var(--color-on-secondary-container)" }}>{batteryLabels[battery().state]}</text>
-            </row>
-            <row style={{ gap: "6px" }}>
-              <BatteryChip label="Power" value={battery().energy_rate_watts?.toFixed(1)} unit=" W" />
-              <BatteryChip label="Health" value={battery().capacity_percent?.toFixed(0)} unit="%" />
-              <BatteryChip label="Cycles" value={battery().charge_cycles?.toString()} />
-            </row>
-          </column>
+          <Button testId="qs-battery-row" ariaLabel="Open power and battery settings" onClick={() => openSettingsWindow("power")} style={{
+            display: "flex", flexDirection: "row", alignItems: "center", gap: "10px",
+            borderRadius: "16px", backgroundColor: containerHigh, padding: "10px 12px", color: onSurface,
+          }}>
+            <box ariaHidden style={{ ...iconWell, width: "36px", height: "24px", borderRadius: "8px", backgroundColor: containerHighest }}>
+              <ShellIcon name={charging() ? "batteryCharging" : "battery"} size={18} color={primary} />
+            </box>
+            <column style={{ ...grow, gap: "1px" }}>
+              <row style={{ alignItems: "baseline", gap: "6px" }}>
+                <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "14px", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+                  {battery().percentage == null ? "—" : `${Math.round(battery().percentage ?? 0)}%`}
+                </text>
+                <text style={{ fontSize: "12px", fontWeight: 500, color: charging() ? primary : muted }}>
+                  {batteryLabels[battery().state]}
+                </text>
+              </row>
+              <text style={{ ...clipped, fontSize: "11px", color: muted }}>{detail()}</text>
+            </column>
+            <box ariaHidden style={{ display: "flex", width: "26px", height: "26px", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <ShellIcon name="chevronRight" size={16} color={muted} />
+            </box>
+          </Button>
         );
       }}
     </Show>
   );
 }
 
-function BatteryChip(props: { label: string; value?: string | undefined; unit?: string | undefined }): NativeChild {
+function PowerActionButton(props: {
+  label: string;
+  icon: ShellIconName;
+  action: PowerConfirmAction;
+  danger?: boolean;
+  onSelect: (action: PowerConfirmAction) => void;
+}): NativeChild {
+  const color = () => props.danger ? "var(--color-on-error-container)" : onSurface;
+  const mutedColor = () => props.danger ? "var(--color-on-error-container)" : muted;
+  const isSafe = () => props.action === "lock" || props.action === "suspend";
   return (
-    <column style={{ ...grow, gap: "2px", borderRadius: "10px", padding: "6px 8px", backgroundColor: containerHigh }}>
-      <text style={{ fontSize: "11px", color: muted }}>{props.label}</text>
-      <text style={{ fontSize: "13px", fontWeight: "600" }}>{props.value === undefined ? "—" : `${props.value}${props.unit ?? ""}`}</text>
-    </column>
-  );
-}
-
-function RecentNotifications(): NativeChild {
-  const { notifications, invokePublic } = useShellStore();
-  const history = () => notifications.data()?.history;
-  return (
-    <column style={card}>
-      <row style={row}>
-        <text role="heading" style={{ ...grow, fontSize: "14px", fontWeight: "600" }}>Notifications</text>
-        <Button disabled={!history()?.length} onClick={() => void invokePublic("notifications.clear", {})}
-          style={{ padding: "5px 9px", borderRadius: "10px", backgroundColor: containerHigh, color: primary, fontSize: "12px" }}>
-          Clear all
-        </Button>
-      </row>
-      <For each={history()?.slice(0, 3)} keyed={item => item.id}
-        fallback={<text style={{ fontSize: "12px", color: muted }}>No recent notifications</text>}>
-        {item => (
-          <row style={{ ...row, backgroundColor: containerHigh, borderRadius: "10px", padding: "6px 8px" }}>
-            <column style={{ ...grow, gap: "2px" }}>
-              <text style={{ ...clipped, fontSize: "13px", fontWeight: "600" }}>{item().summary || item().app_name}</text>
-              <text style={{ ...clipped, fontSize: "11px", color: muted }}>{item().body || item().app_name}</text>
-            </column>
-            <QuickSettingsIconButton label={`Dismiss ${item().summary || item().app_name}`} icon="close"
-              onClick={() => void invokePublic("notifications.dismiss", { id: item().id })} />
-          </row>
-        )}
-      </For>
-    </column>
+    <Button ariaLabel={props.label} onClick={() => props.onSelect(props.action)} style={{
+      ...grow, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "4px",
+      padding: props.danger ? "7px 2px" : "8px 2px", borderRadius: "10px",
+      backgroundColor: props.danger
+        ? "color-mix(in srgb, var(--color-error-container) 38%, transparent)"
+        : containerHighest,
+      border: props.danger
+        ? "1px solid color-mix(in srgb, var(--color-error) 35%, transparent)"
+        : "1px solid transparent",
+      color: isSafe() ? color() : mutedColor(),
+      fontSize: "11px", fontWeight: 500,
+    }}>
+      <ShellIcon name={props.icon} size={16} color={isSafe() ? color() : mutedColor()} />
+      <text style={{ whiteSpace: "nowrap" }}>{props.label}</text>
+    </Button>
   );
 }
 
@@ -245,8 +321,8 @@ function MainPage(props: {
   togglePowerMenu: () => void;
   closePowerMenu: () => void;
 }): NativeChild {
-  const { user, hostClient, network, bluetooth, notifications, idle, power, wallpaper,
-    invokePublic, togglePanel, closePanels, requestPowerDialog } = useShellStore();
+  const { user, hostClient, network, bluetooth, idle, power, wallpaper, clipboard,
+    invokePublic, togglePanel, closePanels, requestPowerDialog, openSettingsWindow } = useShellStore();
   const avatar = useDaemonMedia(hostClient, () => user.data()?.avatar, { fetchCommand: "user.fetch-blob" });
   const name = () => user.data()?.display_name ?? user.data()?.username ?? "User";
   const wifi = () => network.data()?.wifi;
@@ -267,86 +343,101 @@ function MainPage(props: {
     void invokePublic("power.set-profile", { profile: current.profiles[(index + 1) % current.profiles.length] });
   };
 
+  const handlePowerSelect = (selected: PowerConfirmAction) => {
+    props.closePowerMenu();
+    if (selected === "lock") {
+      void invokePublic("lock.request", {});
+      closePanels();
+    } else {
+      requestPowerDialog(selected);
+    }
+  };
+
   return (
-    <QuickSettingsScroll testId="qs-main" label="Quick settings">
-      <row style={row}>
-        <Show when={avatar.src()} fallback={
-          <box ariaHidden style={{ ...avatarStyle, display: "flex", alignItems: "center", justifyContent: "center",
-            backgroundColor: "var(--color-primary-container)", color: "var(--color-on-primary-container)", fontWeight: "600" }}>
-            <text>{Array.from(name().trim())[0]?.toUpperCase() || "U"}</text>
-          </box>
-        }>
-          {src => <Image ariaHidden src={src()} style={avatarStyle} />}
-        </Show>
-        <column style={{ ...grow, gap: "2px" }}>
-          <text style={{ ...clipped, fontSize: "15px", fontWeight: "600" }}>{name()}</text>
-          <text style={{ fontSize: "11px", color: muted }}>z-shell</text>
+    <column testId="qs-main" ariaLabel="Quick settings" style={{
+      width: "100%", padding: "14px", gap: "10px", flexDirection: "column",
+      backgroundColor: "var(--color-surface-container)", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
+    }}>
+      <row style={{ ...row, gap: "10px", padding: "0 2px" }}>
+        <box ariaHidden style={{
+          width: "40px", height: "40px", flexShrink: 0, position: "relative",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <vector ariaHidden d={SHELL_ROSETTE_PATH} viewBox="0 0 64 64"
+            style={{ position: "absolute", inset: "0px", width: "40px", height: "40px", color: primaryContainer }} />
+          <Show when={avatar.src()} fallback={
+            <ShellIcon name="person" size={18} color={onPrimaryContainer} />
+          }>
+            {src => <Image ariaHidden src={src()} style={{
+              position: "relative", zIndex: 1, width: "40px", height: "40px", objectFit: "cover", clipPath: SHELL_ROSETTE_CLIP_40,
+            }} />}
+          </Show>
+        </box>
+        <column style={{ ...grow, gap: "1px" }}>
+          <text style={{ ...clipped, fontSize: "15px", fontWeight: 600, lineHeight: "20px" }}>{name()}</text>
+          <text style={{ ...clipped, fontSize: "12px", color: muted, lineHeight: "16px" }}>z-shell</text>
         </column>
-        <QuickSettingsIconButton testId="qs-open-clipboard" label="Open clipboard" icon="copy" onClick={() => togglePanel("clipboard")} />
-        <QuickSettingsIconButton testId="qs-open-settings" label="Open settings" icon="settings" onClick={() => props.navigate("settings")} />
-        <QuickSettingsIconButton testId="qs-power-toggle" label="Power menu" icon="power" fill={primary} color={onPrimary}
-          expanded={props.powerMenuOpen} onClick={props.togglePowerMenu} />
+        <row style={{ gap: "6px", flexShrink: 0 }}>
+          <Button testId="qs-open-settings" ariaLabel="Open settings" onClick={() => openSettingsWindow("appearance")}
+            style={{ ...headerBtn, backgroundColor: containerHighest }}>
+            <ShellIcon name="settings" size={18} color={onSurface} />
+          </Button>
+          <Button testId="qs-power-toggle" ariaLabel="Power menu" expanded={props.powerMenuOpen} onClick={props.togglePowerMenu}
+            style={{
+              ...headerBtn,
+              backgroundColor: props.powerMenuOpen ? primaryContainer : containerHighest,
+              border: props.powerMenuOpen
+                ? "1px solid color-mix(in srgb, var(--color-primary) 42%, transparent)"
+                : "1px solid transparent",
+            }}>
+            <ShellIcon name="power" size={18} color={props.powerMenuOpen ? onPrimaryContainer : onSurface} />
+          </Button>
+        </row>
       </row>
       <Show when={props.powerMenuOpen} fallback={<box style={hiddenSection} />}>
-        <row testId="qs-power-menu" style={{ ...card, gap: "4px" }}>
-          <For each={powerActions} keyed={entry => entry.action}>
-            {action => {
-              const danger = () => "danger" in action();
-              const color = () => danger() ? "var(--color-on-error-container)" : onSurface;
-              return (
-                <Button ariaLabel={action().label} onClick={() => {
-                  const selected = action().action;
-                  props.closePowerMenu();
-                  if (selected === "lock") {
-                    void invokePublic("lock.request", {});
-                    closePanels();
-                  } else {
-                    requestPowerDialog(selected);
-                  }
-                }} style={{ ...grow, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "4px",
-                  padding: "6px 2px", borderRadius: "10px", backgroundColor: danger() ? "var(--color-error-container)" : containerHigh,
-                  color: color(), fontSize: "11px" }}>
-                  <ShellIcon name={action().icon} size={16} color={color()} />
-                  <text style={{ whiteSpace: "nowrap" }}>{action().label}</text>
-                </Button>
-              );
-            }}
+        <row testId="qs-power-menu" style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "6px", gap: "6px", alignItems: "center" }}>
+          <For each={safePowerActions} keyed={entry => entry.action}>
+            {entry => <PowerActionButton label={entry().label} icon={entry().icon} action={entry().action} onSelect={handlePowerSelect} />}
+          </For>
+          <box ariaHidden style={{ width: "1px", height: "28px", flexShrink: 0, backgroundColor: "var(--color-outline-variant)" }} />
+          <For each={sessionPowerActions} keyed={entry => entry.action}>
+            {entry => <PowerActionButton label={entry().label} icon={entry().icon} action={entry().action} danger={entry().danger} onSelect={handlePowerSelect} />}
           </For>
         </row>
       </Show>
       <column style={{ gap: "8px" }}>
         <row style={{ gap: "8px" }}>
           <QuickTile id="wifi" label="Wi-Fi" detail={wifi()?.enabled ? wifiName() ?? "Disconnected" : "Off"}
-            icon={wifi()?.enabled ? "wifi" : "wifiOff"} active={Boolean(wifi()?.enabled)} toggle
+            icon={wifi()?.enabled ? "wifi" : "wifiOff"} active={wifi()?.enabled} toggle
             disabled={!network.data()?.available || !wifi()?.hardware_enabled}
             onClick={() => void invokePublic("network.wifi.set-enabled", { enabled: !wifi()?.enabled })}
             open={() => props.navigate("wifi")} />
           <QuickTile id="bluetooth" label="Bluetooth"
             detail={adapter()?.powered ? connectedBluetooth()?.name || connectedBluetooth()?.address || "On" : "Off"}
-            icon={adapter()?.powered ? "bluetooth" : "bluetoothOff"} active={Boolean(adapter()?.powered)} toggle disabled={!adapter()}
+            icon={adapter()?.powered ? "bluetooth" : "bluetoothOff"} active={adapter()?.powered} toggle disabled={!adapter()}
             onClick={() => {
               const device = adapter();
               if (device) void invokePublic("bluetooth.set-power", { adapter: device.path, powered: !device.powered });
             }} open={() => props.navigate("bluetooth")} />
         </row>
         <row style={{ gap: "8px" }}>
-          <QuickTile id="dnd" label="Do Not Disturb" detail={notifications.data()?.dnd ? "On" : "Off"}
-            icon={notifications.data()?.dnd ? "bellOff" : "bell"} active={Boolean(notifications.data()?.dnd)} toggle
-            onClick={() => void invokePublic("notifications.set-dnd", { dnd: !notifications.data()?.dnd })} />
-          <QuickTile id="caffeine" label="Caffeine" detail={`${caffeine() ? "Awake" : "Normal"} · ${ruleCount()} ${ruleCount() === 1 ? "rule" : "rules"}`}
-            icon="coffee" active={caffeine()} toggle onClick={() => void invokePublic("idle.caffeine", { enabled: !caffeine() })} />
+          <QuickTile id="caffeine" label="Nosleep" detail={caffeine() ? "Awake" : `${ruleCount()} ${ruleCount() === 1 ? "rule" : "rules"}`}
+            icon="coffee" active={caffeine()} toggle
+            onClick={() => void invokePublic("idle.caffeine", { enabled: !caffeine() })}
+            open={() => openSettingsWindow("idle")} />
+          <QuickTile id="profile" label="Power Profile" detail={profiles()?.active_profile ?? "balanced"}
+            icon="battery" active={profiles()?.active_profile === "performance"} disabled={!profiles()?.profiles.length} onClick={cycleProfile} />
         </row>
         <row style={{ gap: "8px" }}>
-          <QuickTile id="profile" label="Power Profile" detail={profiles()?.active_profile ?? "balanced"}
-            icon="battery" disabled={!profiles()?.profiles.length} onClick={cycleProfile} />
           <QuickTile id="wallpaper" label="Wallpaper" detail={`${wallpaper.data()?.catalog_count ?? 0} wallpapers`}
-            icon="wallpaper" onClick={() => props.navigate("wallpaper")} />
+            icon="wallpaper" onClick={() => openSettingsWindow("appearance")} />
+          <QuickTile id="clipboard" label="Clipboard" detail={`${clipboard.data()?.entry_count ?? 0} entries`}
+            icon="copy" onClick={() => togglePanel("clipboard")} />
         </row>
       </column>
       <Sliders openSound={() => props.navigate("sound")} />
-      <BatterySummary />
-      <RecentNotifications />
-    </QuickSettingsScroll>
+      <BatteryCompactRow />
+    </column>
   );
 }
 

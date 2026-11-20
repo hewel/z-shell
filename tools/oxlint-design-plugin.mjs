@@ -356,14 +356,15 @@ const rules = {
           const grows = spreadsGrow || (flexGrow?.type === "Literal" && Number(flexGrow.value) > 0);
           const radius = staticString(map.get("borderRadius") ?? map.get("border-radius"));
 
-          // Exempt compact circular FABs such as the 52x52 media play/pause button.
-          const isCompactCircleFab =
-            width !== null && height !== null && width === height && width <= 56 &&
+          // Exempt compact pill/circular FABs such as the 72x56 media play/pause button.
+          const isCompactFab =
+            !grows &&
+            width !== null && height !== null && width <= 72 && height <= 56 &&
             (radius === "999px" || radius === "var(--radius-pill)");
 
           const isLargeContainer =
             isQsTile ||
-            (!isCompactCircleFab && ((height !== null && height >= 44) || (width !== null && width >= 44) || grows));
+            (!isCompactFab && ((height !== null && height >= 44) || (width !== null && width >= 44) || grows));
 
           if (isLargeContainer) {
             context.report({
@@ -626,7 +627,12 @@ const rules = {
                 : attr.value?.type === "JSXExpressionContainer"
                   ? staticString(attr.value.expression)
                   : null;
-            if (attr.name.name === "viewBox" && attrValue !== null && !ALLOWED_VECTOR_VIEWBOXES.has(attrValue.trim())) {
+            if (
+              attr.name.name === "viewBox" &&
+              attrValue !== null &&
+              !ALLOWED_VECTOR_VIEWBOXES.has(attrValue.trim()) &&
+              !(WAVY_ALLOWED_FILES.has(basename) && attrValue.trim() === "0 0 328 28")
+            ) {
               context.report({
                 node: attr.value,
                 message: `Material-First Icon Rule: <vector> viewBox must be "0 0 24 24" (Material grid) or "0 0 64 64" (expressive shape), got "${attrValue}".`,
@@ -639,6 +645,136 @@ const rules = {
                   "Material-First Icon Rule: do not inline ad-hoc SVG path literals in panels/surfaces; register Material Icons in icons.tsx or analytical shapes in shapes.ts.",
               });
             }
+          }
+        },
+      };
+    },
+  },
+
+  "single-owner-ia": {
+    meta: {
+      type: "problem",
+      docs: { description: "Enforce The Single-Owner IA Rule: Notifications & DND belong to Calendar, not Control Center; telemetry cards do not belong in Calendar" },
+      schema: [],
+    },
+    create(context) {
+      const basename = path.basename(context.filename ?? "");
+      if (basename !== "QuickSettingsPanel.tsx" && basename !== "CalendarPanel.tsx") return {};
+      return {
+        Literal(node) {
+          if (typeof node.value !== "string") return;
+          if (basename === "QuickSettingsPanel.tsx" && /^(?:notifications\.(?:clear|dismiss|set-dnd)|Do Not Disturb)$/.test(node.value)) {
+            context.report({
+              node,
+              message: `Single-Owner IA Rule: "${node.value}" belongs exclusively to CalendarPanel.tsx, not QuickSettingsPanel.tsx.`,
+            });
+          }
+        },
+        Identifier(node) {
+          if (basename === "QuickSettingsPanel.tsx" && node.name === "RecentNotifications") {
+            context.report({
+              node,
+              message: "Single-Owner IA Rule: Notifications history belongs exclusively to CalendarPanel.tsx.",
+            });
+          }
+          if (basename === "CalendarPanel.tsx" && node.name === "SystemTelemetryCards") {
+            context.report({
+              node,
+              message: "Single-Owner IA Rule: System telemetry belongs to BatteryPanel / Settings Window, not CalendarPanel.tsx.",
+            });
+          }
+        },
+        JSXIdentifier(node) {
+          if (basename === "QuickSettingsPanel.tsx" && node.name === "RecentNotifications") {
+            context.report({
+              node,
+              message: "Single-Owner IA Rule: Notifications history belongs exclusively to CalendarPanel.tsx.",
+            });
+          }
+          if (basename === "CalendarPanel.tsx" && node.name === "SystemTelemetryCards") {
+            context.report({
+              node,
+              message: "Single-Owner IA Rule: System telemetry belongs to BatteryPanel / Settings Window, not CalendarPanel.tsx.",
+            });
+          }
+        },
+      };
+    },
+  },
+
+  "split-action-divider": {
+    meta: {
+      type: "problem",
+      docs: { description: "Enforce The Split-Action Guardrail: split QuickTile controls must include a vertical hairline divider before the chevron" },
+      schema: [],
+    },
+    create(context) {
+      const basename = path.basename(context.filename ?? "");
+      if (basename !== "QuickSettingsPanel.tsx") return {};
+      return {
+        JSXElement(node) {
+          const opening = node.openingElement;
+          const isQsTile = opening?.attributes?.some(
+            attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === "data-qs-tile",
+          );
+          if (!isQsTile) return;
+          const text = context.sourceCode?.getText?.(node) ?? "";
+          if (text.includes("qs-open-") && !text.includes("data-split-divider")) {
+            context.report({
+              node: opening,
+              message:
+                "Split-Action Guardrail: QuickTile with sub-panel chevron must separate its primary toggle from the chevron with a 1px vertical hairline (mark with data-split-divider=\"true\").",
+            });
+          }
+        },
+      };
+    },
+  },
+
+  "tabular-readout": {
+    meta: {
+      type: "problem",
+      docs: { description: "Enforce The Tabular Readout Rule: live monospace numeric readout slots must specify fontVariantNumeric: 'tabular-nums'" },
+      schema: [],
+    },
+    create(context) {
+      return {
+        ObjectExpression(node) {
+          const { map } = getStyleProps(node);
+          const fontFamily = staticString(map.get("fontFamily") ?? map.get("font-family"));
+          if (fontFamily !== "var(--font-mono)") return;
+          const isTabularSlot = isEnclosingJsxElementWithAttr(node, "data-tabular");
+          const fvn = staticString(map.get("fontVariantNumeric") ?? map.get("font-variant-numeric"));
+          if (isTabularSlot && fvn !== "tabular-nums") {
+            context.report({
+              node,
+              message: "Tabular Readout Rule: numeric readout slots must declare fontVariantNumeric: \"tabular-nums\".",
+            });
+          }
+        },
+      };
+    },
+  },
+
+  "bluetooth-safe-action": {
+    meta: {
+      type: "problem",
+      docs: { description: "Enforce DESIGN.md Device List safety: do not render a destructive Remove/Forget action directly on a connected Bluetooth device row" },
+      schema: [],
+    },
+    create(context) {
+      const basename = path.basename(context.filename ?? "");
+      if (basename !== "QuickSettingsSubpages.tsx") return {};
+      return {
+        FunctionDeclaration(node) {
+          if (node.id?.name !== "BluetoothPage") return;
+          const text = context.sourceCode?.getText?.(node) ?? "";
+          if (/label="Remove"/.test(text) && !/Show\s+when=\{!dev\(\)\.connected\}/.test(text)) {
+            context.report({
+              node: node.id,
+              message:
+                "Device List safety rule: do not show destructive Remove/Forget action on a connected Bluetooth device; gate Remove behind !dev().connected and keep Disconnect as the primary action.",
+            });
           }
         },
       };

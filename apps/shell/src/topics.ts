@@ -23,6 +23,7 @@ export interface WallpaperSnapshot {
 }
 
 export type BarPosition = "top" | "left" | "right";
+export type BarStyle = "floating" | "docked";
 
 export interface EdgeOverrides {
   readonly top: number | null;
@@ -33,6 +34,7 @@ export interface EdgeOverrides {
 
 export interface BarSettings {
   readonly position: BarPosition;
+  readonly style?: BarStyle;
   readonly gaps: number;
   readonly edge_overrides: EdgeOverrides;
   readonly launcher_enabled: boolean;
@@ -74,6 +76,7 @@ export interface PublicSettingsSummary {
 
 export const DEFAULT_BAR_SETTINGS: BarSettings = {
   position: "top",
+  style: "floating",
   gaps: 14,
   edge_overrides: { top: null, right: null, bottom: null, left: null },
   launcher_enabled: true,
@@ -718,8 +721,10 @@ export interface IdleSnapshot {
   readonly service_status: IdleServiceStatus;
 }
 
-export const TOP_BAR_HEIGHT = 48;
-export const VERTICAL_BAR_WIDTH = 52;
+export const TOP_BAR_HEIGHT = 32;
+export const VERTICAL_BAR_WIDTH = 40;
+export const DOCKED_TOP_BAR_HEIGHT = 38;
+export const DOCKED_VERTICAL_BAR_WIDTH = 44;
 
 const MAX_SURFACE_NAME_LEN = 128;
 
@@ -814,6 +819,7 @@ export function resolveActiveMonitor(
 
 export interface ResolvedBarLayout {
   readonly position: BarPosition;
+  readonly style: BarStyle;
   readonly isVertical: boolean;
   readonly anchor: readonly LayerAnchor[];
   readonly margin: {
@@ -838,59 +844,73 @@ export function resolveBarLayout(
   outputs?: WaylandOutputsSnapshot,
 ): ResolvedBarLayout {
   const settings = bar ?? DEFAULT_BAR_SETTINGS;
+  const style: BarStyle = settings.style ?? "floating";
+  const docked = style === "docked";
   const { edge_overrides: edges, gaps } = settings;
   const size = resolveMonitorLogicalSize(monitor, outputs);
 
   if (settings.position === "top") {
-    const margin = {
-      top: edges.top ?? gaps,
-      right: edges.right ?? gaps,
-      bottom: edges.bottom ?? 0,
-      left: edges.left ?? gaps,
-    };
+    const margin = docked
+      ? { top: 0, right: 0, bottom: 0, left: 0 }
+      : {
+          top: edges.top ?? gaps,
+          right: edges.right ?? gaps,
+          bottom: edges.bottom ?? 0,
+          left: edges.left ?? gaps,
+        };
+    const height = docked ? DOCKED_TOP_BAR_HEIGHT : TOP_BAR_HEIGHT;
     return {
       position: "top",
+      style,
       isVertical: false,
       anchor: ["top", "left", "right"],
       margin,
       width: Math.max(240, size.width - margin.left - margin.right),
-      height: TOP_BAR_HEIGHT,
-      exclusiveZone: TOP_BAR_HEIGHT + margin.top,
+      height,
+      exclusiveZone: height + margin.top,
     };
   }
 
   if (settings.position === "left") {
-    const margin = {
-      top: edges.top ?? gaps,
-      right: edges.right ?? 0,
-      bottom: edges.bottom ?? gaps,
-      left: edges.left ?? gaps,
-    };
+    const margin = docked
+      ? { top: 0, right: 0, bottom: 0, left: 0 }
+      : {
+          top: edges.top ?? gaps,
+          right: edges.right ?? 0,
+          bottom: edges.bottom ?? gaps,
+          left: edges.left ?? gaps,
+        };
+    const width = docked ? DOCKED_VERTICAL_BAR_WIDTH : VERTICAL_BAR_WIDTH;
     return {
       position: "left",
+      style,
       isVertical: true,
       anchor: ["left", "top", "bottom"],
       margin,
-      width: VERTICAL_BAR_WIDTH,
+      width,
       height: Math.max(240, size.height - margin.top - margin.bottom),
-      exclusiveZone: VERTICAL_BAR_WIDTH + margin.left,
+      exclusiveZone: width + margin.left,
     };
   }
 
-  const margin = {
-    top: edges.top ?? gaps,
-    right: edges.right ?? gaps,
-    bottom: edges.bottom ?? gaps,
-    left: edges.left ?? 0,
-  };
+  const margin = docked
+    ? { top: 0, right: 0, bottom: 0, left: 0 }
+    : {
+        top: edges.top ?? gaps,
+        right: edges.right ?? gaps,
+        bottom: edges.bottom ?? gaps,
+        left: edges.left ?? 0,
+      };
+  const width = docked ? DOCKED_VERTICAL_BAR_WIDTH : VERTICAL_BAR_WIDTH;
   return {
     position: "right",
+    style,
     isVertical: true,
     anchor: ["right", "top", "bottom"],
     margin,
-    width: VERTICAL_BAR_WIDTH,
+    width,
     height: Math.max(240, size.height - margin.top - margin.bottom),
-    exclusiveZone: VERTICAL_BAR_WIDTH + margin.right,
+    exclusiveZone: width + margin.right,
   };
 }
 

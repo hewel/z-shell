@@ -36,9 +36,8 @@
   --color-error-container: #93000A;
   --color-on-error-container: #FFDAD6;
   --zgui-ring: var(--color-primary);
-  /* Shipped-only preview requires named fonts to be bundled via zgui.fonts; switch to Roboto Flex / JetBrains Mono once font assets are packaged. */
-  --font-sans: ui-sans-serif, system-ui, sans-serif;
-  --font-mono: ui-monospace, monospace;
+  --font-sans: "Roboto Flex", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
   --radius-xs: 6px;
   --radius-sm: 8px;
   --radius-md: 10px;

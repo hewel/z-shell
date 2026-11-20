@@ -28,7 +28,11 @@
         "zshell/no-outline-none": "error",
         "zshell/expressive-budget": "error",
         "zshell/no-hand-authored-expressive-paths": "error",
-        "zshell/material-icon-grid": "error"
+        "zshell/material-icon-grid": "error",
+        "zshell/single-owner-ia": "error",
+        "zshell/split-action-divider": "error",
+        "zshell/tabular-readout": "error",
+        "zshell/bluetooth-safe-action": "error"
       }
     },
     {

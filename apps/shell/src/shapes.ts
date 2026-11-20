@@ -54,7 +54,7 @@ export function rosettePath(spec: RosetteSpec): string {
   return commands.join("");
 }
 
-/** Canonical 8-lobe D_8 scalloped rosette for z-shell brand / Launcher mark and user avatar badges (viewBox 0 0 64 64). */
+/** Canonical 8-lobe D_8 scalloped rosette for z-shell brand mark and user avatar badges (viewBox 0 0 64 64). */
 export const SHELL_ROSETTE_PATH = rosettePath({
   lobes: 8,
   cx: 32,
@@ -64,6 +64,23 @@ export const SHELL_ROSETTE_PATH = rosettePath({
   outerTension: 1.15,
   innerTension: 0.85,
 });
+
+/** CSS `clip-path: path("...")` scaled to `sizePx` for clipping raster avatar images into the exact D_8 rosette. */
+export function shellRosetteClipPath(sizePx: number): string {
+  const scale = sizePx / 64;
+  return `path("${rosettePath({
+    lobes: 8,
+    cx: 32 * scale,
+    cy: 32 * scale,
+    outerRadius: 28 * scale,
+    innerRadius: 23.5 * scale,
+    outerTension: 1.15,
+    innerTension: 0.85,
+  })}")`;
+}
+
+export const SHELL_ROSETTE_CLIP_40 = shellRosetteClipPath(40);
+export const SHELL_ROSETTE_CLIP_104 = shellRosetteClipPath(104);
 
 /** Canonical Lock Screen morphing password dot shapes (viewBox 0 0 24 24, centered at 12, 12). */
 export const LOCK_MORPH_SHAPES = Object.freeze({

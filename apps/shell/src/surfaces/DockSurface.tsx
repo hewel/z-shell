@@ -12,7 +12,7 @@ import { buildDockItems, formatSurfaceName, resolveMonitorLogicalSize, type Dock
 const primary = "var(--color-primary)";
 const outline = "var(--color-outline-variant)";
 const onSurfaceVariant = "var(--color-on-surface-variant)";
-const tileSize = 40;
+const tileSize = 46;
 const dockGap = 8;
 const dockPadding = 10;
 const dockHeight = 60;
@@ -23,13 +23,17 @@ const autoHideDelayMs = 500;
 const hiddenSlideOffset = dockHeight + dockBottomMargin + 18;
 const capsule = {
   height: `${dockHeight}px`, alignItems: "center", gap: `${dockGap}px`, padding: `0 ${dockPadding}px`,
-  borderRadius: "999px", backgroundColor: "var(--color-surface)", border: `1px solid ${outline}`, overflow: "visible",
+  borderRadius: "999px",
+  backgroundColor: "var(--color-surface-container)",
+  border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
+  boxShadow: "0 14px 36px rgba(0, 0, 0, 0.50)",
+  overflow: "visible",
 } satisfies NativeStyle;
 const tile = {
   display: "flex", width: `${tileSize}px`, height: `${tileSize}px`, flexShrink: 0, alignItems: "center", justifyContent: "center",
 } satisfies NativeStyle;
-const tileIcon = { width: "34px", height: "34px", borderRadius: "8px", "object-fit": "contain" } as const;
-const tileStack = { height: "48px", flexShrink: 0, alignItems: "center", justifyContent: "flex-end", gap: "4px" } as const;
+const tileIcon = { width: "36px", height: "36px", borderRadius: "10px", "object-fit": "contain" } as const;
+const tileStack = { height: "54px", flexShrink: 0, alignItems: "center", justifyContent: "flex-end", gap: "3px" } as const;
 const dot = { width: "4px", height: "4px", flexShrink: 0, borderRadius: "2px", backgroundColor: onSurfaceVariant } as const;
 const tints = ["primary", "secondary", "tertiary"] as const;
 
@@ -143,7 +147,7 @@ function DockCapsule(props: {
         <row style={{ height: `${dockHeight}px`, alignItems: "center", gap: `${dockGap}px`, paddingTop: "6px" }}>
           <For each={slots()} keyed={slot => slot.key}>
             {slot => slot().kind === "divider"
-              ? <box ariaHidden style={{ width: "1px", height: "24px", flexShrink: 0, backgroundColor: outline }} />
+              ? <box ariaHidden style={{ width: "1px", height: "30px", flexShrink: 0, backgroundColor: outline }} />
               : <DockApp entry={() => (slot() as Extract<DockSlot, { readonly kind: "app" }>).entry} />}
           </For>
         </row>
