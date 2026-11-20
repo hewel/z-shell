@@ -1,29 +1,96 @@
 {
   "schemaVersion": 1,
-  "id": "z-shell-bar-and-theme",
+  "id": "z-shell-phase-1-top-bar",
   "requiredCapabilities": ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
   "steps": [
     {
       "id": "outputs",
       "op": "monitors.set",
       "monitors": [
-        { "id": "dp-1", "name": "DP-1", "x": 0, "y": 0, "width": 1440, "height": 900, "scale": 1, "refreshRateMilliHz": 60000 }
+        { "id": "dp-1", "name": "DP-1", "x": 0, "y": 0, "width": 1440, "height": 900, "scale": 1, "refreshRateMilliHz": 60000 },
+        { "id": "hdmi-1", "name": "HDMI-A-1", "x": 1440, "y": 0, "width": 1280, "height": 720, "scale": 1, "refreshRateMilliHz": 60000 }
       ]
     },
     { "id": "daemon-events", "op": "clock.advance", "byMs": 30 },
     { "id": "ready", "op": "settle" },
     {
-      "id": "daemon-ready",
+      "id": "active-window",
       "op": "assert",
-      "target": { "surface": "bar-dp-1", "testId": "daemon-status" },
-      "check": { "property": "text", "equals": "ready" }
+      "target": { "surface": "bar-dp-1", "testId": "bar-active-window-title" },
+      "check": { "property": "text", "equals": "shoji-bar-4 — Alacritty" }
     },
+    {
+      "id": "media",
+      "op": "assert",
+      "target": { "surface": "bar-dp-1", "testId": "bar-media-text" },
+      "check": { "property": "text", "equals": "Feather — Nujabes" }
+    },
+    {
+      "id": "battery",
+      "op": "assert",
+      "target": { "surface": "bar-dp-1", "testId": "bar-battery-text" },
+      "check": { "property": "text", "equals": "84%" }
+    },
+    {
+      "id": "ime",
+      "op": "assert",
+      "target": { "surface": "bar-dp-1", "testId": "bar-ime" },
+      "check": { "property": "text", "equals": "中" }
+    },
+    {
+      "id": "notifications",
+      "op": "assert",
+      "target": { "surface": "bar-dp-1", "testId": "bar-notifications-badge" },
+      "check": { "property": "text", "equals": "2" }
+    },
+    {
+      "id": "privacy",
+      "op": "assert",
+      "target": { "surface": "bar-dp-1", "testId": "bar-privacy" },
+      "check": { "property": "exists", "equals": true }
+    },
+    { "id": "capture-bar-dp", "op": "capture", "surface": "bar-dp-1", "captureId": "bar-dp-1" },
+    { "id": "capture-bar-hdmi", "op": "capture", "surface": "bar-hdmi-1", "captureId": "bar-hdmi-1" },
+    { "id": "capture-wallpaper-dp", "op": "capture", "surface": "wallpaper-dp-1", "captureId": "wallpaper-dp-1" },
+    { "id": "capture-wallpaper-hdmi", "op": "capture", "surface": "wallpaper-hdmi-1", "captureId": "wallpaper-hdmi-1" },
+    {
+      "id": "activate-workspace",
+      "op": "pointer.click",
+      "target": { "surface": "bar-dp-1", "testId": "ws-3" },
+      "button": "primary"
+    },
+    {
+      "id": "lower-volume",
+      "op": "wheel",
+      "target": { "surface": "bar-dp-1", "testId": "bar-audio" },
+      "delta": { "x": 0, "y": 1, "unit": "pixels" }
+    },
+    {
+      "id": "toggle-ime",
+      "op": "pointer.click",
+      "target": { "surface": "bar-dp-1", "testId": "bar-ime" },
+      "button": "primary"
+    },
+    {
+      "id": "open-tray-menu",
+      "op": "pointer.click",
+      "target": { "surface": "bar-dp-1", "testId": "tray-item-discord" },
+      "button": "primary"
+    },
+    { "id": "present-tray-menu", "op": "clock.advance", "byMs": 20 },
+    { "id": "capture-tray-menu", "op": "capture", "surface": "tray-menu", "captureId": "tray-menu" },
+    {
+      "id": "activate-tray-menu-item",
+      "op": "pointer.click",
+      "target": { "surface": "tray-menu", "testId": "tray-menu-item-101" },
+      "button": "primary"
+    },
+    { "id": "command-replies", "op": "clock.advance", "byMs": 1 },
     {
       "id": "control-ping",
       "op": "service.emit",
       "channel": "control.message",
       "value": { "args": ["ping"], "reply": { "text": "pong" } }
-    },
-    { "id": "bar-capture", "op": "capture", "surface": "bar-dp-1", "captureId": "bar-initial" }
+    }
   ]
 }

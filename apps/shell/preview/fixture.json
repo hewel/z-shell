@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "z-shell-daemon",
+  "id": "z-shell-phase-1-top-bar",
   "runtimeEnvironment": {
     "xdgRuntimeDir": "/zgui-preview-only/runtime",
     "homeDir": "/zgui-preview-only/home",
@@ -17,7 +17,25 @@
         "framing": "line",
         "send": [
           "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"bus.hello\",\"params\":{\"protocol_version\":1,\"client_name\":\"z-shell-ui\"}}",
-          "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"theme\"}}"
+          "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"theme\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"settings\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"wallpaper\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"wayland.outputs\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"wayland.workspaces\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"wayland.windows\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"desktop.media\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"desktop.tray\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"desktop.notifications\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"desktop.ime\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"system.audio\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"system.privacy\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"system.network\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":15,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"system.bluetooth\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":16,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"system.power\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":17,\"method\":\"command.invoke\",\"params\":{\"name\":\"wayland.workspace.activate\",\"args\":[],\"payload\":{\"workspace_id\":3}}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":18,\"method\":\"command.invoke\",\"params\":{\"name\":\"audio.set-volume\",\"args\":[],\"payload\":{\"kind\":\"sink\",\"index\":7,\"volume\":0.6}}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":19,\"method\":\"command.invoke\",\"params\":{\"name\":\"ime.toggle\",\"args\":[],\"payload\":{}}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"command.invoke\",\"params\":{\"name\":\"tray.menu-item\",\"args\":[],\"payload\":{\"id\":\"discord\",\"menu_id\":101}}}"
         ],
         "events": [
           {
@@ -32,8 +50,103 @@
           },
           {
             "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":2,\"topic\":\"settings\",\"revision\":1,\"data\":{\"general\":{\"offline_mode\":false,\"log_level\":\"info\"},\"bar\":{\"position\":\"top\",\"gaps\":14,\"edge_overrides\":{\"top\":null,\"right\":null,\"bottom\":null,\"left\":null},\"launcher_enabled\":true,\"dock_enabled\":true,\"clock_24h\":true,\"clock_seconds\":false},\"theme\":{\"mode\":\"dark\",\"variant\":\"tonal\",\"seed_color\":null,\"backend\":\"builtin\",\"gtk_linking\":false},\"ime\":{\"mode\":\"indicator_only\",\"candidate_layout\":\"auto\",\"switch_osd\":true},\"polkit\":{\"enabled\":true},\"wallpaper\":{\"directories\":[],\"fit\":\"cover\",\"sync_theme\":true,\"slideshow_seconds\":300},\"pre_action_fade_seconds\":0,\"configured_plugins\":[]}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":3,\"topic\":\"wallpaper\",\"revision\":1,\"data\":{\"available\":true,\"fit\":\"cover\",\"sync_theme\":true,\"slideshow_seconds\":300,\"catalog_count\":2,\"current\":{\"source_path\":\"/wallpapers/global.png\",\"media\":{\"kind\":\"blob_handle\",\"token\":\"wallpaper-global\",\"mime\":\"image/png\",\"byte_len\":70},\"width\":1,\"height\":1,\"fit\":\"cover\"},\"per_output\":{\"HDMI-A-1\":{\"source_path\":\"/wallpapers/hdmi.png\",\"media\":{\"kind\":\"blob_handle\",\"token\":\"wallpaper-hdmi\",\"mime\":\"image/png\",\"byte_len\":70},\"width\":1,\"height\":1,\"fit\":\"cover\"}},\"last_error\":null}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":5,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":4,\"topic\":\"wayland.outputs\",\"revision\":1,\"data\":{\"capability\":\"controllable\",\"outputs\":[{\"output_instance_id\":1,\"name\":\"DP-1\",\"description\":\"DP-1\",\"make\":\"Shoji\",\"model\":\"Bar 4\",\"x\":0,\"y\":0,\"width\":1440,\"height\":900,\"mode_width\":1440,\"mode_height\":900,\"refresh_mhz\":60000,\"scale\":1,\"physical_width_mm\":600,\"physical_height_mm\":375},{\"output_instance_id\":2,\"name\":\"HDMI-A-1\",\"description\":\"HDMI-A-1\",\"make\":\"Shoji\",\"model\":\"Bar 4\",\"x\":1440,\"y\":0,\"width\":1280,\"height\":720,\"mode_width\":1280,\"mode_height\":720,\"refresh_mhz\":60000,\"scale\":1,\"physical_width_mm\":530,\"physical_height_mm\":300}]}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":6,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":5,\"topic\":\"wayland.workspaces\",\"revision\":1,\"data\":{\"capability\":\"controllable\",\"groups\":[{\"group_id\":1,\"output_instance_ids\":[1,2]}],\"workspaces\":[{\"workspace_id\":1,\"group_id\":1,\"name\":\"1\",\"id_str\":\"1\",\"coordinates\":[0],\"active\":false,\"urgent\":false,\"hidden\":false,\"capabilities\":[\"activate\"]},{\"workspace_id\":2,\"group_id\":1,\"name\":\"2\",\"id_str\":\"2\",\"coordinates\":[1],\"active\":true,\"urgent\":false,\"hidden\":false,\"capabilities\":[\"activate\"]},{\"workspace_id\":3,\"group_id\":1,\"name\":\"3\",\"id_str\":\"3\",\"coordinates\":[2],\"active\":false,\"urgent\":false,\"hidden\":false,\"capabilities\":[\"activate\"]},{\"workspace_id\":4,\"group_id\":1,\"name\":\"4\",\"id_str\":\"4\",\"coordinates\":[3],\"active\":false,\"urgent\":false,\"hidden\":false,\"capabilities\":[\"activate\"]}]}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":6,\"topic\":\"wayland.windows\",\"revision\":1,\"data\":{\"capability\":\"controllable\",\"windows\":[{\"window_id\":41,\"title\":\"shoji-bar-4 — Alacritty\",\"app_id\":\"Alacritty\",\"activated\":true,\"minimized\":false,\"maximized\":false,\"fullscreen\":false,\"output_instance_ids\":[1,2]}]}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":8,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":7,\"topic\":\"desktop.media\",\"revision\":1,\"data\":{\"available\":true,\"players\":[{\"id\":\"nujabes\",\"identity\":\"Nujabes\",\"playback_status\":\"playing\",\"position_us\":42000000,\"metadata\":{\"track_id\":\"feather\",\"title\":\"Feather\",\"album\":\"Modal Soul\",\"artists\":[\"Nujabes\"],\"length_us\":174000000},\"capabilities\":{\"can_control\":true,\"can_play\":true,\"can_pause\":true,\"can_go_next\":true,\"can_go_previous\":true,\"can_seek\":true}}],\"selected_player_id\":\"nujabes\",\"any_playing\":true,\"cover\":null}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":9,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":8,\"topic\":\"desktop.tray\",\"revision\":1,\"data\":{\"available\":false,\"items\":[]}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":10,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":9,\"topic\":\"desktop.notifications\",\"revision\":1,\"data\":{\"available\":true,\"dnd\":false,\"popups\":[],\"history\":[{\"id\":1,\"revision\":1,\"app_name\":\"Shoji\",\"summary\":\"Notification 1\",\"body\":\"Phase 1 preview\",\"icon\":null,\"attachment\":null,\"actions\":[],\"urgency\":1},{\"id\":2,\"revision\":1,\"app_name\":\"Shoji\",\"summary\":\"Notification 2\",\"body\":\"Phase 1 preview\",\"icon\":null,\"attachment\":null,\"actions\":[],\"urgency\":1}]}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":11,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":10,\"topic\":\"desktop.ime\",\"revision\":1,\"data\":{\"mode\":\"indicator_only\",\"candidate_layout\":\"auto\",\"switch_osd\":true,\"available\":true,\"enabled\":true,\"active_im\":{\"unique_name\":\"fcitx5-chinese\",\"label\":\"Chinese\",\"short_label\":\"中\",\"icon\":null,\"text\":\"中\"},\"properties\":[],\"group_ims\":[{\"unique_name\":\"fcitx5-chinese\",\"label\":\"Chinese\",\"layout\":\"us\"}],\"exec_menu\":null}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":12,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":11,\"topic\":\"system.audio\",\"revision\":1,\"data\":{\"availability\":\"available\",\"default_sink\":\"sink-1\",\"default_source\":\"source-1\",\"sinks\":[{\"index\":7,\"name\":\"sink-1\",\"description\":\"Speakers\",\"channels\":2,\"volume\":0.65,\"muted\":false}],\"sources\":[{\"index\":8,\"name\":\"source-1\",\"description\":\"Microphone\",\"channels\":1,\"volume\":0.5,\"muted\":false}],\"sink_inputs\":[],\"source_outputs\":[]}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":13,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":12,\"topic\":\"system.privacy\",\"revision\":1,\"data\":{\"audio_capture\":{\"state\":\"active\",\"apps\":[\"Discord\"]},\"camera\":{\"state\":\"unknown\"},\"screencast\":{\"state\":\"unknown\"}}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":14,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":13,\"topic\":\"system.network\",\"revision\":1,\"data\":{\"available\":true,\"connectivity\":\"full\",\"wifi\":{\"enabled\":true,\"hardware_enabled\":true,\"scanning\":false,\"devices\":[],\"profiles\":[]},\"ethernet\":[],\"vpn\":[]}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":15,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":14,\"topic\":\"system.bluetooth\",\"revision\":1,\"data\":{\"available\":true,\"adapters\":[{\"path\":\"/org/bluez/hci0\",\"powered\":true,\"discovering\":false}],\"devices\":[]}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":16,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":15,\"topic\":\"system.power\",\"revision\":1,\"data\":{\"available\":true,\"on_ac\":true,\"battery\":{\"percentage\":84,\"state\":\"charging\",\"time_to_empty_seconds\":null,\"time_to_full_seconds\":3600,\"energy_rate_watts\":12,\"capacity_percent\":100,\"charge_cycles\":42},\"profiles\":{\"available\":true,\"active_profile\":\"balanced\",\"profiles\":[\"power-saver\",\"balanced\",\"performance\"]}}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 8,
+            "text": "{\"jsonrpc\":\"2.0\",\"method\":\"topic.update\",\"params\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":8,\"topic\":\"desktop.tray\",\"revision\":2,\"source_baseline\":false,\"data\":{\"available\":true,\"items\":[{\"id\":\"discord\",\"title\":\"Discord\",\"category\":\"application\",\"status\":\"active\",\"icon_name\":null,\"item_is_menu\":true,\"tooltip\":null,\"icon\":{\"kind\":\"blob_handle\",\"token\":\"tray-discord\",\"mime\":\"image/png\",\"byte_len\":70},\"menu\":{\"revision\":1,\"root\":{\"id\":0,\"label\":null,\"enabled\":true,\"visible\":true,\"separator\":false,\"toggle_type\":null,\"toggle_state\":null,\"children\":[{\"id\":101,\"label\":\"Mute\",\"enabled\":true,\"visible\":true,\"separator\":false,\"toggle_type\":null,\"toggle_state\":null,\"children\":[]}]}}}]}}}"
+          },
+          {
+            "kind": "message",
             "atMs": 10,
             "text": "{\"jsonrpc\":\"2.0\",\"method\":\"topic.update\",\"params\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":1,\"topic\":\"theme\",\"revision\":2,\"source_baseline\":false,\"data\":{\"scheme\":{\"surface\":\"#111318\",\"surface_dim\":\"#111318\",\"surface_bright\":\"#37393E\",\"surface_container_lowest\":\"#0C0E13\",\"surface_container_low\":\"#191C20\",\"surface_container\":\"#1D2024\",\"surface_container_high\":\"#272A2F\",\"surface_container_highest\":\"#32353A\",\"on_surface\":\"#E2E2E9\",\"on_surface_variant\":\"#C3C6CF\",\"inverse_surface\":\"#E2E2E9\",\"inverse_on_surface\":\"#2E3036\",\"outline\":\"#8D9199\",\"outline_variant\":\"#43474E\",\"scrim\":\"#000000\",\"primary\":\"#7DD3FC\",\"on_primary\":\"#08305F\",\"primary_container\":\"#254777\",\"on_primary_container\":\"#D4E3FF\",\"secondary\":\"#BCC7DC\",\"on_secondary\":\"#263141\",\"secondary_container\":\"#3C4759\",\"on_secondary_container\":\"#D6E3F8\",\"tertiary\":\"#D8BDE4\",\"on_tertiary\":\"#3C2947\",\"tertiary_container\":\"#533F5F\",\"on_tertiary_container\":\"#F5D9FF\",\"error\":\"#FFB4AB\",\"on_error\":\"#690005\",\"error_container\":\"#93000A\",\"on_error_container\":\"#FFDAD6\"},\"dark\":true,\"variant\":\"tonal\",\"backend\":\"builtin\",\"last_error\":null}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 31,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":17,\"result\":{}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 31,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":18,\"result\":{}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 31,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":19,\"result\":{}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 51,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":20,\"result\":{}}"
           }
         ]
       },
@@ -41,13 +154,37 @@
         "path": "/zgui-preview-only/runtime/z-shell/host-wayland-1.sock",
         "framing": "line",
         "send": [
-          "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"bus.hello\",\"params\":{\"protocol_version\":1,\"client_name\":\"z-shell-host\"}}"
+          "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"bus.hello\",\"params\":{\"protocol_version\":1,\"client_name\":\"z-shell-host\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"command.invoke\",\"params\":{\"name\":\"wallpaper.fetch-blob\",\"args\":[],\"payload\":{\"token\":\"wallpaper-global\"}}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"command.invoke\",\"params\":{\"name\":\"wallpaper.fetch-blob\",\"args\":[],\"payload\":{\"token\":\"wallpaper-hdmi\"}}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"command.invoke\",\"params\":{\"name\":\"tray.fetch-blob\",\"args\":[],\"payload\":{\"token\":\"tray-discord\"}}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"command.invoke\",\"params\":{\"name\":\"tray.fetch-blob\",\"args\":[],\"payload\":{\"token\":\"tray-discord\"}}}"
         ],
         "events": [
           {
             "kind": "message",
             "atMs": 1,
             "text": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocol_version\":1,\"daemon_version\":\"0.1.0-preview\",\"daemon_instance_id\":\"preview-daemon\",\"client_id\":2,\"role\":\"privileged_host\",\"media_dir\":\"/zgui-preview-only/runtime/z-shell/media\"}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 6,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"data\":{\"bytes\":[137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,120,156,99,16,169,106,250,15,0,3,198,2,16,181,47,55,35,0,0,0,0,73,69,78,68,174,66,96,130]}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 6,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"data\":{\"bytes\":[137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,120,156,99,48,210,169,248,15,0,3,64,1,214,87,160,107,114,0,0,0,0,73,69,78,68,174,66,96,130]}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 10,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{\"data\":{\"bytes\":[137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,120,156,99,136,72,253,244,31,0,5,119,2,175,134,155,203,94,0,0,0,0,73,69,78,68,174,66,96,130]}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 10,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":5,\"result\":{\"data\":{\"bytes\":[137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,120,156,99,136,72,253,244,31,0,5,119,2,175,134,155,203,94,0,0,0,0,73,69,78,68,174,66,96,130]}}}"
           }
         ]
       }
