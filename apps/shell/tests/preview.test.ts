@@ -1534,4 +1534,167 @@ describe("apps/shell preview", () => {
       rmSync(workspace, { recursive: true, force: true });
     }
   });
+
+  previewTest("multi-output hotplug: removing first output retargets live overlay LayerSurfaces cleanly (zgui-js#37)", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "z-shell-preview-hotplug-"));
+    const out = join(workspace, "out");
+    const dp1 = {
+      id: "dp-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900,
+      scale: 1, refreshRateMilliHz: 60000,
+    };
+    const hdmi1 = {
+      id: "hdmi-1", name: "HDMI-A-1", x: 1440, y: 0, width: 1280, height: 720,
+      scale: 1, refreshRateMilliHz: 60000,
+    };
+    const audio = (volume: number) => ({
+      availability: "available",
+      default_sink: "sink-1",
+      default_source: "source-1",
+      sinks: [{ index: 7, name: "sink-1", description: "Speakers", channels: 2, volume, muted: false }],
+      sources: [{ index: 8, name: "source-1", description: "Microphone", channels: 1, volume: 0.5, muted: false }],
+      sink_inputs: [],
+      source_outputs: [],
+    });
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-hotplug-retarget",
+        initialTopics: {
+          "desktop.notifications": {
+            available: true,
+            dnd: false,
+            popups: [{
+              id: 1,
+              revision: 1,
+              app_name: "Shoji",
+              summary: "Hotplug toast",
+              body: "Retargets when primary output disconnects",
+              icon: null,
+              attachment: null,
+              actions: [],
+              urgency: 1,
+            }],
+            history: [],
+          },
+          "system.audio": audio(0.65),
+        },
+        topicUpdates: [
+          { topic: "system.audio", atMs: 40, revision: 2, sourceBaseline: false, data: audio(0.80) },
+        ],
+        commands: [
+          {
+            id: 26,
+            name: "launcher.query",
+            payload: { query: "", query_id: 1, limit: 18 },
+            atMs: 50,
+            result: {
+              data: {
+                query_id: 1,
+                items: [{
+                  provider_id: "desktop",
+                  item_id: "alacritty.desktop",
+                  title: "Alacritty",
+                  actions: [],
+                  score: 100,
+                }],
+              },
+            },
+          },
+          {
+            id: 27,
+            name: "launcher.query",
+            payload: { query: "", query_id: 2, limit: 18 },
+            atMs: 600,
+            result: {
+              data: {
+                query_id: 2,
+                items: [{
+                  provider_id: "desktop",
+                  item_id: "alacritty.desktop",
+                  title: "Alacritty",
+                  actions: [],
+                  score: 100,
+                }],
+              },
+            },
+          },
+        ],
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-hotplug-retarget",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: [
+          { id: "two-outputs", op: "monitors.set", monitors: [dp1, hdmi1] },
+          { id: "daemon-events", op: "clock.advance", byMs: 30 },
+          { id: "ready", op: "settle" },
+          { id: "live-volume-osd", op: "clock.advance", byMs: 10 },
+          {
+            id: "open-launcher",
+            op: "pointer.click",
+            target: { surface: "bar-dp-1", testId: "bar-launcher" },
+            button: "primary",
+          },
+          { id: "launcher-ready", op: "clock.advance", byMs: 550 },
+          {
+            id: "toast-before-hotplug",
+            op: "assert",
+            target: { surface: "notification-toasts", testId: "toast-card-1" },
+            check: { property: "exists", equals: true },
+          },
+          {
+            id: "osd-before-hotplug",
+            op: "assert",
+            target: { surface: "osd-overlay", testId: "osd-value" },
+            check: { property: "text", equals: "80%" },
+          },
+          { id: "remove-primary-output", op: "monitors.set", monitors: [hdmi1] },
+          { id: "retargeted-launcher-reply", op: "clock.advance", byMs: 550 },
+          { id: "hotplug-settled", op: "settle" },
+          {
+            id: "toast-after-hotplug",
+            op: "assert",
+            target: { surface: "notification-toasts", testId: "toast-card-1" },
+            check: { property: "exists", equals: true },
+          },
+          {
+            id: "osd-after-hotplug",
+            op: "assert",
+            target: { surface: "osd-overlay", testId: "osd-value" },
+            check: { property: "text", equals: "80%" },
+          },
+          {
+            id: "hdmi-bar-healthy",
+            op: "assert",
+            target: { surface: "bar-hdmi-1", testId: "bar-launcher" },
+            check: { property: "exists", equals: true },
+          },
+          { id: "capture-retargeted-launcher", op: "capture", surface: "launcher-overlay", captureId: "launcher-overlay" },
+          { id: "capture-retargeted-osd", op: "capture", surface: "osd-overlay", captureId: "osd-overlay" },
+          { id: "capture-retargeted-toasts", op: "capture", surface: "notification-toasts", captureId: "notification-toasts" },
+        ],
+      }, null, 2));
+
+      const result = runPreview(fixture, scenario, out);
+      expectCleanPreview(result, 3, 5);
+      const surfacesAfterHotplug = previewSurfaces(out, "remove-primary-output");
+      expect(surfacesAfterHotplug).not.toContain("bar-dp-1");
+      expect(surfacesAfterHotplug).not.toContain("wallpaper-dp-1");
+      expect(surfacesAfterHotplug).not.toContain("dock-dp-1");
+      expect(surfacesAfterHotplug).toContain("bar-hdmi-1");
+      expect(surfacesAfterHotplug).toContain("notification-toasts");
+      expect(surfacesAfterHotplug).toContain("osd-overlay");
+      expect(surfacesAfterHotplug).toContain("launcher-overlay");
+
+      const launcher = readCapture(out, "launcher-overlay", "launcher-overlay");
+      const osd = readCapture(out, "osd-overlay", "osd-overlay");
+      const toasts = readCapture(out, "notification-toasts", "notification-toasts");
+      expect([launcher.image.width, launcher.image.height]).toEqual([1280, 720]);
+      expect(treeNode(osd.tree, "osd-value").text).toBe("80%");
+      expect(treeNode(toasts.tree, "toast-card-1").boundsDevice).toBeDefined();
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
 });

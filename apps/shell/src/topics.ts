@@ -781,10 +781,10 @@ export function resolveMonitorLogicalSize(
 export function resolveActiveMonitor(
   monitors: readonly Monitor[],
   options: {
-    readonly preferredMonitorId?: string | null;
-    readonly windows?: WaylandWindowsSnapshot;
-    readonly outputs?: WaylandOutputsSnapshot;
-    readonly lastMonitorId?: string | null;
+    readonly preferredMonitorId?: string | null | undefined;
+    readonly windows?: WaylandWindowsSnapshot | undefined;
+    readonly outputs?: WaylandOutputsSnapshot | undefined;
+    readonly lastMonitorId?: string | null | undefined;
   } = {},
 ): Monitor | undefined {
   if (monitors.length === 0) return undefined;
@@ -910,7 +910,7 @@ export function resolveMonitorWallpaper(
 function compareWorkspaces(a: WaylandWorkspace, b: WaylandWorkspace): number {
   const sharedLength = Math.min(a.coordinates.length, b.coordinates.length);
   for (let index = 0; index < sharedLength; index += 1) {
-    const difference = a.coordinates[index] - b.coordinates[index];
+    const difference = (a.coordinates[index] ?? 0) - (b.coordinates[index] ?? 0);
     if (difference !== 0) {
       return difference;
     }
@@ -1124,7 +1124,7 @@ export function buildDockItems(
     return normalizeDockAppId(resolved?.id ?? appId);
   };
 
-  const groups = new Map<string, { appId: string; app?: DesktopAppSummary; windows: WaylandWindow[] }>();
+  const groups = new Map<string, { appId: string; app?: DesktopAppSummary | undefined; windows: WaylandWindow[] }>();
   for (const window of windows) {
     if (window.app_id === null) {
       continue;

@@ -51,7 +51,7 @@ function QuickTile(props: {
     <row data-qs-tile="true" style={{ ...grow, height: "56px", borderRadius: "28px", alignItems: "center",
       backgroundColor: props.active ? primary : container }}>
       <Button testId={`qs-tile-${props.id}`} ariaLabel={props.label} checked={props.toggle ? props.active ?? false : null}
-        disabled={props.disabled} onClick={props.onClick} style={{
+        disabled={props.disabled ?? false} onClick={props.onClick} style={{
           ...row, ...grow, display: "flex", flexDirection: "row", height: "100%", borderRadius: "28px",
           padding: props.open ? "0 0 0 12px" : "0 12px",
           color: color(), opacity: props.disabled ? 0.55 : 1,
@@ -88,7 +88,7 @@ function PercentTrack(props: {
   };
   return (
     <>
-      <box role="slider" tabIndex={props.disabled ? -1 : 0} disabled={props.disabled} ariaLabel={props.label}
+      <box role="slider" tabIndex={props.disabled ? -1 : 0} disabled={props.disabled ?? false} ariaLabel={props.label}
         ariaValueMin={0} ariaValueMax={100} ariaValueNow={value()} ariaValueStep={5}
         onPointerDown={event => {
           if (props.disabled || !event.primary || !(event.button === "primary" || (event.button === null && event.pointerKind !== "mouse"))) return;
@@ -198,7 +198,7 @@ function BatterySummary(): NativeChild {
   );
 }
 
-function BatteryChip(props: { label: string; value?: string; unit?: string }): NativeChild {
+function BatteryChip(props: { label: string; value?: string | undefined; unit?: string | undefined }): NativeChild {
   return (
     <column style={{ ...grow, gap: "2px", borderRadius: "12px", padding: "6px 8px", backgroundColor: containerHigh }}>
       <text style={{ fontSize: "11px", color: muted }}>{props.label}</text>
@@ -314,13 +314,13 @@ function MainPage(props: {
       <column style={{ gap: "8px" }}>
         <row style={{ gap: "8px" }}>
           <QuickTile id="wifi" label="Wi-Fi" detail={wifi()?.enabled ? wifiName() ?? "Disconnected" : "Off"}
-            icon={wifi()?.enabled ? "wifi" : "wifiOff"} active={wifi()?.enabled} toggle
+            icon={wifi()?.enabled ? "wifi" : "wifiOff"} active={Boolean(wifi()?.enabled)} toggle
             disabled={!network.data()?.available || !wifi()?.hardware_enabled}
             onClick={() => void invokePublic("network.wifi.set-enabled", { enabled: !wifi()?.enabled })}
             open={() => props.navigate("wifi")} />
           <QuickTile id="bluetooth" label="Bluetooth"
             detail={adapter()?.powered ? connectedBluetooth()?.name || connectedBluetooth()?.address || "On" : "Off"}
-            icon={adapter()?.powered ? "bluetooth" : "bluetoothOff"} active={adapter()?.powered} toggle disabled={!adapter()}
+            icon={adapter()?.powered ? "bluetooth" : "bluetoothOff"} active={Boolean(adapter()?.powered)} toggle disabled={!adapter()}
             onClick={() => {
               const device = adapter();
               if (device) void invokePublic("bluetooth.set-power", { adapter: device.path, powered: !device.powered });
@@ -328,7 +328,7 @@ function MainPage(props: {
         </row>
         <row style={{ gap: "8px" }}>
           <QuickTile id="dnd" label="Do Not Disturb" detail={notifications.data()?.dnd ? "On" : "Off"}
-            icon={notifications.data()?.dnd ? "bellOff" : "bell"} active={notifications.data()?.dnd} toggle
+            icon={notifications.data()?.dnd ? "bellOff" : "bell"} active={Boolean(notifications.data()?.dnd)} toggle
             onClick={() => void invokePublic("notifications.set-dnd", { dnd: !notifications.data()?.dnd })} />
           <QuickTile id="caffeine" label="Caffeine" detail={`${caffeine() ? "Awake" : "Normal"} · ${ruleCount()} ${ruleCount() === 1 ? "rule" : "rules"}`}
             icon="coffee" active={caffeine()} toggle onClick={() => void invokePublic("idle.caffeine", { enabled: !caffeine() })} />

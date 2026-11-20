@@ -41,7 +41,7 @@ export function QuickSettingsIconButton(props: {
   disabled?: boolean; expanded?: boolean; onClick: () => void;
 }): NativeChild {
   return (
-    <Button testId={props.testId} ariaLabel={props.label} disabled={props.disabled} expanded={props.expanded}
+    <Button testId={props.testId ?? null} ariaLabel={props.label} disabled={props.disabled ?? false} expanded={props.expanded ?? null}
       onClick={props.onClick} style={{ display: "flex", width: "34px", height: "34px", borderRadius: "17px", flexShrink: 0,
         alignItems: "center", justifyContent: "center", backgroundColor: props.fill ?? container, opacity: props.disabled ? 0.45 : 1 }}>
       <ShojiIcon name={props.icon} size={16} color={props.color} />
@@ -54,7 +54,7 @@ function Action(props: {
   checked?: boolean; onClick: () => void;
 }): NativeChild {
   return (
-    <Button testId={props.testId} ariaLabel={props.ariaLabel ?? props.label} checked={props.checked} disabled={props.disabled}
+    <Button testId={props.testId ?? null} ariaLabel={props.ariaLabel ?? props.label} checked={props.checked ?? null} disabled={props.disabled ?? false}
       onClick={props.onClick} style={{ display: "flex", minHeight: "30px", padding: "0 9px", borderRadius: "15px",
         flexShrink: 0, alignItems: "center", justifyContent: "center", fontSize: "12px", opacity: props.disabled ? 0.45 : 1,
         backgroundColor: props.active ? selectedFill : containerHigh, color: props.active ? selectedInk : onSurface }}>
@@ -66,7 +66,7 @@ function Action(props: {
 function Toggle(props: { label: string; checked: boolean; disabled?: boolean; onClick: () => void }): NativeChild {
   return (
     <control role="switch" tabIndex={props.disabled ? -1 : 0} ariaLabel={props.label} checked={props.checked}
-      disabled={props.disabled} onClick={props.onClick} style={{ ...row, padding: "4px 8px", borderRadius: "16px",
+      disabled={props.disabled ?? false} onClick={props.onClick} style={{ ...row, padding: "4px 8px", borderRadius: "16px",
         flexShrink: 0, minHeight: "30px", backgroundColor: container, opacity: props.disabled ? 0.45 : 1 }}>
       <text style={{ fontSize: "12px" }}>{props.label}</text>
       <row ariaHidden data-switch-track="true" style={{ width: "28px", height: "16px", borderRadius: "8px", padding: "2px", alignItems: "center",
@@ -142,7 +142,7 @@ function WifiPage(props: { onBack: () => void }): NativeChild {
             void invokePublic("network.wifi.set-enabled", { enabled: !enabled() });
           }} />
         <Action testId="wifi-scan" label={wifi()?.scanning ? "Scanning…" : "Scan"}
-          disabled={!enabled() || !wifi()?.devices.length || wifi()?.scanning}
+          disabled={!enabled() || !wifi()?.devices.length || Boolean(wifi()?.scanning)}
           onClick={() => void invokePublic("network.wifi.scan", {})} />
       </>
     }>
@@ -225,7 +225,7 @@ function BluetoothPage(props: { onBack: () => void }): NativeChild {
           if (device) void invokePublic("bluetooth.set-power", { adapter: device.path, powered: !device.powered });
         }} />
         <Action label={adapter()?.discovering ? "Stop scan" : "Scan"} checked={adapter()?.discovering ?? false}
-          active={adapter()?.discovering} disabled={!adapter()?.powered} onClick={() => {
+          active={Boolean(adapter()?.discovering)} disabled={!adapter()?.powered} onClick={() => {
             const device = adapter();
             if (device) void invokePublic("bluetooth.set-discovery", { adapter: device.path, discovering: !device.discovering });
           }} />

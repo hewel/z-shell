@@ -352,7 +352,8 @@ function BarContent(props: {
             event.preventDefault();
             const active = items.findIndex(workspace => workspace.active);
             const next = active < 0 ? (direction > 0 ? 0 : items.length - 1) : (active + direction + items.length) % items.length;
-            if (next !== active) activateWorkspace(items[next].workspace_id);
+            const target = items[next];
+            if (next !== active && target) activateWorkspace(target.workspace_id);
           }}>
           <For each={workspaces()} keyed={workspace => workspace.workspace_id}>
             {workspace => <WorkspaceButton workspace={workspace()} vertical={vertical()} activate={() => activateWorkspace(workspace().workspace_id)} />}

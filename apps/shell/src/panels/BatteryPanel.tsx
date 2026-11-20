@@ -28,7 +28,7 @@ function percent(value: number | null | undefined) {
   return value == null ? "—" : `${Math.round(value)}%`;
 }
 
-function TelemetryCard(props: { icon: ShojiIconName; label: string; value: string; detail?: string }) {
+function TelemetryCard(props: { icon: ShojiIconName; label: string; value: string; detail?: string | undefined }) {
   return (
     <column style={{ ...metric, backgroundColor: container, borderRadius: "16px", gap: "4px", padding: "10px" }}>
       <row style={{ alignItems: "center", gap: "4px" }}>

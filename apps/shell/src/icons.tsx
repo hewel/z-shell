@@ -193,10 +193,10 @@ export type ShojiIconName = keyof typeof SHOJI_ICON_PATHS;
 
 export function ShojiIcon(props: {
   name: ShojiIconName;
-  size?: number;
-  color?: string;
-  testId?: string;
-  label?: string;
+  size?: number | undefined;
+  color?: string | undefined;
+  testId?: string | undefined;
+  label?: string | undefined;
 }) {
   const icon = () => SHOJI_ICON_PATHS[props.name];
   return (

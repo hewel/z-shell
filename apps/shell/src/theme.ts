@@ -60,7 +60,7 @@ export function buildThemeStylesheet(scheme: ThemeColorScheme, dark: boolean): s
 
 const sessionThemes = new Map<number, {
   users: number;
-  snapshot?: ThemeTopicSnapshot;
+  snapshot?: ThemeTopicSnapshot | undefined;
   css?: string;
   dispose?: () => void;
   disposeMotion?: () => void;
