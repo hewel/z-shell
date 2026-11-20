@@ -2,7 +2,7 @@ import { Button, For, Image, Show, TextField, createMemo, createSignal, mountSty
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
-import type { ClipboardEntrySummary } from "../topics.ts";
+import { PANEL_MAX_HEIGHTS, type ClipboardEntrySummary } from "../topics.ts";
 
 const primary = "var(--color-primary)";
 const onSurface = "var(--color-on-surface)";
@@ -162,7 +162,7 @@ export function ClipboardPanel() {
 
   return (
     <column testId="panel-clipboard" onKeyDown={handleKeyDown} style={{
-      width: "100%", maxHeight: "100vh", padding: "16px", gap: "10px", flexDirection: "column",
+      width: "100%", maxHeight: `${PANEL_MAX_HEIGHTS.clipboard}px`, padding: "16px", gap: "10px", flexDirection: "column",
       backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
     }}>
       <Show when={!locked()} fallback={

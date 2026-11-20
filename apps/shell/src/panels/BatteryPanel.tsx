@@ -1,7 +1,7 @@
 import { Button, For, Show, createMemo } from "@hewel/zgui";
 import { ShellIcon, type ShellIconName } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
-import { formatBytesGiB, formatDurationSeconds, maxThermalCelsius, type BatteryState } from "../topics.ts";
+import { PANEL_MAX_HEIGHTS, formatBytesGiB, formatDurationSeconds, maxThermalCelsius, type BatteryState } from "../topics.ts";
 
 const primary = "var(--color-primary)";
 const primaryContainer = "var(--color-primary-container)";
@@ -87,7 +87,7 @@ export function BatteryPanel() {
 
   return (
     <scroll testId="panel-battery" style={{
-      width: "100%", maxHeight: "100vh", overflow: "hidden auto",
+      width: "100%", maxHeight: `${PANEL_MAX_HEIGHTS.battery}px`, overflow: "hidden auto",
       backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
     }}>
       <column style={{ padding: "14px", gap: "10px", flexDirection: "column" }}>

@@ -2,7 +2,7 @@ import { Button, For, Match, Show, Switch, TextField, createMemo, createSignal, 
 import { ShellIcon, type ShellIconName } from "../icons.tsx";
 import { createEnterProgress } from "../motion.ts";
 import { useShellStore } from "../store.ts";
-import type { AudioDevice, BluetoothDevice } from "../topics.ts";
+import { PANEL_MAX_HEIGHTS, type AudioDevice, type BluetoothDevice } from "../topics.ts";
 import { PrecisionSliderRow, type QuickSettingsPage } from "./QuickSettingsPanel.tsx";
 
 type Subpage = Exclude<QuickSettingsPage, "main">;
@@ -29,7 +29,7 @@ const itemCard = { borderRadius: "14px", backgroundColor: containerHighest, padd
 export function QuickSettingsScroll(props: { testId: string; label: string; children: NativeChild }): NativeChild {
   return (
     <scroll testId={props.testId} role="scrollView" ariaLabel={props.label} style={{
-      width: "100%", maxHeight: "100vh",
+      width: "100%", maxHeight: `${PANEL_MAX_HEIGHTS["quick-settings"]}px`,
       overflow: "hidden auto", backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
     }}>
       <column style={{ width: "100%", padding: "14px", gap: "10px", flexDirection: "column" }}>{props.children}</column>

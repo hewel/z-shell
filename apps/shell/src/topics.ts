@@ -726,6 +726,15 @@ export const VERTICAL_BAR_WIDTH = 40;
 export const DOCKED_TOP_BAR_HEIGHT = 38;
 export const DOCKED_VERTICAL_BAR_WIDTH = 44;
 
+export const PANEL_MAX_HEIGHTS = {
+  "quick-settings": 760,
+  calendar: 760,
+  media: 420,
+  battery: 520,
+  clipboard: 620,
+  plugin: 760,
+} as const;
+
 const MAX_SURFACE_NAME_LEN = 128;
 
 /**

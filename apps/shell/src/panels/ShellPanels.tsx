@@ -2,7 +2,7 @@ import { PopupSurface, Show, createMemo, type NativeChild, type PopupSurfacePlac
 import { createEnterProgress, panelMotionStyle } from "../motion.ts";
 import { useShellStore, type PanelId, type ShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
-import type { BarPosition, BarStyle } from "../topics.ts";
+import { PANEL_MAX_HEIGHTS, type BarPosition, type BarStyle } from "../topics.ts";
 import { BatteryPanel } from "./BatteryPanel.tsx";
 import { CalendarPanel } from "./CalendarPanel.tsx";
 import { ClipboardPanel } from "./ClipboardPanel.tsx";
@@ -10,16 +10,15 @@ import { MediaPanel } from "./MediaPanel.tsx";
 import { QuickSettingsPanel } from "./QuickSettingsPanel.tsx";
 
 const panels = {
-  "quick-settings": { width: 396, maxHeight: 760, Component: QuickSettingsPanel },
-  calendar: { width: 396, maxHeight: 760, Component: CalendarPanel },
-  media: { width: 396, maxHeight: 420, Component: MediaPanel },
-  battery: { width: 360, maxHeight: 520, Component: BatteryPanel },
-  clipboard: { width: 560, maxHeight: 620, Component: ClipboardPanel },
+  "quick-settings": { width: 396, maxHeight: PANEL_MAX_HEIGHTS["quick-settings"], Component: QuickSettingsPanel },
+  calendar: { width: 396, maxHeight: PANEL_MAX_HEIGHTS.calendar, Component: CalendarPanel },
+  media: { width: 396, maxHeight: PANEL_MAX_HEIGHTS.media, Component: MediaPanel },
+  battery: { width: 360, maxHeight: PANEL_MAX_HEIGHTS.battery, Component: BatteryPanel },
+  clipboard: { width: 560, maxHeight: PANEL_MAX_HEIGHTS.clipboard, Component: ClipboardPanel },
 };
 
 export const POPOVER_FRAME_STYLE = {
   width: "100%",
-  maxHeight: "100vh",
   borderRadius: "22px",
   backgroundColor: "var(--color-surface-container)",
   border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
@@ -59,6 +58,7 @@ export function resolvePopoverGeometry(
 
 function PanelContent(props: {
   id: PanelId;
+  maxHeight: number;
   position: BarPosition;
   centered: boolean;
   theme: ShellStore["theme"];
@@ -69,6 +69,7 @@ function PanelContent(props: {
   return (
     <box testId={`panel-root-${props.id}`} data-theme-rev={String(props.theme.revision())} style={{
       ...POPOVER_FRAME_STYLE,
+      maxHeight: `${props.maxHeight}px`,
       ...panelMotionStyle(progress(), props.position, props.centered),
     }}>
       {props.children}
@@ -95,7 +96,7 @@ export function ShellPanels(): NativeChild {
           <PopupSurface name={`panel-${target.id}`} parent={target.parentSurface} anchorRect={target.anchorRect}
             width={width} height="auto" minHeight={80} maxHeight={maxHeight}
             placement={geometry().placement} offset={geometry().offset} grab onDismiss={closePanels}>
-            <PanelContent id={target.id} position={position()} centered={centered} theme={theme}><Component /></PanelContent>
+            <PanelContent id={target.id} maxHeight={maxHeight} position={position()} centered={centered} theme={theme}><Component /></PanelContent>
           </PopupSurface>
         );
       }}

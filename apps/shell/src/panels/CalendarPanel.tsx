@@ -2,7 +2,7 @@ import { Button, For, Image, Show, createMemo, createSignal, onCleanup, type Acc
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
-import { buildMonthCalendarGrid, formatBarClock, formatFullDate, formatMonthYear, type NotificationItem } from "../topics.ts";
+import { PANEL_MAX_HEIGHTS, buildMonthCalendarGrid, formatBarClock, formatFullDate, formatMonthYear, type NotificationItem } from "../topics.ts";
 
 const primary = "var(--color-primary)";
 const onPrimary = "var(--color-on-primary)";
@@ -104,7 +104,7 @@ export function CalendarPanel() {
 
   return (
     <scroll testId="panel-calendar" style={{
-      width: "100%", maxHeight: "100vh", overflow: "hidden auto",
+      width: "100%", maxHeight: `${PANEL_MAX_HEIGHTS.calendar}px`, overflow: "hidden auto",
       backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
     }}>
       <column style={{ padding: "14px", gap: "12px", flexDirection: "column" }}>

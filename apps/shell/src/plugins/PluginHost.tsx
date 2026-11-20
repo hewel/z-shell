@@ -6,7 +6,7 @@ import { createEnterProgress, panelMotionStyle } from "../motion.ts";
 import { POPOVER_FRAME_STYLE, resolvePopoverGeometry } from "../panels/ShellPanels.tsx";
 import { useShellStore, type ShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
-import { formatSurfaceName, resolveBarLayout, resolveBarPopupAnchor, type BarPosition, type BarStyle } from "../topics.ts";
+import { PANEL_MAX_HEIGHTS, formatSurfaceName, resolveBarLayout, resolveBarPopupAnchor, type BarPosition, type BarStyle } from "../topics.ts";
 import { composedPlugins, type ComposedEntryInstanceDescriptor, type ComposedServiceDescriptor } from "./composed.ts";
 import { startComposedPluginServices } from "./services.ts";
 
@@ -40,9 +40,10 @@ function PluginPanelFrame(props: { theme: ShellStore["theme"]; position: BarPosi
   return (
     <box data-theme-rev={String(props.theme.revision())} style={{
       ...POPOVER_FRAME_STYLE,
+      maxHeight: `${PANEL_MAX_HEIGHTS.plugin}px`,
       ...panelMotionStyle(progress(), props.position),
     }}>
-      <scroll style={{ width: "100%", maxHeight: "100vh", overflow: "hidden auto" }}>
+      <scroll style={{ width: "100%", maxHeight: `${PANEL_MAX_HEIGHTS.plugin}px`, overflow: "hidden auto" }}>
         {props.children}
       </scroll>
     </box>
@@ -178,7 +179,7 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
           const geometry = resolvePopoverGeometry(position, style, false);
           return (
             <PopupSurface name={formatSurfaceName("plugin-panel", instanceId)} parent={formatSurfaceName("bar", outputId)} anchorRect={anchorRect}
-              width={STANDARD_PLUGIN_PANEL_WIDTH} height="auto" minHeight={80} maxHeight={760}
+              width={STANDARD_PLUGIN_PANEL_WIDTH} height="auto" minHeight={80} maxHeight={PANEL_MAX_HEIGHTS.plugin}
               placement={geometry.placement} offset={geometry.offset} grab onDismiss={dismissPluginPanel}>
               <PluginPanelFrame theme={theme} position={position}>
                 <PanelComponent client={publicClient} onClose={dismissPluginPanel} />

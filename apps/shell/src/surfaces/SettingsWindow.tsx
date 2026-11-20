@@ -1,4 +1,4 @@
-import { Button, For, Image, Match, Show, Switch, WindowSurface, createEffect, createMemo, createSignal, type Accessor, type NativeChild } from "@hewel/zgui";
+import { Button, For, Image, Match, Show, Switch, WindowSurface, createEffect, createMemo, createSignal, flush, type Accessor, type NativeChild } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon, type ShellIconName } from "../icons.tsx";
 import { SystemTelemetryCards } from "../panels/BatteryPanel.tsx";
@@ -571,12 +571,30 @@ function SettingsWindowContent(): NativeChild {
 
 export function SettingsWindow(): NativeChild {
   const { settingsWindowOpen, closeSettingsWindow } = useShellStore();
+  const [surfaceMounted, setSurfaceMounted] = createSignal(settingsWindowOpen());
+  createEffect(settingsWindowOpen, open => {
+    if (open) {
+      setSurfaceMounted(true);
+      return;
+    }
+    // Detach region DOM nodes (especially blob-backed <Image> tiles) before unmounting
+    // WindowSurface so native-host never paints a frame against a released zgui-blob handle,
+    // regardless of whether close came from the close button, compositor, or control channel.
+    queueMicrotask(() => {
+      if (!settingsWindowOpen()) {
+        setSurfaceMounted(false);
+        flush();
+      }
+    });
+  });
   return (
-    <Show when={settingsWindowOpen()}>
+    <Show when={surfaceMounted()}>
       <WindowSurface name="settings-window" title="z-shell Settings" appId="dev.zshell.shell.settings"
         width={820} height={600} minWidth={820} minHeight={600} resizable={false} decorations="none"
         onClose={closeSettingsWindow}>
-        <SettingsWindowContent />
+        <Show when={settingsWindowOpen()}>
+          <SettingsWindowContent />
+        </Show>
       </WindowSurface>
     </Show>
   );
