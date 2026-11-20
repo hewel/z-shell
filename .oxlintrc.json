@@ -32,7 +32,9 @@
         "zshell/single-owner-ia": "error",
         "zshell/split-action-divider": "error",
         "zshell/tabular-readout": "error",
-        "zshell/bluetooth-safe-action": "error"
+        "zshell/bluetooth-safe-action": "error",
+        "zshell/composite-input-focus": "error",
+        "zshell/no-hover-hit-target-shift": "error"
       }
     },
     {

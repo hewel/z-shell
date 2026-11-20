@@ -121,7 +121,7 @@ function LockScreen(props: {
         <text testId={`lock-user-${monitor().id}`} style={{ fontSize: "22px", fontWeight: 500, lineHeight: "28px" }}>
           {controls.username()}
         </text>
-        <row style={{
+        <row data-composite-input="true" style={{
           position: "relative", width: "340px", maxWidth: "100%", height: "56px", flexShrink: 0,
           alignItems: "center", justifyContent: "space-between", gap: "8px",
           borderRadius: "999px",
@@ -129,7 +129,7 @@ function LockScreen(props: {
           border: passwordFocused()
             ? "2px solid var(--color-primary)"
             : "1px solid color-mix(in srgb, var(--color-on-surface) 24%, transparent)",
-          padding: "0px 12px",
+          padding: passwordFocused() ? "0px 11px" : "0px 12px",
         }}>
           <box ariaHidden style={{ width: "36px", height: "32px", flexShrink: 0 }} />
           <row testId="lock-morph-dots" ariaHidden style={{
@@ -147,7 +147,7 @@ function LockScreen(props: {
               </For>
             </Show>
           </row>
-          <TextField testId="lock-password" secure placeholder="Password" ariaLabel="Password"
+          <TextField testId="lock-password" class="shell-composite-field" secure placeholder="Password" ariaLabel="Password"
             disabled={controls.disabled()} value={controls.password()} onValueChange={value => controls.setPassword(value)}
             onFocus={() => setPasswordFocused(true)} onBlur={() => setPasswordFocused(false)}
             ref={node => { setField(node); }} onKeyDown={e => {

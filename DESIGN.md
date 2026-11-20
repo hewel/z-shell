@@ -195,10 +195,10 @@ All shell surfaces snap to **four standardized width tiers**:
 |---|---|---|---|
 | **Bar Strut (Floating)** | Top bar `100% × 46px` (`32px` islands + `14px` top margin); Vertical bar `54px × 100%` (`40px` islands + `14px` side margin) | Exclusive Wayland `wlr-layer-shell` edge strut | `09 · Top Bar`, `09B · Vertical Bar` |
 | **Bar Strut (Docked / Flush)** | Top bar `100% × 38px` (`0px` outer margin, `1px` bottom hairline); Vertical bar `44px × 100%` (`0px` outer margin, `1px` inner hairline) | Exclusive Wayland `wlr-layer-shell` flush edge strut (reclaims `8px`–`10px` workspace space) | `09C · Docked Top Bar`, `09D · Docked Vertical Bar` |
-| **Compact Popover** | `360px` wide | Fit-content, zero scroll | `12 · Notification Popup`, `15 · Nosleep`, `17 · Power Dialog`, future `Polkit` prompt |
-| **Standard Popover** | `396px` wide | **Zero scroll** (target ≤ `760px`) | `01 · Main`, `02 · Wi-Fi`, `03 · Bluetooth`, `04 · Sound`, `13 · Calendar`, `14 · Media Player`, `16 · AI Usage` |
+| **Compact Popover** | `360px` wide | Fit-content, zero scroll | `12 · Notification Popup`, `15 · Nosleep`, `17 · Power Dialog`, `23 · Polkit Auth Prompt` |
+| **Standard Popover** | `396px` wide | **Zero scroll** (target ≤ `760px`) | `01 · Main`, `02 · Wi-Fi`, `03 · Bluetooth`, `04 · Sound`, `04B · Battery & Power`, `13 · Calendar`, `14 · Media Player`, `16 · AI Usage` |
 | **Centered Modal** | `560px`–`684px` wide | Centered over dimmed desktop scrim | `18 · Launcher` (`652px`), `19 · Clipboard` (`560px`), `20 · Workspace Overview` (`684px`) |
-| **Settings Window** | `820px × 600px` | `216px` left nav + `604px` content pane | `22 · Settings Window` (Shell categories + plugin `settings_page` entries) |
+| **Settings Window** | `820px × 600px` | `216px` left nav + `604px` content pane | `22 · Appearance`, `22B · Bar & Layout`, `22C · Idle & Sleep`, `22D · Power & Battery`, `22E · AI Usage`, `22F · Nosleep`, `22G · Theme Bridges`, `22H · Niri Overview` |
 | **Exclusive Fullscreen** | `100% × 100%` | Exclusive `ext-session-lock-v1` lock surface [[Wayland-Layer]](#references) | `21 · Lock Screen` |
 
 ### Anchoring & Pointer Ergonomics

@@ -23,7 +23,6 @@ export const POPOVER_FRAME_STYLE = {
   borderRadius: "22px",
   backgroundColor: "var(--color-surface-container)",
   border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
-  boxShadow: "0 14px 36px rgba(0, 0, 0, 0.50)",
   overflow: "hidden",
   fontFamily: "var(--font-sans)",
 } as const;

@@ -17,7 +17,7 @@ const dockGap = 8;
 const dockPadding = 10;
 const dockHeight = 60;
 const dockBottomMargin = 10;
-const dockLayerHeight = 96;
+const dockLayerHeight = 112;
 const triggerStripHeight = 8;
 const autoHideDelayMs = 500;
 const hiddenSlideOffset = dockHeight + dockBottomMargin + 18;
@@ -26,14 +26,17 @@ const capsule = {
   borderRadius: "999px",
   backgroundColor: "var(--color-surface-container)",
   border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
-  boxShadow: "0 14px 36px rgba(0, 0, 0, 0.50)",
+  boxShadow: "0 10px 24px rgba(0, 0, 0, 0.45)",
   overflow: "visible",
 } satisfies NativeStyle;
 const tile = {
   display: "flex", width: `${tileSize}px`, height: `${tileSize}px`, flexShrink: 0, alignItems: "center", justifyContent: "center",
 } satisfies NativeStyle;
 const tileIcon = { width: "36px", height: "36px", borderRadius: "10px", "object-fit": "contain" } as const;
-const tileStack = { height: "54px", flexShrink: 0, alignItems: "center", justifyContent: "flex-end", gap: "3px" } as const;
+const tileStack = {
+  position: "relative", width: `${tileSize}px`, height: `${dockHeight}px`, flexShrink: 0,
+  alignItems: "center", justifyContent: "center",
+} as const;
 const dot = { width: "4px", height: "4px", flexShrink: 0, borderRadius: "2px", backgroundColor: onSurfaceVariant } as const;
 const tints = ["primary", "secondary", "tertiary"] as const;
 
@@ -76,21 +79,27 @@ function DockApp(props: { entry: Accessor<DockEntry> }) {
           event.preventDefault();
           togglePin();
         }}
-        style={{
+        style={{ ...tile, borderRadius: "10px", backgroundColor: "transparent", overflow: "visible" }}>
+        <box data-dock-visual="true" ariaHidden style={{
           ...tile,
+          pointerEvents: "none",
           borderRadius: "10px",
           backgroundColor: src() ? "transparent" : `var(--color-${tint()}-container)`,
           color: `var(--color-on-${tint()}-container)`,
         }}>
-        <Show when={src()} fallback={
-          <text style={{ fontFamily: "var(--font-sans)", fontSize: "18px", fontWeight: 700 }}>
-            {initial()}
-          </text>
-        }>
-          {image => <Image ariaHidden src={image()} style={tileIcon} />}
-        </Show>
+          <Show when={src()} fallback={
+            <text style={{ fontFamily: "var(--font-sans)", fontSize: "18px", fontWeight: 700 }}>
+              {initial()}
+            </text>
+          }>
+            {image => <Image ariaHidden src={image()} style={tileIcon} />}
+          </Show>
+        </box>
       </Button>
-      <row ariaHidden style={{ height: "4px", maxWidth: `${tileSize}px`, alignItems: "center", gap: "2px", overflow: "hidden" }}>
+      <row ariaHidden style={{
+        position: "absolute", bottom: "2px", height: "4px", maxWidth: `${tileSize}px`,
+        alignItems: "center", justifyContent: "center", gap: "2px", overflow: "hidden", pointerEvents: "none",
+      }}>
         <Show when={entry().pinned} fallback={<box style={{ ...dot, backgroundColor: entry().focused ? primary : onSurfaceVariant }} />}>
           <Show when={entry().focused} fallback={
             <For each={entry().windows} keyed={window => window.window_id}>{() => <box style={dot} />}</For>
@@ -135,16 +144,16 @@ function DockCapsule(props: {
       opacity: Math.max(0, Math.min(1, 1 - slideProgress() * 0.45)),
     }}>
       <column style={tileStack}>
-        <Button testId="dock-launcher" ariaLabel="Open launcher" data-dock-item="true" onClick={event => {
+        <Button testId="dock-launcher" ariaLabel="Open launcher" data-dock-trigger="true" onClick={event => {
           event.stopPropagation();
           togglePanel("launcher", { monitorId: props.monitorId });
         }}
-          style={{ ...tile, borderRadius: "14px", backgroundColor: "var(--color-surface-container)" }}>
+          style={{ ...tile, borderRadius: "14px", backgroundColor: "var(--color-surface-container-high)" }}>
           <ShellIcon name="apps" size={22} color={primary} />
         </Button>
       </column>
       <scroll style={{ flexGrow: 1, flexShrink: 1, minWidth: "0px", height: `${dockHeight}px`, overflow: "auto hidden" }}>
-        <row style={{ height: `${dockHeight}px`, alignItems: "center", gap: `${dockGap}px`, paddingTop: "6px" }}>
+        <row style={{ height: `${dockHeight}px`, alignItems: "center", gap: `${dockGap}px` }}>
           <For each={slots()} keyed={slot => slot.key}>
             {slot => slot().kind === "divider"
               ? <box ariaHidden style={{ width: "1px", height: "30px", flexShrink: 0, backgroundColor: outline }} />

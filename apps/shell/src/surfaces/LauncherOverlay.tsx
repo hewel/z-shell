@@ -50,6 +50,7 @@ function LauncherContent(props: { allocateQueryId: () => number }): NativeChild 
   const [query, setQuery] = createSignal("");
   const [results, setResults] = createSignal<LauncherQueryResponse>();
   const [selectedIndex, setSelectedIndex] = createSignal(0);
+  const [searchFocused, setSearchFocused] = createSignal(false);
   const items = () => results()?.items ?? [];
   const resolvedQueryId = () => results()?.query_id;
   let latestQueryId = 0;
@@ -123,13 +124,17 @@ function LauncherContent(props: { allocateQueryId: () => number }): NativeChild 
         padding: "18px", gap: "14px", fontFamily: "var(--font-sans)", color: "var(--color-on-surface)",
         ...dialogMotionStyle(enter()),
       }}>
-        <row style={{
-          width: "100%", height: "46px", borderRadius: "14px", padding: "0 14px", gap: "10px",
+        <row testId="launcher-search-bar" data-composite-input="true" style={{
+          width: "100%", height: "46px", borderRadius: "14px", padding: searchFocused() ? "0 13px" : "0 14px", gap: "10px",
           alignItems: "center", flexShrink: 0, backgroundColor: "var(--color-surface-container-high)",
-          border: "1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent)",
+          border: searchFocused()
+            ? "2px solid var(--color-primary)"
+            : "1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent)",
         }}>
-          <ShellIcon name="search" size={20} color="var(--color-on-surface-variant)" />
-          <TextField testId="launcher-search" placeholder="Search apps" value={query()} onInput={event => setQuery(event.value)}
+          <ShellIcon name="search" size={20} color={searchFocused() ? "var(--color-primary)" : "var(--color-on-surface-variant)"} />
+          <TextField testId="launcher-search" class="shell-composite-field" placeholder="Search apps" value={query()}
+            onInput={event => setQuery(event.value)}
+            onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)}
             onKeyDown={handleKeyDown} ref={node => focus(node)} style={{
               flexGrow: 1, flexBasis: "0px", minWidth: "0px", height: "38px",
               padding: "9px 0", lineHeight: "20px", backgroundColor: "transparent",

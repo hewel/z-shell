@@ -13,16 +13,27 @@ export const DOCK_SPRING: SpringOptions = { stiffness: 320, damping: 28 };
 export const TOAST_SPRING: SpringOptions = { stiffness: 360, damping: 30 };
 
 export const SHELL_MOTION_CSS = `
-[data-dock-item] {
+[data-dock-visual] {
   transition-property: transform, background-color;
   transition-duration: 180ms;
   transition-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1.15);
 }
-[data-dock-item]:hover {
-  transform: translateY(-6px) scale(1.1);
+[data-dock-item]:hover > [data-dock-visual] {
+  transform: translateY(-4px) scale(1.08);
 }
-[data-dock-item]:active {
-  transform: translateY(-2px) scale(0.92);
+[data-dock-item]:active > [data-dock-visual] {
+  transform: translateY(-1px) scale(0.94);
+}
+[data-dock-trigger] {
+  transition-property: background-color;
+  transition-duration: 160ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+[data-dock-trigger]:hover {
+  background-color: var(--color-surface-container-highest);
+}
+[data-dock-trigger]:active {
+  background-color: var(--color-primary-container);
 }
 [data-ws-pill] {
   transition-property: width, height, background-color, opacity;
@@ -30,12 +41,9 @@ export const SHELL_MOTION_CSS = `
   transition-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1.1);
 }
 [data-qs-tile] {
-  transition-property: background-color, transform;
+  transition-property: background-color;
   transition-duration: 180ms;
   transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
-}
-[data-qs-tile]:active {
-  transform: scale(0.98);
 }
 [data-percent-fill] {
   transition-property: width;

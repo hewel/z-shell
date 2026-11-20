@@ -454,10 +454,8 @@ function SettingsWindowContent(): NativeChild {
 
   return (
     <row testId="settings-window-root" data-theme-rev={String(theme.revision())} style={{
-      width: "820px", height: "600px", borderRadius: "22px", overflow: "hidden",
+      width: "820px", height: "600px", overflow: "hidden",
       backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
-      border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
-      boxShadow: "0 20px 56px rgba(0, 0, 0, 0.60)",
     }}>
       <column testId="settings-sidebar" style={{
         width: "216px", height: "100%", flexShrink: 0, backgroundColor: surface,
@@ -576,7 +574,7 @@ export function SettingsWindow(): NativeChild {
   return (
     <Show when={settingsWindowOpen()}>
       <WindowSurface name="settings-window" title="z-shell Settings" appId="dev.zshell.shell.settings"
-        width={820} height={600} minWidth={820} minHeight={600} resizable={false} decorations="none" transparent
+        width={820} height={600} minWidth={820} minHeight={600} resizable={false} decorations="none"
         onClose={closeSettingsWindow}>
         <SettingsWindowContent />
       </WindowSurface>

@@ -817,6 +817,13 @@ export function resolveActiveMonitor(
   return monitors[0];
 }
 
+export interface BarShadowBleed {
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly left: number;
+}
+
 export interface ResolvedBarLayout {
   readonly position: BarPosition;
   readonly style: BarStyle;
@@ -828,10 +835,14 @@ export interface ResolvedBarLayout {
     readonly bottom: number;
     readonly left: number;
   };
+  readonly shadowBleed: BarShadowBleed;
   readonly width: number;
   readonly height: number;
   readonly exclusiveZone: number;
+  readonly inputRegion?: readonly BarAnchorBox[];
 }
+
+const ZERO_SHADOW_BLEED: BarShadowBleed = { top: 0, right: 0, bottom: 0, left: 0 };
 
 export function resolveBarLayout(
   bar: BarSettings | undefined,
@@ -850,67 +861,154 @@ export function resolveBarLayout(
   const size = resolveMonitorLogicalSize(monitor, outputs);
 
   if (settings.position === "top") {
-    const margin = docked
-      ? { top: 0, right: 0, bottom: 0, left: 0 }
-      : {
-          top: edges.top ?? gaps,
-          right: edges.right ?? gaps,
-          bottom: edges.bottom ?? 0,
-          left: edges.left ?? gaps,
-        };
-    const height = docked ? DOCKED_TOP_BAR_HEIGHT : TOP_BAR_HEIGHT;
+    if (docked) {
+      return {
+        position: "top",
+        style,
+        isVertical: false,
+        anchor: ["top", "left", "right"],
+        margin: { top: 0, right: 0, bottom: 0, left: 0 },
+        shadowBleed: ZERO_SHADOW_BLEED,
+        width: Math.max(240, size.width),
+        height: DOCKED_TOP_BAR_HEIGHT,
+        exclusiveZone: DOCKED_TOP_BAR_HEIGHT,
+      };
+    }
+    const desiredTop = edges.top ?? gaps;
+    const desiredRight = edges.right ?? gaps;
+    const desiredLeft = edges.left ?? gaps;
+    // Expand the transparent LayerSurface around floating islands so drop shadows
+    // fade to alpha=0 without clipping, while keeping exclusiveZone and inputRegion
+    // strictly on the 32px island band.
+    const shadowBleed: BarShadowBleed = {
+      top: Math.min(desiredTop, 10),
+      right: Math.min(desiredRight, 14),
+      bottom: 22,
+      left: Math.min(desiredLeft, 14),
+    };
+    const margin = {
+      top: desiredTop - shadowBleed.top,
+      right: desiredRight - shadowBleed.right,
+      bottom: edges.bottom ?? 0,
+      left: desiredLeft - shadowBleed.left,
+    };
+    const width = Math.max(240, size.width - margin.left - margin.right);
+    const height = TOP_BAR_HEIGHT + shadowBleed.top + shadowBleed.bottom;
     return {
       position: "top",
       style,
       isVertical: false,
       anchor: ["top", "left", "right"],
       margin,
-      width: Math.max(240, size.width - margin.left - margin.right),
+      shadowBleed,
+      width,
       height,
-      exclusiveZone: height + margin.top,
+      exclusiveZone: TOP_BAR_HEIGHT + desiredTop,
+      inputRegion: [{
+        x: shadowBleed.left,
+        y: shadowBleed.top,
+        width: Math.max(1, width - shadowBleed.left - shadowBleed.right),
+        height: TOP_BAR_HEIGHT,
+      }],
     };
   }
 
   if (settings.position === "left") {
-    const margin = docked
-      ? { top: 0, right: 0, bottom: 0, left: 0 }
-      : {
-          top: edges.top ?? gaps,
-          right: edges.right ?? 0,
-          bottom: edges.bottom ?? gaps,
-          left: edges.left ?? gaps,
-        };
-    const width = docked ? DOCKED_VERTICAL_BAR_WIDTH : VERTICAL_BAR_WIDTH;
+    if (docked) {
+      return {
+        position: "left",
+        style,
+        isVertical: true,
+        anchor: ["left", "top", "bottom"],
+        margin: { top: 0, right: 0, bottom: 0, left: 0 },
+        shadowBleed: ZERO_SHADOW_BLEED,
+        width: DOCKED_VERTICAL_BAR_WIDTH,
+        height: Math.max(240, size.height),
+        exclusiveZone: DOCKED_VERTICAL_BAR_WIDTH,
+      };
+    }
+    const desiredTop = edges.top ?? gaps;
+    const desiredBottom = edges.bottom ?? gaps;
+    const desiredLeft = edges.left ?? gaps;
+    const shadowBleed: BarShadowBleed = {
+      top: Math.min(desiredTop, 10),
+      right: 22,
+      bottom: Math.min(desiredBottom, 18),
+      left: Math.min(desiredLeft, 14),
+    };
+    const margin = {
+      top: desiredTop - shadowBleed.top,
+      right: edges.right ?? 0,
+      bottom: desiredBottom - shadowBleed.bottom,
+      left: desiredLeft - shadowBleed.left,
+    };
+    const width = VERTICAL_BAR_WIDTH + shadowBleed.left + shadowBleed.right;
+    const height = Math.max(240, size.height - margin.top - margin.bottom);
     return {
       position: "left",
       style,
       isVertical: true,
       anchor: ["left", "top", "bottom"],
       margin,
+      shadowBleed,
       width,
-      height: Math.max(240, size.height - margin.top - margin.bottom),
-      exclusiveZone: width + margin.left,
+      height,
+      exclusiveZone: VERTICAL_BAR_WIDTH + desiredLeft,
+      inputRegion: [{
+        x: shadowBleed.left,
+        y: shadowBleed.top,
+        width: VERTICAL_BAR_WIDTH,
+        height: Math.max(1, height - shadowBleed.top - shadowBleed.bottom),
+      }],
     };
   }
 
-  const margin = docked
-    ? { top: 0, right: 0, bottom: 0, left: 0 }
-    : {
-        top: edges.top ?? gaps,
-        right: edges.right ?? gaps,
-        bottom: edges.bottom ?? gaps,
-        left: edges.left ?? 0,
-      };
-  const width = docked ? DOCKED_VERTICAL_BAR_WIDTH : VERTICAL_BAR_WIDTH;
+  if (docked) {
+    return {
+      position: "right",
+      style,
+      isVertical: true,
+      anchor: ["right", "top", "bottom"],
+      margin: { top: 0, right: 0, bottom: 0, left: 0 },
+      shadowBleed: ZERO_SHADOW_BLEED,
+      width: DOCKED_VERTICAL_BAR_WIDTH,
+      height: Math.max(240, size.height),
+      exclusiveZone: DOCKED_VERTICAL_BAR_WIDTH,
+    };
+  }
+  const desiredTop = edges.top ?? gaps;
+  const desiredRight = edges.right ?? gaps;
+  const desiredBottom = edges.bottom ?? gaps;
+  const shadowBleed: BarShadowBleed = {
+    top: Math.min(desiredTop, 10),
+    right: Math.min(desiredRight, 14),
+    bottom: Math.min(desiredBottom, 18),
+    left: 22,
+  };
+  const margin = {
+    top: desiredTop - shadowBleed.top,
+    right: desiredRight - shadowBleed.right,
+    bottom: desiredBottom - shadowBleed.bottom,
+    left: edges.left ?? 0,
+  };
+  const width = VERTICAL_BAR_WIDTH + shadowBleed.left + shadowBleed.right;
+  const height = Math.max(240, size.height - margin.top - margin.bottom);
   return {
     position: "right",
     style,
     isVertical: true,
     anchor: ["right", "top", "bottom"],
     margin,
+    shadowBleed,
     width,
-    height: Math.max(240, size.height - margin.top - margin.bottom),
-    exclusiveZone: width + margin.right,
+    height,
+    exclusiveZone: VERTICAL_BAR_WIDTH + desiredRight,
+    inputRegion: [{
+      x: shadowBleed.left,
+      y: shadowBleed.top,
+      width: VERTICAL_BAR_WIDTH,
+      height: Math.max(1, height - shadowBleed.top - shadowBleed.bottom),
+    }],
   };
 }
 
@@ -993,67 +1091,70 @@ export interface BarAnchorBox {
  * offsets create a clean gap outside the bar instead of overlapping inner pills.
  */
 export function resolveBarPopupAnchor(
-  layout: Pick<ResolvedBarLayout, "isVertical" | "width" | "height">,
+  layout: Pick<ResolvedBarLayout, "isVertical" | "width" | "height"> & { readonly shadowBleed?: BarShadowBleed },
   options: {
     readonly align: "center" | "end" | "target";
     readonly targetRect?: BarAnchorBox | null;
   },
 ): BarAnchorBox {
   const { align, targetRect } = options;
+  const bleed = layout.shadowBleed ?? ZERO_SHADOW_BLEED;
+  const barWidth = Math.max(1, layout.width - bleed.left - bleed.right);
+  const barHeight = Math.max(1, layout.height - bleed.top - bleed.bottom);
   if (layout.isVertical) {
     if (align === "center") {
       return {
-        x: 0,
-        y: targetRect ? targetRect.y : Math.max(0, Math.round(layout.height / 2) - 16),
-        width: layout.width,
+        x: bleed.left,
+        y: targetRect ? targetRect.y : Math.max(bleed.top, bleed.top + Math.round(barHeight / 2) - 16),
+        width: barWidth,
         height: targetRect ? Math.max(1, targetRect.height) : 32,
       };
     }
     if (align === "target" && targetRect) {
       return {
-        x: 0,
+        x: bleed.left,
         y: targetRect.y,
-        width: layout.width,
+        width: barWidth,
         height: Math.max(1, targetRect.height),
       };
     }
     return {
-      x: 0,
-      y: targetRect ? targetRect.y : Math.max(0, layout.height - 1),
-      width: layout.width,
+      x: bleed.left,
+      y: targetRect ? targetRect.y : Math.max(bleed.top, bleed.top + barHeight - 1),
+      width: barWidth,
       height: targetRect ? Math.max(1, targetRect.height) : 1,
     };
   }
 
   if (align === "end") {
     return {
-      x: Math.max(0, layout.width - 1),
-      y: 0,
+      x: Math.max(bleed.left, bleed.left + barWidth - 1),
+      y: bleed.top,
       width: 1,
-      height: layout.height,
+      height: barHeight,
     };
   }
   if (align === "center") {
     return {
-      x: targetRect ? targetRect.x : Math.max(0, Math.round(layout.width / 2) - 1),
-      y: 0,
+      x: targetRect ? targetRect.x : Math.max(bleed.left, bleed.left + Math.round(barWidth / 2) - 1),
+      y: bleed.top,
       width: targetRect ? Math.max(1, targetRect.width) : 2,
-      height: layout.height,
+      height: barHeight,
     };
   }
   if (targetRect) {
     return {
       x: targetRect.x,
-      y: 0,
+      y: bleed.top,
       width: Math.max(1, targetRect.width),
-      height: layout.height,
+      height: barHeight,
     };
   }
   return {
-    x: Math.max(0, layout.width - 1),
-    y: 0,
+    x: Math.max(bleed.left, bleed.left + barWidth - 1),
+    y: bleed.top,
     width: 1,
-    height: layout.height,
+    height: barHeight,
   };
 }
 

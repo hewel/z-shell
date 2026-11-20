@@ -262,6 +262,52 @@ describe("zshell oxlint design plugin", () => {
     const goodBt = lintSnippet("QuickSettingsSubpages.tsx", `export function BluetoothPage() { return <Show when={!dev().connected}><Action label="Remove" /></Show>; }`, "zshell/bluetooth-safe-action");
     expect(goodBt.status, goodBt.output).toBe(0);
   });
+
+  test("zshell/composite-input-focus requires composite search/input rows to delegate focus ring to the outer pill", () => {
+    const badComposite = lintSnippet(
+      "LauncherOverlay.tsx",
+      `export const x = <row><ShellIcon name="search" /><TextField value="" /></row>;`,
+      "zshell/composite-input-focus",
+    );
+    expect(badComposite.status).not.toBe(0);
+
+    const goodComposite = lintSnippet(
+      "LauncherOverlay.tsx",
+      `export const x = <row data-composite-input="true"><ShellIcon name="search" /><TextField class="shell-composite-field" onFocus={() => {}} onBlur={() => {}} value="" /></row>;`,
+      "zshell/composite-input-focus",
+    );
+    expect(goodComposite.status, goodComposite.output).toBe(0);
+  });
+
+  test("zshell/no-hover-hit-target-shift blocks direct :hover/:active transforms on hit targets and allows inner visual child transforms", () => {
+    const badHover = lintSnippet(
+      "motion.ts",
+      `export const CSS = \`[data-dock-item]:hover { transform: translateY(-6px) scale(1.1); }\`;`,
+      "zshell/no-hover-hit-target-shift",
+    );
+    expect(badHover.status).not.toBe(0);
+
+    const badActive = lintSnippet(
+      "motion.ts",
+      `export const CSS = \`[data-qs-tile]:active { transform: scale(0.98); }\`;`,
+      "zshell/no-hover-hit-target-shift",
+    );
+    expect(badActive.status).not.toBe(0);
+
+    const badVisual = lintSnippet(
+      "DockSurface.tsx",
+      `export const x = <box data-dock-visual="true" style={{ width: "46px" }} />;`,
+      "zshell/no-hover-hit-target-shift",
+    );
+    expect(badVisual.status).not.toBe(0);
+
+    const goodHover = lintSnippet(
+      "motion.ts",
+      `export const CSS = \`[data-dock-item]:hover > [data-dock-visual] { transform: translateY(-4px) scale(1.08); } [data-qs-tile]:hover { background-color: var(--color-surface-container-high); }\`;`,
+      "zshell/no-hover-hit-target-shift",
+    );
+    expect(goodHover.status, goodHover.output).toBe(0);
+  });
 });
 
 function parseCubicPoints(d: string): { x: number; y: number }[] {

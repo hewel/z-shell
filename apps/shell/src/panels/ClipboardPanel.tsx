@@ -105,6 +105,7 @@ export function ClipboardPanel() {
   const [query, setQuery] = createSignal("");
   const [filter, setFilter] = createSignal<Filter>("all");
   const [selectedIndex, setSelectedIndex] = createSignal(0);
+  const [searchFocused, setSearchFocused] = createSignal(false);
   const locked = () => clipboard.data()?.locked === "locked";
   const entries = () => locked() ? [] : clipboard.data()?.entries ?? [];
   const counts = createMemo(() => {
@@ -170,14 +171,18 @@ export function ClipboardPanel() {
           <text>Clipboard hidden while session is locked</text>
         </row>
       }>
-        <row style={{
-          width: "100%", height: "44px", borderRadius: "14px", padding: "0 14px", gap: "10px",
+        <row testId="clipboard-search-bar" data-composite-input="true" style={{
+          width: "100%", height: "44px", borderRadius: "14px", padding: searchFocused() ? "0 13px" : "0 14px", gap: "10px",
           alignItems: "center", flexShrink: 0, backgroundColor: containerHigh,
-          border: "1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent)",
+          border: searchFocused()
+            ? "2px solid var(--color-primary)"
+            : "1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent)",
         }}>
-          <ShellIcon name="search" size={18} color={muted} />
-          <TextField testId="clipboard-search" class="clipboard-search" ariaLabel={searchPlaceholder} placeholder={searchPlaceholder} value={query()}
-            onInput={event => { setQuery(event.value); setSelectedIndex(0); }} onKeyDown={handleKeyDown} style={{
+          <ShellIcon name="search" size={18} color={searchFocused() ? primary : muted} />
+          <TextField testId="clipboard-search" class="clipboard-search shell-composite-field" ariaLabel={searchPlaceholder} placeholder={searchPlaceholder} value={query()}
+            onInput={event => { setQuery(event.value); setSelectedIndex(0); }}
+            onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)}
+            onKeyDown={handleKeyDown} style={{
               flexGrow: 1, flexBasis: "0px", minWidth: "0px", height: "36px", lineHeight: "18px",
               padding: "9px 0", backgroundColor: "transparent", color: onSurface,
             }} />

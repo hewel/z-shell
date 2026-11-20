@@ -781,6 +781,118 @@ const rules = {
     },
   },
 
+  "composite-input-focus": {
+    meta: {
+      type: "problem",
+      docs: { description: "Composite input rows (<row> containing icons/controls + <TextField>) must delegate focus ring styling to the outer rounded container via data-composite-input + shell-composite-field + onFocus/onBlur" },
+      schema: [],
+    },
+    create(context) {
+      const hasAttr = (opening, name) =>
+        (opening?.attributes ?? []).some(attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === name);
+      const getStringAttr = (opening, name) => {
+        for (const attr of opening?.attributes ?? []) {
+          if (attr.type !== "JSXAttribute" || attr.name?.type !== "JSXIdentifier" || attr.name.name !== name) continue;
+          if (attr.value?.type === "Literal" && typeof attr.value.value === "string") return attr.value.value;
+          if (attr.value?.type === "JSXExpressionContainer") return staticString(attr.value.expression);
+        }
+        return null;
+      };
+      return {
+        JSXOpeningElement(node) {
+          if (node.name?.type !== "JSXIdentifier" || (node.name.name !== "TextField" && node.name.name !== "Input")) return;
+          const jsxElement = node.parent;
+          const parentElement = jsxElement?.parent;
+          if (!parentElement || parentElement.type !== "JSXElement") return;
+          const parentName = parentElement.openingElement?.name;
+          if (!parentName || parentName.type !== "JSXIdentifier" || parentName.name !== "row") return;
+          const elementSiblings = (parentElement.children ?? []).filter(
+            child => child !== jsxElement && child.type === "JSXElement",
+          );
+          if (elementSiblings.length === 0) return;
+
+          const wrapperMarked = getStringAttr(parentElement.openingElement, "data-composite-input") === "true";
+          const fieldClass = getStringAttr(node, "class") ?? "";
+          const hasCompositeClass = fieldClass.split(/\s+/).includes("shell-composite-field");
+          const handlesFocus = hasAttr(node, "onFocus") && hasAttr(node, "onBlur");
+          if (!wrapperMarked || !hasCompositeClass || !handlesFocus) {
+            context.report({
+              node,
+              message:
+                "Composite Input Focus Rule: <TextField> inside a <row> with sibling icons/controls must delegate focus to the outer rounded container (data-composite-input=\"true\" on <row>, class=\"... shell-composite-field\" + onFocus/onBlur on <TextField>).",
+            });
+          }
+        },
+      };
+    },
+  },
+
+  "no-hover-hit-target-shift": {
+    meta: {
+      type: "problem",
+      docs: { description: "Disallow geometric CSS transform directly on :hover/:active subject selectors so hover/press animations never shift pointer hit-testing and cause oscillation" },
+      schema: [],
+    },
+    create(context) {
+      const CSS_RULE_RE = /([^{}]+)\{([^{}]*)\}/g;
+      const GEOMETRIC_TRANSFORM_RE = /\btransform\s*:\s*[^;]*(?:translate|scale|rotate|skew|matrix)/i;
+      const SUBJECT_INTERACTIVE_PSEUDO_RE = /:(?:hover|active)(?::[a-z-]+)*\s*$/i;
+
+      const checkCssText = (node, cssText) => {
+        if (!cssText.includes(":hover") && !cssText.includes(":active")) return;
+        CSS_RULE_RE.lastIndex = 0;
+        let match;
+        while ((match = CSS_RULE_RE.exec(cssText)) !== null) {
+          const selectorList = match[1] ?? "";
+          const body = match[2] ?? "";
+          if (!GEOMETRIC_TRANSFORM_RE.test(body)) continue;
+          for (const rawSelector of selectorList.split(",")) {
+            const selector = rawSelector.trim();
+            if (!selector) continue;
+            // Split on combinators; only the rightmost compound selector is the transformed subject.
+            const subject = selector.split(/[\s>+~]+/).pop() ?? "";
+            if (SUBJECT_INTERACTIVE_PSEUDO_RE.test(subject)) {
+              context.report({
+                node,
+                message: `Hover Hit-Target Stability Rule: do not apply geometric transform directly on ":hover/:active" subject selector "${selector}". Keep the interactive hit target stationary and transform a pointer-events: none inner child (e.g. "parent:hover > [data-dock-visual]") to prevent hover oscillation.`,
+              });
+            }
+          }
+        }
+      };
+
+      return {
+        Literal(node) {
+          if (typeof node.value === "string") checkCssText(node, node.value);
+        },
+        TemplateLiteral(node) {
+          if (node.expressions.length === 0) {
+            checkCssText(node, node.quasis[0]?.value?.cooked ?? "");
+          }
+        },
+        JSXOpeningElement(node) {
+          const isVisualChild = (node.attributes ?? []).some(
+            attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === "data-dock-visual",
+          );
+          if (!isVisualChild) return;
+          const styleAttr = (node.attributes ?? []).find(
+            attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === "style",
+          );
+          const styleExpr = styleAttr?.value?.type === "JSXExpressionContainer" ? styleAttr.value.expression : null;
+          if (!styleExpr || styleExpr.type !== "ObjectExpression") return;
+          const { map } = getStyleProps(styleExpr);
+          const pe = staticString(map.get("pointerEvents") ?? map.get("pointer-events"));
+          if (pe !== "none") {
+            context.report({
+              node,
+              message: "Hover Hit-Target Stability Rule: transformed visual child [data-dock-visual] must set pointerEvents: \"none\" so it never alters hit-testing.",
+            });
+          }
+        },
+      };
+    },
+  },
+
   "no-lint-suppression": {
     meta: {
       type: "problem",

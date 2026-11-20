@@ -38,7 +38,7 @@ function ToastCard({ toast, track }: { toast: Accessor<NotificationItem>; track:
 
   return (
     <column ref={trackedRef(track)} testId={`toast-card-${toast().id}`} style={{
-      borderRadius: "22px", backgroundColor: container, border: outline, boxShadow: "0 14px 36px rgba(0, 0, 0, 0.50)",
+      borderRadius: "22px", backgroundColor: container, border: outline, boxShadow: "0 8px 20px rgba(0, 0, 0, 0.45)",
       padding: "14px", gap: "10px", color: onSurface,
       opacity: Math.max(0, Math.min(1, enter() * 1.35)),
       transform: `translateX(${((1 - enter()) * 24).toFixed(2)}px) scale(${(0.96 + enter() * 0.04).toFixed(4)})`,
@@ -93,7 +93,7 @@ function ToastFooter({ count, next, track }: { count: number; next: Notification
   const { invokePublic } = useShellStore();
   return (
     <row ref={trackedRef(track)} testId="toast-more-footer" style={{
-      borderRadius: "16px", backgroundColor: container, border: outline, boxShadow: "0 14px 36px rgba(0, 0, 0, 0.50)",
+      borderRadius: "16px", backgroundColor: container, border: outline, boxShadow: "0 8px 20px rgba(0, 0, 0, 0.45)",
       padding: "6px 10px", gap: "8px", alignItems: "center",
     }}>
       <box style={{ ...pill, minHeight: "24px", padding: "2px 8px", backgroundColor: containerHigh, color: primary, fontSize: "11px" }}>
@@ -123,8 +123,8 @@ function ToastSurface({ output, popups }: { output: string; popups: Accessor<rea
 
   return (
     <LayerSurface name="notification-toasts" output={output} layer="overlay" anchor={["top", "right"]}
-      margin={{ top: topMargin(), right: 14 }} width={360} height={420} keyboard="none" inputRegion={trackedNodes()}>
-      <column style={{ width: "100%", gap: "8px" }}>
+      margin={{ top: Math.max(0, topMargin() - 12), right: 0 }} width={396} height={456} keyboard="none" inputRegion={trackedNodes()}>
+      <column style={{ width: "100%", padding: "12px 14px 28px 22px", gap: "8px" }}>
         <Show when={popups()[0]}>{toast => <ToastCard toast={toast} track={track} />}</Show>
         <Show when={popups()[1]}>{next => <ToastFooter count={popups().length} next={next()} track={track} />}</Show>
       </column>

@@ -1755,6 +1755,15 @@ describe("apps/shell preview", () => {
               activated: true, minimized: false, maximized: false, fullscreen: false, output_instance_ids: [1],
             }],
           },
+          "desktop.apps": {
+            available: true,
+            count: 2,
+            pinned_apps: ["org.example.editor", "org.example.browser"],
+            apps: [
+              { id: "org.example.editor", title: "Editor", startup_wm_class: "org.example.editor", icon: null },
+              { id: "org.example.browser", title: "Browser", startup_wm_class: "org.example.browser", icon: null },
+            ],
+          },
           "desktop.media": {
             available: true,
             selected_player_id: "spotify",
@@ -1786,8 +1795,23 @@ describe("apps/shell preview", () => {
             id: 26,
             name: "wallpaper.list",
             payload: { offset: 0, limit: 16 },
-            atMs: 1850,
+            atMs: 2100,
             result: { total: 0, items: [] },
+          },
+          {
+            id: 27,
+            name: "launcher.query",
+            payload: { query: "", query_id: 1, limit: 18 },
+            atMs: 3000,
+            result: {
+              data: {
+                query_id: 1,
+                items: [
+                  { provider_id: "desktop", item_id: "org.example.editor", title: "Editor", icon: null },
+                  { provider_id: "desktop", item_id: "org.example.browser", title: "Browser", icon: null },
+                ],
+              },
+            },
           },
         ],
       }), null, 2));
@@ -1800,6 +1824,10 @@ describe("apps/shell preview", () => {
           { id: "daemon-events", op: "clock.advance", byMs: 30 },
           { id: "ready", op: "settle" },
           { id: "capture-bar", op: "capture", surface: "bar-hdmi-a-1", captureId: "bar" },
+          { id: "capture-dock", op: "capture", surface: "dock-hdmi-a-1", captureId: "dock" },
+          { id: "hover-dock-app", op: "pointer.move", target: { surface: "dock-hdmi-a-1", testId: "dock-app-org.example.editor" } },
+          { id: "dock-hover-settle", op: "clock.advance", byMs: 250 },
+          { id: "capture-dock-hover", op: "capture", surface: "dock-hdmi-a-1", captureId: "dock-hover" },
           { id: "open-qs", op: "pointer.click", target: { surface: "bar-hdmi-a-1", testId: "bar-audio" }, button: "primary" },
           { id: "qs-settle", op: "clock.advance", byMs: 600 },
           { id: "capture-qs", op: "capture", surface: "panel-quick-settings", captureId: "qs" },
@@ -1821,26 +1849,37 @@ describe("apps/shell preview", () => {
           },
           { id: "power-settle", op: "clock.advance", byMs: 600 },
           { id: "capture-power", op: "capture", surface: "power-dialog", captureId: "power" },
+          {
+            id: "open-launcher", op: "service.emit", channel: "control.message",
+            value: { args: ["panel", "launcher"], reply: { text: "{\"activePanel\":\"launcher\"}" } },
+          },
+          { id: "launcher-settle", op: "clock.advance", byMs: 400 },
+          { id: "capture-launcher", op: "capture", surface: "launcher-overlay", captureId: "launcher" },
         ],
       }, null, 2));
 
       const result = runPreview(fixture, scenario, out);
-      expectCleanPreview(result, 6, 0);
+      expectCleanPreview(result, 9, 0);
       const bar = readCapture(out, "bar-hdmi-a-1", "bar");
+      const dock = readCapture(out, "dock-hdmi-a-1", "dock");
+      const dockHover = readCapture(out, "dock-hdmi-a-1", "dock-hover");
       const qs = readCapture(out, "panel-quick-settings", "qs");
       const cal = readCapture(out, "panel-calendar", "cal");
       const media = readCapture(out, "panel-media", "media");
       const settings = readCapture(out, "settings-window", "settings");
       const power = readCapture(out, "power-dialog", "power");
+      const launcher = readCapture(out, "launcher-overlay", "launcher");
 
       // WCAG 2.2 SC 2.5.8: every visible interactive control must meet >= 24x24px hit area.
       for (const [label, tree] of [
         ["bar", bar.tree],
+        ["dock", dock.tree],
         ["quick-settings", qs.tree],
         ["calendar", cal.tree],
         ["media", media.tree],
         ["settings", settings.tree],
         ["power-dialog", power.tree],
+        ["launcher", launcher.tree],
       ] as const) {
         const controls = tree.nodes.filter(node => node.role && interactiveRoles.has(node.role) && node.boundsLogical);
         expect(controls.length, label).toBeGreaterThan(0);
@@ -1850,6 +1889,73 @@ describe("apps/shell preview", () => {
           expect(bounds.height, `${label} ${node.testId ?? node.role} height`).toBeGreaterThanOrEqual(24);
         }
       }
+
+      // Shadow-Clipping Guard: transparent LayerSurface bleed edges must fade to near-zero alpha
+      // so drop shadows are never hard-clipped by the buffer boundary.
+      const maxRowAlpha = (image: DecodedPng, y: number): number => {
+        let max = 0;
+        for (let x = 0; x < image.width; x++) {
+          const alpha = image.data[(y * image.width + x) * 4 + 3] ?? 0;
+          if (alpha > max) max = alpha;
+        }
+        return max;
+      };
+      expect(maxRowAlpha(bar.image, 0), "bar top edge shadow clipping").toBeLessThanOrEqual(8);
+      expect(maxRowAlpha(bar.image, bar.image.height - 1), "bar bottom edge shadow clipping").toBeLessThanOrEqual(8);
+      expect(maxRowAlpha(dock.image, 0), "dock top edge shadow clipping").toBeLessThanOrEqual(8);
+
+      // Rounded Surface Corner Guard: transparent rounded PopupSurface corners
+      // must remain pure transparent (no root boxShadow leaking into square surface corners).
+      for (const [label, capture] of [
+        ["quick-settings", qs],
+        ["calendar", cal],
+        ["media", media],
+      ] as const) {
+        const w = capture.image.width - 1;
+        const h = capture.image.height - 1;
+        expect(pixel(capture.image, 0, 0), `${label} top-left corner transparent`).toEqual([0, 0, 0, 0]);
+        expect(pixel(capture.image, w, 0), `${label} top-right corner transparent`).toEqual([0, 0, 0, 0]);
+        expect(pixel(capture.image, 0, h), `${label} bottom-left corner transparent`).toEqual([0, 0, 0, 0]);
+        expect(pixel(capture.image, w, h), `${label} bottom-right corner transparent`).toEqual([0, 0, 0, 0]);
+      }
+
+      // Opaque Toplevel Edge Guard: Settings WindowSurface delegates outer corners/borders to the
+      // Wayland compositor (prefer-no-csd), so its 4 corners must stay fully opaque (alpha=255).
+      {
+        const w = settings.image.width - 1;
+        const h = settings.image.height - 1;
+        expect(pixel(settings.image, 0, 0)[3], "settings-window top-left opaque").toBe(255);
+        expect(pixel(settings.image, w, 0)[3], "settings-window top-right opaque").toBe(255);
+        expect(pixel(settings.image, 0, h)[3], "settings-window bottom-left opaque").toBe(255);
+        expect(pixel(settings.image, w, h)[3], "settings-window bottom-right opaque").toBe(255);
+      }
+
+      // Dock Vertical Alignment: launcher tile and every app tile must share the capsule's vertical center.
+      const centerY = (bounds: DeviceBounds) => bounds.y + bounds.height / 2;
+      const dockCapsule = treeNode(dock.tree, "dock-root-HDMI-A-1").boundsLogical!;
+      const dockLauncher = treeNode(dock.tree, "dock-launcher").boundsLogical!;
+      expect(Math.abs(centerY(dockLauncher) - centerY(dockCapsule)), "dock-launcher centered in capsule").toBeLessThanOrEqual(1);
+      for (const appId of ["org.example.editor", "org.example.browser"]) {
+        const appBounds = treeNode(dock.tree, `dock-app-${appId}`).boundsLogical!;
+        expect(Math.abs(centerY(appBounds) - centerY(dockLauncher)), `dock-app-${appId} aligned with launcher`).toBeLessThanOrEqual(1);
+      }
+
+      // Hover Hit-Target Stability: hovering a dock button must NEVER move the button's own hit box
+      // (only its pointer-events: none inner visual child translates), preventing hover jitter loops.
+      const dockAppBefore = treeNode(dock.tree, "dock-app-org.example.editor").boundsLogical!;
+      const dockAppAfterHover = treeNode(dockHover.tree, "dock-app-org.example.editor").boundsLogical!;
+      expect(Math.abs(dockAppAfterHover.x - dockAppBefore.x), "hovered dock hit-target x stable").toBeLessThanOrEqual(0.5);
+      expect(Math.abs(dockAppAfterHover.y - dockAppBefore.y), "hovered dock hit-target y stable").toBeLessThanOrEqual(0.5);
+      expect(Math.abs(dockAppAfterHover.width - dockAppBefore.width), "hovered dock hit-target width stable").toBeLessThanOrEqual(0.5);
+      expect(Math.abs(dockAppAfterHover.height - dockAppBefore.height), "hovered dock hit-target height stable").toBeLessThanOrEqual(0.5);
+
+      // Launcher card width (652px) and composite search bar framing.
+      expect(Math.round(treeNode(launcher.tree, "launcher-card").boundsLogical!.width)).toBe(652);
+      const launcherSearchBar = treeNode(launcher.tree, "launcher-search-bar").boundsLogical!;
+      const launcherSearchField = treeNode(launcher.tree, "launcher-search").boundsLogical!;
+      expect(launcherSearchField.x).toBeGreaterThan(launcherSearchBar.x + 20);
+      expect(launcherSearchField.y).toBeGreaterThanOrEqual(launcherSearchBar.y);
+      expect(launcherSearchField.y + launcherSearchField.height).toBeLessThanOrEqual(launcherSearchBar.y + launcherSearchBar.height);
 
       // Top bar anti-collision at 1280px with long window title and long media label.
       const activeWin = treeNode(bar.tree, "bar-active-window").boundsLogical!;
@@ -1876,10 +1982,10 @@ describe("apps/shell preview", () => {
       expect(media.image.height).toBeLessThanOrEqual(420);
       expect(Math.round(treeNode(power.tree, "power-dialog-card").boundsLogical!.width)).toBe(360);
 
-      // Settings WindowSurface (820x600 with 1px outer border -> 216px left sidebar + 602px content pane).
+      // Settings WindowSurface (820x600 flush toplevel -> 216px left sidebar + 604px content pane).
       expect([settings.image.width, settings.image.height]).toEqual([820, 600]);
       expect(Math.round(treeNode(settings.tree, "settings-sidebar").boundsLogical!.width)).toBe(216);
-      expect(Math.round(treeNode(settings.tree, "settings-content-pane").boundsLogical!.width)).toBe(602);
+      expect(Math.round(treeNode(settings.tree, "settings-content-pane").boundsLogical!.width)).toBe(604);
 
       // Zero-Scroll Popover Rule verified via upstream zgui-js scrollMetrics (commit 33c0fab+).
       for (const [label, capture, testId] of [

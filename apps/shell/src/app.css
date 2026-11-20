@@ -36,8 +36,8 @@
   --color-error-container: #93000A;
   --color-on-error-container: #FFDAD6;
   --zgui-ring: var(--color-primary);
-  --font-sans: "Roboto Flex", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-sans: "Roboto Flex", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
   --radius-xs: 6px;
   --radius-sm: 8px;
   --radius-md: 10px;
@@ -56,4 +56,8 @@
   --text-14: 14px;
   --text-16: 16px;
   --text-22: 22px;
+}
+
+.shell-composite-field:focus-visible {
+  outline-color: transparent;
 }

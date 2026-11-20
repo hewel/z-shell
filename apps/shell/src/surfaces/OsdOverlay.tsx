@@ -9,7 +9,7 @@ const muted = "var(--color-on-surface-variant)";
 const capsule = {
   backgroundColor: "var(--color-surface-container)",
   border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
-  boxShadow: "0 14px 36px rgba(0, 0, 0, 0.50)",
+  boxShadow: "0 10px 24px rgba(0, 0, 0, 0.45)",
   borderRadius: "999px",
   color: onSurface,
 } as const;
@@ -141,8 +141,13 @@ export function OsdOverlay(): NativeChild {
       <Show when={targetMonitorId()} keyed>
         {output => (
           <LayerSurface name="osd-overlay" output={output} layer="overlay" anchor={["bottom"]}
-            margin={{ bottom: 88 }} width={280} height={48} keyboard="none" inputRegion="empty">
-            <OsdPill osd={() => activeOsd()!} />
+            margin={{ bottom: 52 }} width={344} height={108} keyboard="none" inputRegion="empty">
+            <box style={{
+              width: "100%", height: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center",
+              paddingBottom: "36px",
+            }}>
+              <OsdPill osd={() => activeOsd()!} />
+            </box>
           </LayerSurface>
         )}
       </Show>

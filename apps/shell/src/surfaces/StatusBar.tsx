@@ -66,7 +66,7 @@ function segmentChrome(vertical: boolean, docked: boolean, active = false): Styl
     backgroundColor: active ? "var(--color-surface-container-high)" : "var(--color-surface-container)",
     color: onSurface,
     border: active ? activeIslandBorder : islandBorder,
-    boxShadow: "0 4px 14px rgba(0, 0, 0, 0.36)",
+    boxShadow: "0 4px 12px rgba(0, 0, 0, 0.36)",
   };
 }
 
@@ -398,13 +398,15 @@ function BarContent(props: {
   const rootStyle = createMemo((): StyleObj => {
     const isDocked = docked();
     const isVertical = vertical();
+    const bleed = props.layout.shadowBleed;
+    const bleedPadding = `${bleed.top}px ${bleed.right}px ${bleed.bottom}px ${bleed.left}px`;
     const base: StyleObj = {
       ...center,
       justifyContent: "space-between",
       color: onSurface,
       fontFamily: "var(--font-sans)",
       fontSize: "12px",
-      overflow: "hidden",
+      overflow: isDocked ? "hidden" : "visible",
       backgroundColor: isDocked ? "var(--color-surface-container)" : "transparent",
     };
     if (isVertical) {
@@ -412,7 +414,7 @@ function BarContent(props: {
         ...base,
         width: `${props.layout.width}px`,
         height: `${props.layout.height}px`,
-        padding: isDocked ? "8px 0" : "0px",
+        padding: isDocked ? "8px 0" : bleedPadding,
         flexDirection: "column",
         ...(isDocked && props.layout.position === "left" ? { borderRight: dockedEdgeBorder } : {}),
         ...(isDocked && props.layout.position === "right" ? { borderLeft: dockedEdgeBorder } : {}),
@@ -422,7 +424,7 @@ function BarContent(props: {
       ...base,
       width: "100%",
       height: `${props.layout.height}px`,
-      padding: isDocked ? "0 10px" : "0px",
+      padding: isDocked ? "0 10px" : bleedPadding,
       ...(isDocked ? { borderBottom: dockedEdgeBorder } : {}),
     };
   });
@@ -571,7 +573,8 @@ export function StatusBar() {
         const layout = createMemo(() => resolveBarLayout(barSettings(), monitor(), outputs.data()));
         return (
           <LayerSurface name={formatSurfaceName("bar", monitor().id)} output={monitor().id} layer="top" anchor={[...layout().anchor]}
-            width={layout().width} height={layout().height} margin={layout().margin} exclusiveZone={layout().exclusiveZone} keyboard="none">
+            width={layout().width} height={layout().height} margin={layout().margin} exclusiveZone={layout().exclusiveZone}
+            inputRegion={layout().inputRegion ? [...layout().inputRegion!] : undefined} keyboard="none">
             <BarContent monitor={monitor()} layout={layout()} launcher={barSettings().launcher_enabled !== false} clock={clock} seconds={clockSeconds()} />
           </LayerSurface>
         );

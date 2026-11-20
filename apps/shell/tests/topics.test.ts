@@ -191,29 +191,33 @@ function makeMedia(
 }
 
 describe("resolveBarLayout", () => {
-  test("resolves a floating top bar with custom gaps (32px islands + margin = 46px strut at gap 14)", () => {
+  test("resolves a floating top bar with shadow bleed while preserving exact 42px strut at gap 10", () => {
     expect(resolveBarLayout(makeBarSettings("top", 10), { width: 1280, height: 720 })).toEqual({
       position: "top",
       style: "floating",
       isVertical: false,
       anchor: ["top", "left", "right"],
-      margin: { top: 10, right: 10, bottom: 0, left: 10 },
-      width: 1260,
-      height: TOP_BAR_HEIGHT,
+      margin: { top: 0, right: 0, bottom: 0, left: 0 },
+      shadowBleed: { top: 10, right: 10, bottom: 22, left: 10 },
+      width: 1280,
+      height: TOP_BAR_HEIGHT + 32,
       exclusiveZone: 42,
+      inputRegion: [{ x: 10, y: 10, width: 1260, height: TOP_BAR_HEIGHT }],
     });
   });
 
-  test("resolves a floating left vertical bar (40px islands + margin = 54px strut at gap 14)", () => {
+  test("resolves a floating left vertical bar with shadow bleed and 52px strut at gap 12", () => {
     expect(resolveBarLayout(makeBarSettings("left", 12), { width: 1920, height: 1080 })).toEqual({
       position: "left",
       style: "floating",
       isVertical: true,
       anchor: ["left", "top", "bottom"],
-      margin: { top: 12, right: 0, bottom: 12, left: 12 },
-      width: VERTICAL_BAR_WIDTH,
-      height: 1056,
+      margin: { top: 2, right: 0, bottom: 0, left: 0 },
+      shadowBleed: { top: 10, right: 22, bottom: 12, left: 12 },
+      width: VERTICAL_BAR_WIDTH + 34,
+      height: 1078,
       exclusiveZone: 52,
+      inputRegion: [{ x: 12, y: 10, width: VERTICAL_BAR_WIDTH, height: 1056 }],
     });
   });
 
@@ -223,20 +227,23 @@ describe("resolveBarLayout", () => {
       style: "floating",
       isVertical: true,
       anchor: ["right", "top", "bottom"],
-      margin: { top: 12, right: 12, bottom: 12, left: 0 },
-      width: VERTICAL_BAR_WIDTH,
-      height: 1056,
+      margin: { top: 2, right: 0, bottom: 0, left: 0 },
+      shadowBleed: { top: 10, right: 12, bottom: 12, left: 22 },
+      width: VERTICAL_BAR_WIDTH + 34,
+      height: 1078,
       exclusiveZone: 52,
+      inputRegion: [{ x: 22, y: 10, width: VERTICAL_BAR_WIDTH, height: 1056 }],
     });
   });
 
-  test("resolves docked top (38px flush) and docked left (44px flush) bars with zero outer margin", () => {
+  test("resolves docked top (38px flush) and docked left (44px flush) bars with zero outer margin and zero shadow bleed", () => {
     expect(resolveBarLayout({ ...makeBarSettings("top", 14), style: "docked" }, { width: 1440, height: 900 })).toEqual({
       position: "top",
       style: "docked",
       isVertical: false,
       anchor: ["top", "left", "right"],
       margin: { top: 0, right: 0, bottom: 0, left: 0 },
+      shadowBleed: { top: 0, right: 0, bottom: 0, left: 0 },
       width: 1440,
       height: DOCKED_TOP_BAR_HEIGHT,
       exclusiveZone: 38,
@@ -247,6 +254,7 @@ describe("resolveBarLayout", () => {
       isVertical: true,
       anchor: ["left", "top", "bottom"],
       margin: { top: 0, right: 0, bottom: 0, left: 0 },
+      shadowBleed: { top: 0, right: 0, bottom: 0, left: 0 },
       width: DOCKED_VERTICAL_BAR_WIDTH,
       height: 900,
       exclusiveZone: 44,
@@ -259,8 +267,10 @@ describe("resolveBarLayout", () => {
       { width: 1280, height: 720 },
     );
 
-    expect(layout.margin).toEqual({ top: 3, right: 14, bottom: 9, left: 14 });
-    expect(layout.width).toBe(1252);
+    expect(layout.margin).toEqual({ top: 0, right: 0, bottom: 9, left: 0 });
+    expect(layout.shadowBleed).toEqual({ top: 3, right: 14, bottom: 22, left: 14 });
+    expect(layout.width).toBe(1280);
+    expect(layout.inputRegion).toEqual([{ x: 14, y: 3, width: 1252, height: TOP_BAR_HEIGHT }]);
     expect(layout.exclusiveZone).toBe(35);
   });
 
@@ -269,9 +279,10 @@ describe("resolveBarLayout", () => {
 
     expect(layout.position).toBe("top");
     expect(layout.style).toBe("floating");
-    expect(layout.margin).toEqual({ top: 14, right: 14, bottom: 0, left: 14 });
+    expect(layout.margin).toEqual({ top: 4, right: 0, bottom: 0, left: 0 });
+    expect(layout.shadowBleed).toEqual({ top: 10, right: 14, bottom: 22, left: 14 });
     expect(layout.width).toBe(240);
-    expect(layout.height).toBe(TOP_BAR_HEIGHT);
+    expect(layout.height).toBe(TOP_BAR_HEIGHT + 32);
     expect(layout.exclusiveZone).toBe(46);
   });
 });
@@ -683,7 +694,9 @@ describe("resolveMonitorLogicalSize", () => {
     const monitor = { id: "DP-2", name: "DP-2", width: 3840, height: 2160 };
 
     expect(resolveMonitorLogicalSize(monitor, outputs)).toEqual({ width: 2194, height: 1234 });
-    expect(resolveBarLayout(makeBarSettings("top", 14), monitor, outputs).width).toBe(2166);
+    const barLayout = resolveBarLayout(makeBarSettings("top", 14), monitor, outputs);
+    expect(barLayout.width).toBe(2194);
+    expect(barLayout.inputRegion?.[0]?.width).toBe(2166);
   });
 
   test("falls back to host monitor logicalWidth/logicalHeight, then raw width/height", () => {
@@ -758,6 +771,16 @@ describe("resolveBarPopupAnchor", () => {
       align: "end",
       targetRect: { x: 8, y: 780, width: 36, height: 26 },
     })).toEqual({ x: 0, y: 780, width: VERTICAL_BAR_WIDTH, height: 26 });
+  });
+
+  test("anchors popups to visual island bounds rather than transparent shadow bleed", () => {
+    const floatingTop = resolveBarLayout(makeBarSettings("top", 14), { width: 1280, height: 720 });
+    expect(resolveBarPopupAnchor(floatingTop, { align: "end" })).toEqual({
+      x: 1280 - 14 - 1,
+      y: 10,
+      width: 1,
+      height: TOP_BAR_HEIGHT,
+    });
   });
 });
 
