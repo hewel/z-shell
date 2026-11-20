@@ -574,7 +574,7 @@ export function StatusBar() {
         return (
           <LayerSurface name={formatSurfaceName("bar", monitor().id)} output={monitor().id} layer="top" anchor={[...layout().anchor]}
             width={layout().width} height={layout().height} margin={layout().margin} exclusiveZone={layout().exclusiveZone}
-            inputRegion={layout().inputRegion ? [...layout().inputRegion!] : undefined} keyboard="none">
+            inputRegion={layout().inputRegion ? [...layout().inputRegion!] : "full"} keyboard="none">
             <BarContent monitor={monitor()} layout={layout()} launcher={barSettings().launcher_enabled !== false} clock={clock} seconds={clockSeconds()} />
           </LayerSurface>
         );

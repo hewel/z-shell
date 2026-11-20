@@ -43,7 +43,7 @@ export function QuickSettingsIconButton(props: {
 }): NativeChild {
   const px = () => `${props.size ?? 34}px`;
   return (
-    <Button testId={props.testId} ariaLabel={props.label} disabled={props.disabled} expanded={props.expanded}
+    <Button testId={props.testId ?? null} ariaLabel={props.label} disabled={props.disabled ?? false} expanded={props.expanded ?? null}
       onClick={props.onClick} style={{
         display: "flex", width: px(), height: px(), borderRadius: "10px", flexShrink: 0,
         alignItems: "center", justifyContent: "center", backgroundColor: props.fill ?? containerHighest, opacity: props.disabled ? 0.45 : 1,
@@ -58,7 +58,7 @@ function Action(props: {
   checked?: boolean; onClick: () => void;
 }): NativeChild {
   return (
-    <Button testId={props.testId} ariaLabel={props.ariaLabel ?? props.label} checked={props.checked} disabled={props.disabled}
+    <Button testId={props.testId ?? null} ariaLabel={props.ariaLabel ?? props.label} checked={props.checked ?? null} disabled={props.disabled ?? false}
       onClick={props.onClick} style={{
         display: "flex", minHeight: "30px", padding: "0 10px", borderRadius: "10px",
         flexShrink: 0, alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: 500,
@@ -73,7 +73,7 @@ function Action(props: {
 function Toggle(props: { label: string; checked: boolean; disabled?: boolean; onClick: () => void }): NativeChild {
   return (
     <control role="switch" tabIndex={props.disabled ? -1 : 0} ariaLabel={props.label} checked={props.checked}
-      disabled={props.disabled} onClick={props.onClick} style={{
+      disabled={props.disabled ?? false} onClick={props.onClick} style={{
         ...row, padding: "4px 8px", borderRadius: "999px",
         flexShrink: 0, minHeight: "30px", backgroundColor: containerHigh, opacity: props.disabled ? 0.45 : 1,
       }}>
@@ -150,7 +150,7 @@ function WifiPage(props: { onBack: () => void }): NativeChild {
   const enabled = () => wifi()?.enabled ?? false;
   const [selectedAp, setSelectedAp] = createSignal<string>();
   return (
-    <Page page="wifi" onBack={props.onBack} scanning={wifi()?.scanning} controls={
+    <Page page="wifi" onBack={props.onBack} scanning={wifi()?.scanning ?? false} controls={
       <>
         <Toggle label="Wi-Fi" checked={enabled()} disabled={!network.data()?.available || !wifi()?.hardware_enabled}
           onClick={() => {
@@ -158,7 +158,7 @@ function WifiPage(props: { onBack: () => void }): NativeChild {
             void invokePublic("network.wifi.set-enabled", { enabled: !enabled() });
           }} />
         <Action testId="wifi-scan" label={wifi()?.scanning ? "Scanning…" : "Scan"}
-          disabled={!enabled() || !wifi()?.devices.length || wifi()?.scanning}
+          disabled={!enabled() || !wifi()?.devices.length || (wifi()?.scanning ?? false)}
           onClick={() => void invokePublic("network.wifi.scan", {})} />
       </>
     }>
@@ -299,14 +299,14 @@ function BluetoothPage(props: { onBack: () => void }): NativeChild {
   const availableDevices = createMemo(() => devices().filter(device => !device.connected && !device.paired));
 
   return (
-    <Page page="bluetooth" onBack={props.onBack} scanning={adapter()?.discovering} controls={
+    <Page page="bluetooth" onBack={props.onBack} scanning={adapter()?.discovering ?? false} controls={
       <>
         <Toggle label="Bluetooth" checked={adapter()?.powered ?? false} disabled={!adapter()} onClick={() => {
           const device = adapter();
           if (device) void invokePublic("bluetooth.set-power", { adapter: device.path, powered: !device.powered });
         }} />
         <Action label={adapter()?.discovering ? "Stop scan" : "Scan"} checked={adapter()?.discovering ?? false}
-          active={adapter()?.discovering} disabled={!adapter()?.powered} onClick={() => {
+          active={adapter()?.discovering ?? false} disabled={!adapter()?.powered} onClick={() => {
             const device = adapter();
             if (device) void invokePublic("bluetooth.set-discovery", { adapter: device.path, discovering: !device.discovering });
           }} />

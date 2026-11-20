@@ -74,12 +74,12 @@ export function PrecisionSliderRow(props: {
           <ShellIcon name={props.icon} size={16} color={onSurface} />
         </box>
       }>
-        <Button ariaLabel={props.iconLabel ?? props.label} disabled={props.disabled} onClick={() => props.onIconClick?.()}
+        <Button ariaLabel={props.iconLabel ?? props.label} disabled={props.disabled ?? false} onClick={() => props.onIconClick?.()}
           style={{ ...iconWell, backgroundColor: containerHighest, opacity: props.disabled ? 0.45 : 1 }}>
           <ShellIcon name={props.icon} size={16} color={onSurface} />
         </Button>
       </Show>
-      <box role="slider" tabIndex={props.disabled ? -1 : 0} disabled={props.disabled} ariaLabel={props.label}
+      <box role="slider" tabIndex={props.disabled ? -1 : 0} disabled={props.disabled ?? false} ariaLabel={props.label}
         ariaValueMin={0} ariaValueMax={100} ariaValueNow={value()} ariaValueStep={5}
         onPointerDown={event => {
           if (props.disabled || !event.primary || !(event.button === "primary" || (event.button === null && event.pointerKind !== "mouse"))) return;
@@ -128,7 +128,7 @@ export function PrecisionSliderRow(props: {
       </row>
       <Show when={props.showTrailingSlot !== false}>
         <Show when={props.onTrailingClick} fallback={<box ariaHidden style={{ width: "26px", height: "26px", flexShrink: 0 }} />}>
-          <Button testId={props.trailingTestId} ariaLabel={props.trailingLabel ?? `Open ${props.label}`}
+          <Button testId={props.trailingTestId ?? null} ariaLabel={props.trailingLabel ?? `Open ${props.label}`}
             onClick={() => props.onTrailingClick?.()}
             style={{
               display: "flex", width: "26px", height: "26px", borderRadius: "8px", flexShrink: 0,
@@ -162,7 +162,7 @@ function QuickTile(props: {
       border: props.active ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
     }}>
       <Button testId={`qs-tile-${props.id}`} ariaLabel={props.label} checked={props.toggle ? props.active ?? false : null}
-        disabled={props.disabled} onClick={props.onClick} style={{
+        disabled={props.disabled ?? false} onClick={props.onClick} style={{
           ...row, ...grow, display: "flex", flexDirection: "row", height: "100%", borderRadius: "14px",
           padding: props.open ? "0 6px 0 10px" : "0 10px",
           color: ink(), opacity: props.disabled ? 0.55 : 1,
@@ -408,13 +408,13 @@ function MainPage(props: {
       <column style={{ gap: "8px" }}>
         <row style={{ gap: "8px" }}>
           <QuickTile id="wifi" label="Wi-Fi" detail={wifi()?.enabled ? wifiName() ?? "Disconnected" : "Off"}
-            icon={wifi()?.enabled ? "wifi" : "wifiOff"} active={wifi()?.enabled} toggle
+            icon={wifi()?.enabled ? "wifi" : "wifiOff"} active={wifi()?.enabled ?? false} toggle
             disabled={!network.data()?.available || !wifi()?.hardware_enabled}
             onClick={() => void invokePublic("network.wifi.set-enabled", { enabled: !wifi()?.enabled })}
             open={() => props.navigate("wifi")} />
           <QuickTile id="bluetooth" label="Bluetooth"
             detail={adapter()?.powered ? connectedBluetooth()?.name || connectedBluetooth()?.address || "On" : "Off"}
-            icon={adapter()?.powered ? "bluetooth" : "bluetoothOff"} active={adapter()?.powered} toggle disabled={!adapter()}
+            icon={adapter()?.powered ? "bluetooth" : "bluetoothOff"} active={adapter()?.powered ?? false} toggle disabled={!adapter()}
             onClick={() => {
               const device = adapter();
               if (device) void invokePublic("bluetooth.set-power", { adapter: device.path, powered: !device.powered });
