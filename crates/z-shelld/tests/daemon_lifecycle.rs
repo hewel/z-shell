@@ -587,9 +587,28 @@ async fn wires_wallpaper_to_durable_state_theme_reload_and_session_lock() {
     let host = BusClient::connect(paths.host_socket_path()).await.unwrap();
     let wallpaper = TopicName::try_new("wallpaper").unwrap();
     let initial = public.subscribe(wallpaper.clone()).await.unwrap();
-    assert_eq!(initial.data["available"], true);
-    assert_eq!(initial.data["catalog_count"], 1);
-    assert!(initial.data["current"].is_null());
+    let ready = if initial.data["available"] == true {
+        initial.data
+    } else {
+        timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(ServerMessage::Notification { method, params }) =
+                    public.next_notification().await
+                    && method == methods::TOPIC_UPDATE
+                {
+                    let update: TopicUpdate = serde_json::from_value(params).unwrap();
+                    if update.topic == wallpaper && update.data["available"] == true {
+                        break update.data;
+                    }
+                }
+            }
+        })
+        .await
+        .expect("deferred initial wallpaper scan must publish available baseline")
+    };
+    assert_eq!(ready["available"], true);
+    assert_eq!(ready["catalog_count"], 1);
+    assert!(ready["current"].is_null());
     public
         .subscribe(TopicName::try_new("theme").unwrap())
         .await

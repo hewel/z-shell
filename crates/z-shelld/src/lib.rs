@@ -150,11 +150,15 @@ impl DaemonApp {
 
         let (wallpaper_changes, updates) = watch::channel(None);
         let wallpaper = Arc::new(
-            WallpaperService::new(store.as_ref().clone(), &settings.wallpaper, &runtime_state)
-                .with_shared_state(Arc::clone(&shared_state))
-                .with_theme_sync(move |path| {
-                    wallpaper_changes.send_replace(Some(path));
-                }),
+            WallpaperService::new_deferred(
+                store.as_ref().clone(),
+                &settings.wallpaper,
+                &runtime_state,
+            )
+            .with_shared_state(Arc::clone(&shared_state))
+            .with_theme_sync(move |path| {
+                wallpaper_changes.send_replace(Some(path));
+            }),
         );
         wallpaper.install_on_bus(&hub);
         let mut wallpaper_theme = WallpaperThemeBridge {

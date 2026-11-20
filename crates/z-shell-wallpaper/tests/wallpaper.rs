@@ -486,3 +486,89 @@ async fn slideshow_rearms_and_pauses_while_locked_or_sleeping() {
     assert_eq!(next_wallpaper().await["slideshow_seconds"], 0);
     assert!(timeout(window, next_wallpaper()).await.is_err());
 }
+
+#[tokio::test]
+async fn deferred_startup_populates_catalog_and_restores_assignments_asynchronously() {
+    let fixture = Fixture::new();
+    let global = fixture.image("global.png", ImageFormat::Png, [255, 0, 0]);
+    let output = fixture.image("output.png", ImageFormat::Png, [0, 0, 255]);
+    fixture
+        .store
+        .update_state(|state| {
+            state.last_wallpaper = Some(global.clone());
+            state
+                .output_wallpapers
+                .insert("DP-1".into(), output.clone());
+            Ok(())
+        })
+        .unwrap();
+    let themes = Arc::new(Mutex::new(Vec::new()));
+    let record_theme = {
+        let themes = Arc::clone(&themes);
+        move |path| themes.lock().unwrap().push(path)
+    };
+
+    let service = WallpaperService::new_deferred(
+        fixture.store.clone(),
+        &fixture.settings,
+        &fixture.store.load_state().unwrap(),
+    )
+    .with_theme_sync(record_theme);
+    let initial = service.snapshot();
+    assert!(!initial.available);
+    assert_eq!(initial.catalog_count, 0);
+    assert!(initial.current.is_none());
+
+    let hub = fixture.hub();
+    let (id, outbound) = hub.register_client(ClientRole::Public).unwrap();
+    service.install_on_bus(&hub);
+    for (id_num, method, params) in [
+        (
+            1,
+            methods::BUS_HELLO,
+            json!({"protocol_version": z_shell_protocol::PROTOCOL_VERSION}),
+        ),
+        (
+            2,
+            methods::TOPIC_SUBSCRIBE,
+            json!({"topic": WALLPAPER_TOPIC}),
+        ),
+    ] {
+        hub.handle_inline_message(
+            id,
+            ClientMessage::request(RequestId::Number(id_num), method, Some(params)),
+        );
+    }
+    outbound.next_line().await.unwrap();
+    let subscribed_line = outbound.next_line().await.unwrap();
+    let ServerMessage::Ok { result, .. } = decode_server_line(&subscribed_line).unwrap() else {
+        panic!("expected subscribe response");
+    };
+    let ready = if result["data"]["available"] == true {
+        result["data"].clone()
+    } else {
+        timeout(Duration::from_secs(5), async {
+            loop {
+                let line = outbound.next_line().await.unwrap();
+                let ServerMessage::Notification { method, params } =
+                    decode_server_line(&line).unwrap()
+                else {
+                    continue;
+                };
+                if method == methods::TOPIC_UPDATE {
+                    let update: TopicUpdate = serde_json::from_value(params).unwrap();
+                    if update.data["available"] == true {
+                        assert!(update.source_baseline);
+                        break update.data;
+                    }
+                }
+            }
+        })
+        .await
+        .expect("deferred init should publish an available baseline")
+    };
+    assert_eq!(ready["catalog_count"], 2);
+    assert_eq!(ready["current"]["source_path"], json!(global));
+    assert_eq!(ready["per_output"]["DP-1"]["source_path"], json!(output));
+    assert_eq!(*themes.lock().unwrap(), [global]);
+}

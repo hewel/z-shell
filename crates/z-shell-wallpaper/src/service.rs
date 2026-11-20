@@ -5,7 +5,7 @@ use crate::cache::{Cache, CachedImage, ImageError, StageError};
 use crate::catalog::{self, CatalogEntry};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs::File;
 use std::io;
@@ -91,6 +91,12 @@ pub struct WallpaperService {
     inner: Arc<Inner>,
 }
 
+impl Drop for WallpaperService {
+    fn drop(&mut self) {
+        self.inner.cancelled.store(true, Ordering::Relaxed);
+    }
+}
+
 impl fmt::Debug for WallpaperService {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -107,6 +113,8 @@ struct Inner {
     // synchronous lock/sleep guards wait for image decoding or disk persistence.
     operation: Mutex<()>,
     live: Mutex<Live>,
+    pending_init: Mutex<Option<RuntimeState>>,
+    cancelled: AtomicBool,
     schedule: watch::Sender<Schedule>,
     timer_started: AtomicBool,
     hub: OnceLock<BusHub>,
@@ -115,10 +123,14 @@ struct Inner {
 }
 
 struct Live {
+    available: bool,
     settings: WallpaperSettings,
     catalog: Vec<CatalogEntry>,
+    catalog_touched: bool,
     current: Option<Assignment>,
+    current_touched: bool,
     per_output: BTreeMap<String, Assignment>,
+    touched_outputs: BTreeSet<String>,
     last_error: Option<String>,
 }
 
@@ -132,7 +144,7 @@ impl Live {
             fit: assignment.fit.unwrap_or(self.settings.fit),
         };
         WallpaperSnapshot {
-            available: true,
+            available: self.available,
             fit: self.settings.fit,
             sync_theme: self.settings.sync_theme,
             slideshow_seconds: self.settings.slideshow_seconds,
@@ -228,12 +240,60 @@ impl WallpaperService {
                 cache,
                 operation: Mutex::new(()),
                 live: Mutex::new(Live {
+                    available: true,
                     settings: settings.clone(),
                     catalog,
+                    catalog_touched: false,
                     current,
+                    current_touched: false,
                     per_output,
+                    touched_outputs: BTreeSet::new(),
                     last_error,
                 }),
+                pending_init: Mutex::new(None),
+                cancelled: AtomicBool::new(false),
+                schedule,
+                timer_started: AtomicBool::new(false),
+                hub: OnceLock::new(),
+                shared_state: None,
+                theme_sync: None,
+            }),
+        }
+    }
+
+    /// Constructs the service immediately without scanning directories or staging images on the
+    /// caller's thread. Initial catalog discovery and saved assignment restoration run on a
+    /// blocking worker once [`Self::install_on_bus`] is called inside a Tokio runtime (or
+    /// synchronously if no runtime is active).
+    #[must_use]
+    pub fn new_deferred(
+        store: ConfigStore,
+        settings: &WallpaperSettings,
+        restored: &RuntimeState,
+    ) -> Self {
+        let cache = Cache::new(&store.paths().media_dir());
+        let (schedule, _) = watch::channel(Schedule {
+            seconds: settings.slideshow_seconds,
+            ..Schedule::default()
+        });
+        Self {
+            inner: Arc::new(Inner {
+                store,
+                cache,
+                operation: Mutex::new(()),
+                live: Mutex::new(Live {
+                    available: false,
+                    settings: settings.clone(),
+                    catalog: Vec::new(),
+                    catalog_touched: false,
+                    current: None,
+                    current_touched: false,
+                    per_output: BTreeMap::new(),
+                    touched_outputs: BTreeSet::new(),
+                    last_error: None,
+                }),
+                pending_init: Mutex::new(Some(restored.clone())),
+                cancelled: AtomicBool::new(false),
                 schedule,
                 timer_started: AtomicBool::new(false),
                 hub: OnceLock::new(),
@@ -279,7 +339,8 @@ impl WallpaperService {
         }
         let snapshot = self.snapshot();
         self.inner.publish(&snapshot, UpdateKind::SourceBaseline);
-        if snapshot.sync_theme
+        if snapshot.available
+            && snapshot.sync_theme
             && let Some(current) = snapshot.current
         {
             self.inner.sync_theme(current.source_path);
@@ -313,6 +374,24 @@ impl WallpaperService {
                 description,
                 handler,
             );
+        }
+        let pending = self
+            .inner
+            .pending_init
+            .lock()
+            .expect("wallpaper pending init mutex poisoned")
+            .take();
+        if let Some(restored) = pending {
+            if let Ok(runtime) = Handle::try_current() {
+                let weak = Arc::downgrade(&self.inner);
+                runtime.spawn_blocking(move || {
+                    if let Some(inner) = weak.upgrade() {
+                        inner.complete_deferred_init(restored);
+                    }
+                });
+            } else {
+                self.inner.complete_deferred_init(restored);
+            }
         }
         self.inner.start_timer();
     }
@@ -482,10 +561,12 @@ impl Inner {
             match scan {
                 Some(Ok(catalog)) => {
                     live.catalog = catalog;
+                    live.catalog_touched = true;
                     live.last_error = None;
                 }
                 Some(Err(error)) => {
                     live.catalog.clear();
+                    live.catalog_touched = true;
                     live.last_error = Some(error.to_string());
                 }
                 None => {}
@@ -495,6 +576,90 @@ impl Inner {
         self.publish(&snapshot, UpdateKind::Live);
     }
 
+    fn complete_deferred_init(self: &Arc<Self>, restored: RuntimeState) {
+        let _operation = self.operation();
+        let (directories, need_catalog, need_current, pending_outputs) = {
+            let live = self.live();
+            let pending_outputs: Vec<(String, PathBuf)> = restored
+                .output_wallpapers
+                .iter()
+                .filter(|(output, _)| !live.touched_outputs.contains(*output))
+                .map(|(output, path)| (output.clone(), path.clone()))
+                .collect();
+            (
+                live.settings.directories.clone(),
+                !live.catalog_touched,
+                !live.current_touched,
+                pending_outputs,
+            )
+        };
+        let mut last_error = None;
+        let scanned_catalog = need_catalog.then(|| {
+            catalog::scan_with_cancel(&directories, &self.cache, Some(&self.cancelled))
+                .unwrap_or_else(|error| {
+                    last_error = Some(error.to_string());
+                    Vec::new()
+                })
+        });
+        if self.cancelled.load(Ordering::Relaxed) {
+            return;
+        }
+        let mut restore = |path: &Path| match Assignment::stage(&self.cache, path, None) {
+            Ok(assignment) => Some(assignment),
+            Err(error) => {
+                last_error = Some(format!(
+                    "could not restore wallpaper {}: {error}",
+                    path.display()
+                ));
+                None
+            }
+        };
+        let restored_current = if need_current {
+            restored.last_wallpaper.as_deref().and_then(&mut restore)
+        } else {
+            None
+        };
+        let restored_outputs: Vec<(String, Assignment)> = pending_outputs
+            .into_iter()
+            .filter_map(|(output, path)| restore(&path).map(|assignment| (output, assignment)))
+            .collect();
+        if let Err(error) = self.cache.collect() {
+            last_error.get_or_insert_with(|| error.to_string());
+        }
+        let (snapshot, theme_path) = {
+            let mut live = self.live();
+            if !live.catalog_touched
+                && let Some(catalog) = scanned_catalog
+            {
+                live.catalog = catalog;
+            }
+            let mut theme_path = None;
+            if !live.current_touched
+                && let Some(current) = restored_current
+            {
+                if self.theme_sync.is_some() && live.settings.sync_theme {
+                    theme_path = Some(current.source_path.clone());
+                }
+                live.current = Some(current);
+            }
+            for (output, assignment) in restored_outputs {
+                if !live.touched_outputs.contains(&output) {
+                    live.per_output.insert(output, assignment);
+                }
+            }
+            if live.last_error.is_none() {
+                live.last_error = last_error;
+            }
+            live.available = true;
+            (live.snapshot(), theme_path)
+        };
+        self.publish(&snapshot, UpdateKind::SourceBaseline);
+        if let Some(path) = theme_path {
+            self.sync_theme(path);
+        }
+        self.start_timer();
+    }
+
     fn rescan(&self, origin: Origin) -> Result<WallpaperSnapshot, RpcError> {
         let directories = self.live().settings.directories.clone();
         let catalog = catalog::scan(&directories, &self.cache).map_err(internal)?;
@@ -502,6 +667,7 @@ impl Inner {
         let snapshot = {
             let mut live = self.live();
             live.catalog = catalog;
+            live.catalog_touched = true;
             live.last_error = None;
             live.snapshot()
         };
@@ -651,11 +817,14 @@ impl Inner {
                         theme_path = Some(new.source_path.clone());
                     }
                     live.current = assignment;
+                    live.current_touched = true;
                 }
                 (Some(output), Some(assignment)) => {
+                    live.touched_outputs.insert(output.clone());
                     live.per_output.insert(output, assignment);
                 }
                 (Some(output), None) => {
+                    live.touched_outputs.insert(output.clone());
                     live.per_output.remove(&output);
                 }
             }
@@ -690,7 +859,8 @@ impl Inner {
     }
 
     fn start_timer(self: &Arc<Self>) {
-        if self.hub.get().is_none() || self.schedule.borrow().seconds == 0 {
+        if self.hub.get().is_none() || !self.live().available || self.schedule.borrow().seconds == 0
+        {
             return;
         }
         let Ok(runtime) = Handle::try_current() else {
