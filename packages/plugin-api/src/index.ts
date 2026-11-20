@@ -44,10 +44,12 @@ export interface PluginEntryDescriptor {
 export interface HostCapabilities {
   /** Allowlisted executable names or canonical paths (`zgui-js` field: `commands`). */
   readonly commands?: readonly string[];
-  /** Read-only canonical absolute media directory prefixes (`zgui-js` field: `imagePrefixes`). */
+  /** Read-only canonical absolute media directory prefixes or constrained runtime templates (`zgui-js` field: `imagePrefixes`). */
   readonly imagePrefixes?: readonly string[];
-  /** Canonical Unix domain socket paths (`zgui-js` field: `unixSockets`). */
+  /** Canonical Unix domain socket paths or constrained runtime templates (`zgui-js` field: `unixSockets`). */
   readonly unixSockets?: readonly string[];
+  /** Named Unix socket bindings resolved by the host (`zgui-js` field: `namedSockets`). */
+  readonly namedSockets?: readonly string[];
   /** Requests additional `zwlr_layer_shell_v1` shell surfaces (`zgui-js` field: `shellSurfaces`). */
   readonly shellSurfaces?: boolean;
   /** Requests inbound control channel access (`zgui-js` field: `controlChannel`). */

@@ -3,6 +3,8 @@
 **/node_modules
 /dist
 **/dist
+**/.zgui-generations
+**/.zgui-native-status.json
 .DS_Store
 *.swp
 .scratch/

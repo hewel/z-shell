@@ -43,7 +43,9 @@ describe("Rust z-shell plugin CLI -> @z-shell/composer interop", () => {
           "",
           "[host_capabilities]",
           'commands = ["ai-usagebar"]',
-          'image_prefixes = ["/run/user/1000/z-shell/media"]',
+          'image_prefixes = ["$XDG_RUNTIME_DIR/z-shell/media"]',
+          'unix_sockets = ["$XDG_RUNTIME_DIR/z-shell/bus-${WAYLAND_DISPLAY}.sock"]',
+          'named_sockets = ["niri"]',
           "shell_surfaces = false",
           "control_channel = false",
           "",
@@ -133,7 +135,9 @@ describe("Rust z-shell plugin CLI -> @z-shell/composer interop", () => {
       expect(report.nativeAcceptance).toBeNull();
       expect(report.capabilityUnion).toEqual({
         commands: ["ai-usagebar"],
-        imagePrefixes: ["/run/user/1000/z-shell/media"],
+        imagePrefixes: ["$XDG_RUNTIME_DIR/z-shell/media"],
+        unixSockets: ["$XDG_RUNTIME_DIR/z-shell/bus-${WAYLAND_DISPLAY}.sock"],
+        namedSockets: ["niri"],
       });
 
       const manifestCaps = JSON.parse(
@@ -141,7 +145,9 @@ describe("Rust z-shell plugin CLI -> @z-shell/composer interop", () => {
       ) as Record<string, unknown>;
       expect(manifestCaps).toEqual({
         commands: ["ai-usagebar"],
-        imagePrefixes: ["/run/user/1000/z-shell/media"],
+        imagePrefixes: ["$XDG_RUNTIME_DIR/z-shell/media"],
+        unixSockets: ["$XDG_RUNTIME_DIR/z-shell/bus-${WAYLAND_DISPLAY}.sock"],
+        namedSockets: ["niri"],
       });
       expect("sessionLock" in manifestCaps).toBe(false);
 

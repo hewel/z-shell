@@ -40,6 +40,7 @@ const HOST_CAPABILITY_KEYS: Record<string, true> = {
   commands: true,
   image_prefixes: true,
   unix_sockets: true,
+  named_sockets: true,
   shell_surfaces: true,
   control_channel: true,
 };
@@ -65,9 +66,15 @@ const SETTING_KEYS: Record<string, true> = {
   secret: true,
 };
 
-// Exact item pattern from zgui-js/schemas/package.schema.json $defs/hostPaths.
-export const HOST_PATH_PATTERN =
+// Exact item patterns from zgui-js/schemas/package.schema.json $defs/hostPaths & $defs/socketName.
+export const HOST_LITERAL_PATH_PATTERN =
   /^\/(?:$|(?:(?!\.{1,2}(?:\/|$))[^\/\\\u0000-\u001f\u007f-\u009f]+\/)*(?!\.{1,2}$)[^\/\\\u0000-\u001f\u007f-\u009f]+$)/;
+export const HOST_TEMPLATE_PATH_PATTERN =
+  /^\$(?:XDG_RUNTIME_DIR|HOME|XDG_DATA_HOME)(?:\/(?!\.{1,2}(?:\/|$))(?:\$WAYLAND_DISPLAY(?=\/|$)|(?:[^$\/\\\u0000-\u001f\u007f-\u009f]|\$\{WAYLAND_DISPLAY\})+))*$/;
+export const HOST_PATH_PATTERN = new RegExp(
+  `^(?:${HOST_LITERAL_PATH_PATTERN.source.slice(1)}|${HOST_TEMPLATE_PATH_PATTERN.source.slice(1, -1)})$`,
+);
+export const HOST_NAMED_SOCKET_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 // Exact command item pattern from zgui-js/schemas/package.schema.json capabilities.commands.
 export const HOST_COMMAND_PATTERN = /^(?=.*[^ ])[^\u0000-\u001f\u007f-\u009f]+$/;
 
@@ -156,6 +163,7 @@ function parseHostCapabilities(value: unknown): HostCapabilities {
   }
   const imagePrefixes = stringArray(record.image_prefixes, "host_capabilities.image_prefixes");
   const unixSockets = stringArray(record.unix_sockets, "host_capabilities.unix_sockets");
+  const namedSockets = stringArray(record.named_sockets, "host_capabilities.named_sockets");
   for (const [context, paths] of [
     ["host_capabilities.image_prefixes", imagePrefixes],
     ["host_capabilities.unix_sockets", unixSockets],
@@ -166,17 +174,24 @@ function parseHostCapabilities(value: unknown): HostCapabilities {
       }
     }
   }
+  for (const name of namedSockets) {
+    if (!HOST_NAMED_SOCKET_PATTERN.test(name)) {
+      throw new Error(`host_capabilities.named_sockets contains invalid socket name ${JSON.stringify(name)}`);
+    }
+  }
 
   const result: {
     commands?: string[];
     imagePrefixes?: string[];
     unixSockets?: string[];
+    namedSockets?: string[];
     shellSurfaces?: boolean;
     controlChannel?: boolean;
   } = {};
   if (record.commands !== undefined) result.commands = commands;
   if (record.image_prefixes !== undefined) result.imagePrefixes = imagePrefixes;
   if (record.unix_sockets !== undefined) result.unixSockets = unixSockets;
+  if (record.named_sockets !== undefined) result.namedSockets = namedSockets;
   const shellSurfaces = optionalBoolean(record, "shell_surfaces", "host_capabilities");
   const controlChannel = optionalBoolean(record, "control_channel", "host_capabilities");
   if (shellSurfaces !== undefined) result.shellSurfaces = shellSurfaces;

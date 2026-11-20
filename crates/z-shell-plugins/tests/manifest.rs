@@ -30,8 +30,9 @@ dependencies = ["tool"]
 
 [host_capabilities]
 commands = ["tool", "/usr/bin/other"]
-image_prefixes = ["/", "/opt/example/images"]
-unix_sockets = ["/run/example.sock"]
+image_prefixes = ["/", "/opt/example/images", "$XDG_RUNTIME_DIR/z-shell/media", "$XDG_DATA_HOME/icons"]
+unix_sockets = ["/run/example.sock", "$XDG_RUNTIME_DIR/z-shell/bus-${WAYLAND_DISPLAY}.sock", "$HOME/.cache/$WAYLAND_DISPLAY"]
+named_sockets = ["niri", "hyprland_ipc-1"]
 shell_surfaces = true
 control_channel = true
 
@@ -106,6 +107,21 @@ entry = "main.tsx"
         }
     }
     assert!(manifest.capabilities.host.image_prefixes.contains("/"));
+    assert!(
+        manifest
+            .capabilities
+            .host
+            .image_prefixes
+            .contains("$XDG_RUNTIME_DIR/z-shell/media")
+    );
+    assert!(
+        manifest
+            .capabilities
+            .host
+            .unix_sockets
+            .contains("$XDG_RUNTIME_DIR/z-shell/bus-${WAYLAND_DISPLAY}.sock")
+    );
+    assert!(manifest.capabilities.host.named_sockets.contains("niri"));
     assert!(manifest.capabilities.host.shell_surfaces);
     assert!(manifest.capabilities.bus.inhibitors);
     assert!(manifest.capabilities.bus.topics_read.contains("settings"));
@@ -348,6 +364,30 @@ fn rejects_invalid_package_versions_api_levels_and_capability_declarations() {
         (
             "[host_capabilities]\nunix_sockets = ['/run/file\\name']",
             "unix_sockets",
+        ),
+        (
+            "[host_capabilities]\nunix_sockets = ['$OTHER_VAR/z-shell.sock']",
+            "unix_sockets",
+        ),
+        (
+            "[host_capabilities]\nunix_sockets = ['$XDG_RUNTIME_DIR/../escape.sock']",
+            "unix_sockets",
+        ),
+        (
+            "[host_capabilities]\nunix_sockets = ['$XDG_RUNTIME_DIR/foo$BAR.sock']",
+            "unix_sockets",
+        ),
+        (
+            "[host_capabilities]\nimage_prefixes = ['$XDG_RUNTIME_DIR/']",
+            "image_prefixes",
+        ),
+        (
+            "[host_capabilities]\nnamed_sockets = ['1bad']",
+            "named_sockets",
+        ),
+        (
+            "[host_capabilities]\nnamed_sockets = ['bad name']",
+            "named_sockets",
         ),
         (
             "[bus_permissions]\ntopics_publish = ['settings']",

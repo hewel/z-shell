@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { buildShellApplication } from "../src/build.ts";
 import {
   assertCapabilityApproval,
   diffCapabilities,
@@ -145,6 +146,73 @@ describe("capabilities", () => {
     expect(JSON.stringify(unionHostCapabilities([{}]))).not.toContain("sessionLock");
   });
 
+  test("accepts schema-compliant named sockets and rejects invalid names", () => {
+    expect(normalizeHostCapabilities({
+      namedSockets: ["niri", "hyprland_ipc-1", "niri"],
+    })).toEqual({ namedSockets: ["hyprland_ipc-1", "niri"] });
+
+    for (const name of ["1bad", "bad name", `a${"1".repeat(64)}`]) {
+      expect(() => normalizeHostCapabilities({ namedSockets: [name] }))
+        .toThrow(/host\.namedSockets.*schema-compliant/);
+    }
+  });
+
+  test("accepts only constrained runtime path templates for image prefixes and Unix sockets", () => {
+    const validPaths = [
+      "$XDG_RUNTIME_DIR/z-shell/media",
+      "$XDG_RUNTIME_DIR/z-shell/bus-${WAYLAND_DISPLAY}.sock",
+      "$HOME/.cache/$WAYLAND_DISPLAY",
+      "$XDG_DATA_HOME/icons",
+      "$XDG_RUNTIME_DIR",
+    ];
+    const invalidPaths = [
+      "$OTHER/foo",
+      "$XDG_RUNTIME_DIR/../escape",
+      "$XDG_RUNTIME_DIR/foo$BAR",
+      "$XDG_RUNTIME_DIR/",
+    ];
+
+    for (const property of ["imagePrefixes", "unixSockets"] as const) {
+      expect(normalizeHostCapabilities({ [property]: validPaths })).toEqual({
+        [property]: [...validPaths].sort(),
+      });
+      for (const path of invalidPaths) {
+        expect(() => normalizeHostCapabilities({ [property]: [path] }))
+          .toThrow(new RegExp(`host\\.${property}.*schema-compliant`));
+      }
+    }
+  });
+
+  test("merges, deduplicates, and sorts named sockets across plugins", () => {
+    expect(unionHostCapabilities([
+      { namedSockets: ["niri", "shared_socket"] },
+      { namedSockets: ["hyprland_ipc-1", "shared_socket"] },
+    ])).toEqual({
+      namedSockets: ["hyprland_ipc-1", "niri", "shared_socket"],
+    });
+  });
+
+  test("reports named socket additions and removals in capability approval diffs", () => {
+    const approved = {
+      host: { namedSockets: ["niri", "old_socket"] },
+      bus: {},
+    };
+    const requested = {
+      host: { namedSockets: ["niri", "hyprland_ipc-1"] },
+      bus: {},
+    };
+    const diff = diffCapabilities(approved, requested);
+
+    expect(diff.added.host.namedSockets).toEqual(["hyprland_ipc-1"]);
+    expect(diff.removed.host.namedSockets).toEqual(["old_socket"]);
+    expect(diff.requiresApproval).toBe(true);
+    expect(() => assertCapabilityApproval(requested, approved)).toThrow(/unapproved capability expansion/);
+    expect(() => assertCapabilityApproval(
+      { host: { namedSockets: ["niri"] }, bus: {} },
+      approved,
+    )).not.toThrow();
+  });
+
   test("requires approval for host or bus expansion but not removal", () => {
     const approved = {
       host: { commands: ["notify-send"] },
@@ -172,6 +240,18 @@ describe("capabilities", () => {
       { host: {}, bus: {} },
       true,
     )).toThrow(/revoked/i);
+  });
+});
+
+describe("buildShellApplication", () => {
+  test("rejects session lock capabilities before invoking the build", async () => {
+    for (const key of ["sessionLock", "session_lock"] as const) {
+      const extraCapabilities = { namedSockets: ["niri"], [key]: true };
+      await expect(buildShellApplication({
+        appDirectory: "/unused",
+        extraCapabilities,
+      })).rejects.toThrow("sessionLock is never grantable through plugin composition");
+    }
   });
 });
 

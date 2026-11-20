@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "z-shell-bar-and-theme",
+  "requiredCapabilities": ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+  "steps": [
+    {
+      "id": "outputs",
+      "op": "monitors.set",
+      "monitors": [
+        { "id": "dp-1", "name": "DP-1", "x": 0, "y": 0, "width": 1440, "height": 900, "scale": 1, "refreshRateMilliHz": 60000 }
+      ]
+    },
+    { "id": "daemon-events", "op": "clock.advance", "byMs": 30 },
+    { "id": "ready", "op": "settle" },
+    {
+      "id": "daemon-ready",
+      "op": "assert",
+      "target": { "surface": "bar-dp-1", "testId": "daemon-status" },
+      "check": { "property": "text", "equals": "ready" }
+    },
+    {
+      "id": "control-ping",
+      "op": "service.emit",
+      "channel": "control.message",
+      "value": { "args": ["ping"], "reply": { "text": "pong" } }
+    },
+    { "id": "bar-capture", "op": "capture", "surface": "bar-dp-1", "captureId": "bar-initial" }
+  ]
+}

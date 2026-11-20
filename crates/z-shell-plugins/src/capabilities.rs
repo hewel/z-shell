@@ -9,10 +9,13 @@ use std::collections::BTreeSet;
 pub struct HostCapabilities {
     /// Executable names or paths.
     pub commands: BTreeSet<String>,
-    /// Canonical absolute host image paths or prefixes.
+    /// Canonical absolute host image paths or constrained runtime path templates.
     pub image_prefixes: BTreeSet<String>,
-    /// Canonical absolute Unix socket paths.
+    /// Canonical absolute Unix socket paths or constrained runtime path templates.
     pub unix_sockets: BTreeSet<String>,
+    /// Named Unix socket bindings resolved by the host (`zgui-js#24`).
+    #[serde(default)]
+    pub named_sockets: BTreeSet<String>,
     /// Permission to create shell surfaces.
     pub shell_surfaces: bool,
     /// Permission to access the host control channel.
@@ -66,6 +69,10 @@ impl CapabilityBundle {
                 .host
                 .unix_sockets
                 .is_subset(&approved.host.unix_sockets)
+            && self
+                .host
+                .named_sockets
+                .is_subset(&approved.host.named_sockets)
             && (!self.host.shell_surfaces || approved.host.shell_surfaces)
             && (!self.host.control_channel || approved.host.control_channel)
             && self.bus.topics_read.is_subset(&approved.bus.topics_read)
@@ -97,6 +104,7 @@ impl CapabilityBundle {
                 commands: difference(&self.host.commands, &other.host.commands),
                 image_prefixes: difference(&self.host.image_prefixes, &other.host.image_prefixes),
                 unix_sockets: difference(&self.host.unix_sockets, &other.host.unix_sockets),
+                named_sockets: difference(&self.host.named_sockets, &other.host.named_sockets),
                 shell_surfaces: self.host.shell_surfaces && !other.host.shell_surfaces,
                 control_channel: self.host.control_channel && !other.host.control_channel,
             },

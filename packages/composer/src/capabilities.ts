@@ -1,6 +1,6 @@
 import type { BusPermissions, HostCapabilities } from "@z-shell/plugin-api";
 
-import { HOST_COMMAND_PATTERN, HOST_PATH_PATTERN } from "./manifest.ts";
+import { HOST_COMMAND_PATTERN, HOST_NAMED_SOCKET_PATTERN, HOST_PATH_PATTERN } from "./manifest.ts";
 import { isRecord } from "./type-guards.ts";
 
 export interface PluginCapabilities {
@@ -18,6 +18,7 @@ const HOST_KEYS: Record<string, true> = {
   commands: true,
   imagePrefixes: true,
   unixSockets: true,
+  namedSockets: true,
   shellSurfaces: true,
   controlChannel: true,
 };
@@ -76,18 +77,21 @@ export function normalizeHostCapabilities(value?: HostCapabilities | null): Host
   const commands = normalizedStrings(input.commands, "host.commands", HOST_COMMAND_PATTERN);
   const imagePrefixes = normalizedStrings(input.imagePrefixes, "host.imagePrefixes", HOST_PATH_PATTERN);
   const unixSockets = normalizedStrings(input.unixSockets, "host.unixSockets", HOST_PATH_PATTERN);
+  const namedSockets = normalizedStrings(input.namedSockets, "host.namedSockets", HOST_NAMED_SOCKET_PATTERN);
   const shellSurfaces = booleanValue(input.shellSurfaces, "host.shellSurfaces");
   const controlChannel = booleanValue(input.controlChannel, "host.controlChannel");
   const result: {
     commands?: string[];
     imagePrefixes?: string[];
     unixSockets?: string[];
+    namedSockets?: string[];
     shellSurfaces?: boolean;
     controlChannel?: boolean;
   } = {};
   if (commands.length > 0) result.commands = commands;
   if (imagePrefixes.length > 0) result.imagePrefixes = imagePrefixes;
   if (unixSockets.length > 0) result.unixSockets = unixSockets;
+  if (namedSockets.length > 0) result.namedSockets = namedSockets;
   if (shellSurfaces) result.shellSurfaces = true;
   if (controlChannel) result.controlChannel = true;
   return result;
@@ -134,6 +138,7 @@ export function unionHostCapabilities(capabilities: readonly HostCapabilities[])
     commands: normalized.flatMap((capability) => capability.commands ?? []),
     imagePrefixes: normalized.flatMap((capability) => capability.imagePrefixes ?? []),
     unixSockets: normalized.flatMap((capability) => capability.unixSockets ?? []),
+    namedSockets: normalized.flatMap((capability) => capability.namedSockets ?? []),
     shellSurfaces: normalized.some((capability) => capability.shellSurfaces === true),
     controlChannel: normalized.some((capability) => capability.controlChannel === true),
   });
@@ -149,15 +154,18 @@ function diffHost(approved: HostCapabilities, requested: HostCapabilities): Host
     commands?: string[];
     imagePrefixes?: string[];
     unixSockets?: string[];
+    namedSockets?: string[];
     shellSurfaces?: boolean;
     controlChannel?: boolean;
   } = {};
   const commands = listDifference(approved.commands, requested.commands);
   const imagePrefixes = listDifference(approved.imagePrefixes, requested.imagePrefixes);
   const unixSockets = listDifference(approved.unixSockets, requested.unixSockets);
+  const namedSockets = listDifference(approved.namedSockets, requested.namedSockets);
   if (commands.length > 0) result.commands = commands;
   if (imagePrefixes.length > 0) result.imagePrefixes = imagePrefixes;
   if (unixSockets.length > 0) result.unixSockets = unixSockets;
+  if (namedSockets.length > 0) result.namedSockets = namedSockets;
   if (approved.shellSurfaces === true && requested.shellSurfaces !== true) result.shellSurfaces = true;
   if (approved.controlChannel === true && requested.controlChannel !== true) result.controlChannel = true;
   return result;
@@ -185,6 +193,7 @@ function hasCapabilities(value: PluginCapabilities): boolean {
     value.host.commands,
     value.host.imagePrefixes,
     value.host.unixSockets,
+    value.host.namedSockets,
     value.bus.topicsRead,
     value.bus.topicsPublish,
     value.bus.commandsRegister,

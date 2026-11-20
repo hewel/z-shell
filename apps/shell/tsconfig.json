@@ -1,0 +1,8 @@
+{
+  "extends": "@hewel/zgui/tsconfig.native.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
+}

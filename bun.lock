@@ -5,16 +5,40 @@
     "": {
       "name": "z-shell",
       "devDependencies": {
+        "@hewel/zgui": "link:../zgui-js/packages/ui",
+        "@hewel/zgui-build": "link:../zgui-js/packages/build",
+        "@hewel/zgui-services": "link:../zgui-js/packages/services",
+        "@stylexjs/stylex": "0.19.2",
         "@z-shell/composer": "workspace:*",
         "@z-shell/plugin-api": "workspace:*",
         "@z-shell/sdk": "workspace:*",
+        "solid-js": "2.0.1",
+        "styleq": "0.2.1",
         "tsrs": "7.1.0-beta.tsrs2",
+      },
+    },
+    "apps/shell": {
+      "name": "@z-shell/shell",
+      "version": "0.1.0",
+      "dependencies": {
+        "@hewel/zgui": "link:../../../zgui-js/packages/ui",
+        "@hewel/zgui-services": "link:../../../zgui-js/packages/services",
+        "@stylexjs/stylex": "0.19.2",
+        "@z-shell/plugin-api": "workspace:*",
+        "@z-shell/sdk": "workspace:*",
+        "solid-js": "2.0.1",
+        "styleq": "0.2.1",
+      },
+      "devDependencies": {
+        "@hewel/zgui-build": "link:../../../zgui-js/packages/build",
+        "@types/bun": "1.4.4",
       },
     },
     "packages/composer": {
       "name": "@z-shell/composer",
       "version": "0.1.0",
       "dependencies": {
+        "@hewel/zgui-build": "link:../../../zgui-js/packages/build",
         "@z-shell/plugin-api": "workspace:*",
         "@z-shell/sdk": "workspace:*",
       },
@@ -32,9 +56,27 @@
     "packages/sdk": {
       "name": "@z-shell/sdk",
       "version": "0.1.0",
+      "peerDependencies": {
+        "@hewel/zgui": "*",
+        "@hewel/zgui-services": "*",
+      },
+      "optionalPeers": [
+        "@hewel/zgui",
+        "@hewel/zgui-services",
+      ],
     },
   },
   "packages": {
+    "@hewel/zgui": ["@hewel/zgui@link:../zgui-js/packages/ui", {}],
+
+    "@hewel/zgui-build": ["@hewel/zgui-build@link:../zgui-js/packages/build", { "bin": { "zgui-js": "./src/cli.ts" } }],
+
+    "@hewel/zgui-services": ["@hewel/zgui-services@link:../zgui-js/packages/services", {}],
+
+    "@solidjs/signals": ["@solidjs/signals@2.0.3", "", {}, "sha512-M6+kiJflqSvJRHRcmdsdIXpPLPkQrY817zWKKfxZ3z3ZRE5eEtddtWPrDXY4IM1Wz3zAqG+3Fx/HQIkAtpRwnA=="],
+
+    "@stylexjs/stylex": ["@stylexjs/stylex@0.19.2", "", { "dependencies": { "styleq": "0.2.1" } }, "sha512-l0fRhOBZ4rFiZ0GntYSlp4lYO5dPT11F3mLb7O4ShK6eE1WOjHtv9GHGQZuzHJbQkjcEaRjPSpBn6itI7yXc3Q=="],
+
     "@tsrs/darwin-arm64": ["@tsrs/darwin-arm64@7.1.0-beta.tsrs2", "", { "os": "darwin", "cpu": "arm64" }, "sha512-VMsXBPFD0SO5p7XrXhLutPmnpHc4kMIt7uztBJoHr/5Jd6qC8eH/TomobdPGugw27U3uiW2wJDqYjqYq5fxoCA=="],
 
     "@tsrs/darwin-x64": ["@tsrs/darwin-x64@7.1.0-beta.tsrs2", "", { "os": "darwin", "cpu": "x64" }, "sha512-cNVbvIaKasKYjAI4aBfCE+gpa188JMb3GORyK9SDMZOEib9toEAAO7XCImOkazkLPq45UZxmxfCgBKMpMNWfug=="],
@@ -61,7 +103,17 @@
 
     "@z-shell/sdk": ["@z-shell/sdk@workspace:packages/sdk"],
 
+    "@z-shell/shell": ["@z-shell/shell@workspace:apps/shell"],
+
     "bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
+
+    "seroval": ["seroval@1.8.2", "", {}, "sha512-zmMxi/9MdLK1MKazLmIP6Rk39RuK0Xydd+QHeOYntS37olJeTjB3+nwVj4ce/ZWiZJeRhcO5htfxt0mUzQBscQ=="],
+
+    "seroval-plugins": ["seroval-plugins@1.8.0", "", { "peerDependencies": { "seroval": "^1.8.0" } }, "sha512-96vBb12rDvPPwdKUgWw1op3fGq8AVBFOr0IllbnM72yR5J9WWXF18cQ4g1XfDO7HCyh2dt70P3XdtyRayP8FWg=="],
+
+    "solid-js": ["solid-js@2.0.1", "", { "dependencies": { "@solidjs/signals": "^2.0.1", "seroval": "^1.8.0", "seroval-plugins": "^1.8.0" } }, "sha512-5bBwRCblIZ672y2H2aB5KIOfeP/N+acx1YoCjNCWYFc4ZI/Y7y7n/6N1kei8AgWmcJJQ1m5SV90rs3V8CPAnYQ=="],
+
+    "styleq": ["styleq@0.2.1", "", {}, "sha512-L0TR0NQb+X4/ktDEKmjWyp27gla+LUYi/by5k5SjKXf6/pvZP7wbwEB5J+tqxdFVPgzbsuz+d4RTScO/QZquBw=="],
 
     "tsrs": ["tsrs@7.1.0-beta.tsrs2", "", { "optionalDependencies": { "@tsrs/darwin-arm64": "7.1.0-beta.tsrs2", "@tsrs/darwin-x64": "7.1.0-beta.tsrs2", "@tsrs/linux-arm64-gnu": "7.1.0-beta.tsrs2", "@tsrs/linux-arm64-musl": "7.1.0-beta.tsrs2", "@tsrs/linux-x64-gnu": "7.1.0-beta.tsrs2", "@tsrs/linux-x64-musl": "7.1.0-beta.tsrs2", "@tsrs/win32-arm64": "7.1.0-beta.tsrs2", "@tsrs/win32-x64": "7.1.0-beta.tsrs2" }, "bin": { "tsrs": "./bin/tsrs", "tsrs-lint": "./bin/tsrs-lint" } }, "sha512-T6O1mYbPe7B5ZSudwqJcn7hfn66w3wXsCd+GpXyDPsRmei71W6WAidlj+QWaYgmfpbmMqzcryKcg5aVg8DOSXw=="],
 

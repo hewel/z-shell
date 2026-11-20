@@ -1,3 +1,4 @@
+export * from "./build.ts";
 export * from "./capabilities.ts";
 export * from "./compose.ts";
 export * from "./digest.ts";

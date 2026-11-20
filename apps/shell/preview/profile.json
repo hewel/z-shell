@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "z-shell-transparent-bar",
+  "pureShell": true,
+  "surface": {
+    "name": "main",
+    "width": 1440,
+    "height": 48,
+    "scale": 1,
+    "refreshRateMilliHz": 60000,
+    "opaque": false,
+    "background": "#00000000"
+  },
+  "theme": "dark",
+  "locale": "en-US",
+  "direction": "ltr",
+  "timeZone": "UTC",
+  "clock": { "mode": "virtual", "epochMs": 1700000000000, "startUs": 0 },
+  "random": { "seed": 1 },
+  "fonts": { "mode": "shipped-only", "manifest": "../../../../zgui-js/preview/fonts/fonts.json" },
+  "assets": { "mode": "package-only", "readiness": "required-visible" },
+  "limits": {
+    "maxRunWallMs": 30000,
+    "maxStepWallMs": 10000,
+    "maxJsEntryWallMs": 1000,
+    "maxJobsPerPump": 10000,
+    "maxPumpWallMs": 1000,
+    "maxSettleTurns": 1000,
+    "maxFramesPerStep": 1000,
+    "maxVirtualDurationMs": 60000,
+    "maxOutputBytes": 67108864
+  }
+}

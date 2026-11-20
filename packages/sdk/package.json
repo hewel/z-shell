@@ -5,6 +5,15 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./bun": "./src/bun-transport.ts"
+    "./bun": "./src/bun-transport.ts",
+    "./zgui": "./src/zgui.ts"
+  },
+  "peerDependencies": {
+    "@hewel/zgui": "*",
+    "@hewel/zgui-services": "*"
+  },
+  "peerDependenciesMeta": {
+    "@hewel/zgui": { "optional": true },
+    "@hewel/zgui-services": { "optional": true }
   }
 }

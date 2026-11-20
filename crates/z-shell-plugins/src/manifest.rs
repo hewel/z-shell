@@ -403,6 +403,7 @@ struct RawHostCapabilities {
     commands: BTreeSet<String>,
     image_prefixes: BTreeSet<String>,
     unix_sockets: BTreeSet<String>,
+    named_sockets: BTreeSet<String>,
     shell_surfaces: bool,
     control_channel: bool,
 }
@@ -422,13 +423,19 @@ impl RawHostCapabilities {
                 self.image_prefixes,
                 "host_capabilities.image_prefixes",
                 canonical_host_path,
-                "expected a canonical absolute path",
+                "expected a canonical absolute path or constrained runtime path template",
             )?,
             unix_sockets: host_list(
                 self.unix_sockets,
                 "host_capabilities.unix_sockets",
                 canonical_host_path,
-                "expected a canonical absolute path",
+                "expected a canonical absolute path or constrained runtime path template",
+            )?,
+            named_sockets: host_list(
+                self.named_sockets,
+                "host_capabilities.named_sockets",
+                valid_named_socket,
+                "expected a valid named socket identifier (1..=64 ASCII letters, digits, _, - starting with a letter)",
             )?,
             shell_surfaces: self.shell_surfaces,
             control_channel: self.control_channel,
@@ -448,12 +455,36 @@ fn host_list(
     Ok(values)
 }
 
+fn valid_named_socket(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    (1..=64).contains(&bytes.len())
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1..]
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'_' | b'-'))
+}
+
 fn canonical_host_path(path: &str) -> bool {
-    path == "/"
-        || path.strip_prefix('/').is_some_and(|rest| {
-            !rest.chars().any(|ch| ch == '\\' || ch.is_control())
-                && rest.split('/').all(|part| !matches!(part, "" | "." | ".."))
-        })
+    if path == "/" {
+        return true;
+    }
+    if path.chars().any(|ch| ch == '\\' || ch.is_control()) {
+        return false;
+    }
+    let mut parts = path.split('/');
+    let Some(root) = parts.next() else {
+        return false;
+    };
+    let is_template = matches!(root, "$XDG_RUNTIME_DIR" | "$HOME" | "$XDG_DATA_HOME");
+    if !root.is_empty() && !is_template {
+        return false;
+    }
+    parts.all(|part| {
+        !matches!(part, "" | "." | "..")
+            && (!is_template
+                || part == "$WAYLAND_DISPLAY"
+                || !part.replace("${WAYLAND_DISPLAY}", "").contains('$'))
+    })
 }
 
 #[derive(Default, Deserialize)]

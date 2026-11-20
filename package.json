@@ -6,21 +6,28 @@
   "license": "MIT OR Apache-2.0",
   "packageManager": "bun@1.4.4",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "engines": {
     "bun": ">=1.4.4"
   },
   "scripts": {
-    "typecheck": "bun --bun run tsrs --project tsconfig.quickjs.json && bun --bun run tsrs --project packages/composer/tsconfig.json",
+    "typecheck": "bun --bun run tsrs --project tsconfig.quickjs.json && bun --bun run tsrs --project packages/composer/tsconfig.json && bun --bun run tsrs --project apps/shell/tsconfig.json",
     "test:rust": "cargo test --workspace && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo doc --workspace --no-deps",
-    "test:ts": "cargo build --bins && bun test --timeout=30000 packages/ plugins/",
+    "test:ts": "cargo build --bins && bun test --timeout=30000 packages/ plugins/ apps/",
     "check": "cargo fmt --check && bun run typecheck && bun run test:rust && bun run test:ts"
   },
   "devDependencies": {
+    "@hewel/zgui": "link:../zgui-js/packages/ui",
+    "@hewel/zgui-build": "link:../zgui-js/packages/build",
+    "@hewel/zgui-services": "link:../zgui-js/packages/services",
+    "@stylexjs/stylex": "0.19.2",
     "@z-shell/composer": "workspace:*",
     "@z-shell/plugin-api": "workspace:*",
     "@z-shell/sdk": "workspace:*",
+    "solid-js": "2.0.1",
+    "styleq": "0.2.1",
     "tsrs": "7.1.0-beta.tsrs2"
   }
 }

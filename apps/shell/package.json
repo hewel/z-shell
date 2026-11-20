@@ -1,0 +1,37 @@
+{
+  "name": "@z-shell/shell",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "zgui": {
+    "id": "dev.zshell.shell",
+    "capabilities": {
+      "shellSurfaces": true,
+      "sessionLock": true,
+      "imagePrefixes": [
+        "$XDG_RUNTIME_DIR/z-shell/media"
+      ],
+      "unixSockets": [
+        "$XDG_RUNTIME_DIR/z-shell/bus-${WAYLAND_DISPLAY}.sock",
+        "$XDG_RUNTIME_DIR/z-shell/host-${WAYLAND_DISPLAY}.sock"
+      ],
+      "namedSockets": [
+        "niri"
+      ],
+      "controlChannel": true
+    }
+  },
+  "dependencies": {
+    "@hewel/zgui": "link:../../../zgui-js/packages/ui",
+    "@hewel/zgui-services": "link:../../../zgui-js/packages/services",
+    "@stylexjs/stylex": "0.19.2",
+    "@z-shell/plugin-api": "workspace:*",
+    "@z-shell/sdk": "workspace:*",
+    "solid-js": "2.0.1",
+    "styleq": "0.2.1"
+  },
+  "devDependencies": {
+    "@hewel/zgui-build": "link:../../../zgui-js/packages/build",
+    "@types/bun": "1.4.4"
+  }
+}

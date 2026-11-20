@@ -16,8 +16,9 @@ dependencies = ["tool"]         # optional informational metadata
 
 [host_capabilities]             # maps to zgui-js package.schema.json capabilities; `session_lock` is FORBIDDEN
 commands = ["tool"]             # optional array of non-empty command names/paths
-image_prefixes = []             # optional array of canonical absolute paths (no .., no trailing slash unless "/")
-unix_sockets = []               # optional array of canonical absolute paths
+image_prefixes = []             # optional array of canonical absolute paths or constrained runtime templates ($XDG_RUNTIME_DIR, $HOME, $XDG_DATA_HOME, ${WAYLAND_DISPLAY})
+unix_sockets = []               # optional array of canonical absolute paths or constrained runtime templates
+named_sockets = []              # optional array of host-resolved socket names (^[A-Za-z][A-Za-z0-9_-]{0,63}$)
 shell_surfaces = false          # optional bool
 control_channel = false         # optional bool
 
@@ -86,6 +87,7 @@ Written atomically (`0600` unique temp file + `fsync` + `rename` + dir `fsync`) 
           "commands": [],
           "imagePrefixes": [],
           "unixSockets": [],
+          "namedSockets": [],
           "shellSurfaces": false,
           "controlChannel": false
         },

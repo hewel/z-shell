@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "id": "z-shell-daemon",
+  "runtimeEnvironment": {
+    "xdgRuntimeDir": "/zgui-preview-only/runtime",
+    "homeDir": "/zgui-preview-only/home",
+    "xdgDataHome": "/zgui-preview-only/home/.local/share",
+    "waylandDisplay": "wayland-1",
+    "namedSockets": {
+      "niri": "/zgui-preview-only/niri.sock"
+    }
+  },
+  "services": {
+    "sockets": [
+      {
+        "path": "/zgui-preview-only/runtime/z-shell/bus-wayland-1.sock",
+        "framing": "line",
+        "send": [
+          "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"bus.hello\",\"params\":{\"protocol_version\":1,\"client_name\":\"z-shell-ui\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"theme\"}}"
+        ],
+        "events": [
+          {
+            "kind": "message",
+            "atMs": 1,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocol_version\":1,\"daemon_version\":\"0.1.0-preview\",\"daemon_instance_id\":\"preview-daemon\",\"client_id\":1,\"role\":\"public\",\"media_dir\":\"/zgui-preview-only/runtime/z-shell/media\"}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":1,\"topic\":\"theme\",\"revision\":1,\"data\":{\"scheme\":{\"surface\":\"#111318\",\"surface_dim\":\"#111318\",\"surface_bright\":\"#37393E\",\"surface_container_lowest\":\"#0C0E13\",\"surface_container_low\":\"#191C20\",\"surface_container\":\"#1D2024\",\"surface_container_high\":\"#272A2F\",\"surface_container_highest\":\"#32353A\",\"on_surface\":\"#E2E2E9\",\"on_surface_variant\":\"#C3C6CF\",\"inverse_surface\":\"#E2E2E9\",\"inverse_on_surface\":\"#2E3036\",\"outline\":\"#8D9199\",\"outline_variant\":\"#43474E\",\"scrim\":\"#000000\",\"primary\":\"#7CD4FF\",\"on_primary\":\"#08305F\",\"primary_container\":\"#254777\",\"on_primary_container\":\"#D4E3FF\",\"secondary\":\"#BCC7DC\",\"on_secondary\":\"#263141\",\"secondary_container\":\"#3C4759\",\"on_secondary_container\":\"#D6E3F8\",\"tertiary\":\"#D8BDE4\",\"on_tertiary\":\"#3C2947\",\"tertiary_container\":\"#533F5F\",\"on_tertiary_container\":\"#F5D9FF\",\"error\":\"#FFB4AB\",\"on_error\":\"#690005\",\"error_container\":\"#93000A\",\"on_error_container\":\"#FFDAD6\"},\"dark\":true,\"variant\":\"tonal\",\"backend\":\"builtin\",\"last_error\":null}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 10,
+            "text": "{\"jsonrpc\":\"2.0\",\"method\":\"topic.update\",\"params\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":1,\"topic\":\"theme\",\"revision\":2,\"source_baseline\":false,\"data\":{\"scheme\":{\"surface\":\"#111318\",\"surface_dim\":\"#111318\",\"surface_bright\":\"#37393E\",\"surface_container_lowest\":\"#0C0E13\",\"surface_container_low\":\"#191C20\",\"surface_container\":\"#1D2024\",\"surface_container_high\":\"#272A2F\",\"surface_container_highest\":\"#32353A\",\"on_surface\":\"#E2E2E9\",\"on_surface_variant\":\"#C3C6CF\",\"inverse_surface\":\"#E2E2E9\",\"inverse_on_surface\":\"#2E3036\",\"outline\":\"#8D9199\",\"outline_variant\":\"#43474E\",\"scrim\":\"#000000\",\"primary\":\"#7DD3FC\",\"on_primary\":\"#08305F\",\"primary_container\":\"#254777\",\"on_primary_container\":\"#D4E3FF\",\"secondary\":\"#BCC7DC\",\"on_secondary\":\"#263141\",\"secondary_container\":\"#3C4759\",\"on_secondary_container\":\"#D6E3F8\",\"tertiary\":\"#D8BDE4\",\"on_tertiary\":\"#3C2947\",\"tertiary_container\":\"#533F5F\",\"on_tertiary_container\":\"#F5D9FF\",\"error\":\"#FFB4AB\",\"on_error\":\"#690005\",\"error_container\":\"#93000A\",\"on_error_container\":\"#FFDAD6\"},\"dark\":true,\"variant\":\"tonal\",\"backend\":\"builtin\",\"last_error\":null}}}"
+          }
+        ]
+      },
+      {
+        "path": "/zgui-preview-only/runtime/z-shell/host-wayland-1.sock",
+        "framing": "line",
+        "send": [
+          "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"bus.hello\",\"params\":{\"protocol_version\":1,\"client_name\":\"z-shell-host\"}}"
+        ],
+        "events": [
+          {
+            "kind": "message",
+            "atMs": 1,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocol_version\":1,\"daemon_version\":\"0.1.0-preview\",\"daemon_instance_id\":\"preview-daemon\",\"client_id\":2,\"role\":\"privileged_host\",\"media_dir\":\"/zgui-preview-only/runtime/z-shell/media\"}}"
+          }
+        ]
+      }
+    ],
+    "control": {}
+  },
+  "events": []
+}
