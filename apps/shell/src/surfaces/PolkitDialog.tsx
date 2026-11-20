@@ -1,5 +1,5 @@
 import { Button, For, LayerSurface, Show, TextField, createEffect, createMemo, createSignal, focus, onCleanup, registerDismissLayer, type Accessor, type NativeChild, type NativeKeyEvent, type NativeNode } from "@hewel/zgui";
-import { ShojiIcon } from "../icons.tsx";
+import { ShellIcon } from "../icons.tsx";
 import { DIALOG_SPRING, createEnterProgress, dialogMotionStyle, scrimBackdrop } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { resolveMonitorLogicalSize, type PolkitPromptView } from "../topics.ts";
@@ -81,7 +81,7 @@ function PolkitContent(props: { active: Accessor<PolkitPromptView> }): NativeChi
             display: "flex", width: "44px", height: "44px", flexShrink: 0, borderRadius: "22px",
             alignItems: "center", justifyContent: "center", backgroundColor: "var(--color-primary-container)",
           }}>
-            <ShojiIcon name="lock" size={22} color="var(--color-on-primary-container)" />
+            <ShellIcon name="lock" size={22} color="var(--color-on-primary-container)" />
           </box>
           <column style={{ minWidth: "0px", alignItems: "flex-start", gap: "4px" }}>
             <text role="heading" style={{ fontSize: "20px", fontWeight: 700 }}>Authentication Required</text>

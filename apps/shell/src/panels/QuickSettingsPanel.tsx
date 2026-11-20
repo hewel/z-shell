@@ -1,6 +1,6 @@
 import { Button, For, Image, Show, createSignal, focus, getWindowRect, type NativeChild } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
-import { ShojiIcon, type ShojiIconName } from "../icons.tsx";
+import { ShellIcon, type ShellIconName } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
 import { formatDurationSeconds, type BatteryState, type PowerConfirmAction } from "../topics.ts";
 import { QuickSettingsIconButton, QuickSettingsScroll, QuickSettingsSubpage } from "./QuickSettingsSubpages.tsx";
@@ -29,7 +29,7 @@ const powerActions = [
   { label: "Reboot", icon: "reboot", action: "reboot" },
   { label: "Power off", icon: "power", action: "poweroff", danger: true },
 ] as const satisfies readonly {
-  label: string; icon: ShojiIconName; action: PowerConfirmAction; danger?: boolean;
+  label: string; icon: ShellIconName; action: PowerConfirmAction; danger?: boolean;
 }[];
 
 const batteryLabels: Readonly<Record<BatteryState, string>> = {
@@ -41,7 +41,7 @@ function QuickTile(props: {
   id: string;
   label: string;
   detail: string;
-  icon: ShojiIconName;
+  icon: ShellIconName;
   active?: boolean;
   toggle?: boolean;
   disabled?: boolean;
@@ -59,7 +59,7 @@ function QuickTile(props: {
           padding: props.open ? "0 0 0 10px" : "0 10px",
           color: color(), opacity: props.disabled ? 0.55 : 1,
         }}>
-        <ShojiIcon name={props.icon} size={18} color={color()} />
+        <ShellIcon name={props.icon} size={18} color={color()} />
         <column style={{ ...grow, gap: "2px" }}>
           <text style={{ ...clipped, fontSize: "13px", fontWeight: "600" }}>{props.label}</text>
           <text style={{ ...clipped, fontSize: "11px", color: props.active ? onPrimaryContainer : muted, opacity: props.active ? 0.78 : 1 }}>{props.detail}</text>
@@ -157,7 +157,7 @@ function Sliders(props: { openSound: () => void }): NativeChild {
       <Show when={backlight()} fallback={<box style={hiddenSection} />}>
         {device => (
           <row style={row}>
-            <row style={{ width: "34px", justifyContent: "center", flexShrink: 0 }}><ShojiIcon name="brightness" size={18} /></row>
+            <row style={{ width: "34px", justifyContent: "center", flexShrink: 0 }}><ShellIcon name="brightness" size={18} /></row>
             <PercentTrack label="Brightness" value={device().max_brightness > 0 ? device().brightness * 100 / device().max_brightness : 0}
               disabled={!device().controllable || device().max_brightness <= 0} onChange={percent => {
                 const { device: id, max_brightness } = device();
@@ -181,7 +181,7 @@ function BatterySummary(): NativeChild {
         return (
           <column style={card}>
             <row style={row}>
-              <ShojiIcon name={charging() ? "batteryCharging" : "battery"} size={20} color={primary} />
+              <ShellIcon name={charging() ? "batteryCharging" : "battery"} size={20} color={primary} />
               <text style={{ fontSize: "20px", fontWeight: "600" }}>
                 {battery().percentage == null ? "—" : `${Math.round(battery().percentage ?? 0)}%`}
               </text>
@@ -306,7 +306,7 @@ function MainPage(props: {
                 }} style={{ ...grow, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "4px",
                   padding: "6px 2px", borderRadius: "10px", backgroundColor: danger() ? "var(--color-error-container)" : containerHigh,
                   color: color(), fontSize: "11px" }}>
-                  <ShojiIcon name={action().icon} size={16} color={color()} />
+                  <ShellIcon name={action().icon} size={16} color={color()} />
                   <text style={{ whiteSpace: "nowrap" }}>{action().label}</text>
                 </Button>
               );

@@ -75,7 +75,17 @@ const SUPPRESSION_RE = /\b(?:oxlint|eslint)-disable(?:-next-line|-line)?\b/;
 const FONT_TOKEN_RE = /^(?:var\(--font-(?:sans|mono)\)|inherit)$/;
 const OUTLINE_NONE_RE = /^(?:none|0(?:px)?)$/i;
 const WAVY_ALLOWED_FILES = new Set(["MediaPanel.tsx"]);
-const SCALLOP_ALLOWED_FILES = new Set(["SessionLockOverlay.tsx", "LauncherOverlay.tsx", "icons.tsx"]);
+const SCALLOP_ALLOWED_FILES = new Set([
+  "SessionLockOverlay.tsx",
+  "QuickSettingsPanel.tsx",
+  "SettingsWindow.tsx",
+  "SettingsSidebar.tsx",
+  "icons.tsx",
+  "shapes.ts",
+]);
+const EXPRESSIVE_PATH_NAME_RE = /(?:scallop|rosette|shellEmblem|cookie[46]|clover4|flower5|morphShape|passwordShape)/i;
+const SVG_BEZIER_PATH_RE = /^\s*M\s*-?\d[\d.,\s-]*[CcQqSsTt]/;
+const ALLOWED_VECTOR_VIEWBOXES = new Set(["0 0 24 24", "0 0 64 64"]);
 
 function propertyName(prop) {
   if (!prop || prop.type !== "Property") return null;
@@ -477,13 +487,21 @@ const rules = {
   "expressive-budget": {
     meta: {
       type: "problem",
-      docs: { description: "Enforce The Expressive-Budget Rule: restrict wavy progress to MediaPanel and scalloped shapes to brand/Launcher/SessionLock" },
+      docs: { description: "Enforce The Expressive-Budget Rule: restrict wavy progress to MediaPanel and scalloped rosettes to brand mark and user avatar badges" },
       schema: [],
     },
     create(context) {
       const basename = path.basename(context.filename ?? "");
       const allowWavy = WAVY_ALLOWED_FILES.has(basename);
       const allowScallop = SCALLOP_ALLOWED_FILES.has(basename);
+
+      const reportScallop = node => {
+        context.report({
+          node,
+          message:
+            "Expressive-Budget Rule: scalloped rosettes (shellEmblem) are reserved strictly for the z-shell brand mark (Settings sidebar header) and user avatar badges (QuickSettingsPanel / SessionLockOverlay) — use Material 'apps' for functional Launcher triggers.",
+        });
+      };
 
       const checkName = (node, name) => {
         if (!allowWavy && /wavy(?:progress|slider|bar)/i.test(name)) {
@@ -492,11 +510,14 @@ const rules = {
             message: "Expressive-Budget Rule: wavy progress bars are reserved strictly for MediaPanel.tsx.",
           });
         }
-        if (!allowScallop && /scallop/i.test(name)) {
-          context.report({
-            node,
-            message: "Expressive-Budget Rule: scalloped marks are reserved strictly for brand/Launcher and SessionLockOverlay.tsx.",
-          });
+        if (!allowScallop && /(?:scallop|rosette|shellEmblem)/i.test(name)) {
+          reportScallop(node);
+        }
+      };
+
+      const checkLiteral = (node, value) => {
+        if (!allowScallop && typeof value === "string" && /^shellEmblem$/i.test(value.trim())) {
+          reportScallop(node);
         }
       };
 
@@ -506,6 +527,119 @@ const rules = {
         },
         JSXIdentifier(node) {
           checkName(node, node.name);
+        },
+        Literal(node) {
+          checkLiteral(node, node.value);
+        },
+        TemplateLiteral(node) {
+          if (node.expressions.length === 0) {
+            checkLiteral(node, node.quasis[0]?.value?.cooked ?? "");
+          }
+        },
+      };
+    },
+  },
+
+  "no-hand-authored-expressive-paths": {
+    meta: {
+      type: "problem",
+      docs: { description: "Enforce The Exact-Geometry Shape Rule: disallow hand-estimated SVG Bezier literals for M3 Expressive shapes" },
+      schema: [],
+    },
+    create(context) {
+      const basename = path.basename(context.filename ?? "");
+      if (basename === "shapes.ts") return {};
+      const checkNamedValue = (name, valueNode) => {
+        if (!name || !EXPRESSIVE_PATH_NAME_RE.test(name)) return;
+        const text = staticString(valueNode);
+        if (text && SVG_BEZIER_PATH_RE.test(text)) {
+          context.report({
+            node: valueNode,
+            message:
+              `Exact-Geometry Shape Rule: do not hand-author Bezier path "${name}". Generate symmetric expressive shapes analytically via apps/shell/src/shapes.ts.`,
+          });
+        }
+      };
+      return {
+        VariableDeclarator(node) {
+          if (node.id?.type === "Identifier" && node.init) {
+            checkNamedValue(node.id.name, node.init);
+          }
+        },
+        Property(node) {
+          const key = propertyName(node);
+          if (key === "d") {
+            const parentProp = node.parent?.type === "ObjectExpression" ? node.parent.parent : null;
+            const ownerName = parentProp?.type === "Property" ? propertyName(parentProp) : null;
+            checkNamedValue(ownerName, node.value);
+          } else {
+            checkNamedValue(key, node.value);
+          }
+        },
+      };
+    },
+  },
+
+  "material-icon-grid": {
+    meta: {
+      type: "problem",
+      docs: { description: "Enforce The Material-First Icon Rule: 24x24 viewBox for system UI glyphs and centralized ShellIcon usage" },
+      schema: [],
+    },
+    create(context) {
+      const filename = (context.filename ?? "").replace(/\\/g, "/");
+      const basename = path.basename(filename);
+      const isShellSurfaceOrPanel =
+        filename.includes("/apps/shell/src/panels/") ||
+        filename.includes("/apps/shell/src/surfaces/") ||
+        filename.startsWith("apps/shell/src/panels/") ||
+        filename.startsWith("apps/shell/src/surfaces/");
+
+      return {
+        Property(node) {
+          if (basename !== "icons.tsx") return;
+          if (propertyName(node) !== "viewBox") return;
+          const parentProp = node.parent?.type === "ObjectExpression" ? node.parent.parent : null;
+          const iconName = parentProp?.type === "Property" ? propertyName(parentProp) : null;
+          const value = staticString(node.value);
+          if (!value) return;
+          if (iconName === "shellEmblem") {
+            if (value !== "0 0 64 64" && value !== "0 0 24 24") {
+              context.report({ node: node.value, message: `Expressive mark viewBox must be "0 0 64 64" or "0 0 24 24", got "${value}".` });
+            }
+            return;
+          }
+          if (value !== "0 0 24 24") {
+            context.report({
+              node: node.value,
+              message: `Material-First Icon Rule: system UI icon "${iconName ?? "unknown"}" must use Material 24x24 grid (viewBox="0 0 24 24"), got "${value}".`,
+            });
+          }
+        },
+        JSXOpeningElement(node) {
+          if (node.name?.type !== "JSXIdentifier" || node.name.name !== "vector") return;
+          for (const attr of node.attributes) {
+            if (attr.type !== "JSXAttribute" || attr.name?.type !== "JSXIdentifier") continue;
+            const attrValue =
+              attr.value?.type === "Literal"
+                ? (typeof attr.value.value === "string" ? attr.value.value : null)
+                : attr.value?.type === "JSXExpressionContainer"
+                  ? staticString(attr.value.expression)
+                  : null;
+            if (attr.name.name === "viewBox" && attrValue !== null && !ALLOWED_VECTOR_VIEWBOXES.has(attrValue.trim())) {
+              context.report({
+                node: attr.value,
+                message: `Material-First Icon Rule: <vector> viewBox must be "0 0 24 24" (Material grid) or "0 0 64 64" (expressive shape), got "${attrValue}".`,
+              });
+            }
+            if (isShellSurfaceOrPanel && attr.name.name === "d" && attrValue !== null) {
+              context.report({
+                node: attr.value,
+                message:
+                  "Material-First Icon Rule: do not inline ad-hoc SVG path literals in panels/surfaces; register Material Icons in icons.tsx or analytical shapes in shapes.ts.",
+              });
+            }
+          }
         },
       };
     },

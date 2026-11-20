@@ -1,6 +1,6 @@
 import { Button, For, Image, Match, Show, Switch, TextField, createEffect, createMemo, createSignal, type Accessor, type NativeChild } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
-import { ShojiIcon, type ShojiIconName } from "../icons.tsx";
+import { ShellIcon, type ShellIconName } from "../icons.tsx";
 import { createEnterProgress } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { THEME_SEED_SWATCHES } from "../theme.ts";
@@ -38,14 +38,14 @@ export function QuickSettingsScroll(props: { testId: string; label: string; chil
 }
 
 export function QuickSettingsIconButton(props: {
-  label: string; icon: ShojiIconName; testId?: string; color?: string; fill?: string;
+  label: string; icon: ShellIconName; testId?: string; color?: string; fill?: string;
   disabled?: boolean; expanded?: boolean; onClick: () => void;
 }): NativeChild {
   return (
     <Button testId={props.testId ?? null} ariaLabel={props.label} disabled={props.disabled ?? false} expanded={props.expanded ?? null}
       onClick={props.onClick} style={{ display: "flex", width: "34px", height: "34px", borderRadius: "999px", flexShrink: 0,
         alignItems: "center", justifyContent: "center", backgroundColor: props.fill ?? container, opacity: props.disabled ? 0.45 : 1 }}>
-      <ShojiIcon name={props.icon} size={16} color={props.color} />
+      <ShellIcon name={props.icon} size={16} color={props.color} />
     </Button>
   );
 }
@@ -156,7 +156,7 @@ function WifiPage(props: { onBack: () => void }): NativeChild {
                 <Show when={active() || device().active_connection}>
                   <Section title="Connected network">
                     <row style={row}>
-                      <ShojiIcon name="wifi" size={18} color={primary} />
+                      <ShellIcon name="wifi" size={18} color={primary} />
                       <text style={{ ...grow, ...clipped }}>{active()?.ssid || device().active_connection?.name || "Hidden network"}</text>
                       <Action label="Disconnect" onClick={() => void invokePublic("network.wifi.disconnect", { device_id: device().id })} />
                     </row>
@@ -188,7 +188,7 @@ function WifiPage(props: { onBack: () => void }): NativeChild {
                                 void invokePublic("network.wifi.connect", profile ? { ...target, profile_id: profile.id } : target);
                               }
                           }} style={{ ...itemCard, ...row }}>
-                            <ShojiIcon name={ap().security === "open" ? "wifi" : "wifiLock"} size={18} color={primary} />
+                            <ShellIcon name={ap().security === "open" ? "wifi" : "wifiLock"} size={18} color={primary} />
                             <column style={{ ...grow, gap: "2px" }}>
                               <text style={clipped}>{ssid()}</text>
                               <text style={detail}>{ap().security}{requiresProfile() && !savedProfile() ? " · Saved profile required" : ""}</text>
@@ -241,7 +241,7 @@ function BluetoothPage(props: { onBack: () => void }): NativeChild {
             return (
               <column testId={`bt-dev-${dev().address}`} style={itemCard}>
                 <row style={row}>
-                  <ShojiIcon name="bluetooth" size={18} color={primary} />
+                  <ShellIcon name="bluetooth" size={18} color={primary} />
                   <column style={{ ...grow, gap: "2px" }}>
                     <text style={clipped}>{dev().name || dev().address}</text>
                     <Show when={dev().name}><text style={detail}>{dev().address}</text></Show>
@@ -291,7 +291,7 @@ function AudioDeviceRow(props: { device: Accessor<AudioDevice>; kind: "sink" | "
     <row style={{ ...itemCard, ...row, backgroundColor: props.active ? selectedFill : containerHigh }}>
       <Button ariaLabel={name()} selected={props.active} onClick={() => void invokePublic("audio.set-default", target())}
         style={{ ...grow, ...row, minHeight: "34px", color: props.active ? selectedInk : onSurface }}>
-        <ShojiIcon name={props.kind === "sink" ? "volumeHigh" : "mic"} color={props.active ? selectedInk : primary} />
+        <ShellIcon name={props.kind === "sink" ? "volumeHigh" : "mic"} color={props.active ? selectedInk : primary} />
         <text style={{ ...grow, ...clipped }}>{name()}</text>
       </Button>
       <QuickSettingsIconButton label={props.device().muted ? "Unmute device" : "Mute device"}
@@ -344,13 +344,13 @@ function WallpaperThumbnail(props: { item: Accessor<CatalogEntry>; active: boole
       onClick={props.onClick} style={{ ...grow, display: "flex", maxWidth: "112px", height: "72px", borderRadius: "14px",
         border: `2px solid ${props.active ? primary : "var(--color-outline-variant)"}`, backgroundColor: containerHigh,
         justifyContent: "center", alignItems: "center", position: "relative", overflow: "hidden" }}>
-      <Show when={image.src()} fallback={<ShojiIcon name="image" size={20} color={muted} />}>
+      <Show when={image.src()} fallback={<ShellIcon name="image" size={20} color={muted} />}>
         {src => <Image ariaHidden src={src()} style={thumbImage} />}
       </Show>
       <Show when={props.active}>
         <box ariaHidden style={{ position: "absolute", right: "4px", top: "4px", width: "20px", height: "20px", borderRadius: "10px",
           display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: primary }}>
-          <ShojiIcon name="check" size={14} color="var(--color-on-primary)" />
+          <ShellIcon name="check" size={14} color="var(--color-on-primary)" />
         </box>
       </Show>
     </Button>

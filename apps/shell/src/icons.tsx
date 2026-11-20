@@ -1,7 +1,13 @@
-export const SHOJI_ICON_PATHS = {
-  shojiEmblem: {
+import { SHELL_ROSETTE_PATH } from "./shapes.ts";
+
+export const SHELL_ICON_PATHS = {
+  shellEmblem: {
     viewBox: "0 0 64 64",
-    d: "M32 4C36 4 38.2 7.4 41.9 8.4C45.6 9.4 49.4 7.5 52 10.1C54.6 12.7 52.7 16.5 53.7 20.2C54.7 23.9 58 26.1 58 30.1C58 34.1 60 36 58 38C56 40 56.6 45.6 54 48.2C51.4 50.8 49.5 50.7 45.8 51.7C42.1 52.7 39.9 56 35.9 56C31.9 56 30 60 28 58C26 56 22.1 55.6 18.4 54.6C14.7 53.6 12.6 54.5 10 51.9C7.4 49.3 9.3 45.5 8.3 41.8C7.3 38.1 4 35.9 4 31.9C4 27.9 6 26 8 24C10 22 9.4 16.4 12 13.8C14.6 11.2 16.5 11.3 20.2 10.3C23.9 9.3 28 4 32 4Z",
+    d: SHELL_ROSETTE_PATH,
+  },
+  apps: {
+    viewBox: "0 0 24 24",
+    d: "M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z",
   },
   overview: {
     viewBox: "0 0 24 24",
@@ -20,8 +26,8 @@ export const SHOJI_ICON_PATHS = {
     d: "M20 18.69L7.84 6.14 5.27 3.49 4 4.76l2.8 2.8v.01c-.52.99-.8 2.16-.8 3.42v5l-2 2v1h13.73l2 2L21 19.72l-1-1.03zM12 22c1.11 0 2-.89 2-2h-4c0 1.11.89 2 2 2zm6-7.32V11c0-3.08-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.15.03-.29.08-.42.12-.1.03-.2.07-.3.11h-.01c-.01 0-.01 0-.02.01-.23.09-.46.2-.68.31 0 0-.01 0-.01.01L18 14.68z",
   },
   mediaEq: {
-    viewBox: "0 0 16 16",
-    d: "M2.2 6C1.54 6 1 6.54 1 7.2v5.6c0 .66.54 1.2 1.2 1.2h.1c.66 0 1.2-.54 1.2-1.2V7.2C3.5 6.54 2.96 6 2.3 6h-.1zm4-4C5.54 2 5 2.54 5 3.2v9.6c0 .66.54 1.2 1.2 1.2h.1c.66 0 1.2-.54 1.2-1.2V3.2C7.5 2.54 6.96 2 6.3 2h-.1zm4 3C9.54 5 9 5.54 9 6.2v6.6c0 .66.54 1.2 1.2 1.2h.1c.66 0 1.2-.54 1.2-1.2V6.2c0-.66-.54-1.2-1.2-1.2h-.1zm4 3c-.66 0-1.2.54-1.2 1.2v3.6c0 .66.54 1.2 1.2 1.2h.1c.66 0 1.2-.54 1.2-1.2V9.2c0-.66-.54-1.2-1.2-1.2h-.1z",
+    viewBox: "0 0 24 24",
+    d: "M7 18h2V6H7v12zm4 4h2V2h-2v20zm-8-8h2v-4H3v4zm12 4h2V6h-2v12zm4-8v4h2v-4h-2z",
   },
   wifi: {
     viewBox: "0 0 24 24",
@@ -189,16 +195,16 @@ export const SHOJI_ICON_PATHS = {
   },
 } as const;
 
-export type ShojiIconName = keyof typeof SHOJI_ICON_PATHS;
+export type ShellIconName = keyof typeof SHELL_ICON_PATHS;
 
-export function ShojiIcon(props: {
-  name: ShojiIconName;
+export function ShellIcon(props: {
+  name: ShellIconName;
   size?: number | undefined;
   color?: string | undefined;
   testId?: string | undefined;
   label?: string | undefined;
 }) {
-  const icon = () => SHOJI_ICON_PATHS[props.name];
+  const icon = () => SHELL_ICON_PATHS[props.name];
   return (
     <vector
       d={icon().d}

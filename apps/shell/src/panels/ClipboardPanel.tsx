@@ -1,6 +1,6 @@
 import { Button, For, Image, Show, TextField, createMemo, createSignal, mountStylesheet, type Accessor } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
-import { ShojiIcon } from "../icons.tsx";
+import { ShellIcon } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
 import type { ClipboardEntrySummary } from "../topics.ts";
 
@@ -44,7 +44,7 @@ function ClipboardRow(props: { entry: Accessor<ClipboardEntrySummary> }) {
       backgroundColor: entry().pinned ? secondaryContainer : container, color: entry().pinned ? onSecondaryContainer : onSurface }}>
       <Show when={src()} fallback={
         <box style={{ ...thumbnail, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: containerHigh }}>
-          <ShojiIcon name={entry().kind === "image" ? "image" : entry().preview.startsWith("http") ? "link" : "fileText"} color={primary} />
+          <ShellIcon name={entry().kind === "image" ? "image" : entry().preview.startsWith("http") ? "link" : "fileText"} color={primary} />
         </box>
       }>
         <Image testId={`clip-image-${entry().id}`} src={src()} style={thumbnailImage} />
@@ -62,7 +62,7 @@ function ClipboardRow(props: { entry: Accessor<ClipboardEntrySummary> }) {
       <Button testId={`clip-pin-${entry().id}`} ariaLabel={entry().pinned ? "Unpin entry" : "Pin entry"} checked={entry().pinned}
         style={{ ...iconButton, backgroundColor: entry().pinned ? "var(--color-primary-container)" : containerHigh }}
         onClick={() => { void invokePublic(entry().pinned ? "clipboard.unpin" : "clipboard.pin", { id: entry().id }); }}>
-        <ShojiIcon name="pin" size={14} color={entry().pinned ? "var(--color-on-primary-container)" : muted} />
+        <ShellIcon name="pin" size={14} color={entry().pinned ? "var(--color-on-primary-container)" : muted} />
       </Button>
       <Button testId={`clip-forget-${entry().id}`} ariaLabel="Forget entry" style={iconButton}
         onClick={() => { void invokePublic("clipboard.forget", { id: entry().id }); }}>
@@ -110,7 +110,7 @@ export function ClipboardPanel() {
     <column testId="panel-clipboard" style={{ width: "100%", height: "100%", minHeight: "calc(100vh - 2px)", padding: "14px", gap: "10px", flexDirection: "column", backgroundColor: "var(--color-surface)", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px" }}>
       <Show when={!locked()} fallback={
         <row role="status" style={{ padding: "14px", borderRadius: "16px", gap: "8px", alignItems: "center", backgroundColor: errorContainer, color: onErrorContainer }}>
-          <ShojiIcon name="lock" size={18} color={onErrorContainer} />
+          <ShellIcon name="lock" size={18} color={onErrorContainer} />
           <text>Clipboard hidden while session is locked</text>
         </row>
       }>

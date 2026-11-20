@@ -1,7 +1,7 @@
 import { createEffect, getSessionGeneration, mountShellStylesheet, onCleanup, type Accessor } from "@hewel/zgui";
 import { SHELL_MOTION_CSS } from "./motion.ts";
 
-export const SHOJI_DEFAULT_SCHEME = Object.freeze({
+export const SHELL_DEFAULT_SCHEME = Object.freeze({
   surface: "#111318",
   surface_dim: "#111318",
   surface_bright: "#37393E",
@@ -37,7 +37,7 @@ export const SHOJI_DEFAULT_SCHEME = Object.freeze({
 
 export const THEME_SEED_SWATCHES = ["#A6C8FF", "#D0BCFF", "#7DD3FC", "#86EFAC", "#FCD34D", "#FCA5A5"] as const;
 
-export type ThemeColorScheme = Readonly<Record<keyof typeof SHOJI_DEFAULT_SCHEME, string>>;
+export type ThemeColorScheme = Readonly<Record<keyof typeof SHELL_DEFAULT_SCHEME, string>>;
 
 export interface ThemeTopicSnapshot {
   readonly scheme: ThemeColorScheme;
@@ -48,8 +48,8 @@ export interface ThemeTopicSnapshot {
 }
 
 const hexColor = /^#[0-9a-fA-F]{6}$/;
-const roles = (Object.keys(SHOJI_DEFAULT_SCHEME) as (keyof ThemeColorScheme)[])
-  .map(role => ({ role, property: `--color-${role.replaceAll("_", "-")}`, fallback: SHOJI_DEFAULT_SCHEME[role] }));
+const roles = (Object.keys(SHELL_DEFAULT_SCHEME) as (keyof ThemeColorScheme)[])
+  .map(role => ({ role, property: `--color-${role.replaceAll("_", "-")}`, fallback: SHELL_DEFAULT_SCHEME[role] }));
 
 export function buildThemeStylesheet(scheme: ThemeColorScheme, dark: boolean): string {
   let css = `:root { color-scheme: ${dark ? "dark" : "light"}; --zgui-ring: var(--color-primary);`;
@@ -87,7 +87,7 @@ export function useShellTheme(theme: Accessor<ThemeTopicSnapshot | undefined>): 
   });
   createEffect(theme, snapshot => {
     if (registration.css !== undefined && registration.snapshot === snapshot) return;
-    const css = buildThemeStylesheet(snapshot?.scheme ?? SHOJI_DEFAULT_SCHEME, snapshot?.dark ?? true);
+    const css = buildThemeStylesheet(snapshot?.scheme ?? SHELL_DEFAULT_SCHEME, snapshot?.dark ?? true);
     if (css !== registration.css) {
       registration.dispose = mountShellStylesheet("z-shell-theme", css);
       registration.css = css;

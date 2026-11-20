@@ -5,7 +5,8 @@ import {
 } from "@hewel/zgui";
 import { Input as TextField } from "@hewel/zgui/components";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
-import { ShojiIcon } from "../icons.tsx";
+import { ShellIcon } from "../icons.tsx";
+import { SHELL_ROSETTE_PATH } from "../shapes.ts";
 import { useShellStore } from "../store.ts";
 import { formatBarClock, formatFullDate, formatSurfaceName, resolveMonitorWallpaper, selectActiveMediaPlayer, type UnlockApproval } from "../topics.ts";
 
@@ -26,7 +27,6 @@ type LockControls = {
 const clockFormat = { clock24h: true, clockSeconds: false };
 const cover = { position: "absolute", inset: "0px", width: "100%", height: "100%", pointerEvents: "none" } as const;
 const centeredColumn = { display: "flex", flexDirection: "column", alignItems: "center" } as const;
-const avatarScallop = "M32 2C37-1 43 1 46 6C52 6 57 10 58 16C63 19 65 25 62 31C65 37 63 44 58 47C57 53 52 58 46 58C43 63 37 65 32 62C27 65 21 63 18 58C12 58 7 53 6 47C1 44-1 37 2 31C-1 25 1 19 6 16C7 10 12 6 18 6C21 1 27-1 32 2Z";
 
 function LockScreen(props: {
   readonly monitor: Accessor<Monitor>;
@@ -70,7 +70,7 @@ function LockScreen(props: {
             position: "absolute", zIndex: 2, top: "20px", right: "24px", alignItems: "center", gap: "5px",
             borderRadius: "16px", backgroundColor: "color-mix(in srgb, var(--color-on-surface) 10%, transparent)", padding: "5px 10px",
           }}>
-            <ShojiIcon name={battery().state === "charging" ? "batteryCharging" : "battery"} color="inherit" />
+            <ShellIcon name={battery().state === "charging" ? "batteryCharging" : "battery"} color="inherit" />
             <text style={{ fontSize: "13px" }}>{label()}</text>
           </row>
         );
@@ -89,7 +89,7 @@ function LockScreen(props: {
           width: "64px", height: "64px", flexShrink: 0, position: "relative",
           display: "flex", alignItems: "center", justifyContent: "center",
         }}>
-          <vector ariaHidden d={avatarScallop} viewBox="0 0 64 64"
+          <vector ariaHidden d={SHELL_ROSETTE_PATH} viewBox="0 0 64 64"
             style={{ ...cover, zIndex: 0, color: "var(--color-primary-container)" }} />
           <Show when={props.avatar()} fallback={
             <text style={{ position: "relative", zIndex: 1, fontSize: "25px", fontWeight: 600, color: "var(--color-on-primary-container)" }}>
@@ -127,14 +127,14 @@ function LockScreen(props: {
               width: "28px", height: "28px", borderRadius: "14px", border: "0px",
               backgroundColor: "var(--color-primary)", opacity: controls.disabled() ? 0.45 : 1,
             }}>
-            <ShojiIcon name="chevronRight" color="var(--color-on-primary)" size={18} />
+            <ShellIcon name="chevronRight" color="var(--color-on-primary)" size={18} />
           </Button>
         </row>
         <Show when={controls.sleepHold()}><text testId="lock-sleep-hold">Preparing for sleep…</text></Show>
         <Show when={controls.error()}><text testId="lock-error" role="alert" style={{ color: "var(--color-error)" }}>{controls.error()}</text></Show>
         <Show when={playing()}>{player => (
           <row style={{ gap: "5px", alignItems: "center", maxWidth: "300px", opacity: 0.8 }}>
-            <ShojiIcon name="play" size={14} color="inherit" />
+            <ShellIcon name="play" size={14} color="inherit" />
             <text style={{ fontSize: "12px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {player().metadata.title ?? player().identity}
               {player().metadata.artists.length > 0 ? ` · ${player().metadata.artists.join(", ")}` : ""}

@@ -1,6 +1,6 @@
 import { Button, For, Image, LayerSurface, Show, createSignal, onCleanup, type Accessor, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
-import { ShojiIcon } from "../icons.tsx";
+import { ShellIcon } from "../icons.tsx";
 import { TOAST_SPRING, createEnterProgress } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import type { NotificationItem } from "../topics.ts";
@@ -46,7 +46,7 @@ function ToastCard({ toast, track }: { toast: Accessor<NotificationItem>; track:
       <row style={{ gap: "10px", alignItems: "center" }}>
         <Show when={icon.src()} fallback={
           <box style={{ ...iconTile, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: containerHigh }}>
-            <ShojiIcon name="bell" color={primary} />
+            <ShellIcon name="bell" color={primary} />
           </box>
         }>
           <Image src={icon.src()} style={{ ...iconTile, "object-fit": "contain" }} />

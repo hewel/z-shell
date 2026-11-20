@@ -1,6 +1,6 @@
 import { Button, For, Image, Show, createMemo, createSignal, onCleanup, type Accessor } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
-import { ShojiIcon } from "../icons.tsx";
+import { ShellIcon } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
 import { buildMonthCalendarGrid, formatBarClock, formatFullDate, formatMonthYear, type NotificationItem } from "../topics.ts";
 import { SystemTelemetryCards } from "./BatteryPanel.tsx";
@@ -33,7 +33,7 @@ function NotificationRow(props: { item: Accessor<NotificationItem> }) {
     <row testId={`cal-notif-${item().id}`} style={{ ...card, borderRadius: "16px", alignItems: "flex-start" }}>
       <Show when={icon.src()} fallback={
         <box style={{ ...imageTile, display: "flex", backgroundColor: containerHigh, alignItems: "center", justifyContent: "center" }}>
-          <ShojiIcon name="bell" color={primary} />
+          <ShellIcon name="bell" color={primary} />
         </box>
       }>
         <Image src={icon.src()} style={iconImage} />
@@ -110,14 +110,14 @@ export function CalendarPanel() {
           <Button testId="cal-dnd-toggle" checked={dnd()} onClick={() => { void invokePublic("notifications.set-dnd", { dnd: !dnd() }); }}
             style={{ ...pill, flexDirection: "row", gap: "5px", backgroundColor: dnd() ? "var(--color-primary-container)" : containerHigh,
               color: dnd() ? "var(--color-on-primary-container)" : onSurface }}>
-            <ShojiIcon name={dnd() ? "bellOff" : "bell"} size={14} color="currentColor" />
+            <ShellIcon name={dnd() ? "bellOff" : "bell"} size={14} color="currentColor" />
             <text>Do Not Disturb</text>
           </Button>
         </row>
         <column style={card}>
           <row style={{ alignItems: "center", gap: "6px" }}>
             <Button testId="cal-prev-month" ariaLabel="Previous month" style={pill} onClick={() => moveMonth(-1)}>
-              <ShojiIcon name="chevronLeft" size={14} />
+              <ShellIcon name="chevronLeft" size={14} />
             </Button>
             <text testId="cal-month-title" style={{ flexGrow: 1, minWidth: "0px", fontWeight: 600 }}>{formatMonthYear(viewYear(), viewMonth())}</text>
             <Button testId="cal-today" style={pill} onClick={() => {
@@ -125,7 +125,7 @@ export function CalendarPanel() {
               setViewMonth(today().getMonth());
             }}><text>Today</text></Button>
             <Button testId="cal-next-month" ariaLabel="Next month" style={pill} onClick={() => moveMonth(1)}>
-              <ShojiIcon name="chevronRight" size={14} />
+              <ShellIcon name="chevronRight" size={14} />
             </Button>
           </row>
           <column style={{ gap: "2px" }}>

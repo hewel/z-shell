@@ -3,7 +3,7 @@ import {
   type Accessor, type Monitor, type NativeChild, type NativeStyle, type NativeWindowRect,
 } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
-import { ShojiIcon } from "../icons.tsx";
+import { ShellIcon } from "../icons.tsx";
 import { DOCK_SPRING } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
@@ -136,7 +136,7 @@ function DockCapsule(props: {
           togglePanel("launcher", { monitorId: props.monitorId });
         }}
           style={{ ...tile, borderRadius: "14px", backgroundColor: "var(--color-surface-container)" }}>
-          <ShojiIcon name="shojiEmblem" size={22} color={primary} />
+          <ShellIcon name="apps" size={22} color={primary} />
         </Button>
       </column>
       <scroll style={{ flexGrow: 1, flexShrink: 1, minWidth: "0px", height: `${dockHeight}px`, overflow: "auto hidden" }}>

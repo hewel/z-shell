@@ -241,11 +241,23 @@ Corner radii tighten the Material 3 shape scale [[M3-Shape]](#references) for de
 - **Bar Islands, Filter Chips & Full Pills**: `16px` (`32px`-tall islands) or `999px` (`--radius-pill`)
 
 ### Named Rules
-- **The Expressive-Budget Rule.** Expressive M3 shapes and wave tracks are strictly budgeted: the scalloped star silhouette is reserved exclusively for the **z-shell brand / Launcher mark** (and optionally the Lock Screen avatar badge)—never reused on calendar dates, destructive warnings, or utility buttons. Wavy progress tracks are reserved exclusively for **`14 · Media Player` playback progress**; all hardware and config sliders (volume, microphone, brightness, gaps) use crisp straight tracks. *(Deliberate desktop restraint over mobile M3 Expressive.)*
+- **The Expressive-Budget Rule.** Expressive M3 shapes and wave tracks are strictly budgeted: the scalloped rosette silhouette is reserved exclusively for the **z-shell brand mark** (e.g., Settings sidebar header) and **user avatar badges** (Control Center and Lock Screen)—never reused on functional Launcher triggers, calendar dates, destructive warnings, or utility buttons. Wavy progress tracks are reserved exclusively for **`14 · Media Player` playback progress**; all hardware and config sliders (volume, microphone, brightness, gaps) use crisp straight tracks. *(Deliberate desktop restraint over mobile M3 Expressive.)*
+- **The Exact-Geometry Shape Rule.** All M3 Expressive geometric silhouettes (the 8-lobe $D_8$ scalloped rosette and Lock Screen morphing password dots: `Cookie4`, `Clover4`, `Sunny`, `Circle`, `Cookie6`, `Flower5`) must be generated analytically with exact rotational and mirror symmetry around their `viewBox` center `(cx, cy)`. Hand-estimated Bezier coordinates are strictly prohibited.
 
 ---
 
 ## Components
+
+### Iconography (Material Icons First)
+`z-shell` enforces a three-tier iconography policy with **Google Material Icons / Material Symbols** as the mandatory default for all system UI glyphs [[M3-Icons]](#references):
+
+| Tier | Source & Grid | Usage Scope | Size & Alignment Rules |
+|---|---|---|---|
+| **1. System UI Icons (Primary)** | **Material Icons / Material Symbols** (`24×24` optical grid, Filled / Rounded style) [[M3-Icons]](#references) | All bars, popovers, toggles, headers, navigation rails, dialogs, Launcher triggers, and system utilities (e.g., `apps` for Launcher, `dashboard` for Workspace Overview, `wifi`, `bluetooth`, `volume_up`, `battery_charging_full`, `local_cafe`, `smart_toy`, `auto_awesome`, `graphic_eq`, `terminal`, `folder`, `tune`, `monitor_heart`, `grid_view`, `settings`, `notifications`) | Render on `viewBox="0 0 24 24"` using semantic `fill` tokens (`on-surface`, `on-surface-variant`, `primary`, `on-primary-container`). Common optical sizes: `12px`–`18px` (bars & inline metadata), `16px`–`18px` (toggles, headers & list rows), `20px`–`22px` (dock, modals & system app tiles). |
+| **2. M3 Expressive Shapes** | Analytically symmetric SVG paths (`viewBox="0 0 64 64"` or `0 0 24 24"`) [[M3-Shape]](#references) | Strictly limited to the `z-shell` 8-lobe scalloped brand mark, user avatar badges, and Lock Screen morphing password indicators | Exact dihedral symmetry ($D_4$/$D_6$/$D_8$) centered on `(cx, cy)`; never hand-approximated. |
+| **3. Third-Party App & Brand Icons** | Runtime: Linux **XDG Icon Theme Specification** (`.desktop` `Icon=` lookup) [[XDG-Icon]](#references). Design canvas: one canonical brand SVG per app (official mark / Simple Icons) | `18 · Launcher`, `10 · Dock`, `Tray Island`, and active window indicators | Every third-party app (e.g., Zen Browser, Alacritty, Spotify, Paper, Discord) must use **one identical icon and brand backing color** across Launcher, Dock, Tray, and Vertical Bar. Generic system utilities (`Files`, `Pavucontrol`, `Monitor`, `Settings`) default to Tier 1 Material Icons. |
+
+- **The Material-First Icon Rule.** Never invent custom hand-drawn UI glyphs when an official Material Icon exists (for example, use `smart_toy` for Nosleep agent guard, `auto_awesome` for AI usage, `graphic_eq` for live media playback, `monitor_heart` for system monitor, and `grid_view` for workspace overview). Composite telemetry widgets (such as the AI quota circular progress ring) must center any inner Material sparkle cleanly on the exact `viewBox` midpoint `(cx, cy)`.
 
 ### Bar Modes (`09` / `09B` Floating Islands vs. `09C` / `09D` Docked Flush Bar)
 `z-shell` supports two bar styles sharing identical information density and semantic tokens:
@@ -291,9 +303,11 @@ Modeled on `19 · Clipboard` as the canonical desktop modal grammar:
 - **Do** keep every pointer target ≥ `24×24px` (prefer `28px`–`36px` for frequent controls) and maintain ≥ `4.5:1` contrast for all body text [[WCAG-2.2]](#references).
 - **Do** use fixed-width slots (`flex-shrink: 0`) for icons, tabular numeric readouts, and trailing actions across repeated rows.
 - **Do** keep all primary popovers zero-scroll at `1440×900`, deferring low-frequency telemetry (battery health, cycle count) and rich editors to the `820×600` Settings window.
+- **Do** prefer official **Material Icons / Material Symbols** (`viewBox="0 0 24 24"`) for all system UI glyphs, use mathematically symmetric SVG paths for M3 Expressive shapes, and keep one canonical icon per app across Launcher, Dock, and Tray [[M3-Icons]](#references) [[XDG-Icon]](#references).
 - **Do** bottom-align popovers triggered from the bottom-left `Status Island` in vertical left-bar mode.
 
 ### Don't:
+- **Don't** hand-draw ad-hoc UI icons when a Material Icon exists, hand-estimate asymmetric scalloped Bezier paths, or mix inconsistent app icons/colors between Dock, Launcher, and Tray.
 - **Don't** fill large Control Center tiles with solid high-saturation `primary`, or duplicate `Notifications` / `Do Not Disturb` across both Control Center and Calendar.
 - **Don't** style read-only telemetry (such as `AI usage` quota) as an active ON/OFF toggle tile.
 - **Don't** apply wavy playback tracks to hardware or configuration sliders (volume, mic, brightness, gaps), or reuse the scalloped brand silhouette across more than two distinct meanings.
@@ -310,8 +324,10 @@ Modeled on `19 · Clipboard` as the canonical desktop modal grammar:
 4. **[M3-Shape]** Google Material Design 3 — *Shape Scale & Expressive Shapes*: https://m3.material.io/styles/shape/overview
 5. **[M3-Typography]** Google Material Design 3 — *Typography Scale*: https://m3.material.io/styles/typography/overview
 6. **[M3-Motion]** Google Material Design 3 — *Motion Physics, Easing & Duration*: https://m3.material.io/styles/motion/overview
-7. **[WCAG-2.2]** W3C — *Web Content Accessibility Guidelines (WCAG) 2.2* (SC 1.4.3 Contrast Minimum, SC 1.4.11 Non-text Contrast, SC 2.4.7 Focus Visible, SC 2.4.11 Focus Not Obscured, SC 2.4.13 Focus Appearance, SC 2.5.8 Target Size Minimum): https://www.w3.org/TR/WCAG22/
-8. **[Wayland-Layer]** Wayland Protocols — *Session Lock (`ext-session-lock-v1`) & Layer Shell Surfaces*: https://wayland.app/protocols/ext-session-lock-v1
-9. **[z-shell-Paper]** `z-shell` Paper Design Canvas (*z-shell — All Surfaces & Panels* & *Desktop Placement*): https://app.paper.design/file/01M7J3P8QM6GW1HSHNW0M8TQSV/p-2-0
-10. **[z-shell-ADR-0003]** Internal Architecture Decision Record — [docs/adr/0003-pure-rust-audio-and-theme-engines.md](docs/adr/0003-pure-rust-audio-and-theme-engines.md) & [crates/z-shell-theme/src/palette.rs](crates/z-shell-theme/src/palette.rs)
-11. **[z-shell-SCOPE]** Internal Product Scope & Domain Glossary — [SCOPE.md](SCOPE.md) & [GLOSSARY.md](GLOSSARY.md)
+7. **[M3-Icons]** Google Material Design 3 — *Icons Overview & Material Symbols / Icons*: https://m3.material.io/styles/icons/overview · https://fonts.google.com/icons
+8. **[XDG-Icon]** freedesktop.org — *XDG Icon Theme Specification* (runtime Linux desktop application icon lookup): https://specifications.freedesktop.org/icon-theme-spec/latest/
+9. **[WCAG-2.2]** W3C — *Web Content Accessibility Guidelines (WCAG) 2.2* (SC 1.4.3 Contrast Minimum, SC 1.4.11 Non-text Contrast, SC 2.4.7 Focus Visible, SC 2.4.11 Focus Not Obscured, SC 2.4.13 Focus Appearance, SC 2.5.8 Target Size Minimum): https://www.w3.org/TR/WCAG22/
+10. **[Wayland-Layer]** Wayland Protocols — *Session Lock (`ext-session-lock-v1`) & Layer Shell Surfaces*: https://wayland.app/protocols/ext-session-lock-v1
+11. **[z-shell-Paper]** `z-shell` Paper Design Canvas (*z-shell — All Surfaces & Panels* & *Desktop Placement*): https://app.paper.design/file/01M7J3P8QM6GW1HSHNW0M8TQSV/p-2-0
+12. **[z-shell-ADR-0003]** Internal Architecture Decision Record — [docs/adr/0003-pure-rust-audio-and-theme-engines.md](docs/adr/0003-pure-rust-audio-and-theme-engines.md) & [crates/z-shell-theme/src/palette.rs](crates/z-shell-theme/src/palette.rs)
+13. **[z-shell-SCOPE]** Internal Product Scope & Domain Glossary — [SCOPE.md](SCOPE.md) & [GLOSSARY.md](GLOSSARY.md)

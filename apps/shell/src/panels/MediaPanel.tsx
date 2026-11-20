@@ -1,6 +1,6 @@
 import { Button, For, Image, Show, createMemo, getWindowRect, type Accessor } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
-import { ShojiIcon } from "../icons.tsx";
+import { ShellIcon } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
 import { formatTrackTimeUs, selectActiveMediaPlayer, type MediaPlayer } from "../topics.ts";
 
@@ -39,7 +39,7 @@ function TrackControls(props: { player: Accessor<MediaPlayer> }) {
       <row style={{ alignItems: "center", gap: "12px" }}>
         <Show when={src()} fallback={
           <box style={{ ...coverTile, display: "flex", backgroundColor: container, alignItems: "center", justifyContent: "center" }}>
-            <ShojiIcon name="mediaEq" size={28} color={primary} />
+            <ShellIcon name="mediaEq" size={28} color={primary} />
           </box>
         }>
           <Image testId="media-cover" src={src()} style={coverImage} />
@@ -91,16 +91,16 @@ function TrackControls(props: { player: Accessor<MediaPlayer> }) {
       <row style={{ justifyContent: "center", alignItems: "center", gap: "16px" }}>
         <Button testId="media-prev" ariaLabel="Previous track" disabled={!player().capabilities.can_go_previous} style={skip}
           onClick={() => { void invokePublic("media.previous", { player_id: player().id }); }}>
-          <ShojiIcon name="skipPrev" size={18} />
+          <ShellIcon name="skipPrev" size={18} />
         </Button>
         <Button testId="media-play-pause" ariaLabel={playing() ? "Pause" : "Play"} disabled={!canPlayPause()}
           style={{ ...skip, width: "52px", height: "52px", borderRadius: "999px", backgroundColor: primary }}
           onClick={() => { void invokePublic("media.play-pause", { player_id: player().id }); }}>
-          <ShojiIcon name={playing() ? "pause" : "play"} size={24} color={onPrimary} />
+          <ShellIcon name={playing() ? "pause" : "play"} size={24} color={onPrimary} />
         </Button>
         <Button testId="media-next" ariaLabel="Next track" disabled={!player().capabilities.can_go_next} style={skip}
           onClick={() => { void invokePublic("media.next", { player_id: player().id }); }}>
-          <ShojiIcon name="skipNext" size={18} />
+          <ShellIcon name="skipNext" size={18} />
         </Button>
       </row>
     </>
@@ -133,13 +133,13 @@ export function MediaPanel() {
           </For>
         </row>
         <row style={{ ...pill, maxWidth: "48%", flexDirection: "row", gap: "5px", backgroundColor: "var(--color-secondary-container)", color: "var(--color-on-secondary-container)" }}>
-          <ShojiIcon name="volumeHigh" size={14} color="currentColor" />
+          <ShellIcon name="volumeHigh" size={14} color="currentColor" />
           <text style={{ ...truncate, minWidth: "0px" }}>{sink()}</text>
         </row>
       </row>
       <Show when={activePlayer()} fallback={
         <column style={{ flexGrow: 1, alignItems: "center", justifyContent: "center", gap: "8px", color: muted }}>
-          <ShojiIcon name="mediaEq" size={28} color={primary} />
+          <ShellIcon name="mediaEq" size={28} color={primary} />
           <text>Nothing playing</text>
         </column>
       }>

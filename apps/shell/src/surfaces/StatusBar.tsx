@@ -3,7 +3,7 @@ import {
   type Accessor, type ButtonProps, type Monitor, type NativeEvent, type NativeNode, type NativeStyle, type NativeWheelEvent, type NativeWindowRect,
 } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
-import { ShojiIcon } from "../icons.tsx";
+import { ShellIcon } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import {
@@ -121,7 +121,7 @@ function ActiveWindowPill(props: { window: Accessor<WaylandWindow>; vertical: bo
   const { src } = useDaemonMedia(hostClient, () => app()?.icon, { fetchCommand: "launcher.fetch-blob" });
   return (
     <box testId="bar-active-window" ariaLabel={props.window().title} style={props.vertical ? verticalCircle : horizontalLabelPill}>
-      <Show when={src()} fallback={<ShojiIcon name="terminal" color={primary} />}>
+      <Show when={src()} fallback={<ShellIcon name="terminal" color={primary} />}>
         {image => <Image ariaHidden src={image()} style={{ width: "16px", height: "16px", borderRadius: "4px", flexShrink: 0, "object-fit": "contain" }} />}
       </Show>
       <Show when={!props.vertical}>
@@ -193,7 +193,7 @@ function ClockPill(props: { vertical: boolean; clock: Accessor<BarClock>; second
       <Show when={count() > 0 || (!props.vertical && dnd())}>
         <Show when={!props.vertical}><Divider vertical={false} short /></Show>
         <box testId="bar-notifications-badge" style={notificationBadge}>
-          <Show when={!props.vertical}><ShojiIcon name={dnd() ? "bellOff" : "bell"} size={12} color={onPrimaryContainer} /></Show>
+          <Show when={!props.vertical}><ShellIcon name={dnd() ? "bellOff" : "bell"} size={12} color={onPrimaryContainer} /></Show>
           <text>{count()}</text>
         </box>
       </Show>
@@ -248,14 +248,14 @@ function SystemPill(props: { vertical: boolean; monitorId: string; surfaceName: 
       </Show>
       <Show when={privacy.data()?.audio_capture.state === "active"}>
         <box testId="bar-privacy" ariaLabel="Microphone in use" style={{ ...center, width: "20px", height: "18px", borderRadius: "10px", backgroundColor: "var(--color-error-container)" }}>
-          <ShojiIcon name="mic" size={13} color="var(--color-on-error-container)" />
+          <ShellIcon name="mic" size={13} color="var(--color-on-error-container)" />
         </box>
       </Show>
       <Button testId="bar-network" ariaLabel="Network settings" style={btnStyle()} onClick={quickSettings}>
-        <ShojiIcon name={networkIcon()} color={networkIcon() === "wifiOff" ? muted : onSurface} />
+        <ShellIcon name={networkIcon()} color={networkIcon() === "wifiOff" ? muted : onSurface} />
       </Button>
       <Button testId="bar-bluetooth" ariaLabel="Bluetooth settings" style={btnStyle()} onClick={quickSettings}>
-        <ShojiIcon name={bluetoothPowered() || bluetoothConnected() ? "bluetooth" : "bluetoothOff"}
+        <ShellIcon name={bluetoothPowered() || bluetoothConnected() ? "bluetooth" : "bluetoothOff"}
           color={bluetoothConnected() ? primary : bluetoothPowered() ? onSurface : muted} />
       </Button>
       <Button testId="bar-audio" ariaLabel="Audio settings" style={btnStyle()} onClick={quickSettings}
@@ -271,7 +271,7 @@ function SystemPill(props: { vertical: boolean; monitorId: string; surfaceName: 
           const device = sink();
           if (device) void invokePublic("audio.set-mute", { kind: "sink", index: device.index, muted: !device.muted });
         })}>
-        <ShojiIcon name={audioIcon()} />
+        <ShellIcon name={audioIcon()} />
       </Button>
       <Show when={power.data()?.battery}>
         {battery => (
@@ -292,7 +292,7 @@ function SystemPill(props: { vertical: boolean; monitorId: string; surfaceName: 
               padding: props.vertical ? "4px 0" : "0 4px",
               flexShrink: 0,
             }}>
-            <ShojiIcon name={battery().state === "charging" || battery().state === "full" ? "batteryCharging" : "battery"}
+            <ShellIcon name={battery().state === "charging" || battery().state === "full" ? "batteryCharging" : "battery"}
               color={battery().state === "discharging" && (battery().percentage ?? 100) < 20
                 ? error : battery().state === "charging" ? primary : onSurface} />
             <text testId="bar-battery-text">{battery().percentage == null ? "—" : `${Math.round(battery().percentage ?? 0)}%`}</text>
@@ -340,7 +340,7 @@ function BarContent(props: {
               event.stopPropagation();
               togglePanel("launcher", { monitorId: props.monitor.id });
             }}>
-            <ShojiIcon name="shojiEmblem" size={20} color={primary} />
+            <ShellIcon name="apps" size={20} color={primary} />
           </Button>
         </Show>
         <box testId="bar-workspaces" style={vertical() ? { ...verticalPill, gap: "2px", padding: "6px 0" }
@@ -364,7 +364,7 @@ function BarContent(props: {
               event.stopPropagation();
               togglePanel("overview", { monitorId: props.monitor.id });
             }}>
-            <ShojiIcon name="overview" color={muted} />
+            <ShellIcon name="overview" color={muted} />
           </Button>
         </box>
         <Show when={activeWindow()}>
@@ -399,7 +399,7 @@ function BarContent(props: {
                 event.preventDefault();
                 void invokePublic(direction > 0 ? "media.next" : "media.previous", { player_id: active().id });
               }}>
-              <ShojiIcon name="mediaEq" color={primary} />
+              <ShellIcon name="mediaEq" color={primary} />
               <Show when={!vertical()}><text testId="bar-media-text" style={clippedText}>{mediaLabel()}</text></Show>
             </Button>
           )}

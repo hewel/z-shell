@@ -1,5 +1,5 @@
 import { For, PopupSurface, Show, createMemo, type NativeChild, type PopupSurfacePlacement } from "@hewel/zgui";
-import { ShojiIcon } from "../icons.tsx";
+import { ShellIcon } from "../icons.tsx";
 import { createEnterProgress, panelMotionStyle } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
@@ -79,13 +79,13 @@ function MenuButton(props: {
       }}>
       <box ariaHidden style={indicator}>
         <Show when={props.checked}>
-          <Show when={props.toggle === "radio"} fallback={<ShojiIcon name="check" size={14} color={primary} />}>
+          <Show when={props.toggle === "radio"} fallback={<ShellIcon name="check" size={14} color={primary} />}>
             <box style={{ width: "6px", height: "6px", borderRadius: "3px", backgroundColor: primary }} />
           </Show>
         </Show>
       </box>
       <text style={{ flexGrow: 1, minWidth: "0px", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{props.label}</text>
-      <Show when={props.submenu}><ShojiIcon name="chevronRight" size={12} color={onSurfaceVariant} /></Show>
+      <Show when={props.submenu}><ShellIcon name="chevronRight" size={12} color={onSurfaceVariant} /></Show>
     </control>
   );
 }

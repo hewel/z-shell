@@ -1,5 +1,5 @@
 import { Button, LayerSurface, Show, createMemo, focus, registerDismissLayer, type Accessor, type NativeChild } from "@hewel/zgui";
-import { ShojiIcon } from "../icons.tsx";
+import { ShellIcon } from "../icons.tsx";
 import { DIALOG_SPRING, createEnterProgress, dialogMotionStyle, scrimBackdrop } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { POWER_DIALOG_COPY, resolveMonitorLogicalSize, type PowerConfirmAction } from "../topics.ts";
@@ -44,7 +44,7 @@ function PowerDialogContent(props: { action: Accessor<PowerConfirmAction> }): Na
           display: "flex", alignItems: "center", justifyContent: "center", width: "56px", height: "56px", borderRadius: "999px",
           backgroundColor: copy().destructive ? "var(--color-error-container)" : "var(--color-primary-container)",
         }}>
-          <ShojiIcon name={copy().icon} size={26}
+          <ShellIcon name={copy().icon} size={26}
             color={copy().destructive ? "var(--color-on-error-container)" : "var(--color-on-primary-container)"} />
         </box>
         <text testId="power-dialog-title" role="heading" style={{ fontSize: "22px", fontWeight: 700 }}>{copy().title}</text>

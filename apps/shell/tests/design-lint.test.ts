@@ -4,7 +4,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { SHOJI_DEFAULT_SCHEME, buildThemeStylesheet } from "../src/theme.ts";
+import { LOCK_MORPH_SHAPES, SHELL_ROSETTE_PATH } from "../src/shapes.ts";
+import { SHELL_DEFAULT_SCHEME, buildThemeStylesheet } from "../src/theme.ts";
 import { DEFAULT_BAR_SETTINGS } from "../src/topics.ts";
 
 const shellDir = resolve(import.meta.dir, "..");
@@ -162,7 +163,7 @@ describe("zshell oxlint design plugin", () => {
     expect(good.status, good.output).toBe(0);
   });
 
-  test("zshell/expressive-budget scopes wavy progress to MediaPanel and scalloped shapes to brand/Launcher/Lock", () => {
+  test("zshell/expressive-budget scopes wavy progress to MediaPanel and scalloped rosettes to brand mark & user avatars (not Launcher triggers)", () => {
     const badWavy = lintSnippet("QuickSettingsPanel.tsx", `export const x = <WavyProgress />;`, "zshell/expressive-budget");
     expect(badWavy.status).not.toBe(0);
 
@@ -172,8 +173,23 @@ describe("zshell oxlint design plugin", () => {
     const badScallop = lintSnippet("CalendarPanel.tsx", `const scallopPath = "M0 0"; export const x = scallopPath;`, "zshell/expressive-budget");
     expect(badScallop.status).not.toBe(0);
 
-    const goodScallop = lintSnippet("SessionLockOverlay.tsx", `const avatarScallop = "M0 0"; export const x = avatarScallop;`, "zshell/expressive-budget");
-    expect(goodScallop.status, goodScallop.output).toBe(0);
+    const badLauncherBar = lintSnippet("StatusBar.tsx", `export const x = <ShellIcon name="shellEmblem" size={20} />;`, "zshell/expressive-budget");
+    expect(badLauncherBar.status).not.toBe(0);
+
+    const badLauncherDock = lintSnippet("DockSurface.tsx", `export const x = <ShellIcon name="shellEmblem" size={22} />;`, "zshell/expressive-budget");
+    expect(badLauncherDock.status).not.toBe(0);
+
+    const badLauncherOverlay = lintSnippet("LauncherOverlay.tsx", `const rosette = "M0 0"; export const x = rosette;`, "zshell/expressive-budget");
+    expect(badLauncherOverlay.status).not.toBe(0);
+
+    const goodLauncherBar = lintSnippet("StatusBar.tsx", `export const x = <ShellIcon name="apps" size={20} />;`, "zshell/expressive-budget");
+    expect(goodLauncherBar.status, goodLauncherBar.output).toBe(0);
+
+    const goodScallopLock = lintSnippet("SessionLockOverlay.tsx", `const avatarScallop = "M0 0"; export const x = avatarScallop;`, "zshell/expressive-budget");
+    expect(goodScallopLock.status, goodScallopLock.output).toBe(0);
+
+    const goodScallopQs = lintSnippet("QuickSettingsPanel.tsx", `const avatarRosette = "M0 0"; export const x = avatarRosette;`, "zshell/expressive-budget");
+    expect(goodScallopQs.status, goodScallopQs.output).toBe(0);
   });
 
   test("zshell/no-lint-suppression rejects inline oxlint/eslint disable comments", () => {
@@ -183,17 +199,107 @@ describe("zshell oxlint design plugin", () => {
     const good = lintSnippet("Good.tsx", `// Regular explanation comment.\nexport const x = 1;`, "zshell/no-lint-suppression");
     expect(good.status, good.output).toBe(0);
   });
+
+  test("zshell/no-hand-authored-expressive-paths rejects hand-coded Bezier expressive shapes outside shapes.ts", () => {
+    const badVar = lintSnippet("SessionLockOverlay.tsx", `export const avatarScallop = "M32 2C37-1 43 1 46 6Z";`, "zshell/no-hand-authored-expressive-paths");
+    expect(badVar.status).not.toBe(0);
+
+    const badObj = lintSnippet("icons.tsx", `export const ICONS = { shellEmblem: { d: "M32 4C36 4 38 7 41 8Z" } };`, "zshell/no-hand-authored-expressive-paths");
+    expect(badObj.status).not.toBe(0);
+
+    const goodRef = lintSnippet("icons.tsx", `import { SHELL_ROSETTE_PATH } from "./shapes.ts"; export const ICONS = { shellEmblem: { d: SHELL_ROSETTE_PATH } };`, "zshell/no-hand-authored-expressive-paths");
+    expect(goodRef.status, goodRef.output).toBe(0);
+  });
+
+  test("zshell/material-icon-grid enforces 24x24 Material viewBox and bans ad-hoc inline vector paths in shell surfaces", () => {
+    const badIconGrid = lintSnippet("icons.tsx", `export const ICONS = { mediaEq: { viewBox: "0 0 16 16", d: "M0 0h16v16H0z" } };`, "zshell/material-icon-grid");
+    expect(badIconGrid.status).not.toBe(0);
+
+    const badVectorGrid = lintSnippet("Widget.tsx", `export const x = <vector d={path} viewBox="0 0 16 16" />;`, "zshell/material-icon-grid");
+    expect(badVectorGrid.status).not.toBe(0);
+
+    const goodIconGrid = lintSnippet("icons.tsx", `export const ICONS = { mediaEq: { viewBox: "0 0 24 24", d: "M7 18h2V6H7v12z" }, shellEmblem: { viewBox: "0 0 64 64", d: p } };`, "zshell/material-icon-grid");
+    expect(goodIconGrid.status, goodIconGrid.output).toBe(0);
+  });
+});
+
+function parseCubicPoints(d: string): { x: number; y: number }[] {
+  const nums = d.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+  expect(nums.length % 2).toBe(0);
+  const points: { x: number; y: number }[] = [];
+  for (let i = 0; i < nums.length; i += 2) {
+    points.push({ x: nums[i]!, y: nums[i + 1]! });
+  }
+  return points;
+}
+
+function assertDihedralSymmetry(label: string, d: string, lobes: number, cx: number, cy: number, size: number) {
+  const points = parseCubicPoints(d);
+  expect(points.length, `${label} point count`).toBeGreaterThan(0);
+
+  for (const pt of points) {
+    expect(pt.x, `${label} x in [0, ${size}]`).toBeGreaterThanOrEqual(0);
+    expect(pt.x, `${label} x in [0, ${size}]`).toBeLessThanOrEqual(size);
+    expect(pt.y, `${label} y in [0, ${size}]`).toBeGreaterThanOrEqual(0);
+    expect(pt.y, `${label} y in [0, ${size}]`).toBeLessThanOrEqual(size);
+  }
+
+  const angle = (2 * Math.PI) / lobes;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const hasNear = (tx: number, ty: number) =>
+    points.some(candidate => Math.hypot(candidate.x - tx, candidate.y - ty) < 0.01);
+
+  for (const pt of points) {
+    // Rotational symmetry by 2*pi / lobes around (cx, cy).
+    const dx = pt.x - cx;
+    const dy = pt.y - cy;
+    const rx = cx + dx * cos - dy * sin;
+    const ry = cy + dx * sin + dy * cos;
+    expect(hasNear(rx, ry), `${label} rotational symmetry for (${pt.x}, ${pt.y}) -> (${rx.toFixed(3)}, ${ry.toFixed(3)})`).toBe(true);
+
+    // Mirror symmetry across vertical axis x = cx.
+    const mx = 2 * cx - pt.x;
+    expect(hasNear(mx, pt.y), `${label} mirror symmetry for (${pt.x}, ${pt.y}) -> (${mx.toFixed(3)}, ${pt.y})`).toBe(true);
+  }
+}
+
+describe("Exact-Geometry Shape & Material-First Icon contracts", () => {
+  test("all M3 Expressive shapes satisfy exact D_n rotational & mirror symmetry within their viewBox", () => {
+    assertDihedralSymmetry("SHELL_ROSETTE_PATH", SHELL_ROSETTE_PATH, 8, 32, 32, 64);
+    for (const [name, shape] of Object.entries(LOCK_MORPH_SHAPES)) {
+      expect(shape.viewBox).toBe("0 0 24 24");
+      assertDihedralSymmetry(name, shape.d, shape.lobes, 12, 12, 24);
+    }
+  });
+
+  test("all Tier 1 system UI icons in SHELL_ICON_PATHS use the 24x24 Material grid", () => {
+    const iconsSource = readFileSync(join(shellDir, "src/icons.tsx"), "utf8");
+    const entries = [...iconsSource.matchAll(/^\s{2}([a-zA-Z0-9_]+):\s*\{\s*\n\s*viewBox:\s*"([^"]+)"/gm)];
+    expect(entries.length).toBeGreaterThanOrEqual(30);
+    const names = new Set(entries.map(([, name]) => name));
+    expect(names.has("apps")).toBe(true);
+    expect(names.has("overview")).toBe(true);
+    for (const [, name, viewBox] of entries) {
+      if (name === "shellEmblem") {
+        expect(viewBox).toBe("0 0 64 64");
+      } else {
+        expect(viewBox, `SHELL_ICON_PATHS.${name}`).toBe("0 0 24 24");
+      }
+    }
+    expect(iconsSource).toContain("d: SHELL_ROSETTE_PATH");
+  });
 });
 
 describe("DESIGN.md token and surface contract sync", () => {
-  test("DESIGN.md frontmatter colors match SHOJI_DEFAULT_SCHEME and app.css :root", () => {
+  test("DESIGN.md frontmatter colors match SHELL_DEFAULT_SCHEME and app.css :root", () => {
     const frontmatter = parseDesignFrontmatter();
     const appCss = readFileSync(join(shellDir, "src/app.css"), "utf8");
-    const themeCss = buildThemeStylesheet(SHOJI_DEFAULT_SCHEME, true);
+    const themeCss = buildThemeStylesheet(SHELL_DEFAULT_SCHEME, true);
 
     for (const [token, expectedHex] of Object.entries(frontmatter.colors ?? {})) {
-      const schemeKey = token.replaceAll("-", "_") as keyof typeof SHOJI_DEFAULT_SCHEME;
-      expect(SHOJI_DEFAULT_SCHEME[schemeKey]?.toUpperCase(), `theme.ts ${schemeKey}`).toBe(expectedHex.toUpperCase());
+      const schemeKey = token.replaceAll("-", "_") as keyof typeof SHELL_DEFAULT_SCHEME;
+      expect(SHELL_DEFAULT_SCHEME[schemeKey]?.toUpperCase(), `theme.ts ${schemeKey}`).toBe(expectedHex.toUpperCase());
       expect(appCss, `app.css --color-${token}`).toContain(`--color-${token}: ${expectedHex};`);
     }
 

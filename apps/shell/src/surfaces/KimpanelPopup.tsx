@@ -1,5 +1,5 @@
 import { Button, For, LayerSurface, Show, createMemo, type Accessor, type Monitor, type NativeChild, type NativeStyle } from "@hewel/zgui";
-import { ShojiIcon } from "../icons.tsx";
+import { ShellIcon } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import { clampOverlayPosition, resolveMonitorLogicalSize, type DesktopImePanelSnapshot, type ImeLookupTable } from "../topics.ts";
@@ -103,11 +103,11 @@ function CandidateCard(props: {
         <row style={{ justifyContent: "flex-end", gap: "4px", flexShrink: 0 }}>
           <Button testId="kimpanel-prev" ariaLabel="Previous candidate page" disabled={!table().has_prev}
             onClick={() => page(false)} style={{ ...pagerButton, opacity: table().has_prev ? 1 : 0.4 }}>
-            <ShojiIcon name="chevronLeft" size={14} />
+            <ShellIcon name="chevronLeft" size={14} />
           </Button>
           <Button testId="kimpanel-next" ariaLabel="Next candidate page" disabled={!table().has_next}
             onClick={() => page(true)} style={{ ...pagerButton, opacity: table().has_next ? 1 : 0.4 }}>
-            <ShojiIcon name="chevronRight" size={14} />
+            <ShellIcon name="chevronRight" size={14} />
           </Button>
         </row>
       </Show>

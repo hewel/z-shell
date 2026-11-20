@@ -1,5 +1,5 @@
 import { Button, For, Show, createMemo } from "@hewel/zgui";
-import { ShojiIcon, type ShojiIconName } from "../icons.tsx";
+import { ShellIcon, type ShellIconName } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
 import { formatBytesGiB, formatDurationSeconds, maxThermalCelsius, type BatteryState } from "../topics.ts";
 
@@ -28,11 +28,11 @@ function percent(value: number | null | undefined) {
   return value == null ? "—" : `${Math.round(value)}%`;
 }
 
-function TelemetryCard(props: { icon: ShojiIconName; label: string; value: string; detail?: string | undefined }) {
+function TelemetryCard(props: { icon: ShellIconName; label: string; value: string; detail?: string | undefined }) {
   return (
     <column style={{ ...metric, backgroundColor: container, borderRadius: "16px", gap: "4px", padding: "10px" }}>
       <row style={{ alignItems: "center", gap: "4px" }}>
-        <ShojiIcon name={props.icon} size={14} color={primary} />
+        <ShellIcon name={props.icon} size={14} color={primary} />
         <text style={{ color: muted, fontSize: "11px" }}>{props.label}</text>
       </row>
       <text style={{ fontSize: "16px", fontWeight: 600 }}>{props.value}</text>
@@ -84,7 +84,7 @@ export function BatteryPanel() {
       <column style={{ padding: "16px", gap: "12px", flexDirection: "column" }}>
         <column style={{ ...card, padding: "14px" }}>
           <row style={{ alignItems: "center", gap: "8px" }}>
-            <ShojiIcon name={charging() ? "batteryCharging" : "battery"} size={22} color={primary} />
+            <ShellIcon name={charging() ? "batteryCharging" : "battery"} size={22} color={primary} />
             <text style={{ fontWeight: 600 }}>Battery</text>
             <Show when={battery()}>
               {current => (

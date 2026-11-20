@@ -1,5 +1,5 @@
 import { For, LayerSurface, Show, createEffect, createMemo, createSignal, createSpring, onSettled, type Accessor, type Monitor, type NativeChild } from "@hewel/zgui";
-import { ShojiIcon } from "../icons.tsx";
+import { ShellIcon } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
 import { formatSurfaceName, resolveMonitorLogicalSize, type OsdPayload, type WarningFade } from "../topics.ts";
 
@@ -39,7 +39,7 @@ function OsdPill({ osd }: { osd: Accessor<OsdPayload> }): NativeChild {
         display: "flex", width: "34px", height: "34px", borderRadius: "999px", flexShrink: 0,
         alignItems: "center", justifyContent: "center", backgroundColor: primary,
       }}>
-        <ShojiIcon name={icon()} size={18} color="var(--color-on-primary)" />
+        <ShellIcon name={icon()} size={18} color="var(--color-on-primary)" />
       </box>
       <Show when={osd().kind === "ime"} fallback={
         <>
