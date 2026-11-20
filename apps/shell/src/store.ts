@@ -1,4 +1,4 @@
-import { createContext, createEffect, createSignal, flush, onCleanup, runWithOwner, useContext, useMonitors, type Accessor, type Monitor, type NativeChild, type NativeWindowRect } from "@hewel/zgui";
+import { createContext, createEffect, createSignal, flush, getSessionGeneration, onCleanup, runWithOwner, useContext, useMonitors, type Accessor, type Monitor, type NativeChild, type NativeWindowRect } from "@hewel/zgui";
 import { mountOwned } from "@hewel/zgui/renderer";
 import { getResolvedCapabilities, onControlMessage, type JsonValue } from "@hewel/zgui-services";
 import { ZShellClient, type BusHelloResult, type BusTransport, type CommandInvokeResult } from "@z-shell/sdk";
@@ -14,7 +14,10 @@ import type {
   DesktopNotificationsSnapshot,
   DesktopTraySnapshot,
   IdleSnapshot,
+  LockSnapshot,
   OsdPayload,
+  PolkitSnapshot,
+  PowerConfirmAction,
   PublicSettingsSummary,
   SystemAudioSnapshot,
   SystemBluetoothSnapshot,
@@ -37,6 +40,7 @@ export const SHELL_SUBSCRIBED_TOPICS = [
   "system.audio", "system.privacy", "system.network", "system.bluetooth", "system.power",
   "clipboard", "system.brightness", "system.telemetry", "system.user", "session.idle",
   "desktop.apps", "desktop.ime.panel",
+  "session.lock", "session.polkit",
 ] as const;
 
 export type SocketStatus = "disconnected" | "connecting" | "ready" | "error";
@@ -114,6 +118,8 @@ interface ShellTopics {
   readonly idle: TopicState<IdleSnapshot>;
   readonly apps: TopicState<DesktopAppsSnapshot>;
   readonly imePanel: TopicState<DesktopImePanelSnapshot>;
+  readonly sessionLock: TopicState<LockSnapshot>;
+  readonly polkit: TopicState<PolkitSnapshot>;
 }
 
 export interface ShellStore extends ShellTopics {
@@ -127,6 +133,9 @@ export interface ShellStore extends ShellTopics {
   readonly lastError: Accessor<string | undefined>;
   invokePublic(name: string, payload?: unknown): Promise<CommandInvokeResult | undefined>;
   invokeHost(name: string, payload?: unknown): Promise<CommandInvokeResult | undefined>;
+  readonly invokeHostResult: (name: string, payload?: unknown) => Promise<
+    { readonly ok: true; readonly result: CommandInvokeResult } | { readonly ok: false; readonly error: string }
+  >;
   readonly activePanel: Accessor<PanelId | null>;
   readonly activePanelTarget: Accessor<PanelTarget | null>;
   togglePanel(id: PanelId, target?: PanelAnchor): void;
@@ -137,6 +146,9 @@ export interface ShellStore extends ShellTopics {
   readonly activeImeMenu: Accessor<ImeMenuTarget | null>;
   openImeMenu(target: ImeMenuTarget): void;
   closeImeMenu(): void;
+  readonly pendingPowerAction: Accessor<PowerConfirmAction | null>;
+  readonly requestPowerDialog: (action: PowerConfirmAction) => void;
+  readonly closePowerDialog: () => void;
   readonly activeOsd: Accessor<OsdPayload | null>;
   showOsd(osd: Omit<OsdPayload, "seq">): void;
   readonly pluginBarWidgets: Accessor<readonly PluginBarWidgetSlot[]>;
@@ -186,6 +198,13 @@ export function createShellStore(): ShellStore {
     setOverlay(active => active?.kind === kind ? null : active);
   };
 
+  const [pendingPowerAction, setPendingPowerAction] = createSignal<PowerConfirmAction | null>(null);
+  const requestPowerDialog = (action: PowerConfirmAction) => {
+    setOverlay(null);
+    setPendingPowerAction(action);
+  };
+  const closePowerDialog = () => { setPendingPowerAction(null); };
+
   const [activeOsd, setActiveOsd] = createSignal<OsdPayload | null>(null);
   let osdSeq = 0;
   let osdTimer: number | undefined;
@@ -208,8 +227,10 @@ export function createShellStore(): ShellStore {
       : slots);
   }
 
-  function reportError(error: unknown): void {
-    if (!disposed) setLastError(error instanceof Error ? error.message : String(error));
+  function reportError(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!disposed) setLastError(message);
+    return message;
   }
 
   async function invoke(client: ZShellClient | undefined, name: string, payload?: unknown) {
@@ -221,7 +242,7 @@ export function createShellStore(): ShellStore {
     }
   }
 
-  function open(path: string | null, name: string) {
+  function open(path: string | null, name: string, onConnected?: (client: ZShellClient) => void) {
     const [client, setClient] = createSignal<ZShellClient>();
     const [status, setStatus] = createSignal<SocketStatus>(path === null ? "disconnected" : "connecting");
     const hello = () => client()?.helloInfo;
@@ -258,6 +279,7 @@ export function createShellStore(): ShellStore {
           connected.close();
           return;
         }
+        onConnected?.(connected);
         setClient(connected);
         setStatus("ready");
       } catch (error) {
@@ -271,7 +293,10 @@ export function createShellStore(): ShellStore {
   }
 
   const { client: publicClient, status: publicStatus, hello: publicHello, close: closePublic } = open(publicSocket, "z-shell-ui");
-  const { client: hostClient, status: hostStatus, hello: hostHello, close: closeHost } = open(hostSocket, "z-shell-host");
+  const { client: hostClient, status: hostStatus, hello: hostHello, close: closeHost } = open(hostSocket, "z-shell-host", connected => {
+    // Register before publishing the host client, so this is always request 2.
+    void connected.invokeCommand("host.session-register", [], { ui_session_generation: getSessionGeneration() }).catch(reportError);
+  });
   let disposeTopics: (() => void) | undefined;
   onCleanup(() => {
     disposed = true;
@@ -351,6 +376,8 @@ export function createShellStore(): ShellStore {
       idle: useTopic<IdleSnapshot>(publicClient, "session.idle"),
       apps: useTopic<DesktopAppsSnapshot>(publicClient, "desktop.apps"),
       imePanel: useTopic<DesktopImePanelSnapshot>(publicClient, "desktop.ime.panel"),
+      sessionLock: useTopic<LockSnapshot>(publicClient, "session.lock"),
+      polkit: useTopic<PolkitSnapshot>(publicClient, "session.polkit"),
     };
   }));
 
@@ -376,6 +403,18 @@ export function createShellStore(): ShellStore {
         }
         break;
       }
+      case "power": {
+        const action = args[1];
+        if (action === "close") {
+          flush(closePowerDialog);
+          return { pendingPowerAction: null };
+        }
+        if (action === "lock" || action === "suspend" || action === "reboot" || action === "poweroff" || action === "logout") {
+          flush(() => requestPowerDialog(action));
+          return { pendingPowerAction: pendingPowerAction() };
+        }
+        break;
+      }
     }
   });
 
@@ -384,6 +423,15 @@ export function createShellStore(): ShellStore {
     ...topics,
     invokePublic: (name, payload) => invoke(publicClient(), name, payload),
     invokeHost: (name, payload) => invoke(hostClient(), name, payload),
+    async invokeHostResult(name, payload) {
+      const client = hostClient();
+      if (!client) return { ok: false, error: "Host bus is not connected" };
+      try {
+        return { ok: true, result: await client.invokeCommand(name, [], payload) };
+      } catch (error) {
+        return { ok: false, error: reportError(error) };
+      }
+    },
     activePanel,
     activePanelTarget,
     togglePanel,
@@ -394,6 +442,9 @@ export function createShellStore(): ShellStore {
     activeImeMenu,
     openImeMenu: target => setOverlay({ kind: "ime", target }),
     closeImeMenu: () => closeOverlay("ime"),
+    pendingPowerAction,
+    requestPowerDialog,
+    closePowerDialog,
     activeOsd,
     showOsd,
     pluginBarWidgets,

@@ -146,12 +146,46 @@ function readCapture(out: string, surface: string, captureId: string) {
   };
 }
 
-function previewSurfaces(out: string, stepId: string): readonly string[] {
-  const steps = readFileSync(join(out, "steps.jsonl"), "utf8").trim().split("\n").map(line =>
-    JSON.parse(line) as { readonly id: string; readonly result?: { readonly surfaces?: readonly string[] } });
+interface SessionLockSnapshot {
+  readonly state: string;
+  readonly unlockCount: number;
+  readonly coveredOutputs: readonly string[];
+  readonly fallbackOutputs: readonly string[];
+}
+
+interface PreviewStep {
+  readonly id: string;
+  readonly result?: {
+    readonly surfaces?: readonly string[];
+    readonly readiness?: { readonly sessionLock?: SessionLockSnapshot };
+  };
+}
+
+function previewStep(out: string, stepId: string): PreviewStep {
+  const steps = readFileSync(join(out, "steps.jsonl"), "utf8").trim().split("\n")
+    .map(line => JSON.parse(line) as PreviewStep);
   const step = steps.find(candidate => candidate.id === stepId);
   expect(step, stepId).toBeDefined();
-  return step!.result?.surfaces ?? [];
+  return step!;
+}
+
+function previewSurfaces(out: string, stepId: string): readonly string[] {
+  return previewStep(out, stepId).result?.surfaces ?? [];
+}
+
+function previewSessionLock(out: string, stepId: string): SessionLockSnapshot {
+  const snapshot = previewStep(out, stepId).result?.readiness?.sessionLock;
+  expect(snapshot, stepId).toBeDefined();
+  return snapshot!;
+}
+
+function sessionLockTrace(out: string): SessionLockSnapshot {
+  const trace = JSON.parse(readFileSync(join(out, "services.json"), "utf8")) as {
+    readonly records: readonly { readonly kind: string; readonly detail: SessionLockSnapshot }[];
+  };
+  const record = trace.records.findLast(candidate => candidate.kind === "sessionLock");
+  expect(record).toBeDefined();
+  return record!.detail;
 }
 
 function treeNode(tree: { readonly nodes: readonly PreviewTreeNode[] }, testId: string): PreviewTreeNode {
@@ -389,13 +423,13 @@ describe("apps/shell preview", () => {
         commands: [
           {
             socket: "host",
-            id: 2,
+            id: 3,
             name: "network.wifi.connect",
             payload: { device_id: "wlan0", ap_id: "ap-shoji-lab", password: "shoji-secret" },
             atMs: 45,
           },
           {
-            id: 24,
+            id: 26,
             name: "wallpaper.list",
             payload: { offset: 0, limit: 24 },
             atMs: 50,
@@ -415,14 +449,14 @@ describe("apps/shell preview", () => {
           },
           {
             socket: "host",
-            id: 3,
+            id: 4,
             name: "wallpaper.fetch-blob",
             payload: { token: "wallpaper-aurora-thumb" },
             atMs: 55,
             result: { data: { bytes: makeTinyPngBytes(0x7c, 0xd4, 0xff) } },
           },
           {
-            id: 25,
+            id: 27,
             name: "wallpaper.set",
             payload: { path: "/wallpapers/aurora.png", output: null, fit: "cover" },
             atMs: 60,
@@ -638,18 +672,18 @@ describe("apps/shell preview", () => {
           },
         },
         commands: [
-          { id: 24, name: "notifications.set-dnd", payload: { dnd: true }, atMs: 40 },
-          { id: 25, name: "media.play-pause", payload: { player_id: "nujabes" }, atMs: 50 },
-          { id: 26, name: "power.set-profile", payload: { profile: "performance" }, atMs: 60 },
+          { id: 26, name: "notifications.set-dnd", payload: { dnd: true }, atMs: 40 },
+          { id: 27, name: "media.play-pause", payload: { player_id: "nujabes" }, atMs: 50 },
+          { id: 28, name: "power.set-profile", payload: { profile: "performance" }, atMs: 60 },
           {
             socket: "host",
-            id: 2,
+            id: 3,
             name: "clipboard.fetch-blob",
             payload: { token: "clipboard-green" },
             atMs: 70,
             result: { data: { bytes: makeTinyPngBytes(0x22, 0xc5, 0x5e) } },
           },
-          { id: 27, name: "clipboard.copy", payload: { id: 11 }, atMs: 90 },
+          { id: 29, name: "clipboard.copy", payload: { id: 11 }, atMs: 90 },
         ],
       }), null, 2));
       writeFileSync(scenario, JSON.stringify({
@@ -865,14 +899,14 @@ describe("apps/shell preview", () => {
         ],
         commands: [
           {
-            id: 24,
+            id: 26,
             name: "notifications.invoke-action",
             payload: { id: 1, action_key: "open" },
             atMs: 40,
           },
-          { id: 25, name: "notifications.dismiss", payload: { id: 1 }, atMs: 40 },
-          { id: 26, name: "ime.select-candidate", payload: { index: 1 }, atMs: 2070 },
-          { id: 27, name: "ime.page-down", payload: {}, atMs: 2070 },
+          { id: 27, name: "notifications.dismiss", payload: { id: 1 }, atMs: 40 },
+          { id: 28, name: "ime.select-candidate", payload: { index: 1 }, atMs: 2070 },
+          { id: 29, name: "ime.page-down", payload: {}, atMs: 2070 },
         ],
       }), null, 2));
       writeFileSync(scenario, JSON.stringify({
@@ -1048,23 +1082,23 @@ describe("apps/shell preview", () => {
           },
         },
         commands: [
-          { id: 24, name: "wayland.window.activate", payload: { window_id: 41 }, atMs: 40 },
+          { id: 26, name: "wayland.window.activate", payload: { window_id: 41 }, atMs: 40 },
           {
-            id: 25,
+            id: 27,
             name: "launcher.query",
             payload: { query: "", query_id: 1, limit: 18 },
             atMs: 40,
             result: { data: { query_id: 1, items: [zen, alacritty] } },
           },
           {
-            id: 26,
+            id: 28,
             name: "launcher.query",
             payload: { query: "ala", query_id: 2, limit: 18 },
             atMs: 50,
             result: { data: { query_id: 2, items: [alacritty] } },
           },
           {
-            id: 27,
+            id: 29,
             name: "launcher.activate",
             payload: { query_id: 2, provider_id: "desktop", item_id: "alacritty.desktop" },
             atMs: 60,
@@ -1139,6 +1173,363 @@ describe("apps/shell preview", () => {
       expect(treeNode(launcher.tree, "launcher-item-desktop-alacritty.desktop").boundsDevice).toBeDefined();
       expect(launcher.tree.nodes.some(node => node.text === "Zen Browser")).toBe(true);
       expect(launcher.tree.nodes.some(node => node.text === "Alacritty")).toBe(true);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  previewTest("ADR-0004 Session Lock: multi-output opaque SessionLockSurface, PAM failure -> retry -> scoped unlock, plus compositor refusal", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "z-shell-preview-session-lock-"));
+    const lockedOut = join(workspace, "locked-out");
+    const refusedOut = join(workspace, "refused-out");
+    const monitors = [
+      {
+        id: "dp-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900,
+        scale: 1, refreshRateMilliHz: 60000,
+      },
+      {
+        id: "hdmi-1", name: "HDMI-A-1", x: 1440, y: 0, width: 1280, height: 720,
+        scale: 1, refreshRateMilliHz: 60000,
+      },
+    ];
+    try {
+      const lockedFixture = join(workspace, "locked-fixture.json");
+      const lockedScenario = join(workspace, "locked-scenario.json");
+      const fixtureValue = buildShellPreviewFixture({
+        id: "z-shell-phase-4-session-lock",
+        sessionLock: { outcome: "locked" },
+        topicUpdates: [
+          {
+            topic: "session.lock",
+            atMs: 40,
+            revision: 2,
+            data: {
+              phase: "engaging", lock_id: 7, sleep_hold: false, host_connected: true,
+              ui_session_generation: 1, last_error: null,
+            },
+          },
+          {
+            topic: "session.lock",
+            atMs: 45,
+            revision: 3,
+            data: {
+              phase: "locked", lock_id: 7, sleep_hold: false, host_connected: true,
+              ui_session_generation: 1, last_error: null,
+            },
+          },
+          {
+            topic: "session.lock",
+            atMs: 75,
+            revision: 4,
+            data: {
+              phase: "unlocked", lock_id: null, sleep_hold: false, host_connected: true,
+              ui_session_generation: 1, last_error: null,
+            },
+          },
+        ],
+        commands: [
+          {
+            socket: "host", id: 3, name: "host.lock-ack",
+            payload: { lock_id: 7, ui_session_generation: 1 }, atMs: 45,
+          },
+          {
+            socket: "host", id: 4, name: "host.lock-authenticate",
+            payload: { username: "hewel", password: "wrong", lock_id: 7, ui_session_generation: 1 },
+            atMs: 60,
+          },
+          {
+            socket: "host", id: 5, name: "host.lock-authenticate",
+            payload: { username: "hewel", password: "correct", lock_id: 7, ui_session_generation: 1 },
+            atMs: 70,
+            result: {
+              data: {
+                token: "unlock-7", daemon_instance_id: "preview-daemon",
+                ui_session_generation: 1, lock_id: 7, auth_attempt_id: 2,
+              },
+            },
+          },
+          {
+            socket: "host", id: 6, name: "host.lock-consume-unlock",
+            payload: { token: "unlock-7", lock_id: 7, ui_session_generation: 1 }, atMs: 80,
+          },
+        ],
+      });
+      const hostSocket = fixtureValue.services.sockets[1]!;
+      const failedAuthentication = hostSocket.events.find(event =>
+        event.kind === "message" && JSON.parse(event.text).id === 4);
+      expect(failedAuthentication).toBeDefined();
+      failedAuthentication!.text = JSON.stringify({
+        jsonrpc: "2.0", id: 4,
+        error: { code: "permission_denied", message: "Authentication failed" },
+      });
+      writeFileSync(lockedFixture, JSON.stringify(fixtureValue, null, 2));
+      writeFileSync(lockedScenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-phase-4-session-lock",
+        requiredCapabilities: ["session-lock", "pixels", "surface.multiple", "virtual-time"],
+        steps: [
+          { id: "outputs", op: "monitors.set", monitors },
+          { id: "daemon-events", op: "clock.advance", byMs: 30 },
+          { id: "ready", op: "settle" },
+          { id: "engage-lock", op: "clock.advance", byMs: 10 },
+          { id: "lock-ack-reply", op: "clock.advance", byMs: 10 },
+          { id: "capture-lock-dp", op: "capture", surface: "lock-dp-1", captureId: "lock-dp-1" },
+          { id: "capture-lock-hdmi", op: "capture", surface: "lock-hdmi-1", captureId: "lock-hdmi-1" },
+          {
+            id: "focus-wrong-password", op: "pointer.click",
+            target: { surface: "lock-dp-1", testId: "lock-password" }, button: "primary",
+          },
+          { id: "enter-wrong-password", op: "text.commit", surface: "lock-dp-1", text: "wrong" },
+          { id: "wrong-password-committed", op: "clock.advance", byMs: 1 },
+          {
+            id: "submit-wrong-password", op: "pointer.click",
+            target: { surface: "lock-dp-1", testId: "lock-submit" }, button: "primary",
+          },
+          { id: "wrong-auth-reply", op: "clock.advance", byMs: 10 },
+          { id: "wrong-auth-settled", op: "settle" },
+          {
+            id: "pam-error-visible", op: "assert",
+            target: { surface: "lock-dp-1", testId: "lock-error" },
+            check: { property: "text", equals: "permission_denied: Authentication failed" },
+          },
+          { id: "locked-after-wrong-auth", op: "monitors.set", monitors },
+          {
+            id: "focus-correct-password", op: "pointer.click",
+            target: { surface: "lock-dp-1", testId: "lock-password" }, button: "primary",
+          },
+          { id: "enter-correct-password", op: "text.commit", surface: "lock-dp-1", text: "correct" },
+          { id: "correct-password-committed", op: "clock.advance", byMs: 1 },
+          {
+            id: "submit-correct-password", op: "pointer.click",
+            target: { surface: "lock-dp-1", testId: "lock-submit" }, button: "primary",
+          },
+          { id: "correct-auth-reply", op: "clock.advance", byMs: 10 },
+          { id: "daemon-unlocked", op: "clock.advance", byMs: 5 },
+          { id: "consume-unlock-reply", op: "clock.advance", byMs: 5 },
+          { id: "unlock-settled", op: "settle" },
+          { id: "after-unlock", op: "monitors.set", monitors },
+        ],
+      }, null, 2));
+
+      const lockedResult = runPreview(lockedFixture, lockedScenario, lockedOut);
+      expectCleanPreview(lockedResult, 2, 1);
+      expect(previewSessionLock(lockedOut, "locked-after-wrong-auth").state).toBe("locked");
+      expect(previewSessionLock(lockedOut, "after-unlock").state).toBe("unlocked");
+      expect(sessionLockTrace(lockedOut)).toMatchObject({ state: "unlocked", unlockCount: 1 });
+      expect(previewSurfaces(lockedOut, "after-unlock")).not.toContain("lock-dp-1");
+      expect(previewSurfaces(lockedOut, "after-unlock")).not.toContain("lock-hdmi-1");
+      for (const [surface, width, height] of [["lock-dp-1", 1440, 900], ["lock-hdmi-1", 1280, 720]] as const) {
+        const capture = readCapture(lockedOut, surface, surface);
+        expect([capture.image.width, capture.image.height]).toEqual([width, height]);
+        expect(pixel(capture.image, 4, 4)[3]).toBe(255);
+        expect(pixel(capture.image, Math.floor(width / 2), Math.floor(height / 2))[3]).toBe(255);
+      }
+
+      const refusedFixture = join(workspace, "refused-fixture.json");
+      const refusedScenario = join(workspace, "refused-scenario.json");
+      writeFileSync(refusedFixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-phase-4-lock-refusal",
+        sessionLock: { outcome: "finished" },
+        topicUpdates: [{
+          topic: "session.lock",
+          atMs: 40,
+          revision: 2,
+          data: {
+            phase: "engaging", lock_id: 9, sleep_hold: false, host_connected: true,
+            ui_session_generation: 1, last_error: null,
+          },
+        }],
+        commands: [{
+          socket: "host", id: 3, name: "host.lock-failed",
+          payload: { lock_id: 9, reason: "compositor lock refused" }, atMs: 50,
+        }],
+      }), null, 2));
+      writeFileSync(refusedScenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-phase-4-lock-refusal",
+        requiredCapabilities: ["session-lock", "surface.multiple", "virtual-time"],
+        steps: [
+          { id: "outputs", op: "monitors.set", monitors: [monitors[0]] },
+          { id: "daemon-events", op: "clock.advance", byMs: 30 },
+          { id: "ready", op: "settle" },
+          { id: "engage-refused-lock", op: "clock.advance", byMs: 10 },
+          { id: "lock-failed-reply", op: "clock.advance", byMs: 10 },
+          { id: "refused", op: "monitors.set", monitors: [monitors[0]] },
+        ],
+      }, null, 2));
+
+      const refusedResult = runPreview(refusedFixture, refusedScenario, refusedOut);
+      expectCleanPreview(refusedResult, 0, 0);
+      expect(sessionLockTrace(refusedOut).unlockCount).toBe(0);
+      expect(previewSurfaces(refusedOut, "refused")).not.toContain("lock-dp-1");
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  previewTest("Polkit authorization dialog (identity select, respond, cancel, lock suppression) and Power confirmation dialog", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "z-shell-preview-polkit-power-"));
+    const out = join(workspace, "out");
+    const monitor = {
+      id: "dp-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900,
+      scale: 1, refreshRateMilliHz: 60000,
+    };
+    const polkitPrompt = {
+      request_id: 41,
+      action_id: "org.zshell.preview.authorize",
+      message: "Authentication is required to change system settings.",
+      icon_name: "system-lock-screen",
+      details: { Vendor: "Shoji" },
+      identities: [{ uid: 1000, username: "hewel" }, { uid: 0, username: "root" }],
+      selected_uid: 1000,
+      prompt: "Password:",
+      echo_on: false,
+      info_message: null,
+      error_message: null,
+      authenticating: false,
+    };
+    const polkitSnapshot = {
+      enabled: true,
+      registered: true,
+      locked_suppressed: false,
+      last_error: null,
+      active: null,
+    };
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-phase-4-polkit-power",
+        sessionLock: { outcome: "finished" },
+        topicUpdates: [
+          {
+            topic: "session.polkit", atMs: 40, revision: 2,
+            data: { ...polkitSnapshot, active: polkitPrompt },
+          },
+          {
+            topic: "session.polkit", atMs: 70, revision: 3,
+            data: polkitSnapshot,
+          },
+          {
+            topic: "session.polkit", atMs: 80, revision: 4,
+            data: { ...polkitSnapshot, active: { ...polkitPrompt, request_id: 42 } },
+          },
+          {
+            topic: "session.polkit", atMs: 100, revision: 5,
+            data: polkitSnapshot,
+          },
+          {
+            topic: "session.polkit", atMs: 110, revision: 6,
+            data: { ...polkitSnapshot, active: { ...polkitPrompt, request_id: 43 } },
+          },
+          {
+            topic: "session.lock", atMs: 120, revision: 2,
+            data: {
+              phase: "engaging", lock_id: 11, sleep_hold: false, host_connected: true,
+              ui_session_generation: 1, last_error: null,
+            },
+          },
+          {
+            topic: "session.polkit", atMs: 140, revision: 7,
+            data: polkitSnapshot,
+          },
+          {
+            topic: "session.lock", atMs: 140, revision: 3,
+            data: {
+              phase: "unlocked", lock_id: null, sleep_hold: false, host_connected: true,
+              ui_session_generation: 1, last_error: null,
+            },
+          },
+        ],
+        commands: [
+          {
+            socket: "host", id: 3, name: "host.polkit-select-identity",
+            payload: { request_id: 41, uid: 0 }, atMs: 50,
+          },
+          {
+            socket: "host", id: 4, name: "host.polkit-respond",
+            payload: { request_id: 41, response: "shoji-secret" }, atMs: 60,
+          },
+          {
+            socket: "host", id: 5, name: "host.polkit-cancel",
+            payload: { request_id: 42 }, atMs: 90,
+          },
+          {
+            socket: "host", id: 6, name: "host.lock-failed",
+            payload: { lock_id: 11, reason: "compositor lock refused" }, atMs: 130,
+          },
+          { socket: "host", id: 7, name: "power.poweroff", atMs: 160 },
+        ],
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-phase-4-polkit-power",
+        requiredCapabilities: ["session-lock", "pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: [
+          { id: "outputs", op: "monitors.set", monitors: [monitor] },
+          { id: "daemon-events", op: "clock.advance", byMs: 30 },
+          { id: "ready", op: "settle" },
+          { id: "polkit-prompt", op: "clock.advance", byMs: 10 },
+          { id: "capture-polkit", op: "capture", surface: "polkit-dialog", captureId: "polkit-dialog" },
+          {
+            id: "select-root", op: "pointer.click",
+            target: { surface: "polkit-dialog", testId: "polkit-identity-0" }, button: "primary",
+          },
+          { id: "identity-reply", op: "clock.advance", byMs: 10 },
+          {
+            id: "focus-polkit-input", op: "pointer.click",
+            target: { surface: "polkit-dialog", testId: "polkit-input" }, button: "primary",
+          },
+          { id: "enter-polkit-secret", op: "text.commit", surface: "polkit-dialog", text: "shoji-secret" },
+          {
+            id: "submit-polkit-response", op: "pointer.click",
+            target: { surface: "polkit-dialog", testId: "polkit-submit" }, button: "primary",
+          },
+          { id: "polkit-response-reply", op: "clock.advance", byMs: 10 },
+          { id: "polkit-response-cleared", op: "clock.advance", byMs: 10 },
+          { id: "second-polkit-prompt", op: "clock.advance", byMs: 10 },
+          {
+            id: "cancel-polkit", op: "pointer.click",
+            target: { surface: "polkit-dialog", testId: "polkit-cancel" }, button: "primary",
+          },
+          { id: "polkit-cancel-reply", op: "clock.advance", byMs: 10 },
+          { id: "polkit-cancel-cleared", op: "clock.advance", byMs: 10 },
+          { id: "third-polkit-prompt", op: "clock.advance", byMs: 10 },
+          { id: "lock-suppresses-polkit", op: "clock.advance", byMs: 10 },
+          { id: "polkit-hidden-while-locked", op: "monitors.set", monitors: [monitor] },
+          { id: "lock-failed-reply", op: "clock.advance", byMs: 10 },
+          { id: "unlock-and-clear-polkit", op: "clock.advance", byMs: 10 },
+          {
+            id: "open-power-dialog", op: "service.emit", channel: "control.message",
+            value: { args: ["power", "poweroff"], reply: { text: "{\"pendingPowerAction\":\"poweroff\"}" } },
+          },
+          { id: "capture-power", op: "capture", surface: "power-dialog", captureId: "power-dialog" },
+          {
+            id: "power-title", op: "assert",
+            target: { surface: "power-dialog", testId: "power-dialog-title" },
+            check: { property: "text", equals: "Shut down?" },
+          },
+          {
+            id: "confirm-poweroff", op: "pointer.click",
+            target: { surface: "power-dialog", testId: "power-dialog-confirm" }, button: "primary",
+          },
+          { id: "poweroff-reply", op: "clock.advance", byMs: 20 },
+          { id: "power-dialog-closed", op: "monitors.set", monitors: [monitor] },
+        ],
+      }, null, 2));
+
+      const result = runPreview(fixture, scenario, out);
+      expectCleanPreview(result, 2, 1);
+      const polkit = readCapture(out, "polkit-dialog", "polkit-dialog");
+      const power = readCapture(out, "power-dialog", "power-dialog");
+      expect(treeNode(polkit.tree, "polkit-identity-1000").text).toBe("hewel");
+      expect(treeNode(polkit.tree, "polkit-identity-0").text).toBe("root");
+      expect(treeNode(polkit.tree, "polkit-action-id").text).toBe("org.zshell.preview.authorize");
+      expect(treeNode(power.tree, "power-dialog-title").text).toBe("Shut down?");
+      expect(previewSurfaces(out, "polkit-hidden-while-locked")).not.toContain("polkit-dialog");
+      expect(previewSurfaces(out, "polkit-hidden-while-locked")).not.toContain("lock-dp-1");
+      expect(previewSurfaces(out, "power-dialog-closed")).not.toContain("power-dialog");
+      expect(sessionLockTrace(out).unlockCount).toBe(0);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }

@@ -26,6 +26,8 @@ export const SHELL_TOPIC_ORDER = [
   "session.idle",
   "desktop.apps",
   "desktop.ime.panel",
+  "session.lock",
+  "session.polkit",
 ] as const;
 
 type ShellTopic = (typeof SHELL_TOPIC_ORDER)[number];
@@ -61,6 +63,8 @@ export interface ShellPreviewFixtureOptions {
   };
   readonly extraHostSends?: readonly string[];
   readonly extraHostEvents?: readonly Record<string, unknown>[];
+  readonly sessionLock?: { readonly outcome: "locked" | "finished" };
+  readonly expectHostRegister?: boolean;
 }
 
 const DAEMON_INSTANCE_ID = "preview-daemon";
@@ -214,6 +218,21 @@ function defaultTopicSnapshots(): Record<ShellTopic, unknown> {
       rules: [],
       service_status: { status: "running" },
     },
+    "session.lock": {
+      phase: "unlocked",
+      lock_id: null,
+      sleep_hold: false,
+      host_connected: true,
+      ui_session_generation: 1,
+      last_error: null,
+    },
+    "session.polkit": {
+      enabled: true,
+      registered: true,
+      locked_suppressed: false,
+      last_error: null,
+      active: null,
+    },
   };
 }
 
@@ -257,9 +276,17 @@ export function buildShellPreviewFixture(options: ShellPreviewFixtureOptions = {
   const commands = options.commands ?? [];
   const publicCommands = commands.filter(command => (command.socket ?? "public") === "public");
   const hostCommands = commands.filter(command => command.socket === "host");
+  const expectHostRegister = options.expectHostRegister !== false;
+  const hostRegisterCommand: FixtureCommandExpectation = {
+    name: "host.session-register",
+    args: [],
+    payload: { ui_session_generation: 1 },
+    atMs: 2,
+  };
 
   const publicCommandIds = publicCommands.map((command, index) => command.id ?? 17 + index);
-  const hostCommandIds = hostCommands.map((command, index) => command.id ?? 2 + index);
+  const hostCommandIds = hostCommands.map((command, index) =>
+    command.id ?? (expectHostRegister ? 3 : 2) + index);
 
   const snapshotEvents = SHELL_TOPIC_ORDER.map((topic, index) => {
     const data = options.initialTopics && Object.hasOwn(options.initialTopics, topic)
@@ -345,6 +372,7 @@ export function buildShellPreviewFixture(options: ShellPreviewFixtureOptions = {
         method: "bus.hello",
         params: { protocol_version: 1, client_name: "z-shell-host" },
       }),
+      ...(expectHostRegister ? [commandRequest(hostRegisterCommand, 2)] : []),
       ...hostCommands.map((command, index) => commandRequest(command, hostCommandIds[index]!)),
       ...(options.extraHostSends ?? []),
     ],
@@ -361,7 +389,11 @@ export function buildShellPreviewFixture(options: ShellPreviewFixtureOptions = {
           media_dir: `${xdgRuntimeDir}/z-shell/media`,
         },
       }),
-      ...sortEvents([...hostCommandEvents, ...(options.extraHostEvents ?? [])]),
+      ...sortEvents([
+        ...(expectHostRegister ? [commandReply(hostRegisterCommand, 2)] : []),
+        ...hostCommandEvents,
+        ...(options.extraHostEvents ?? []),
+      ]),
     ],
   };
 
@@ -378,6 +410,7 @@ export function buildShellPreviewFixture(options: ShellPreviewFixtureOptions = {
     services: {
       sockets: [publicSocket, hostSocket],
       control: {},
+      ...(options.sessionLock === undefined ? {} : { sessionLock: options.sessionLock }),
       ...(options.images === undefined ? {} : { images: options.images }),
     },
     events: [],

@@ -2,7 +2,7 @@ import { Button, For, Image, Show, createSignal, focus, getWindowRect, type Nati
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShojiIcon, type ShojiIconName } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
-import { formatDurationSeconds, type BatteryState } from "../topics.ts";
+import { formatDurationSeconds, type BatteryState, type PowerConfirmAction } from "../topics.ts";
 import { QuickSettingsIconButton, QuickSettingsScroll, QuickSettingsSubpage } from "./QuickSettingsSubpages.tsx";
 
 export type QuickSettingsPage = "main" | "wifi" | "bluetooth" | "sound" | "wallpaper" | "settings";
@@ -20,13 +20,13 @@ const clipped = { minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", tex
 const avatarStyle = { width: "36px", height: "36px", borderRadius: "18px", flexShrink: 0, "object-fit": "cover" } as const;
 
 const powerActions = [
-  { label: "Lock", icon: "lock", command: "lock.request" },
-  { label: "Log out", icon: "logout", command: "power.logout" },
-  { label: "Suspend", icon: "sleep", command: "host.suspend" },
-  { label: "Reboot", icon: "reboot", command: "power.reboot" },
-  { label: "Power off", icon: "power", command: "power.poweroff", danger: true },
+  { label: "Lock", icon: "lock", action: "lock" },
+  { label: "Log out", icon: "logout", action: "logout" },
+  { label: "Suspend", icon: "sleep", action: "suspend" },
+  { label: "Reboot", icon: "reboot", action: "reboot" },
+  { label: "Power off", icon: "power", action: "poweroff", danger: true },
 ] as const satisfies readonly {
-  label: string; icon: ShojiIconName; command: string; danger?: boolean;
+  label: string; icon: ShojiIconName; action: PowerConfirmAction; danger?: boolean;
 }[];
 
 const batteryLabels: Readonly<Record<BatteryState, string>> = {
@@ -242,7 +242,7 @@ function MainPage(props: {
   closePowerMenu: () => void;
 }): NativeChild {
   const { user, hostClient, network, bluetooth, notifications, idle, power, wallpaper,
-    invokePublic, invokeHost, togglePanel, closePanels } = useShellStore();
+    invokePublic, togglePanel, closePanels, requestPowerDialog } = useShellStore();
   const avatar = useDaemonMedia(hostClient, () => user.data()?.avatar, { fetchCommand: "user.fetch-blob" });
   const name = () => user.data()?.display_name ?? user.data()?.username ?? "User";
   const wifi = () => network.data()?.wifi;
@@ -285,19 +285,20 @@ function MainPage(props: {
       </row>
       <Show when={props.powerMenuOpen}>
         <row testId="qs-power-menu" style={{ ...card, gap: "4px" }}>
-          <For each={powerActions} keyed={action => action.command}>
+          <For each={powerActions} keyed={entry => entry.action}>
             {action => {
               const danger = () => "danger" in action();
               const color = () => danger() ? "var(--color-error)" : onSurface;
               return (
                 <Button ariaLabel={action().label} onClick={() => {
-                  const entry = action();
-                  if (entry.command === "lock.request") void invokePublic(entry.command, {});
-                  else if (entry.command === "host.suspend") void invokeHost(entry.command, {});
-                  // The logind power commands reject a payload, including an empty object.
-                  else void invokeHost(entry.command);
+                  const selected = action().action;
                   props.closePowerMenu();
-                  closePanels();
+                  if (selected === "lock") {
+                    void invokePublic("lock.request", {});
+                    closePanels();
+                  } else {
+                    requestPowerDialog(selected);
+                  }
                 }} style={{ ...grow, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "4px",
                   padding: "6px 2px", borderRadius: "12px", backgroundColor: danger() ? "var(--color-error-container)" : containerHigh,
                   color: color(), fontSize: "11px" }}>

@@ -488,6 +488,99 @@ export interface SystemPowerSnapshot {
   };
 }
 
+export type LockPhaseName = "unlocked" | "engaging" | "locked" | "fallback_spawned";
+
+export interface LockSnapshot {
+  readonly phase: LockPhaseName;
+  readonly lock_id: number | null;
+  readonly sleep_hold: boolean;
+  readonly host_connected: boolean;
+  readonly ui_session_generation: number | null;
+  readonly last_error: string | null;
+}
+
+export interface UnlockApproval {
+  readonly token: string;
+  readonly daemon_instance_id: string;
+  readonly ui_session_generation: number;
+  readonly lock_id: number;
+  readonly auth_attempt_id: number;
+}
+
+export interface PolkitIdentity {
+  readonly uid: number;
+  readonly username: string;
+}
+
+export interface PolkitPromptView {
+  readonly request_id: number;
+  readonly action_id: string;
+  readonly message: string;
+  readonly icon_name: string;
+  readonly details: Readonly<Record<string, string>>;
+  readonly identities: readonly PolkitIdentity[];
+  readonly selected_uid: number | null;
+  readonly prompt: string | null;
+  readonly echo_on: boolean;
+  readonly info_message: string | null;
+  readonly error_message: string | null;
+  readonly authenticating: boolean;
+}
+
+export interface PolkitSnapshot {
+  readonly enabled: boolean;
+  readonly registered: boolean;
+  readonly locked_suppressed: boolean;
+  readonly last_error: string | null;
+  readonly active: PolkitPromptView | null;
+}
+
+export type PowerConfirmAction = "lock" | "suspend" | "reboot" | "poweroff" | "logout";
+
+export const POWER_DIALOG_COPY: Readonly<Record<PowerConfirmAction, {
+  readonly title: string;
+  readonly description: string;
+  readonly confirmLabel: string;
+  readonly destructive: boolean;
+  readonly icon: "lock" | "sleep" | "reboot" | "power" | "logout";
+}>> = {
+  lock: {
+    title: "Lock screen?",
+    description: "Authentication will be required to return to this session.",
+    confirmLabel: "Lock",
+    destructive: false,
+    icon: "lock",
+  },
+  suspend: {
+    title: "Suspend?",
+    description: "The computer will sleep and resume where you left off.",
+    confirmLabel: "Suspend",
+    destructive: false,
+    icon: "sleep",
+  },
+  reboot: {
+    title: "Restart?",
+    description: "Open apps will be closed and the computer will restart.",
+    confirmLabel: "Restart",
+    destructive: true,
+    icon: "reboot",
+  },
+  poweroff: {
+    title: "Shut down?",
+    description: "Open apps will be closed and the computer will turn off.",
+    confirmLabel: "Shut down",
+    destructive: true,
+    icon: "power",
+  },
+  logout: {
+    title: "Log out?",
+    description: "Open apps will be closed and you will return to the login screen.",
+    confirmLabel: "Log out",
+    destructive: true,
+    icon: "logout",
+  },
+};
+
 export interface CatalogEntry {
   readonly id: string;
   readonly name: string;

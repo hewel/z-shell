@@ -39,10 +39,12 @@
           "{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"session.idle\"}}",
           "{\"jsonrpc\":\"2.0\",\"id\":22,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"desktop.apps\"}}",
           "{\"jsonrpc\":\"2.0\",\"id\":23,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"desktop.ime.panel\"}}",
-          "{\"jsonrpc\":\"2.0\",\"id\":24,\"method\":\"command.invoke\",\"params\":{\"name\":\"wayland.workspace.activate\",\"args\":[],\"payload\":{\"workspace_id\":3}}}",
-          "{\"jsonrpc\":\"2.0\",\"id\":25,\"method\":\"command.invoke\",\"params\":{\"name\":\"audio.set-volume\",\"args\":[],\"payload\":{\"kind\":\"sink\",\"index\":7,\"volume\":0.6}}}",
-          "{\"jsonrpc\":\"2.0\",\"id\":26,\"method\":\"command.invoke\",\"params\":{\"name\":\"ime.toggle\",\"args\":[],\"payload\":{}}}",
-          "{\"jsonrpc\":\"2.0\",\"id\":27,\"method\":\"command.invoke\",\"params\":{\"name\":\"tray.menu-item\",\"args\":[],\"payload\":{\"id\":\"discord\",\"menu_id\":101}}}"
+          "{\"jsonrpc\":\"2.0\",\"id\":24,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"session.lock\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":25,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"session.polkit\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":26,\"method\":\"command.invoke\",\"params\":{\"name\":\"wayland.workspace.activate\",\"args\":[],\"payload\":{\"workspace_id\":3}}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":27,\"method\":\"command.invoke\",\"params\":{\"name\":\"audio.set-volume\",\"args\":[],\"payload\":{\"kind\":\"sink\",\"index\":7,\"volume\":0.6}}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":28,\"method\":\"command.invoke\",\"params\":{\"name\":\"ime.toggle\",\"args\":[],\"payload\":{}}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":29,\"method\":\"command.invoke\",\"params\":{\"name\":\"tray.menu-item\",\"args\":[],\"payload\":{\"id\":\"discord\",\"menu_id\":101}}}"
         ],
         "events": [
           {
@@ -162,6 +164,16 @@
           },
           {
             "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":24,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":23,\"topic\":\"session.lock\",\"revision\":1,\"data\":{\"phase\":\"unlocked\",\"lock_id\":null,\"sleep_hold\":false,\"host_connected\":true,\"ui_session_generation\":1,\"last_error\":null}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":25,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":24,\"topic\":\"session.polkit\",\"revision\":1,\"data\":{\"enabled\":true,\"registered\":true,\"locked_suppressed\":false,\"last_error\":null,\"active\":null}}}"
+          },
+          {
+            "kind": "message",
             "atMs": 8,
             "text": "{\"jsonrpc\":\"2.0\",\"method\":\"topic.update\",\"params\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":8,\"topic\":\"desktop.tray\",\"revision\":2,\"source_baseline\":false,\"data\":{\"available\":true,\"items\":[{\"id\":\"discord\",\"title\":\"Discord\",\"category\":\"application\",\"status\":\"active\",\"icon_name\":null,\"item_is_menu\":true,\"tooltip\":null,\"icon\":{\"kind\":\"blob_handle\",\"token\":\"tray-discord\",\"mime\":\"image/png\",\"byte_len\":70},\"menu\":{\"revision\":1,\"root\":{\"id\":0,\"label\":null,\"enabled\":true,\"visible\":true,\"separator\":false,\"toggle_type\":null,\"toggle_state\":null,\"children\":[{\"id\":101,\"label\":\"Mute\",\"enabled\":true,\"visible\":true,\"separator\":false,\"toggle_type\":null,\"toggle_state\":null,\"children\":[]}]}}}]}}}"
           },
@@ -173,22 +185,22 @@
           {
             "kind": "message",
             "atMs": 31,
-            "text": "{\"jsonrpc\":\"2.0\",\"id\":24,\"result\":{}}"
-          },
-          {
-            "kind": "message",
-            "atMs": 31,
-            "text": "{\"jsonrpc\":\"2.0\",\"id\":25,\"result\":{}}"
-          },
-          {
-            "kind": "message",
-            "atMs": 31,
             "text": "{\"jsonrpc\":\"2.0\",\"id\":26,\"result\":{}}"
           },
           {
             "kind": "message",
-            "atMs": 51,
+            "atMs": 31,
             "text": "{\"jsonrpc\":\"2.0\",\"id\":27,\"result\":{}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 31,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":28,\"result\":{}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 51,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":29,\"result\":{}}"
           }
         ]
       },
@@ -197,10 +209,11 @@
         "framing": "line",
         "send": [
           "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"bus.hello\",\"params\":{\"protocol_version\":1,\"client_name\":\"z-shell-host\"}}",
-          "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"command.invoke\",\"params\":{\"name\":\"wallpaper.fetch-blob\",\"args\":[],\"payload\":{\"token\":\"wallpaper-global\"}}}",
-          "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"command.invoke\",\"params\":{\"name\":\"wallpaper.fetch-blob\",\"args\":[],\"payload\":{\"token\":\"wallpaper-hdmi\"}}}",
-          "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"command.invoke\",\"params\":{\"name\":\"tray.fetch-blob\",\"args\":[],\"payload\":{\"token\":\"tray-discord\"}}}",
-          "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"command.invoke\",\"params\":{\"name\":\"tray.fetch-blob\",\"args\":[],\"payload\":{\"token\":\"tray-discord\"}}}"
+          "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"command.invoke\",\"params\":{\"name\":\"host.session-register\",\"args\":[],\"payload\":{\"ui_session_generation\":1}}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"command.invoke\",\"params\":{\"name\":\"wallpaper.fetch-blob\",\"args\":[],\"payload\":{\"token\":\"wallpaper-global\"}}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"command.invoke\",\"params\":{\"name\":\"wallpaper.fetch-blob\",\"args\":[],\"payload\":{\"token\":\"wallpaper-hdmi\"}}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"command.invoke\",\"params\":{\"name\":\"tray.fetch-blob\",\"args\":[],\"payload\":{\"token\":\"tray-discord\"}}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"command.invoke\",\"params\":{\"name\":\"tray.fetch-blob\",\"args\":[],\"payload\":{\"token\":\"tray-discord\"}}}"
         ],
         "events": [
           {
@@ -210,23 +223,28 @@
           },
           {
             "kind": "message",
-            "atMs": 6,
-            "text": "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"data\":{\"bytes\":[137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,120,156,99,16,169,106,250,15,0,3,198,2,16,181,47,55,35,0,0,0,0,73,69,78,68,174,66,96,130]}}}"
+            "atMs": 2,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}"
           },
           {
             "kind": "message",
             "atMs": 6,
-            "text": "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"data\":{\"bytes\":[137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,120,156,99,48,210,169,248,15,0,3,64,1,214,87,160,107,114,0,0,0,0,73,69,78,68,174,66,96,130]}}}"
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"data\":{\"bytes\":[137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,120,156,99,16,169,106,250,15,0,3,198,2,16,181,47,55,35,0,0,0,0,73,69,78,68,174,66,96,130]}}}"
           },
           {
             "kind": "message",
-            "atMs": 10,
-            "text": "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{\"data\":{\"bytes\":[137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,120,156,99,136,72,253,244,31,0,5,119,2,175,134,155,203,94,0,0,0,0,73,69,78,68,174,66,96,130]}}}"
+            "atMs": 6,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{\"data\":{\"bytes\":[137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,120,156,99,48,210,169,248,15,0,3,64,1,214,87,160,107,114,0,0,0,0,73,69,78,68,174,66,96,130]}}}"
           },
           {
             "kind": "message",
             "atMs": 10,
             "text": "{\"jsonrpc\":\"2.0\",\"id\":5,\"result\":{\"data\":{\"bytes\":[137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,120,156,99,136,72,253,244,31,0,5,119,2,175,134,155,203,94,0,0,0,0,73,69,78,68,174,66,96,130]}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 10,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":6,\"result\":{\"data\":{\"bytes\":[137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,120,156,99,136,72,253,244,31,0,5,119,2,175,134,155,203,94,0,0,0,0,73,69,78,68,174,66,96,130]}}}"
           }
         ]
       }
