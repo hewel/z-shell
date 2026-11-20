@@ -3,6 +3,7 @@ import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShojiIcon, type ShojiIconName } from "../icons.tsx";
 import { createEnterProgress } from "../motion.ts";
 import { useShellStore } from "../store.ts";
+import { THEME_SEED_SWATCHES } from "../theme.ts";
 import { resolveMonitorWallpaper, type AudioDevice, type CatalogEntry, type WallpaperFit, type WallpaperListResponse } from "../topics.ts";
 import type { QuickSettingsPage } from "./QuickSettingsPanel.tsx";
 
@@ -23,14 +24,14 @@ const pills = { alignItems: "center", gap: "6px", flexWrap: "wrap" } as const;
 const grow = { flexGrow: 1, flexBasis: "0px", minWidth: "0px" } as const;
 const clipped = { minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
 const detail = { ...clipped, color: muted, fontSize: "12px" } as const;
-const card = { borderRadius: "20px", backgroundColor: container, padding: "12px", gap: "8px" } as const;
-const itemCard = { borderRadius: "12px", backgroundColor: containerHigh, padding: "8px", gap: "6px" } as const;
-const thumbImage = { width: "108px", maxWidth: "100%", height: "68px", borderRadius: "12px", "object-fit": "cover" } as const;
+const card = { borderRadius: "16px", backgroundColor: container, padding: "12px", gap: "8px" } as const;
+const itemCard = { borderRadius: "10px", backgroundColor: containerHigh, padding: "8px", gap: "6px" } as const;
+const thumbImage = { width: "108px", maxWidth: "100%", height: "68px", borderRadius: "10px", "object-fit": "cover" } as const;
 
 export function QuickSettingsScroll(props: { testId: string; label: string; children: NativeChild }): NativeChild {
   return (
     <scroll testId={props.testId} role="scrollView" ariaLabel={props.label} style={{ width: "100%", height: "100%", minHeight: "0px",
-      overflow: "hidden auto", backgroundColor: "var(--color-surface)", color: onSurface, fontFamily: "system-ui", fontSize: "13px" }}>
+      overflow: "hidden auto", backgroundColor: "var(--color-surface)", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px" }}>
       <column style={{ width: "100%", padding: "16px", gap: "12px", flexDirection: "column" }}>{props.children}</column>
     </scroll>
   );
@@ -42,7 +43,7 @@ export function QuickSettingsIconButton(props: {
 }): NativeChild {
   return (
     <Button testId={props.testId ?? null} ariaLabel={props.label} disabled={props.disabled ?? false} expanded={props.expanded ?? null}
-      onClick={props.onClick} style={{ display: "flex", width: "34px", height: "34px", borderRadius: "17px", flexShrink: 0,
+      onClick={props.onClick} style={{ display: "flex", width: "34px", height: "34px", borderRadius: "999px", flexShrink: 0,
         alignItems: "center", justifyContent: "center", backgroundColor: props.fill ?? container, opacity: props.disabled ? 0.45 : 1 }}>
       <ShojiIcon name={props.icon} size={16} color={props.color} />
     </Button>
@@ -55,7 +56,7 @@ function Action(props: {
 }): NativeChild {
   return (
     <Button testId={props.testId ?? null} ariaLabel={props.ariaLabel ?? props.label} checked={props.checked ?? null} disabled={props.disabled ?? false}
-      onClick={props.onClick} style={{ display: "flex", minHeight: "30px", padding: "0 9px", borderRadius: "15px",
+      onClick={props.onClick} style={{ display: "flex", minHeight: "30px", padding: "0 9px", borderRadius: "999px",
         flexShrink: 0, alignItems: "center", justifyContent: "center", fontSize: "12px", opacity: props.disabled ? 0.45 : 1,
         backgroundColor: props.active ? selectedFill : containerHigh, color: props.active ? selectedInk : onSurface }}>
       {props.label}
@@ -447,7 +448,6 @@ function WallpaperPage(props: { onBack: () => void }): NativeChild {
   );
 }
 
-const seeds = ["#A6C8FF", "#D0BCFF", "#7DD3FC", "#86EFAC", "#FCD34D", "#FCA5A5"] as const;
 const variants = ["tonal", "vibrant", "expressive", "fidelity", "neutral", "mono"] as const;
 const modes = [{ mode: "light", label: "Light" }, { mode: "auto", label: "Auto" }, { mode: "dark", label: "Dark" }] as const;
 const idleActions = { lock: "Lock", screen_off: "Screen off", suspend: "Suspend", lock_and_suspend: "Lock and suspend" } as const;
@@ -463,10 +463,10 @@ function SettingsPage(props: { onBack: () => void }): NativeChild {
     <Page page="settings" onBack={props.onBack}>
       <Section title="Theme & Color">
         <row style={pills}>
-          <For each={seeds} keyed={seed => seed}>
+          <For each={THEME_SEED_SWATCHES} keyed={seed => seed}>
             {seed => (
               <Button ariaLabel={`Set seed color ${seed()}`} onClick={() => void invokePublic("theme.set", { seed: seed() })}
-                style={{ width: "26px", height: "26px", borderRadius: "13px", backgroundColor: seed(), flexShrink: 0 }} />
+                style={{ width: "26px", height: "26px", borderRadius: "999px", backgroundColor: seed(), flexShrink: 0 }} />
             )}
           </For>
         </row>

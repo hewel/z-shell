@@ -9,8 +9,8 @@ const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
 const container = "var(--color-surface-container)";
 const containerHigh = "var(--color-surface-container-high)";
-const card = { borderRadius: "20px", backgroundColor: container, padding: "12px", gap: "10px" } as const;
-const metric = { flexBasis: "0px", flexGrow: 1, minWidth: "0px", borderRadius: "12px", padding: "8px", gap: "2px" } as const;
+const card = { borderRadius: "16px", backgroundColor: container, padding: "12px", gap: "10px" } as const;
+const metric = { flexBasis: "0px", flexGrow: 1, minWidth: "0px", borderRadius: "10px", padding: "8px", gap: "2px" } as const;
 const pill = { display: "flex", borderRadius: "16px", minHeight: "32px", padding: "0 10px", alignItems: "center", justifyContent: "center" } as const;
 const hiddenSection = { display: "none" } as const;
 const defaultProfiles = ["power-saver", "balanced", "performance"] as const;
@@ -80,7 +80,7 @@ export function BatteryPanel() {
   const watts = () => battery()?.energy_rate_watts?.toFixed(1);
 
   return (
-    <scroll testId="panel-battery" style={{ width: "100%", height: "100%", maxHeight: "calc(100vh - 2px)", overflow: "hidden auto", backgroundColor: "var(--color-surface)", color: onSurface, fontFamily: "system-ui", fontSize: "13px" }}>
+    <scroll testId="panel-battery" style={{ width: "100%", height: "100%", maxHeight: "calc(100vh - 2px)", overflow: "hidden auto", backgroundColor: "var(--color-surface)", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px" }}>
       <column style={{ padding: "16px", gap: "12px", flexDirection: "column" }}>
         <column style={{ ...card, padding: "14px" }}>
           <row style={{ alignItems: "center", gap: "8px" }}>
@@ -88,7 +88,7 @@ export function BatteryPanel() {
             <text style={{ fontWeight: 600 }}>Battery</text>
             <Show when={battery()}>
               {current => (
-                <text style={{ marginLeft: "auto", borderRadius: "12px", padding: "4px 8px", fontSize: "11px",
+                <text style={{ marginLeft: "auto", borderRadius: "10px", padding: "4px 8px", fontSize: "11px",
                   backgroundColor: charging() ? "var(--color-primary-container)" : "var(--color-secondary-container)",
                   color: charging() ? "var(--color-on-primary-container)" : "var(--color-on-secondary-container)" }}>
                   {batteryLabels[current().state]}

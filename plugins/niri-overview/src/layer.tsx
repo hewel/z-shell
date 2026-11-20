@@ -76,7 +76,7 @@ function OverviewCard(props: {
     <box testId="niri-overview-backdrop" onClick={close} style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center", padding: "12px",
-      backgroundColor: "rgba(11, 13, 18, 0.55)",
+      backgroundColor: "color-mix(in srgb, var(--color-scrim) 55%, transparent)",
     }}>
       <column testId="niri-overview-card" role="dialog" ariaLabel="Workspace Overview" ariaModal tabIndex={-1}
         ref={node => focus(node)} onClick={event => event.stopPropagation()} onKeyDown={event => {
@@ -85,7 +85,7 @@ function OverviewCard(props: {
             close();
           }
         }} style={{
-          width: "684px", maxWidth: "100%", maxHeight: "100%", padding: "18px", gap: "14px", borderRadius: "24px",
+          width: "684px", maxWidth: "100%", maxHeight: "100%", padding: "18px", gap: "14px", borderRadius: "22px",
           backgroundColor: "var(--color-surface)", color: "var(--color-on-surface)",
           border: "1px solid var(--color-outline-variant)",
         }}>

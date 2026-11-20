@@ -240,8 +240,8 @@ impl ColorScheme {
             on_primary_container = palette.primary.tone(tones(0.0, 100.0));
             secondary_container = palette.secondary.tone(tones(30.0, 85.0));
             on_secondary_container = palette.secondary.tone(tones(90.0, 10.0));
-            tertiary_container = palette.tertiary.tone(tones(60.0, 60.0));
-            on_tertiary_container = palette.tertiary.tone(tones(10.0, 90.0));
+            tertiary_container = palette.tertiary.tone(tones(60.0, 40.0));
+            on_tertiary_container = palette.tertiary.tone(tones(10.0, 100.0));
         } else if variant == ThemeVariant::Fidelity {
             let source_tone = Hct::from_rgb(seed).tone;
             primary_container = palette.primary.tone(source_tone);

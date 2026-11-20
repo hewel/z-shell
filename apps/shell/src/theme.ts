@@ -35,6 +35,8 @@ export const SHOJI_DEFAULT_SCHEME = Object.freeze({
   on_error_container: "#FFDAD6",
 });
 
+export const THEME_SEED_SWATCHES = ["#A6C8FF", "#D0BCFF", "#7DD3FC", "#86EFAC", "#FCD34D", "#FCA5A5"] as const;
+
 export type ThemeColorScheme = Readonly<Record<keyof typeof SHOJI_DEFAULT_SCHEME, string>>;
 
 export interface ThemeTopicSnapshot {
@@ -50,7 +52,7 @@ const roles = (Object.keys(SHOJI_DEFAULT_SCHEME) as (keyof ThemeColorScheme)[])
   .map(role => ({ role, property: `--color-${role.replaceAll("_", "-")}`, fallback: SHOJI_DEFAULT_SCHEME[role] }));
 
 export function buildThemeStylesheet(scheme: ThemeColorScheme, dark: boolean): string {
-  let css = `:root { color-scheme: ${dark ? "dark" : "light"};`;
+  let css = `:root { color-scheme: ${dark ? "dark" : "light"}; --zgui-ring: var(--color-primary);`;
   for (const { role, property, fallback } of roles) {
     const value = scheme?.[role];
     css += ` ${property}: ${typeof value === "string" && hexColor.test(value) ? value : fallback};`;

@@ -51,11 +51,11 @@ function PluginPanelFrame(props: { theme: ShellStore["theme"]; position: BarPosi
       top: "0px",
       width: "100%",
       height: "100%",
-      borderRadius: "24px",
+      borderRadius: "22px",
       backgroundColor: "var(--color-surface)",
       border: "1px solid var(--color-outline-variant)",
       overflow: "hidden",
-      fontFamily: "system-ui",
+      fontFamily: "var(--font-sans)",
       ...panelMotionStyle(progress(), props.position),
     }}>
       <scroll style={{ width: "100%", height: "100%", minHeight: "0px", overflow: "hidden auto" }}>

@@ -72,24 +72,178 @@ fn tonal_palette_matches_material_baseline() {
 
 #[test]
 fn every_variant_and_mode_has_valid_contrasting_roles() {
-    for variant in VARIANTS {
-        for dark in [false, true] {
-            let scheme = ColorScheme::generate(rgb("#6750a4"), variant, dark);
-            assert_eq!(scheme.to_map().len(), 31, "{variant:?} dark={dark}");
-            assert!(
-                contrast(&scheme.primary, &scheme.on_primary) >= 4.5,
-                "{variant:?} dark={dark}"
-            );
-            assert!(
-                contrast(&scheme.surface, &scheme.on_surface) >= 4.5,
-                "{variant:?} dark={dark}"
-            );
-            for color in scheme.to_map().values() {
-                assert!(color.starts_with('#') && color.len() == 7, "{color}");
-                assert!(
-                    color[1..].bytes().all(|byte| byte.is_ascii_hexdigit()),
-                    "{color}"
-                );
+    const SEEDS: [&str; 10] = [
+        "#6750a4", "#A6C8FF", "#D0BCFF", "#7DD3FC", "#86EFAC", "#FCD34D", "#FCA5A5", "#ff0000",
+        "#000000", "#ffffff",
+    ];
+    for seed in SEEDS {
+        for variant in VARIANTS {
+            for dark in [false, true] {
+                let scheme = ColorScheme::generate(rgb(seed), variant, dark);
+                assert_eq!(scheme.to_map().len(), 31, "{seed} {variant:?} dark={dark}");
+
+                // WCAG 2.2 SC 1.4.3: normal text role pairs must meet >= 4.5:1.
+                let text_pairs = [
+                    ("on_primary / primary", &scheme.on_primary, &scheme.primary),
+                    (
+                        "on_primary_container / primary_container",
+                        &scheme.on_primary_container,
+                        &scheme.primary_container,
+                    ),
+                    (
+                        "on_secondary / secondary",
+                        &scheme.on_secondary,
+                        &scheme.secondary,
+                    ),
+                    (
+                        "on_secondary_container / secondary_container",
+                        &scheme.on_secondary_container,
+                        &scheme.secondary_container,
+                    ),
+                    (
+                        "on_tertiary / tertiary",
+                        &scheme.on_tertiary,
+                        &scheme.tertiary,
+                    ),
+                    (
+                        "on_tertiary_container / tertiary_container",
+                        &scheme.on_tertiary_container,
+                        &scheme.tertiary_container,
+                    ),
+                    ("on_error / error", &scheme.on_error, &scheme.error),
+                    (
+                        "on_error_container / error_container",
+                        &scheme.on_error_container,
+                        &scheme.error_container,
+                    ),
+                    (
+                        "inverse_on_surface / inverse_surface",
+                        &scheme.inverse_on_surface,
+                        &scheme.inverse_surface,
+                    ),
+                    ("on_surface / surface", &scheme.on_surface, &scheme.surface),
+                    (
+                        "on_surface / surface_dim",
+                        &scheme.on_surface,
+                        &scheme.surface_dim,
+                    ),
+                    (
+                        "on_surface / surface_bright",
+                        &scheme.on_surface,
+                        &scheme.surface_bright,
+                    ),
+                    (
+                        "on_surface / surface_container_lowest",
+                        &scheme.on_surface,
+                        &scheme.surface_container_lowest,
+                    ),
+                    (
+                        "on_surface / surface_container_low",
+                        &scheme.on_surface,
+                        &scheme.surface_container_low,
+                    ),
+                    (
+                        "on_surface / surface_container",
+                        &scheme.on_surface,
+                        &scheme.surface_container,
+                    ),
+                    (
+                        "on_surface / surface_container_high",
+                        &scheme.on_surface,
+                        &scheme.surface_container_high,
+                    ),
+                    (
+                        "on_surface / surface_container_highest",
+                        &scheme.on_surface,
+                        &scheme.surface_container_highest,
+                    ),
+                    (
+                        "on_surface_variant / surface",
+                        &scheme.on_surface_variant,
+                        &scheme.surface,
+                    ),
+                    (
+                        "on_surface_variant / surface_dim",
+                        &scheme.on_surface_variant,
+                        &scheme.surface_dim,
+                    ),
+                    (
+                        "on_surface_variant / surface_bright",
+                        &scheme.on_surface_variant,
+                        &scheme.surface_bright,
+                    ),
+                    (
+                        "on_surface_variant / surface_container_lowest",
+                        &scheme.on_surface_variant,
+                        &scheme.surface_container_lowest,
+                    ),
+                    (
+                        "on_surface_variant / surface_container_low",
+                        &scheme.on_surface_variant,
+                        &scheme.surface_container_low,
+                    ),
+                    (
+                        "on_surface_variant / surface_container",
+                        &scheme.on_surface_variant,
+                        &scheme.surface_container,
+                    ),
+                    (
+                        "on_surface_variant / surface_container_high",
+                        &scheme.on_surface_variant,
+                        &scheme.surface_container_high,
+                    ),
+                    (
+                        "on_surface_variant / surface_container_highest",
+                        &scheme.on_surface_variant,
+                        &scheme.surface_container_highest,
+                    ),
+                ];
+                for (pair, fg, bg) in text_pairs {
+                    let ratio = contrast(fg, bg);
+                    assert!(
+                        ratio >= 4.5,
+                        "WCAG SC 1.4.3 failed for {pair} ({fg} on {bg}) = {ratio:.2}:1 (seed={seed}, variant={variant:?}, dark={dark})"
+                    );
+                }
+
+                // WCAG 2.2 SC 1.4.11: non-text UI accents and control borders must meet >= 3.0:1.
+                let ui_pairs = [
+                    (
+                        "primary / surface_container",
+                        &scheme.primary,
+                        &scheme.surface_container,
+                    ),
+                    (
+                        "primary / surface_container_high",
+                        &scheme.primary,
+                        &scheme.surface_container_high,
+                    ),
+                    (
+                        "error / surface_container",
+                        &scheme.error,
+                        &scheme.surface_container,
+                    ),
+                    (
+                        "outline / surface_container",
+                        &scheme.outline,
+                        &scheme.surface_container,
+                    ),
+                ];
+                for (pair, fg, bg) in ui_pairs {
+                    let ratio = contrast(fg, bg);
+                    assert!(
+                        ratio >= 3.0,
+                        "WCAG SC 1.4.11 failed for {pair} ({fg} on {bg}) = {ratio:.2}:1 (seed={seed}, variant={variant:?}, dark={dark})"
+                    );
+                }
+
+                for color in scheme.to_map().values() {
+                    assert!(color.starts_with('#') && color.len() == 7, "{color}");
+                    assert!(
+                        color[1..].bytes().all(|byte| byte.is_ascii_hexdigit()),
+                        "{color}"
+                    );
+                }
             }
         }
     }

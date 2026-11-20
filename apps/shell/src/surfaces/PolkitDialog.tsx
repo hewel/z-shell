@@ -1,6 +1,6 @@
 import { Button, For, LayerSurface, Show, TextField, createEffect, createMemo, createSignal, focus, onCleanup, registerDismissLayer, type Accessor, type NativeChild, type NativeKeyEvent, type NativeNode } from "@hewel/zgui";
 import { ShojiIcon } from "../icons.tsx";
-import { DIALOG_SPRING, createEnterProgress, dialogMotionStyle } from "../motion.ts";
+import { DIALOG_SPRING, createEnterProgress, dialogMotionStyle, scrimBackdrop } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { resolveMonitorLogicalSize, type PolkitPromptView } from "../topics.ts";
 
@@ -8,7 +8,7 @@ import { resolveMonitorLogicalSize, type PolkitPromptView } from "../topics.ts";
 const hiddenSection = { display: "none" } as const;
 const footerButton = {
   display: "flex", alignItems: "center", justifyContent: "center",
-  height: "40px", borderRadius: "20px", fontSize: "14px", fontWeight: 600,
+  height: "40px", borderRadius: "999px", fontSize: "14px", fontWeight: 600,
 } as const;
 
 function PolkitContent(props: { active: Accessor<PolkitPromptView> }): NativeChild {
@@ -67,13 +67,13 @@ function PolkitContent(props: { active: Accessor<PolkitPromptView> }): NativeChi
     <box style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center",
-      backgroundColor: `rgba(11, 13, 18, ${(0.55 * Math.max(0, Math.min(1, enter()))).toFixed(3)})`,
+      backgroundColor: scrimBackdrop(55, enter()),
     }}>
       <box testId="polkit-card" role="dialog" ariaLabel="Authentication Required" ariaModal
         ref={node => { registerDismissLayer(node, cancel, { layer: "modal", dismissOnOutsidePress: false }); }} style={{
-        display: "flex", flexDirection: "column", width: "420px", borderRadius: "24px",
+        display: "flex", flexDirection: "column", width: "360px", borderRadius: "22px",
         backgroundColor: "var(--color-surface)", border: "1px solid var(--color-outline-variant)",
-        padding: "24px", gap: "14px", fontFamily: "system-ui", color: "var(--color-on-surface)",
+        padding: "24px", gap: "14px", fontFamily: "var(--font-sans)", color: "var(--color-on-surface)",
         ...dialogMotionStyle(enter()),
       }}>
         <row style={{ alignItems: "center", gap: "12px" }}>
@@ -94,7 +94,7 @@ function PolkitContent(props: { active: Accessor<PolkitPromptView> }): NativeChi
         </row>
         <text testId="polkit-message" style={{ fontSize: "14px" }}>{active().message}</text>
         <Show when={detailEntries().length > 0} fallback={<box style={hiddenSection} />}>
-          <column style={{ backgroundColor: "var(--color-surface-container)", borderRadius: "12px", padding: "10px 12px", gap: "4px" }}>
+          <column style={{ backgroundColor: "var(--color-surface-container)", borderRadius: "10px", padding: "10px 12px", gap: "4px" }}>
             <For each={detailEntries()} keyed={entry => entry[0]}>
               {entry => (
                 <row style={{ alignItems: "flex-start", gap: "10px", fontSize: "12px" }}>
@@ -129,7 +129,7 @@ function PolkitContent(props: { active: Accessor<PolkitPromptView> }): NativeChi
           <TextField testId="polkit-input" ariaLabel={prompt()} secure={!active().echo_on}
             disabled={active().authenticating} value={response()} onInput={event => setResponse(event.value)}
             onKeyDown={handleKeyDown} ref={node => { input = node; focus(node); }} style={{
-              width: "100%", height: "44px", lineHeight: "20px", borderRadius: "12px", padding: "12px 12px",
+              width: "100%", height: "44px", lineHeight: "20px", borderRadius: "10px", padding: "12px 12px",
               backgroundColor: "var(--color-surface-container-high)", color: "var(--color-on-surface)", fontSize: "14px",
             }} />
         </column>

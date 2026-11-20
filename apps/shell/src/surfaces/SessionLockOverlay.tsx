@@ -51,14 +51,14 @@ function LockScreen(props: {
   return (
     <box style={{
       ...centeredColumn, position: "fixed", top: "0px", left: "0px", width: "100%", height: "100%", overflow: "hidden",
-      backgroundColor: "var(--color-surface)", fontFamily: "system-ui",
-      color: backdrop.src() ? "#F4F5FA" : "var(--color-on-surface)",
+      backgroundColor: "var(--color-surface)", fontFamily: "var(--font-sans)",
+      color: "var(--color-on-surface)",
     }}>
       <Show when={backdrop.src()}>{src => <>
         <Image ariaHidden src={src()} style={{
           ...cover, zIndex: 0, objectFit: activeWallpaper()?.fit === "center" ? "none" : activeWallpaper()?.fit ?? "cover",
         }} />
-        <box ariaHidden style={{ ...cover, zIndex: 1, backgroundColor: "rgba(17, 19, 24, 0.72)" }} />
+        <box ariaHidden style={{ ...cover, zIndex: 1, backgroundColor: "color-mix(in srgb, var(--color-surface) 76%, transparent)" }} />
       </>}</Show>
       <Show when={power.data()?.battery}>{battery => {
         const label = createMemo(() => {
@@ -68,7 +68,7 @@ function LockScreen(props: {
         return (
           <row testId={`lock-battery-${monitor().id}`} style={{
             position: "absolute", zIndex: 2, top: "20px", right: "24px", alignItems: "center", gap: "5px",
-            borderRadius: "16px", backgroundColor: "rgba(255, 255, 255, 0.08)", padding: "5px 10px",
+            borderRadius: "16px", backgroundColor: "color-mix(in srgb, var(--color-on-surface) 10%, transparent)", padding: "5px 10px",
           }}>
             <ShojiIcon name={battery().state === "charging" ? "batteryCharging" : "battery"} color="inherit" />
             <text style={{ fontSize: "13px" }}>{label()}</text>
@@ -96,13 +96,13 @@ function LockScreen(props: {
               {String.fromCodePoint(controls.username().codePointAt(0) ?? 63).toUpperCase()}
             </text>
           }>{src => <Image ariaHidden src={src()} style={{
-            position: "relative", zIndex: 1, width: "54px", height: "54px", borderRadius: "27px", objectFit: "cover",
+            position: "relative", zIndex: 1, width: "54px", height: "54px", borderRadius: "999px", objectFit: "cover",
           }} />}</Show>
         </box>
         <text testId={`lock-user-${monitor().id}`} style={{ fontSize: "17px", fontWeight: 600 }}>{controls.username()}</text>
         <row style={{
           width: "300px", maxWidth: "100%", height: "46px", flexShrink: 0, alignItems: "center", gap: "8px",
-          borderRadius: "23px", backgroundColor: "rgba(255, 255, 255, 0.08)",
+          borderRadius: "999px", backgroundColor: "color-mix(in srgb, var(--color-on-surface) 10%, transparent)",
           border: "1px solid var(--color-outline-variant)", padding: "0px 12px",
         }}>
           <TextField testId="lock-password" secure placeholder="Password" ariaLabel="Password"
@@ -119,7 +119,7 @@ function LockScreen(props: {
             }} />
           <text style={{
             fontSize: "11px", borderRadius: "8px", padding: "2px 5px", flexShrink: 0,
-            backgroundColor: "rgba(255, 255, 255, 0.1)",
+            backgroundColor: "color-mix(in srgb, var(--color-on-surface) 12%, transparent)",
           }}>{ime.data()?.active_im?.short_label || "EN"}</text>
           <Button testId="lock-submit" ariaLabel="Unlock" disabled={controls.disabled()} onClick={() => void controls.submit()}
             style={{

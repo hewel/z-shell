@@ -9,7 +9,7 @@ const muted = "var(--color-on-surface-variant)";
 const capsule = {
   backgroundColor: "var(--color-surface-container)",
   border: "1px solid var(--color-outline-variant)",
-  borderRadius: "24px",
+  borderRadius: "999px",
   color: onSurface,
 } as const;
 
@@ -36,7 +36,7 @@ function OsdPill({ osd }: { osd: Accessor<OsdPayload> }): NativeChild {
       transformOrigin: "bottom center",
     }}>
       <box style={{
-        display: "flex", width: "34px", height: "34px", borderRadius: "17px", flexShrink: 0,
+        display: "flex", width: "34px", height: "34px", borderRadius: "999px", flexShrink: 0,
         alignItems: "center", justifyContent: "center", backgroundColor: primary,
       }}>
         <ShojiIcon name={icon()} size={18} color="var(--color-on-primary)" />
@@ -73,7 +73,7 @@ function IdleScrim({ monitorId, warning, seconds }: {
     <box style={{
       position: "fixed", top: "0px", left: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center",
-      backgroundColor: "rgba(11, 13, 18, 0.55)", opacity: opacity(),
+      backgroundColor: "color-mix(in srgb, var(--color-scrim) 55%, transparent)", opacity: opacity(),
     }}>
       <row testId={`idle-warning-${monitorId}`} style={{
         ...capsule, padding: "10px 16px", gap: "10px", maxWidth: "90%", alignItems: "center",

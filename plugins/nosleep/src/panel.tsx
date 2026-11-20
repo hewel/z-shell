@@ -16,9 +16,9 @@ export default function Panel(props: {
 
   return (
     <column testId="plugin-nosleep-panel" style={{
-      width: "100%", padding: "16px", gap: "12px", flexDirection: "column", borderRadius: "20px",
+      width: "100%", padding: "16px", gap: "12px", flexDirection: "column", borderRadius: "16px",
       backgroundColor: "var(--color-surface-container)", color: "var(--color-on-surface)",
-      fontFamily: "system-ui", fontSize: "13px",
+      fontFamily: "var(--font-sans)", fontSize: "13px",
     }}>
       <row style={row}>
         <text role="heading" style={{ fontSize: "16px", fontWeight: 700 }}>NoSleep</text>

@@ -107,7 +107,7 @@ export function ClipboardPanel() {
   });
 
   return (
-    <column testId="panel-clipboard" style={{ width: "100%", height: "100%", minHeight: "calc(100vh - 2px)", padding: "14px", gap: "10px", flexDirection: "column", backgroundColor: "var(--color-surface)", color: onSurface, fontFamily: "system-ui", fontSize: "13px" }}>
+    <column testId="panel-clipboard" style={{ width: "100%", height: "100%", minHeight: "calc(100vh - 2px)", padding: "14px", gap: "10px", flexDirection: "column", backgroundColor: "var(--color-surface)", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px" }}>
       <Show when={!locked()} fallback={
         <row role="status" style={{ padding: "14px", borderRadius: "16px", gap: "8px", alignItems: "center", backgroundColor: errorContainer, color: onErrorContainer }}>
           <ShojiIcon name="lock" size={18} color={onErrorContainer} />
@@ -116,7 +116,7 @@ export function ClipboardPanel() {
       }>
         <TextField testId="clipboard-search" class="clipboard-search" ariaLabel={searchPlaceholder} placeholder={searchPlaceholder} value={query()}
           onInput={event => setQuery(event.value)} style={{ width: "100%", height: "38px", lineHeight: "18px", flexShrink: 0,
-            borderRadius: "19px", padding: "10px 14px", backgroundColor: containerHigh, color: onSurface }} />
+            borderRadius: "999px", padding: "10px 14px", backgroundColor: containerHigh, color: onSurface }} />
         <row style={{ gap: "6px", flexWrap: "wrap" }}>
           <For each={filters} keyed={false}>
             {chip => {

@@ -38,7 +38,7 @@ function ToastCard({ toast, track }: { toast: Accessor<NotificationItem>; track:
 
   return (
     <column ref={trackedRef(track)} testId={`toast-card-${toast().id}`} style={{
-      borderRadius: "20px", backgroundColor: container, border: outline, padding: "14px", gap: "10px", color: onSurface,
+      borderRadius: "22px", backgroundColor: container, border: outline, padding: "14px", gap: "10px", color: onSurface,
       opacity: Math.max(0, Math.min(1, enter() * 1.35)),
       transform: `translateX(${((1 - enter()) * 24).toFixed(2)}px) scale(${(0.96 + enter() * 0.04).toFixed(4)})`,
       transformOrigin: "top right",
@@ -66,7 +66,7 @@ function ToastCard({ toast, track }: { toast: Accessor<NotificationItem>; track:
       </Show>
       <Show when={attachment.src()}>
         <Image testId={`toast-attachment-${toast().id}`} src={attachment.src()}
-          style={{ width: "100%", height: "96px", borderRadius: "12px", "object-fit": "contain" }} />
+          style={{ width: "100%", height: "96px", borderRadius: "10px", "object-fit": "contain" }} />
       </Show>
       <Show when={toast().actions.length > 0}>
         <scroll style={{ maxHeight: "96px" }}>

@@ -25,7 +25,7 @@ const bar = {
   borderRadius: "16px",
   backgroundColor: "var(--color-surface)",
   color: onSurface,
-  fontFamily: "system-ui",
+  fontFamily: "var(--font-sans)",
   fontSize: "12px",
   overflow: "hidden",
 } satisfies NativeStyle;
@@ -35,7 +35,7 @@ const group = { display: "flex", alignItems: "center", flexGrow: 1, flexBasis: "
 const verticalGroup = { ...group, flexDirection: "column" } as const;
 const pill = { ...center, flexShrink: 0, backgroundColor: "var(--color-surface-container)" } as const;
 const horizontalPill = { ...pill, height: "32px", borderRadius: "16px" } as const;
-const verticalPill = { ...pill, width: "40px", borderRadius: "20px", flexDirection: "column" } as const;
+const verticalPill = { ...pill, width: "40px", borderRadius: "999px", flexDirection: "column" } as const;
 const horizontalCircle = { ...horizontalPill, width: "32px" } as const;
 const verticalCircle = { ...verticalPill, height: "40px" } as const;
 const horizontalLabelPill = { ...horizontalPill, justifyContent: "flex-start", padding: "0 12px", gap: "8px", flexShrink: 1, minWidth: "0px", overflow: "hidden" } as const;
@@ -90,8 +90,8 @@ function WorkspaceButton(props: { workspace: WaylandWorkspace; vertical: boolean
     <Button testId={`ws-${props.workspace.workspace_id}`} ariaLabel={`Workspace ${label()}`} onClick={props.activate} style={{
       ...center,
       flexShrink: 0,
-      width: props.vertical ? "28px" : props.workspace.active ? "28px" : "18px",
-      height: props.vertical ? (props.workspace.active ? "32px" : "22px") : "32px",
+      width: props.vertical ? "28px" : props.workspace.active ? "28px" : "24px",
+      height: props.vertical ? (props.workspace.active ? "32px" : "24px") : "32px",
       borderRadius: props.vertical ? "14px" : "10px",
       backgroundColor: props.vertical && props.workspace.active ? fill() : "transparent",
       color: props.workspace.urgent ? "var(--color-on-error)" : "var(--color-on-primary)",
@@ -100,7 +100,7 @@ function WorkspaceButton(props: { workspace: WaylandWorkspace; vertical: boolean
         <box ariaHidden data-ws-pill="true" style={{
           width: props.workspace.active ? "24px" : "8px",
           height: props.workspace.active ? "10px" : "8px",
-          borderRadius: props.workspace.active ? "5px" : "4px",
+          borderRadius: props.workspace.active ? "999px" : "4px",
           backgroundColor: fill(),
           opacity: props.workspace.active || props.workspace.urgent ? 1 : 0.55,
         }} />
@@ -233,7 +233,7 @@ function SystemPill(props: { vertical: boolean; monitorId: string; surfaceName: 
       : { ...horizontalPill, gap: "2px", padding: "0 4px" }}>
       <Show when={ime.data()?.available && ime.data()?.mode !== "disabled"}>
         <Button testId="bar-ime" ariaLabel="Input method" ariaHasPopup="menu"
-          style={{ ...center, minWidth: "28px", height: "24px", padding: "0 6px", borderRadius: "12px", backgroundColor: primaryContainer, color: onPrimaryContainer, fontWeight: 700 }}
+          style={{ ...center, minWidth: "28px", height: "24px", padding: "0 6px", borderRadius: "999px", backgroundColor: primaryContainer, color: onPrimaryContainer, fontWeight: 700 }}
           onClick={() => { void invokePublic("ime.toggle", {}); }}
           {...secondaryAction(node => {
             openImeMenu({
@@ -248,7 +248,7 @@ function SystemPill(props: { vertical: boolean; monitorId: string; surfaceName: 
       </Show>
       <Show when={privacy.data()?.audio_capture.state === "active"}>
         <box testId="bar-privacy" ariaLabel="Microphone in use" style={{ ...center, width: "20px", height: "18px", borderRadius: "10px", backgroundColor: "var(--color-error-container)" }}>
-          <ShojiIcon name="mic" size={13} color={error} />
+          <ShojiIcon name="mic" size={13} color="var(--color-on-error-container)" />
         </box>
       </Show>
       <Button testId="bar-network" ariaLabel="Network settings" style={btnStyle()} onClick={quickSettings}>

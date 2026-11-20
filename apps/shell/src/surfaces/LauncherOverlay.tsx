@@ -1,12 +1,12 @@
-import { Button, For, Image, LayerSurface, Show, TextField, createEffect, createSignal, flush, focus, onCleanup, type Accessor, type NativeChild, type NativeKeyEvent } from "@hewel/zgui";
+import { Button, For, Image, LayerSurface, Show, TextField, createEffect, createSignal, flush, focus, onCleanup, type NativeChild, type NativeKeyEvent } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
-import { DIALOG_SPRING, createEnterProgress, dialogMotionStyle } from "../motion.ts";
+import { DIALOG_SPRING, createEnterProgress, dialogMotionStyle, scrimBackdrop } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { resolveActiveMonitor, resolveMonitorLogicalSize, type LauncherItem, type LauncherQueryResponse } from "../topics.ts";
 
 const columns = 6;
-const iconTile = { width: "44px", height: "44px", flexShrink: 0, borderRadius: "12px" } as const;
-const iconColors = ["#254777", "#3C4759", "#533F5F", "#2E5648", "#694431", "#513F69"] as const;
+const iconTile = { width: "44px", height: "44px", flexShrink: 0, borderRadius: "10px" } as const;
+const iconTints = ["primary", "secondary", "tertiary"] as const;
 const clipped = { maxWidth: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
 
 function LauncherTile(props: { item: LauncherItem; selected: boolean; activate: (item: LauncherItem) => void }): NativeChild {
@@ -15,7 +15,7 @@ function LauncherTile(props: { item: LauncherItem; selected: boolean; activate: 
   const { src } = useDaemonMedia(hostClient, () => item.icon, { fetchCommand: "launcher.fetch-blob" });
   const letter = item.title.trim().codePointAt(0);
   const initial = letter === undefined ? "?" : String.fromCodePoint(letter).toUpperCase();
-  const color = iconColors[(letter ?? 0) % iconColors.length];
+  const tint = iconTints[(letter ?? 0) % iconTints.length];
 
   return (
     <Button testId={`launcher-item-${item.provider_id}-${item.item_id}`} tabIndex={-1}
@@ -26,8 +26,11 @@ function LauncherTile(props: { item: LauncherItem; selected: boolean; activate: 
         color: props.selected ? "var(--color-on-secondary-container)" : "var(--color-on-surface)",
       }}>
       <Show when={src()} fallback={
-        <box style={{ ...iconTile, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: color }}>
-          <text style={{ fontSize: "20px", fontWeight: 600, color: "#FFFFFF" }}>{initial}</text>
+        <box style={{
+          ...iconTile, display: "flex", alignItems: "center", justifyContent: "center",
+          backgroundColor: `var(--color-${tint}-container)`, color: `var(--color-on-${tint}-container)`,
+        }}>
+          <text style={{ fontSize: "20px", fontWeight: 600 }}>{initial}</text>
         </box>
       }>
         {image => <Image src={image()} style={iconTile} />}
@@ -108,12 +111,12 @@ function LauncherContent(props: { allocateQueryId: () => number }): NativeChild 
     <box testId="launcher-backdrop" onClick={dismiss} style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center",
-      backgroundColor: `rgba(11, 13, 18, ${(0.45 * Math.max(0, Math.min(1, enter()))).toFixed(3)})`,
+      backgroundColor: scrimBackdrop(45, enter()),
     }}>
       <box testId="launcher-card" role="dialog" ariaLabel="Launcher" ariaModal onClick={event => event.stopPropagation()} style={{
-        display: "flex", flexDirection: "column", width: "652px", height: "410px", borderRadius: "24px",
+        display: "flex", flexDirection: "column", width: "652px", height: "410px", borderRadius: "22px",
         backgroundColor: "var(--color-surface)", border: "1px solid var(--color-outline-variant)",
-        padding: "18px", gap: "14px", fontFamily: "system-ui",
+        padding: "18px", gap: "14px", fontFamily: "var(--font-sans)",
         ...dialogMotionStyle(enter()),
       }}>
         <TextField testId="launcher-search" placeholder="Search apps" value={query()} onInput={event => setQuery(event.value)}

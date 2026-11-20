@@ -9,16 +9,18 @@ export type QuickSettingsPage = "main" | "wifi" | "bluetooth" | "sound" | "wallp
 
 const primary = "var(--color-primary)";
 const onPrimary = "var(--color-on-primary)";
+const primaryContainer = "var(--color-primary-container)";
+const onPrimaryContainer = "var(--color-on-primary-container)";
 const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
 const container = "var(--color-surface-container)";
 const containerHigh = "var(--color-surface-container-high)";
-const card = { borderRadius: "20px", backgroundColor: container, padding: "12px", gap: "10px" } as const;
+const card = { borderRadius: "16px", backgroundColor: container, padding: "12px", gap: "10px" } as const;
 const row = { alignItems: "center", gap: "8px" } as const;
 const grow = { flexGrow: 1, flexBasis: "0px", minWidth: "0px" } as const;
 const clipped = { minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
 const hiddenSection = { display: "none" } as const;
-const avatarStyle = { width: "36px", height: "36px", borderRadius: "18px", flexShrink: 0, "object-fit": "cover" } as const;
+const avatarStyle = { width: "36px", height: "36px", borderRadius: "999px", flexShrink: 0, "object-fit": "cover" } as const;
 
 const powerActions = [
   { label: "Lock", icon: "lock", action: "lock" },
@@ -46,26 +48,27 @@ function QuickTile(props: {
   onClick: () => void;
   open?: () => void;
 }): NativeChild {
-  const color = () => props.active ? onPrimary : onSurface;
+  const color = () => props.active ? onPrimaryContainer : onSurface;
   return (
-    <row data-qs-tile="true" style={{ ...grow, height: "56px", borderRadius: "28px", alignItems: "center",
-      backgroundColor: props.active ? primary : container }}>
+    <row data-qs-tile="true" style={{ ...grow, height: "50px", borderRadius: "14px", alignItems: "center",
+      backgroundColor: props.active ? primaryContainer : containerHigh,
+      border: props.active ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent" }}>
       <Button testId={`qs-tile-${props.id}`} ariaLabel={props.label} checked={props.toggle ? props.active ?? false : null}
         disabled={props.disabled ?? false} onClick={props.onClick} style={{
-          ...row, ...grow, display: "flex", flexDirection: "row", height: "100%", borderRadius: "28px",
-          padding: props.open ? "0 0 0 12px" : "0 12px",
+          ...row, ...grow, display: "flex", flexDirection: "row", height: "100%", borderRadius: "14px",
+          padding: props.open ? "0 0 0 10px" : "0 10px",
           color: color(), opacity: props.disabled ? 0.55 : 1,
         }}>
         <ShojiIcon name={props.icon} size={18} color={color()} />
         <column style={{ ...grow, gap: "2px" }}>
           <text style={{ ...clipped, fontSize: "13px", fontWeight: "600" }}>{props.label}</text>
-          <text style={{ ...clipped, fontSize: "11px", color: props.active ? onPrimary : muted }}>{props.detail}</text>
+          <text style={{ ...clipped, fontSize: "11px", color: props.active ? onPrimaryContainer : muted, opacity: props.active ? 0.78 : 1 }}>{props.detail}</text>
         </column>
       </Button>
       <Show when={props.open !== undefined} fallback={<box style={hiddenSection} />}>
         <QuickSettingsIconButton testId={`qs-open-${props.id}`} label={`Open ${props.label}`} icon="chevronRight"
-          fill={props.active ? "var(--color-primary-container)" : containerHigh}
-          color={props.active ? "var(--color-on-primary-container)" : onSurface}
+          fill={props.active ? "color-mix(in srgb, var(--color-primary) 18%, transparent)" : "var(--color-surface-container-highest)"}
+          color={props.active ? onPrimaryContainer : onSurface}
           onClick={() => props.open?.()} />
         <box style={{ width: "6px", flexShrink: 0 }} />
       </Show>
@@ -121,7 +124,7 @@ function PercentTrack(props: {
         </box>
       </box>
       <row style={{ width: "36px", flexShrink: 0, justifyContent: "flex-end" }}>
-        <text style={{ fontSize: "12px", color: muted }}>{Math.round(props.value)}%</text>
+        <text style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: muted }}>{Math.round(props.value)}%</text>
       </row>
     </>
   );
@@ -183,7 +186,7 @@ function BatterySummary(): NativeChild {
                 {battery().percentage == null ? "—" : `${Math.round(battery().percentage ?? 0)}%`}
               </text>
               <text style={{ ...grow, fontSize: "12px", color: muted }}>{duration()}</text>
-              <text style={{ borderRadius: "12px", padding: "4px 8px", fontSize: "11px", backgroundColor: "var(--color-secondary-container)",
+              <text style={{ borderRadius: "10px", padding: "4px 8px", fontSize: "11px", backgroundColor: "var(--color-secondary-container)",
                 color: "var(--color-on-secondary-container)" }}>{batteryLabels[battery().state]}</text>
             </row>
             <row style={{ gap: "6px" }}>
@@ -200,7 +203,7 @@ function BatterySummary(): NativeChild {
 
 function BatteryChip(props: { label: string; value?: string | undefined; unit?: string | undefined }): NativeChild {
   return (
-    <column style={{ ...grow, gap: "2px", borderRadius: "12px", padding: "6px 8px", backgroundColor: containerHigh }}>
+    <column style={{ ...grow, gap: "2px", borderRadius: "10px", padding: "6px 8px", backgroundColor: containerHigh }}>
       <text style={{ fontSize: "11px", color: muted }}>{props.label}</text>
       <text style={{ fontSize: "13px", fontWeight: "600" }}>{props.value === undefined ? "—" : `${props.value}${props.unit ?? ""}`}</text>
     </column>
@@ -215,14 +218,14 @@ function RecentNotifications(): NativeChild {
       <row style={row}>
         <text role="heading" style={{ ...grow, fontSize: "14px", fontWeight: "600" }}>Notifications</text>
         <Button disabled={!history()?.length} onClick={() => void invokePublic("notifications.clear", {})}
-          style={{ padding: "5px 9px", borderRadius: "12px", backgroundColor: containerHigh, color: primary, fontSize: "12px" }}>
+          style={{ padding: "5px 9px", borderRadius: "10px", backgroundColor: containerHigh, color: primary, fontSize: "12px" }}>
           Clear all
         </Button>
       </row>
       <For each={history()?.slice(0, 3)} keyed={item => item.id}
         fallback={<text style={{ fontSize: "12px", color: muted }}>No recent notifications</text>}>
         {item => (
-          <row style={{ ...row, backgroundColor: containerHigh, borderRadius: "12px", padding: "6px 8px" }}>
+          <row style={{ ...row, backgroundColor: containerHigh, borderRadius: "10px", padding: "6px 8px" }}>
             <column style={{ ...grow, gap: "2px" }}>
               <text style={{ ...clipped, fontSize: "13px", fontWeight: "600" }}>{item().summary || item().app_name}</text>
               <text style={{ ...clipped, fontSize: "11px", color: muted }}>{item().body || item().app_name}</text>
@@ -289,7 +292,7 @@ function MainPage(props: {
           <For each={powerActions} keyed={entry => entry.action}>
             {action => {
               const danger = () => "danger" in action();
-              const color = () => danger() ? "var(--color-error)" : onSurface;
+              const color = () => danger() ? "var(--color-on-error-container)" : onSurface;
               return (
                 <Button ariaLabel={action().label} onClick={() => {
                   const selected = action().action;
@@ -301,7 +304,7 @@ function MainPage(props: {
                     requestPowerDialog(selected);
                   }
                 }} style={{ ...grow, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "4px",
-                  padding: "6px 2px", borderRadius: "12px", backgroundColor: danger() ? "var(--color-error-container)" : containerHigh,
+                  padding: "6px 2px", borderRadius: "10px", backgroundColor: danger() ? "var(--color-error-container)" : containerHigh,
                   color: color(), fontSize: "11px" }}>
                   <ShojiIcon name={action().icon} size={16} color={color()} />
                   <text style={{ whiteSpace: "nowrap" }}>{action().label}</text>

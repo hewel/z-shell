@@ -23,7 +23,7 @@ const autoHideDelayMs = 500;
 const hiddenSlideOffset = dockHeight + dockBottomMargin + 18;
 const capsule = {
   height: `${dockHeight}px`, alignItems: "center", gap: `${dockGap}px`, padding: `0 ${dockPadding}px`,
-  borderRadius: "30px", backgroundColor: "var(--color-surface)", border: `1px solid ${outline}`, overflow: "visible",
+  borderRadius: "999px", backgroundColor: "var(--color-surface)", border: `1px solid ${outline}`, overflow: "visible",
 } satisfies NativeStyle;
 const tile = {
   display: "flex", width: `${tileSize}px`, height: `${tileSize}px`, flexShrink: 0, alignItems: "center", justifyContent: "center",
@@ -74,12 +74,12 @@ function DockApp(props: { entry: Accessor<DockEntry> }) {
         }}
         style={{
           ...tile,
-          borderRadius: "12px",
+          borderRadius: "10px",
           backgroundColor: src() ? "transparent" : `var(--color-${tint()}-container)`,
           color: `var(--color-on-${tint()}-container)`,
         }}>
         <Show when={src()} fallback={
-          <text style={{ fontFamily: "system-ui", fontSize: "18px", fontWeight: 700 }}>
+          <text style={{ fontFamily: "var(--font-sans)", fontSize: "18px", fontWeight: 700 }}>
             {initial()}
           </text>
         }>

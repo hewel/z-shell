@@ -68,9 +68,9 @@ const SETTING_KEYS: Record<string, true> = {
 
 // Exact item patterns from zgui-js/schemas/package.schema.json $defs/hostPaths & $defs/socketName.
 export const HOST_LITERAL_PATH_PATTERN =
-  /^\/(?:$|(?:(?!\.{1,2}(?:\/|$))[^\/\\\u0000-\u001f\u007f-\u009f]+\/)*(?!\.{1,2}$)[^\/\\\u0000-\u001f\u007f-\u009f]+$)/;
+  /^\/(?:$|(?:(?!\.{1,2}(?:\/|$))[^/\\\u0000-\u001f\u007f-\u009f]+\/)*(?!\.{1,2}$)[^/\\\u0000-\u001f\u007f-\u009f]+$)/;
 export const HOST_TEMPLATE_PATH_PATTERN =
-  /^\$(?:XDG_RUNTIME_DIR|HOME|XDG_DATA_HOME)(?:\/(?!\.{1,2}(?:\/|$))(?:\$WAYLAND_DISPLAY(?=\/|$)|(?:[^$\/\\\u0000-\u001f\u007f-\u009f]|\$\{WAYLAND_DISPLAY\})+))*$/;
+  /^\$(?:XDG_RUNTIME_DIR|HOME|XDG_DATA_HOME)(?:\/(?!\.{1,2}(?:\/|$))(?:\$WAYLAND_DISPLAY(?=\/|$)|(?:[^$/\\\u0000-\u001f\u007f-\u009f]|\$\{WAYLAND_DISPLAY\})+))*$/;
 export const HOST_PATH_PATTERN = new RegExp(
   `^(?:${HOST_LITERAL_PATH_PATTERN.source.slice(1)}|${HOST_TEMPLATE_PATH_PATTERN.source.slice(1, -1)})$`,
 );

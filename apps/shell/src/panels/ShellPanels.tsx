@@ -12,7 +12,7 @@ import { QuickSettingsPanel } from "./QuickSettingsPanel.tsx";
 const panels = {
   "quick-settings": { width: 396, height: 620, Component: QuickSettingsPanel },
   calendar: { width: 396, height: 620, Component: CalendarPanel },
-  media: { width: 392, height: 302, Component: MediaPanel },
+  media: { width: 396, height: 302, Component: MediaPanel },
   battery: { width: 360, height: 400, Component: BatteryPanel },
   clipboard: { width: 560, height: 518, Component: ClipboardPanel },
 };
@@ -34,11 +34,11 @@ function PanelContent(props: {
       top: "0px",
       width: "100%",
       height: "100%",
-      borderRadius: "24px",
+      borderRadius: "22px",
       backgroundColor: "var(--color-surface)",
       border: "1px solid var(--color-outline-variant)",
       overflow: "hidden",
-      fontFamily: "system-ui",
+      fontFamily: "var(--font-sans)",
       ...panelMotionStyle(progress(), props.position, props.centered),
     }}>
       {props.children}

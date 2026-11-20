@@ -46,7 +46,7 @@ function PopupContent(props: { padding: string; label: string; children: NativeC
       borderRadius: "16px",
       backgroundColor: "var(--color-surface-container)",
       color: "var(--color-on-surface)",
-      fontFamily: "system-ui",
+      fontFamily: "var(--font-sans)",
       fontSize: "13px",
       ...panelMotionStyle(progress(), "top"),
     }}>

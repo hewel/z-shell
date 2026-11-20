@@ -11,7 +11,7 @@ const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
 const container = "var(--color-surface-container)";
 const containerHigh = "var(--color-surface-container-high)";
-const card = { borderRadius: "20px", backgroundColor: container, padding: "12px", gap: "8px" } as const;
+const card = { borderRadius: "16px", backgroundColor: container, padding: "12px", gap: "8px" } as const;
 const pill = { display: "flex", borderRadius: "16px", minHeight: "30px", padding: "4px 9px", flexShrink: 0, alignItems: "center", justifyContent: "center", backgroundColor: containerHigh } as const;
 const imageTile = { width: "30px", height: "30px", borderRadius: "8px", flexShrink: 0 } as const;
 const iconImage = { ...imageTile, "object-fit": "contain" } as const;
@@ -97,7 +97,7 @@ export function CalendarPanel() {
   }
 
   return (
-    <scroll testId="panel-calendar" style={{ width: "100%", height: "100%", maxHeight: "calc(100vh - 2px)", overflow: "hidden auto", backgroundColor: "var(--color-surface)", color: onSurface, fontFamily: "system-ui", fontSize: "13px" }}>
+    <scroll testId="panel-calendar" style={{ width: "100%", height: "100%", maxHeight: "calc(100vh - 2px)", overflow: "hidden auto", backgroundColor: "var(--color-surface)", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px" }}>
       <column style={{ padding: "16px", gap: "12px", flexDirection: "column" }}>
         <row style={{ alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
           <column style={{ gap: "2px" }}>

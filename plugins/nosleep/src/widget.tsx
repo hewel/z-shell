@@ -30,7 +30,7 @@ export default function Widget(props: {
       }}
       style={{
         display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, position: "relative",
-        width: "26px", height: "26px", borderRadius: "13px",
+        width: "26px", height: "26px", borderRadius: "999px",
         backgroundColor: active() ? "var(--color-primary-container)" : "transparent",
         color: active() ? "var(--color-on-primary-container)" : "var(--color-on-surface-variant)",
       }}>

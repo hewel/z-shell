@@ -55,7 +55,7 @@ export default function ThemeBridgesSettingsPage(props: { readonly client: Acces
 
   return (
     <box testId="plugin-theme-bridges-settings" style={{
-      display: "flex", flexDirection: "column", padding: "16px", gap: "12px", borderRadius: "20px",
+      display: "flex", flexDirection: "column", padding: "16px", gap: "12px", borderRadius: "16px",
       backgroundColor: "var(--color-surface-container-low)", color: "var(--color-on-surface)",
     }}>
       <row style={{ alignItems: "center", flexWrap: "wrap", gap: "8px" }}>

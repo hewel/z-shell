@@ -1,12 +1,12 @@
 import { Button, LayerSurface, Show, createMemo, focus, registerDismissLayer, type Accessor, type NativeChild } from "@hewel/zgui";
 import { ShojiIcon } from "../icons.tsx";
-import { DIALOG_SPRING, createEnterProgress, dialogMotionStyle } from "../motion.ts";
+import { DIALOG_SPRING, createEnterProgress, dialogMotionStyle, scrimBackdrop } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { POWER_DIALOG_COPY, resolveMonitorLogicalSize, type PowerConfirmAction } from "../topics.ts";
 
 const footerButton = {
   display: "flex", alignItems: "center", justifyContent: "center",
-  height: "40px", borderRadius: "20px", fontSize: "14px", fontWeight: 600,
+  height: "40px", borderRadius: "999px", fontSize: "14px", fontWeight: 600,
 } as const;
 
 function PowerDialogContent(props: { action: Accessor<PowerConfirmAction> }): NativeChild {
@@ -30,18 +30,18 @@ function PowerDialogContent(props: { action: Accessor<PowerConfirmAction> }): Na
     <box testId="power-dialog-backdrop" onClick={closePowerDialog} style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center",
-      backgroundColor: `rgba(11, 13, 18, ${(0.55 * Math.max(0, Math.min(1, enter()))).toFixed(3)})`,
+      backgroundColor: scrimBackdrop(55, enter()),
     }}>
       <box testId="power-dialog-card" role="dialog" ariaLabel={copy().title} ariaModal
         ref={node => { registerDismissLayer(node, closePowerDialog, { layer: "modal", dismissOnOutsidePress: false }); }}
         onClick={event => event.stopPropagation()} style={{
-          display: "flex", flexDirection: "column", alignItems: "center", width: "340px", borderRadius: "24px",
+          display: "flex", flexDirection: "column", alignItems: "center", width: "360px", borderRadius: "22px",
           backgroundColor: "var(--color-surface)", border: "1px solid var(--color-outline-variant)",
-          padding: "24px", gap: "14px", fontFamily: "system-ui", color: "var(--color-on-surface)",
+          padding: "24px", gap: "14px", fontFamily: "var(--font-sans)", color: "var(--color-on-surface)",
           ...dialogMotionStyle(enter()),
         }}>
         <box style={{
-          display: "flex", alignItems: "center", justifyContent: "center", width: "56px", height: "56px", borderRadius: "28px",
+          display: "flex", alignItems: "center", justifyContent: "center", width: "56px", height: "56px", borderRadius: "999px",
           backgroundColor: copy().destructive ? "var(--color-error-container)" : "var(--color-primary-container)",
         }}>
           <ShojiIcon name={copy().icon} size={26}

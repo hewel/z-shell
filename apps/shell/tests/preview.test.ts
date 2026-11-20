@@ -13,8 +13,11 @@ const shellDir = resolve(import.meta.dir, "..");
 const repoRoot = resolve(shellDir, "../..");
 const zguiRoot = resolve(repoRoot, "../zgui-js");
 const nativeHost = join(zguiRoot, "target/debug/native-host");
-const previewAvailable = Bun.which("nix-shell") !== null && existsSync(nativeHost);
+const hasNixShell = Bun.which("nix-shell") !== null;
+const previewAvailable = hasNixShell && existsSync(nativeHost);
+const directPreviewAvailable = existsSync(nativeHost);
 const previewTest = previewAvailable ? test : test.skip;
+const geometryLintTest = directPreviewAvailable ? test : test.skip;
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
@@ -92,22 +95,34 @@ interface DeviceBounds {
   readonly height: number;
 }
 
+interface PreviewScrollMetrics {
+  readonly overflowY?: boolean;
+  readonly contentHeight?: number;
+  readonly viewportHeight?: number;
+}
+
 interface PreviewTreeNode {
   readonly testId?: string;
+  readonly role?: string;
   readonly text?: string;
+  readonly boundsLogical?: DeviceBounds;
   readonly boundsDevice?: DeviceBounds;
+  readonly scrollMetrics?: PreviewScrollMetrics;
 }
 
 function runPreview(fixture: string, scenario: string, out: string): PreviewResult {
   const args = [
-    nativeHost, "preview", "run",
+    "preview", "run",
     "--bundle", published.dist,
     "--profile", join(shellDir, "preview/profile.json"),
     "--fixture", fixture,
     "--scenario", scenario,
     "--out", out,
   ];
-  const preview = spawnSync("nix-shell", ["--run", args.map(shellQuote).join(" ")], {
+  const [command, commandArgs] = hasNixShell
+    ? ["nix-shell", ["--run", [nativeHost, ...args].map(shellQuote).join(" ")]]
+    : [nativeHost, args];
+  const preview = spawnSync(command, commandArgs, {
     cwd: zguiRoot,
     encoding: "utf8",
     timeout: 30_000,
@@ -210,7 +225,7 @@ let published!: PublishedApplication;
 
 describe("apps/shell preview", () => {
   beforeAll(async () => {
-    if (!previewAvailable) return;
+    if (!directPreviewAvailable) return;
     published = await buildShellApplication({ app: "shell", appDirectory: shellDir });
     expect(published.manifest.id).toBe("dev.zshell.shell");
     expect(published.manifest.capabilities?.sessionLock).toBe(true);
@@ -224,7 +239,6 @@ describe("apps/shell preview", () => {
   });
 
   previewTest("multi-output Top Bar, per-output Wallpapers, live theme, SNI tray blob + DBusMenu popup, and interactions", () => {
-    expect(Bun.which("nix-shell")).not.toBeNull();
     expect(existsSync(nativeHost)).toBe(true);
 
     const workspace = mkdtempSync(join(tmpdir(), "z-shell-preview-top-"));
@@ -1693,6 +1707,137 @@ describe("apps/shell preview", () => {
       expect([launcher.image.width, launcher.image.height]).toEqual([1280, 720]);
       expect(treeNode(osd.tree, "osd-value").text).toBe("80%");
       expect(treeNode(toasts.tree, "toast-card-1").boundsDevice).toBeDefined();
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  geometryLintTest("Design geometry lint: >=24x24px hit targets, 1280px bar anti-collision, slider alignment, and width tiers", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "z-shell-preview-design-"));
+    const out = join(workspace, "out");
+    const interactiveRoles = new Set(["button", "switch", "slider", "menuItem", "menuItemCheckBox", "menuItemRadio", "tab"]);
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const compactMonitor = { id: "HDMI-A-1", name: "HDMI-A-1", x: 0, y: 0, width: 1280, height: 720, scale: 1 };
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-design-geometry-lint",
+        initialTopics: {
+          "wayland.outputs": {
+            capability: "connected",
+            outputs: [{
+              output_instance_id: 1, name: "HDMI-A-1", description: "Compact Laptop", make: "Test", model: "1280x720",
+              x: 0, y: 0, width: 1280, height: 720, mode_width: 1280, mode_height: 720, refresh_mhz: 60000, scale: 1,
+              physical_width_mm: null, physical_height_mm: null,
+            }],
+          },
+          "wayland.workspaces": {
+            capability: "connected",
+            groups: [{ group_id: 1, output_instance_ids: [1] }],
+            workspaces: [
+              { workspace_id: 1, group_id: 1, name: "1", id_str: "1", coordinates: [1], active: false, urgent: false, hidden: false, capabilities: ["activate"] },
+              { workspace_id: 2, group_id: 1, name: "2", id_str: "2", coordinates: [2], active: true, urgent: false, hidden: false, capabilities: ["activate"] },
+              { workspace_id: 3, group_id: 1, name: "3", id_str: "3", coordinates: [3], active: false, urgent: false, hidden: false, capabilities: ["activate"] },
+            ],
+          },
+          "wayland.windows": {
+            capability: "connected",
+            windows: [{
+              window_id: 10, app_id: "org.example.editor",
+              title: "VeryLongProjectName — crates/z-shell-theme/src/palette.rs — Extremely Verbose Editor Window Title That Must Truncate",
+              activated: true, minimized: false, maximized: false, fullscreen: false, output_instance_ids: [1],
+            }],
+          },
+          "desktop.media": {
+            available: true,
+            selected_player_id: "spotify",
+            any_playing: true,
+            cover: null,
+            players: [{
+              id: "spotify", identity: "Spotify", playback_status: "playing", position_us: 60_000_000,
+              capabilities: { can_play: true, can_pause: true, can_go_next: true, can_go_previous: true, can_seek: true },
+              metadata: {
+                title: "An Exceptionally Long Ambient Track Title Designed To Test Bar Collision Constraints",
+                artists: ["Synthetic Orchestra Featuring Extra Guests"],
+                album: "Geometry Verification",
+                length_us: 240_000_000,
+              },
+            }],
+          },
+          "system.audio": {
+            availability: "ready",
+            default_sink: "alsa_output.0",
+            default_source: null,
+            sinks: [{ index: 1, name: "alsa_output.0", description: "Speakers", volume: 0.65, muted: false, channels: 2 }],
+            sources: [],
+            sink_inputs: [],
+            source_outputs: [],
+          },
+        },
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-geometry-lint",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: [
+          { id: "outputs", op: "monitors.set", monitors: [compactMonitor] },
+          { id: "daemon-events", op: "clock.advance", byMs: 30 },
+          { id: "ready", op: "settle" },
+          { id: "capture-bar", op: "capture", surface: "bar-hdmi-a-1", captureId: "bar" },
+          { id: "open-qs", op: "pointer.click", target: { surface: "bar-hdmi-a-1", testId: "bar-audio" }, button: "primary" },
+          { id: "qs-settle", op: "clock.advance", byMs: 600 },
+          { id: "capture-qs", op: "capture", surface: "panel-quick-settings", captureId: "qs" },
+          {
+            id: "open-power-dialog", op: "service.emit", channel: "control.message",
+            value: { args: ["power", "poweroff"], reply: { text: "{\"pendingPowerAction\":\"poweroff\"}" } },
+          },
+          { id: "power-settle", op: "clock.advance", byMs: 600 },
+          { id: "capture-power", op: "capture", surface: "power-dialog", captureId: "power" },
+        ],
+      }, null, 2));
+
+      const result = runPreview(fixture, scenario, out);
+      expectCleanPreview(result, 3, 0);
+      const bar = readCapture(out, "bar-hdmi-a-1", "bar");
+      const qs = readCapture(out, "panel-quick-settings", "qs");
+      const power = readCapture(out, "power-dialog", "power");
+
+      // WCAG 2.2 SC 2.5.8: every visible interactive control must meet >= 24x24px hit area.
+      for (const [label, tree] of [["bar", bar.tree], ["quick-settings", qs.tree], ["power-dialog", power.tree]] as const) {
+        const controls = tree.nodes.filter(node => node.role && interactiveRoles.has(node.role) && node.boundsLogical);
+        expect(controls.length, label).toBeGreaterThan(0);
+        for (const node of controls) {
+          const bounds = node.boundsLogical!;
+          expect(bounds.width, `${label} ${node.testId ?? node.role} width`).toBeGreaterThanOrEqual(24);
+          expect(bounds.height, `${label} ${node.testId ?? node.role} height`).toBeGreaterThanOrEqual(24);
+        }
+      }
+
+      // Top bar anti-collision at 1280px with long window title and long media label.
+      const activeWin = treeNode(bar.tree, "bar-active-window").boundsLogical!;
+      const clock = treeNode(bar.tree, "bar-clock").boundsLogical!;
+      const media = treeNode(bar.tree, "bar-media").boundsLogical!;
+      expect(activeWin.x + activeWin.width).toBeLessThanOrEqual(clock.x);
+      expect(clock.x + clock.width).toBeLessThanOrEqual(media.x);
+
+      // Precision sliders in Quick Settings share identical horizontal track bounds (Vertical Lane Alignment).
+      const sliders = qs.tree.nodes.filter(node => node.role === "slider" && node.boundsLogical);
+      expect(sliders.length).toBeGreaterThanOrEqual(2);
+      const firstSlider = sliders[0]!.boundsLogical!;
+      for (const slider of sliders.slice(1)) {
+        expect(slider.boundsLogical!.x).toBe(firstSlider.x);
+        expect(slider.boundsLogical!.width).toBe(firstSlider.width);
+      }
+
+      // Settled surface width tiers match DESIGN.md (Standard Popover 396px, Compact Power Dialog 360px).
+      expect(Math.round(treeNode(qs.tree, "panel-root-quick-settings").boundsLogical!.width)).toBe(396);
+      expect(Math.round(treeNode(power.tree, "power-dialog-card").boundsLogical!.width)).toBe(360);
+
+      // Zero-Scroll Popover check when upstream zgui-js scrollMetrics (commit 33c0fab+) is present.
+      const qsScroll = treeNode(qs.tree, "qs-main");
+      if (qsScroll.scrollMetrics) {
+        expect(qsScroll.scrollMetrics.overflowY).toBe(false);
+      }
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }

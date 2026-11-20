@@ -10,7 +10,7 @@ const onSurfaceVariant = "var(--color-on-surface-variant)";
 const card = {
   padding: "10px", gap: "8px", borderRadius: "16px",
   backgroundColor: "var(--color-surface)", border: "1px solid var(--color-outline-variant)",
-  color: onSurface, fontFamily: "system-ui", fontSize: "13px", overflow: "hidden",
+  color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px", overflow: "hidden",
 } satisfies NativeStyle;
 const clippedText = { minWidth: "0px", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" } as const;
 const candidateHeight = 30;

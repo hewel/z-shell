@@ -14,7 +14,7 @@ const pill = { display: "flex", minHeight: "30px", padding: "4px 10px", borderRa
 const coverTile = { width: "64px", height: "64px", flexShrink: 0, borderRadius: "14px" } as const;
 const coverImage = { ...coverTile, "object-fit": "cover" } as const;
 const truncate = { overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" } as const;
-const skip = { display: "flex", width: "36px", height: "36px", borderRadius: "18px", alignItems: "center", justifyContent: "center", backgroundColor: containerHigh } as const;
+const skip = { display: "flex", width: "36px", height: "36px", borderRadius: "999px", alignItems: "center", justifyContent: "center", backgroundColor: containerHigh } as const;
 const tenSecondsUs = 10_000_000;
 
 function TrackControls(props: { player: Accessor<MediaPlayer> }) {
@@ -94,7 +94,7 @@ function TrackControls(props: { player: Accessor<MediaPlayer> }) {
           <ShojiIcon name="skipPrev" size={18} />
         </Button>
         <Button testId="media-play-pause" ariaLabel={playing() ? "Pause" : "Play"} disabled={!canPlayPause()}
-          style={{ ...skip, width: "52px", height: "52px", borderRadius: "26px", backgroundColor: primary }}
+          style={{ ...skip, width: "52px", height: "52px", borderRadius: "999px", backgroundColor: primary }}
           onClick={() => { void invokePublic("media.play-pause", { player_id: player().id }); }}>
           <ShojiIcon name={playing() ? "pause" : "play"} size={24} color={onPrimary} />
         </Button>
@@ -116,7 +116,7 @@ export function MediaPanel() {
   });
 
   return (
-    <column testId="panel-media" style={{ width: "100%", height: "100%", minHeight: "calc(100vh - 2px)", padding: "16px", gap: "12px", flexDirection: "column", backgroundColor: "var(--color-surface)", color: onSurface, fontFamily: "system-ui", fontSize: "13px" }}>
+    <column testId="panel-media" style={{ width: "100%", height: "100%", minHeight: "calc(100vh - 2px)", padding: "16px", gap: "12px", flexDirection: "column", backgroundColor: "var(--color-surface)", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px" }}>
       <row style={{ alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
         <row style={{ flexWrap: "wrap", gap: "6px", flexGrow: 1, flexBasis: "0px", minWidth: "0px" }}>
           <For each={media.data()?.players ?? []} keyed={player => player.id}>

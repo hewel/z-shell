@@ -1,0 +1,51 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["eslint", "typescript", "oxc"],
+  "jsPlugins": ["./tools/oxlint-design-plugin.mjs"],
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "target/**",
+    ".claude/**",
+    ".agents/**",
+    "apps/shell/src/plugins/composed.ts"
+  ],
+  "rules": {
+    "no-debugger": "error",
+    "no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+    "zshell/no-lint-suppression": "error"
+  },
+  "overrides": [
+    {
+      "files": ["apps/shell/src/**/*.tsx", "apps/shell/src/**/*.ts", "plugins/*/src/**/*.tsx"],
+      "rules": {
+        "zshell/no-raw-colors": "error",
+        "zshell/valid-color-roles": "error",
+        "zshell/calm-active-surface": "error",
+        "zshell/no-system-ui-font": "error",
+        "zshell/valid-radius-scale": "error",
+        "zshell/no-mobile-copy": "error",
+        "zshell/no-outline-none": "error",
+        "zshell/expressive-budget": "error"
+      }
+    },
+    {
+      "files": ["apps/shell/src/theme.ts"],
+      "rules": {
+        "zshell/no-raw-colors": "off"
+      }
+    },
+    {
+      "files": ["packages/composer/src/manifest.ts"],
+      "rules": {
+        "no-control-regex": "off"
+      }
+    },
+    {
+      "files": ["**/tests/**", "tools/**"],
+      "rules": {
+        "zshell/no-lint-suppression": "off"
+      }
+    }
+  ]
+}

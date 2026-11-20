@@ -6,7 +6,7 @@ import type { AiUsageSnapshot, QuotaEntry } from "./service.ts";
 const muted = "var(--color-on-surface-variant)";
 const primary = "var(--color-primary)";
 const subcard = {
-  flexDirection: "column", gap: "6px", padding: "10px", borderRadius: "12px",
+  flexDirection: "column", gap: "6px", padding: "10px", borderRadius: "10px",
   backgroundColor: "var(--color-surface-container-high)",
 } as const;
 const heading = { fontWeight: 600 } as const;
@@ -44,9 +44,9 @@ export default function Panel(props: {
 
   return (
     <column testId="plugin-ai-usage-panel" style={{
-      width: "100%", padding: "16px", gap: "12px", flexDirection: "column", borderRadius: "20px",
+      width: "100%", padding: "16px", gap: "12px", flexDirection: "column", borderRadius: "16px",
       backgroundColor: "var(--color-surface-container)", color: "var(--color-on-surface)",
-      fontFamily: "system-ui", fontSize: "13px",
+      fontFamily: "var(--font-sans)", fontSize: "13px",
     }}>
       <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
         <text role="heading" style={{ fontSize: "16px", fontWeight: 700 }}>AI Usage</text>
