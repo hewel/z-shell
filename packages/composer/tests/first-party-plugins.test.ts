@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -18,6 +17,7 @@ import { ZShellClient, type InhibitorEntry } from "@z-shell/sdk";
 import { connectUnixSocket } from "@z-shell/sdk/bun";
 
 import { buildShellPreviewFixture } from "../../../apps/shell/tests/fixture-builder.ts";
+import { expectCleanPreview, nativeHost, runPreview } from "../../../apps/shell/tests/preview-harness.ts";
 import { NOSLEEP_DEFAULTS, createNoSleepPlugin } from "../../../plugins/nosleep/src/service.ts";
 import {
   THEME_BRIDGES_DEFAULTS,
@@ -29,12 +29,6 @@ import { buildShellApplication, composePlugins } from "../src/index.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../..");
 const SHELL_DIR = join(REPO_ROOT, "apps", "shell");
-const ZGUI_ROOT = resolve(REPO_ROOT, "../zgui-js");
-const NATIVE_HOST = join(ZGUI_ROOT, "target/debug/native-host");
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'"'"'`)}'`;
-}
 
 function resolveBinaries(): { cliBin: string; daemonBin: string } {
   const meta = Bun.spawnSync(["cargo", "metadata", "--format-version", "1", "--no-deps"], {
@@ -191,14 +185,23 @@ describe("First-party reference plugins end-to-end", () => {
 
       const stagedShellDir = join(tempDir, "shell");
       mkdirSync(stagedShellDir);
-      for (const entry of ["package.json", "tsconfig.json", "src", "preview"]) {
+      for (const entry of ["package.json", "tsconfig.json", "assets", "src", "preview"]) {
         cpSync(join(SHELL_DIR, entry), join(stagedShellDir, entry), { recursive: true });
       }
       symlinkSync(join(REPO_ROOT, "node_modules"), join(stagedShellDir, "node_modules"), "dir");
-      cpSync(
-        join(outDir, "composed-plugins.ts"),
-        join(stagedShellDir, "src", "plugins", "composed.ts"),
+      const composedSource = readFileSync(join(outDir, "composed-plugins.ts"), "utf8");
+      for (const plugin of plugins) {
+        expect(composedSource).toContain(`${plugin.id}:service`);
+      }
+      // This preview fixture mocks daemon-published plugin topics rather than live plugin services
+      // (which spawn external commands/sockets; service startup/teardown is tested in
+      // apps/shell/tests/plugin-services.test.ts and the live z-shelld test below).
+      const uiOnlyComposed = composedSource.replace(
+        /export const services: readonly ComposedServiceDescriptor\[\] = \[[\s\S]*?\] as const;/,
+        "export const services: readonly ComposedServiceDescriptor[] = [] as const;",
       );
+      expect(uiOnlyComposed).not.toBe(composedSource);
+      writeFileSync(join(stagedShellDir, "src", "plugins", "composed.ts"), uiOnlyComposed);
 
       const published = await buildShellApplication({
         app: "shell",
@@ -440,47 +443,9 @@ describe("First-party reference plugins end-to-end", () => {
         ],
       }, null, 2));
 
-      expect(Bun.which("nix-shell")).not.toBeNull();
-      expect(existsSync(NATIVE_HOST)).toBe(true);
-      const preview = spawnSync("nix-shell", ["--run", [
-        NATIVE_HOST,
-        "preview",
-        "run",
-        "--bundle",
-        published.dist,
-        "--profile",
-        join(SHELL_DIR, "preview", "profile.json"),
-        "--fixture",
-        fixture,
-        "--scenario",
-        scenario,
-        "--out",
-        previewOut,
-      ].map(shellQuote).join(" ")], {
-        cwd: ZGUI_ROOT,
-        encoding: "utf8",
-        timeout: 30_000,
-      });
-      expect(preview.error).toBeUndefined();
-      expect(preview.status, `${preview.stderr}\n${preview.stdout}`).toBe(0);
-      const result = JSON.parse(preview.stdout) as {
-        readonly exitCode: number;
-        readonly status: string;
-        readonly assertions: { readonly passed: number; readonly failed: number };
-        readonly teardown: {
-          readonly clean: boolean;
-          readonly resources: Record<string, number | boolean | undefined>;
-        };
-      };
-      expect(result.exitCode).toBe(0);
-      expect(result.status).toBe("passed");
-      expect(result.assertions.passed).toBe(7);
-      expect(result.assertions.failed).toBe(0);
-      expect(result.teardown.clean).toBe(true);
-      expect(result.teardown.resources.engineAlive).toBe(false);
-      for (const [resource, count] of Object.entries(result.teardown.resources)) {
-        if (typeof count === "number") expect(count, resource).toBe(0);
-      }
+      expect(existsSync(nativeHost)).toBe(true);
+      const result = runPreview(published.dist, fixture, scenario, previewOut);
+      expectCleanPreview(result, 0, 7);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

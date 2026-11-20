@@ -13,6 +13,9 @@
     "bun": ">=1.4.4"
   },
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
+    "build:shell": "bun tools/build-shell.ts",
+    "dev:local": "bash tools/dev-local.sh",
     "lint": "bun --bun run oxlint --deny-warnings",
     "typecheck": "bun --bun run tsrs --project tsconfig.quickjs.json && bun --bun run tsrs --project packages/composer/tsconfig.json && bun --bun run tsrs --project apps/shell/tsconfig.json",
     "test:rust": "cargo test --workspace && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo doc --workspace --no-deps",

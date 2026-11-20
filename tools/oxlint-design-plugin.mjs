@@ -286,6 +286,39 @@ const rules = {
         }
       };
 
+      const checkBgFgPair = (bgNode, fgNode) => {
+        if (
+          bgNode.type === "ConditionalExpression" &&
+          fgNode.type === "ConditionalExpression" &&
+          sameAstCondition(bgNode.test, fgNode.test, context.sourceCode)
+        ) {
+          checkPair(fgNode.consequent, resolveColorRole(bgNode.consequent, aliases), resolveColorRole(fgNode.consequent, aliases));
+          checkPair(fgNode.alternate, resolveColorRole(bgNode.alternate, aliases), resolveColorRole(fgNode.alternate, aliases));
+          return;
+        }
+        if (bgNode.type === "ConditionalExpression") {
+          const fgRole = resolveColorRole(fgNode, aliases);
+          if (fgRole) {
+            checkPair(fgNode, resolveColorRole(bgNode.consequent, aliases), fgRole);
+            checkPair(fgNode, resolveColorRole(bgNode.alternate, aliases), fgRole);
+          }
+          return;
+        }
+        if (fgNode.type === "ConditionalExpression") {
+          const bgRole = resolveColorRole(bgNode, aliases);
+          if (bgRole) {
+            checkPair(fgNode.consequent, bgRole, resolveColorRole(fgNode.consequent, aliases));
+            checkPair(fgNode.alternate, bgRole, resolveColorRole(fgNode.alternate, aliases));
+          }
+          return;
+        }
+        const bgRole = resolveColorRole(bgNode, aliases);
+        const fgRole = resolveColorRole(fgNode, aliases);
+        if (bgRole && fgRole) {
+          checkPair(fgNode, bgRole, fgRole);
+        }
+      };
+
       return {
         Program(program) {
           aliases = collectStringAliases(program);
@@ -303,22 +336,52 @@ const rules = {
           const bgNode = map.get("backgroundColor") ?? map.get("background-color") ?? map.get("background");
           const fgNode = map.get("color");
           if (!bgNode || !fgNode) return;
+          checkBgFgPair(bgNode, fgNode);
+        },
+        JSXOpeningElement(node) {
+          if (node.name?.type !== "JSXIdentifier" || node.name.name !== "ShellIcon") return;
+          const colorAttr = (node.attributes ?? []).find(
+            attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === "color",
+          );
+          if (!colorAttr?.value) return;
+          const fgNode =
+            colorAttr.value.type === "Literal"
+              ? colorAttr.value
+              : colorAttr.value.type === "JSXExpressionContainer"
+                ? colorAttr.value.expression
+                : null;
+          if (!fgNode) return;
 
-          if (
-            bgNode.type === "ConditionalExpression" &&
-            fgNode.type === "ConditionalExpression" &&
-            sameAstCondition(bgNode.test, fgNode.test, context.sourceCode)
-          ) {
-            checkPair(fgNode.consequent, resolveColorRole(bgNode.consequent, aliases), resolveColorRole(fgNode.consequent, aliases));
-            checkPair(fgNode.alternate, resolveColorRole(bgNode.alternate, aliases), resolveColorRole(fgNode.alternate, aliases));
-            return;
+          // Walk up to the nearest enclosing JSXElement that declares a backgroundColor.
+          // Stop if an enclosing container paints its own vector backdrop (e.g. scalloped rosette avatar).
+          let cur = node.parent?.parent;
+          let bgNode = null;
+          while (cur) {
+            if (cur.type === "JSXElement") {
+              const hasVectorBackdrop = (cur.children ?? []).some(
+                child =>
+                  child.type === "JSXElement" &&
+                  child.openingElement?.name?.type === "JSXIdentifier" &&
+                  child.openingElement.name.name === "vector",
+              );
+              if (hasVectorBackdrop) break;
+              const styleAttr = (cur.openingElement?.attributes ?? []).find(
+                attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === "style",
+              );
+              const styleExpr = styleAttr?.value?.type === "JSXExpressionContainer" ? styleAttr.value.expression : null;
+              if (styleExpr?.type === "ObjectExpression") {
+                const { map } = getStyleProps(styleExpr);
+                const candidate = map.get("backgroundColor") ?? map.get("background-color") ?? map.get("background");
+                if (candidate) {
+                  bgNode = candidate;
+                  break;
+                }
+              }
+            }
+            cur = cur.parent;
           }
-
-          const bgRole = resolveColorRole(bgNode, aliases);
-          const fgRole = resolveColorRole(fgNode, aliases);
-          if (bgRole && fgRole) {
-            checkPair(fgNode, bgRole, fgRole);
-          }
+          if (!bgNode) return;
+          checkBgFgPair(bgNode, fgNode);
         },
       };
     },
@@ -738,17 +801,36 @@ const rules = {
       schema: [],
     },
     create(context) {
+      const NUMERIC_READOUT_RE = /(?:%|\bseconds\(\)|\b(?:formatTrackTimeUs|formatDurationSeconds|formatBytesGiB|Math\.round|toFixed|percentage|charge_cycles|strength|battery|timeout_seconds)\b)/;
+      const enclosingTextElement = node => {
+        let cur = node.parent;
+        while (cur) {
+          if (cur.type === "JSXElement") {
+            const name = cur.openingElement?.name;
+            return name?.type === "JSXIdentifier" && name.name === "text" ? cur : null;
+          }
+          if (cur.type === "FunctionDeclaration" || cur.type === "ArrowFunctionExpression") return null;
+          cur = cur.parent;
+        }
+        return null;
+      };
       return {
         ObjectExpression(node) {
           const { map } = getStyleProps(node);
           const fontFamily = staticString(map.get("fontFamily") ?? map.get("font-family"));
           if (fontFamily !== "var(--font-mono)") return;
-          const isTabularSlot = isEnclosingJsxElementWithAttr(node, "data-tabular");
           const fvn = staticString(map.get("fontVariantNumeric") ?? map.get("font-variant-numeric"));
-          if (isTabularSlot && fvn !== "tabular-nums") {
+          if (fvn === "tabular-nums") return;
+
+          const isTabularSlot = isEnclosingJsxElementWithAttr(node, "data-tabular");
+          const textEl = enclosingTextElement(node);
+          const childrenText = textEl
+            ? (textEl.children ?? []).map(child => context.sourceCode?.getText?.(child) ?? "").join(" ")
+            : "";
+          if (isTabularSlot || (textEl && NUMERIC_READOUT_RE.test(childrenText))) {
             context.report({
               node,
-              message: "Tabular Readout Rule: numeric readout slots must declare fontVariantNumeric: \"tabular-nums\".",
+              message: "Tabular Readout Rule: numeric readout slots using var(--font-mono) must declare fontVariantNumeric: \"tabular-nums\".",
             });
           }
         },
@@ -886,6 +968,57 @@ const rules = {
             context.report({
               node,
               message: "Hover Hit-Target Stability Rule: transformed visual child [data-dock-visual] must set pointerEvents: \"none\" so it never alters hit-testing.",
+            });
+          }
+        },
+      };
+    },
+  },
+
+  "no-flush-surface-shadow": {
+    meta: {
+      type: "problem",
+      docs: { description: "Disallow CSS boxShadow on flush PopupSurface/WindowSurface root containers where shadow bleeds into clipped square corners" },
+      schema: [],
+    },
+    create(context) {
+      const FLUSH_FILES = new Set(["ShellPanels.tsx", "PluginHost.tsx", "SettingsWindow.tsx", "BarPopups.tsx"]);
+      const basename = path.basename(context.filename ?? "");
+      if (!FLUSH_FILES.has(basename)) return {};
+      return {
+        Property(node) {
+          const key = propertyName(node);
+          if (key !== "boxShadow" && key !== "box-shadow") return;
+          const val = staticString(node.value);
+          if (val !== null && val.trim().toLowerCase() === "none") return;
+          context.report({
+            node,
+            message:
+              "Flush Surface Shadow Rule: do not apply CSS boxShadow on flush PopupSurface or WindowSurface containers (shadow leaks outside borderRadius and clips at surface bounds).",
+          });
+        },
+      };
+    },
+  },
+
+  "no-core-plugin-id-branching": {
+    meta: {
+      type: "problem",
+      docs: { description: "Enforce ADR-0005: core shell UI must never branch on hardcoded first-party plugin IDs" },
+      schema: [],
+    },
+    create(context) {
+      const filename = (context.filename ?? "").replace(/\\/g, "/");
+      const inPluginPackage = /(?:^|\/)plugins\/[^/]+\/src\//.test(filename);
+      if (inPluginPackage) return {};
+      const PLUGIN_ID_RE = /^(?:z-shell\/)?(?:nosleep|ai-usage|theme-bridges|niri-overview)$/;
+      return {
+        Literal(node) {
+          if (typeof node.value !== "string") return;
+          if (PLUGIN_ID_RE.test(node.value.trim())) {
+            context.report({
+              node,
+              message: `ADR-0005 Plugin Independence: core shell must not hardcode first-party plugin ID "${node.value}". Declare metadata in plugin.toml instead.`,
             });
           }
         },

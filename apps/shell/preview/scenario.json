@@ -11,7 +11,7 @@
         { "id": "hdmi-1", "name": "HDMI-A-1", "x": 1440, "y": 0, "width": 1280, "height": 720, "scale": 1, "refreshRateMilliHz": 60000 }
       ]
     },
-    { "id": "daemon-events", "op": "clock.advance", "byMs": 30 },
+    { "id": "daemon-events", "op": "clock.advance", "byMs": 250 },
     { "id": "ready", "op": "settle" },
     {
       "id": "active-window",

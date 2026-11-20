@@ -1,217 +1,30 @@
-import { beforeAll, describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { inflateSync } from "node:zlib";
+import { beforeAll, describe, expect } from "bun:test";
+import { existsSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
-import { buildShellApplication } from "@z-shell/composer";
 import type { PublishedApplication } from "@hewel/zgui-build";
 import { buildShellPreviewFixture, makeTinyPngBytes } from "./fixture-builder.ts";
+import {
+  buildPublishedShell,
+  createPreviewWorkspace,
+  expectCleanPreview,
+  nativeHost,
+  pixel,
+  previewAvailable,
+  previewSessionLock,
+  previewSurfaces,
+  previewTest,
+  readCapture,
+  runPreview as runPreviewBundle,
+  sessionLockTrace,
+  shellDir,
+  treeNode,
+  type DecodedPng,
+  type DeviceBounds,
+} from "./preview-harness.ts";
 
-const shellDir = resolve(import.meta.dir, "..");
-const repoRoot = resolve(shellDir, "../..");
-const zguiRoot = resolve(repoRoot, "../zgui-js");
-const nativeHost = join(zguiRoot, "target/debug/native-host");
-const hasNixShell = Bun.which("nix-shell") !== null;
-const previewAvailable = hasNixShell && existsSync(nativeHost);
-const directPreviewAvailable = existsSync(nativeHost);
-const previewTest = previewAvailable ? test : test.skip;
-const geometryLintTest = directPreviewAvailable ? test : test.skip;
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'"'"'`)}'`;
-}
-
-interface DecodedPng {
-  readonly width: number;
-  readonly height: number;
-  readonly data: Buffer;
-}
-
-function pngRgba(file: string): DecodedPng {
-  const bytes = readFileSync(file);
-  if (!bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
-    throw new Error(`Invalid PNG signature: ${file}`);
-  }
-  let width = 0;
-  let height = 0;
-  const chunks: Buffer[] = [];
-  for (let offset = 8; offset + 12 <= bytes.length;) {
-    const length = bytes.readUInt32BE(offset);
-    const type = bytes.toString("ascii", offset + 4, offset + 8);
-    const chunk = bytes.subarray(offset + 8, offset + 8 + length);
-    if (type === "IHDR") {
-      width = chunk.readUInt32BE(0);
-      height = chunk.readUInt32BE(4);
-      if (chunk[8] !== 8 || chunk[9] !== 6 || chunk[12] !== 0) {
-        throw new Error("Expected non-interlaced 8-bit RGBA PNG");
-      }
-    } else if (type === "IDAT") chunks.push(chunk);
-    offset += length + 12;
-    if (type === "IEND") break;
-  }
-  const stride = width * 4;
-  const raw = inflateSync(Buffer.concat(chunks));
-  if (!width || !height || raw.length !== (stride + 1) * height) {
-    throw new Error(`Invalid PNG data: ${file}`);
-  }
-  const data = Buffer.alloc(stride * height);
-  const paeth = (a: number, b: number, c: number) => {
-    const p = a + b - c;
-    const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
-    return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
-  };
-  for (let y = 0; y < height; y++) {
-    const filter = raw[y * (stride + 1)]!;
-    for (let x = 0; x < stride; x++) {
-      const index = y * stride + x;
-      const a = x >= 4 ? data[index - 4]! : 0;
-      const b = y ? data[index - stride]! : 0;
-      const c = y && x >= 4 ? data[index - stride - 4]! : 0;
-      const prediction = filter === 0 ? 0 : filter === 1 ? a : filter === 2 ? b
-        : filter === 3 ? Math.floor((a + b) / 2) : paeth(a, b, c);
-      data[index] = (raw[y * (stride + 1) + 1 + x]! + prediction) & 255;
-    }
-  }
-  return { width, height, data };
-}
-
-interface PreviewResult {
-  readonly exitCode: number;
-  readonly status: string;
-  readonly captureCount: number;
-  readonly assertions: { readonly passed: number; readonly failed: number };
-  readonly teardown: {
-    readonly clean: boolean;
-    readonly resources: Record<string, number | boolean | undefined>;
-  };
-}
-
-interface DeviceBounds {
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
-}
-
-interface PreviewScrollMetrics {
-  readonly overflowY?: boolean;
-  readonly contentHeight?: number;
-  readonly viewportHeight?: number;
-}
-
-interface PreviewTreeNode {
-  readonly testId?: string;
-  readonly role?: string;
-  readonly text?: string;
-  readonly boundsLogical?: DeviceBounds;
-  readonly boundsDevice?: DeviceBounds;
-  readonly scrollMetrics?: PreviewScrollMetrics;
-}
-
-function runPreview(fixture: string, scenario: string, out: string): PreviewResult {
-  const args = [
-    "preview", "run",
-    "--bundle", published.dist,
-    "--profile", join(shellDir, "preview/profile.json"),
-    "--fixture", fixture,
-    "--scenario", scenario,
-    "--out", out,
-  ];
-  const [command, commandArgs] = hasNixShell
-    ? ["nix-shell", ["--run", [nativeHost, ...args].map(shellQuote).join(" ")]]
-    : [nativeHost, args];
-  const preview = spawnSync(command, commandArgs, {
-    cwd: zguiRoot,
-    encoding: "utf8",
-    timeout: 30_000,
-  });
-  expect(preview.error).toBeUndefined();
-  expect(preview.status, `${preview.stderr}\n${preview.stdout}`).toBe(0);
-  return JSON.parse(preview.stdout) as PreviewResult;
-}
-
-function expectCleanPreview(result: PreviewResult, captureCount: number, assertionCount: number) {
-  expect(result.exitCode).toBe(0);
-  expect(result.status).toBe("passed");
-  expect(result.captureCount).toBe(captureCount);
-  expect(result.assertions.passed).toBe(assertionCount);
-  expect(result.assertions.failed).toBe(0);
-  expect(result.teardown.clean).toBe(true);
-  for (const resource of ["timers", "imageHandles", "unixSockets", "shellSurfaces"] as const) {
-    expect(result.teardown.resources[resource] ?? 0, resource).toBe(0);
-  }
-  expect(result.teardown.resources.engineAlive).toBe(false);
-  for (const [resource, count] of Object.entries(result.teardown.resources)) {
-    if (typeof count === "number") expect(count, resource).toBe(0);
-  }
-}
-
-function readCapture(out: string, surface: string, captureId: string) {
-  const capture = join(out, "captures/surfaces", surface, captureId);
-  return {
-    frame: JSON.parse(readFileSync(`${capture}.frame.json`, "utf8")) as {
-      readonly renderer: { readonly alphaMode: string };
-    },
-    tree: JSON.parse(readFileSync(`${capture}.tree.json`, "utf8")) as {
-      readonly nodes: readonly PreviewTreeNode[];
-    },
-    image: pngRgba(`${capture}.png`),
-  };
-}
-
-interface SessionLockSnapshot {
-  readonly state: string;
-  readonly unlockCount: number;
-  readonly coveredOutputs: readonly string[];
-  readonly fallbackOutputs: readonly string[];
-}
-
-interface PreviewStep {
-  readonly id: string;
-  readonly result?: {
-    readonly surfaces?: readonly string[];
-    readonly readiness?: { readonly sessionLock?: SessionLockSnapshot };
-  };
-}
-
-function previewStep(out: string, stepId: string): PreviewStep {
-  const steps = readFileSync(join(out, "steps.jsonl"), "utf8").trim().split("\n")
-    .map(line => JSON.parse(line) as PreviewStep);
-  const step = steps.find(candidate => candidate.id === stepId);
-  expect(step, stepId).toBeDefined();
-  return step!;
-}
-
-function previewSurfaces(out: string, stepId: string): readonly string[] {
-  return previewStep(out, stepId).result?.surfaces ?? [];
-}
-
-function previewSessionLock(out: string, stepId: string): SessionLockSnapshot {
-  const snapshot = previewStep(out, stepId).result?.readiness?.sessionLock;
-  expect(snapshot, stepId).toBeDefined();
-  return snapshot!;
-}
-
-function sessionLockTrace(out: string): SessionLockSnapshot {
-  const trace = JSON.parse(readFileSync(join(out, "services.json"), "utf8")) as {
-    readonly records: readonly { readonly kind: string; readonly detail: SessionLockSnapshot }[];
-  };
-  const record = trace.records.findLast(candidate => candidate.kind === "sessionLock");
-  expect(record).toBeDefined();
-  return record!.detail;
-}
-
-function treeNode(tree: { readonly nodes: readonly PreviewTreeNode[] }, testId: string): PreviewTreeNode {
-  const node = tree.nodes.find(candidate => candidate.testId === testId);
-  expect(node, testId).toBeDefined();
-  return node!;
-}
-
-function pixel(image: DecodedPng, x: number, y: number): number[] {
-  const offset = (y * image.width + x) * 4;
-  return Array.from(image.data.subarray(offset, offset + 4));
+function runPreview(fixture: string, scenario: string, out: string) {
+  return runPreviewBundle(published.dist, fixture, scenario, out);
 }
 
 function centerPixel(image: DecodedPng, bounds: DeviceBounds | undefined): number[] {
@@ -225,8 +38,8 @@ let published!: PublishedApplication;
 
 describe("apps/shell preview", () => {
   beforeAll(async () => {
-    if (!directPreviewAvailable) return;
-    published = await buildShellApplication({ app: "shell", appDirectory: shellDir });
+    if (!previewAvailable) return;
+    published = await buildPublishedShell();
     expect(published.manifest.id).toBe("dev.zshell.shell");
     expect(published.manifest.capabilities?.sessionLock).toBe(true);
     expect(published.manifest.capabilities?.namedSockets).toContain("niri");
@@ -241,8 +54,7 @@ describe("apps/shell preview", () => {
   previewTest("multi-output Top Bar, per-output Wallpapers, live theme, SNI tray blob + DBusMenu popup, and interactions", () => {
     expect(existsSync(nativeHost)).toBe(true);
 
-    const workspace = mkdtempSync(join(tmpdir(), "z-shell-preview-top-"));
-    const out = join(workspace, "out");
+    const { out, cleanup } = createPreviewWorkspace("z-shell-preview-top-");
     try {
       const result = runPreview(
         join(shellDir, "preview/fixture.json"),
@@ -260,11 +72,14 @@ describe("apps/shell preview", () => {
         expect(capture.frame.renderer.alphaMode).toBe("PreMultiplied");
       }
 
-      expect([dpBar.image.width, dpBar.image.height]).toEqual([1412, 32]);
-      expect([hdmiBar.image.width, hdmiBar.image.height]).toEqual([1252, 32]);
+      // Floating top bar includes transparent shadowBleed (10px top, 22px bottom, 14px sides).
+      expect([dpBar.image.width, dpBar.image.height]).toEqual([1440, 64]);
+      expect([hdmiBar.image.width, hdmiBar.image.height]).toEqual([1280, 64]);
       expect(pixel(dpBar.image, 0, 0)).toEqual([0, 0, 0, 0]);
       expect(pixel(hdmiBar.image, 0, 0)).toEqual([0, 0, 0, 0]);
-      expect(centerPixel(dpBar.image, treeNode(dpBar.tree, "ws-2").boundsDevice))
+      const ws2Bounds = treeNode(dpBar.tree, "ws-2").boundsDevice!;
+      // Sample the active pill fill inside its left padding (avoiding the centered glyph "2").
+      expect(pixel(dpBar.image, Math.floor(ws2Bounds.x + 6), Math.floor(ws2Bounds.y + ws2Bounds.height / 2)))
         .toEqual([0x7d, 0xd3, 0xfc, 255]);
       expect(centerPixel(dpBar.image, treeNode(dpBar.tree, "tray-item-discord").boundsDevice))
         .toEqual([0x58, 0x65, 0xf2, 255]);
@@ -279,13 +94,12 @@ describe("apps/shell preview", () => {
       expect(trayMenu.image.height).toBeGreaterThan(0);
       expect(trayMenu.image.data.some((value, index) => index % 4 === 3 && value !== 0)).toBe(true);
     } finally {
-      rmSync(workspace, { recursive: true, force: true });
+      cleanup();
     }
   });
 
   previewTest("Vertical Bar (position: \"left\") renders 52px layout with transparent corners and clean teardown", () => {
-    const workspace = mkdtempSync(join(tmpdir(), "z-shell-preview-left-"));
-    const out = join(workspace, "out");
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-left-");
     try {
       const fixture = join(workspace, "fixture.json");
       const scenario = join(workspace, "scenario.json");
@@ -356,18 +170,19 @@ describe("apps/shell preview", () => {
       expectCleanPreview(result, 1, 1);
       const bar = readCapture(out, "bar-dp-1", "bar-dp-1");
       expect(bar.frame.renderer.alphaMode).toBe("PreMultiplied");
-      expect([bar.image.width, bar.image.height]).toEqual([40, 872]);
-      expect(treeNode(bar.tree, "bar-root-dp-1").boundsDevice?.width).toBe(40);
+      // Floating left bar (40px island + 14px left/22px right bleed, 10px top/14px bottom bleed).
+      expect([bar.image.width, bar.image.height]).toEqual([76, 896]);
+      expect(treeNode(bar.tree, "bar-root-dp-1").boundsDevice?.width).toBe(76);
+      expect(treeNode(bar.tree, "bar-workspaces").boundsDevice?.width).toBe(40);
       expect(treeNode(bar.tree, "ws-2").text).toBe("2");
       expect(pixel(bar.image, 0, 0)).toEqual([0, 0, 0, 0]);
     } finally {
-      rmSync(workspace, { recursive: true, force: true });
+      cleanup();
     }
   });
 
   previewTest("Quick Settings popup + Wi-Fi password, Sound, Wallpaper Picker subpages, and popupDone dismiss", () => {
-    const workspace = mkdtempSync(join(tmpdir(), "z-shell-preview-quick-settings-"));
-    const out = join(workspace, "out");
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-quick-settings-");
     try {
       const fixture = join(workspace, "fixture.json");
       const scenario = join(workspace, "scenario.json");
@@ -445,7 +260,7 @@ describe("apps/shell preview", () => {
           {
             id: 26,
             name: "wallpaper.list",
-            payload: { offset: 0, limit: 24 },
+            payload: { offset: 0, limit: 16 },
             atMs: 50,
             result: {
               data: {
@@ -473,7 +288,7 @@ describe("apps/shell preview", () => {
             id: 27,
             name: "wallpaper.set",
             payload: { path: "/wallpapers/aurora.png", output: null, fit: "cover" },
-            atMs: 60,
+            atMs: 65,
           },
         ],
       }), null, 2));
@@ -558,6 +373,8 @@ describe("apps/shell preview", () => {
           },
           { id: "wallpaper-list-reply", op: "clock.advance", byMs: 5 },
           { id: "wallpaper-thumbnail-reply", op: "clock.advance", byMs: 5 },
+          { id: "wallpaper-thumbnail-ready", op: "clock.advance", byMs: 5 },
+          { id: "capture-settings", op: "capture", surface: "settings-window", captureId: "settings-window" },
           {
             id: "select-wallpaper",
             op: "pointer.click",
@@ -582,7 +399,10 @@ describe("apps/shell preview", () => {
       }, null, 2));
 
       const result = runPreview(fixture, scenario, out);
-      expectCleanPreview(result, 1, 2);
+      expectCleanPreview(result, 2, 2);
+      const settingsCapture = readCapture(out, "settings-window", "settings-window");
+      expect(centerPixel(settingsCapture.image, treeNode(settingsCapture.tree, "settings-wp-aurora").boundsDevice))
+        .toEqual([0x7c, 0xd4, 0xff, 255]);
       const quickSettings = readCapture(out, "panel-quick-settings", "panel-quick-settings");
       expect(quickSettings.frame.renderer.alphaMode).toBe("PreMultiplied");
       expect(quickSettings.image.width).toBe(396);
@@ -595,13 +415,12 @@ describe("apps/shell preview", () => {
       expect(quickSettings.tree.nodes.some(node => node.text === "hewel")).toBe(true);
       expect(quickSettings.tree.nodes.some(node => node.text === "84%")).toBe(true);
     } finally {
-      rmSync(workspace, { recursive: true, force: true });
+      cleanup();
     }
   });
 
   previewTest("Calendar/Notifications, Media Player, Battery, and Clipboard panels with clipboard.fetch-blob PNG decoding", () => {
-    const workspace = mkdtempSync(join(tmpdir(), "z-shell-preview-panels-"));
-    const out = join(workspace, "out");
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-panels-");
     try {
       const fixture = join(workspace, "fixture.json");
       const scenario = join(workspace, "scenario.json");
@@ -704,7 +523,7 @@ describe("apps/shell preview", () => {
             atMs: 70,
             result: { data: { bytes: makeTinyPngBytes(0x22, 0xc5, 0x5e) } },
           },
-          { id: 29, name: "clipboard.copy", payload: { id: 11 }, atMs: 90 },
+          { id: 29, name: "clipboard.copy", payload: { id: 11 }, atMs: 385 },
         ],
       }), null, 2));
       writeFileSync(scenario, JSON.stringify({
@@ -771,7 +590,7 @@ describe("apps/shell preview", () => {
             value: { args: ["panel", "clipboard"], reply: { text: "{\"activePanel\":\"clipboard\"}" } },
           },
           { id: "clipboard-blob-reply", op: "clock.advance", byMs: 10 },
-          { id: "clipboard-image-ready", op: "clock.advance", byMs: 5 },
+          { id: "clipboard-image-ready", op: "clock.advance", byMs: 300 },
           { id: "capture-clipboard", op: "capture", surface: "panel-clipboard", captureId: "panel-clipboard" },
           {
             id: "filter-clipboard-text",
@@ -813,8 +632,9 @@ describe("apps/shell preview", () => {
       expect(treeNode(calendar.tree, "cal-month-title").text).toBe("November 2023");
       expect(treeNode(calendar.tree, "cal-today-cell").text).toBe("14");
       expect(treeNode(calendar.tree, "cal-notif-count").text).toBe("2");
-      expect(calendar.tree.nodes.some(node => node.text === "18%")).toBe(true);
-      expect(calendar.tree.nodes.some(node => node.text === "46°C")).toBe(true);
+      expect(calendar.tree.nodes.some(node => node.text === "Notification 1")).toBe(true);
+      // Single-owner IA (DESIGN.md): system telemetry lives in Settings > Power, not Calendar.
+      expect(calendar.tree.nodes.some(node => node.text === "46°C")).toBe(false);
       expect(treeNode(media.tree, "media-title").text).toBe("Feather");
       expect(treeNode(battery.tree, "battery-percent").text).toBe("84%");
       expect(treeNode(clipboard.tree, "clip-entry-11").boundsDevice).toBeDefined();
@@ -823,13 +643,12 @@ describe("apps/shell preview", () => {
       expect(centerPixel(clipboard.image, treeNode(clipboard.tree, "clip-image-12").boundsDevice))
         .toEqual([0x22, 0xc5, 0x5e, 255]);
     } finally {
-      rmSync(workspace, { recursive: true, force: true });
+      cleanup();
     }
   });
 
   previewTest("Notification toasts (click-through inputRegion), live-only Volume/IME OSD + auto-dismiss, Idle fade overlay, and Fcitx5 Kimpanel candidate popup", () => {
-    const workspace = mkdtempSync(join(tmpdir(), "z-shell-preview-overlays-"));
-    const out = join(workspace, "out");
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-overlays-");
     try {
       const fixture = join(workspace, "fixture.json");
       const scenario = join(workspace, "scenario.json");
@@ -1044,13 +863,12 @@ describe("apps/shell preview", () => {
       expect(secondCandidate).toBeDefined();
       expect(secondCandidate!.x).toBeGreaterThan(firstCandidate!.x);
     } finally {
-      rmSync(workspace, { recursive: true, force: true });
+      cleanup();
     }
   });
 
   previewTest("Dock surface (pinned + running apps) and App Launcher overlay (exclusive keyboard, query_id correlation, keyboard activation)", () => {
-    const workspace = mkdtempSync(join(tmpdir(), "z-shell-preview-dock-launcher-"));
-    const out = join(workspace, "out");
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-dock-launcher-");
     try {
       const fixture = join(workspace, "fixture.json");
       const scenario = join(workspace, "scenario.json");
@@ -1195,12 +1013,12 @@ describe("apps/shell preview", () => {
       expect(launcher.tree.nodes.some(node => node.text === "Zen Browser")).toBe(true);
       expect(launcher.tree.nodes.some(node => node.text === "Alacritty")).toBe(true);
     } finally {
-      rmSync(workspace, { recursive: true, force: true });
+      cleanup();
     }
   });
 
   previewTest("ADR-0004 Session Lock: multi-output opaque SessionLockSurface, PAM failure -> retry -> scoped unlock, plus compositor refusal", () => {
-    const workspace = mkdtempSync(join(tmpdir(), "z-shell-preview-session-lock-"));
+    const { workspace, cleanup } = createPreviewWorkspace("z-shell-preview-session-lock-");
     const lockedOut = join(workspace, "locked-out");
     const refusedOut = join(workspace, "refused-out");
     const monitors = [
@@ -1384,13 +1202,12 @@ describe("apps/shell preview", () => {
       expect(sessionLockTrace(refusedOut).unlockCount).toBe(0);
       expect(previewSurfaces(refusedOut, "refused")).not.toContain("lock-dp-1");
     } finally {
-      rmSync(workspace, { recursive: true, force: true });
+      cleanup();
     }
   });
 
   previewTest("Polkit authorization dialog (identity select, respond, cancel, lock suppression) and Power confirmation dialog", () => {
-    const workspace = mkdtempSync(join(tmpdir(), "z-shell-preview-polkit-power-"));
-    const out = join(workspace, "out");
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-polkit-power-");
     const monitor = {
       id: "dp-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900,
       scale: 1, refreshRateMilliHz: 60000,
@@ -1552,13 +1369,12 @@ describe("apps/shell preview", () => {
       expect(previewSurfaces(out, "power-dialog-closed")).not.toContain("power-dialog");
       expect(sessionLockTrace(out).unlockCount).toBe(0);
     } finally {
-      rmSync(workspace, { recursive: true, force: true });
+      cleanup();
     }
   });
 
   previewTest("multi-output hotplug: removing first output retargets live overlay LayerSurfaces cleanly (zgui-js#37)", () => {
-    const workspace = mkdtempSync(join(tmpdir(), "z-shell-preview-hotplug-"));
-    const out = join(workspace, "out");
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-hotplug-");
     const dp1 = {
       id: "dp-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900,
       scale: 1, refreshRateMilliHz: 60000,
@@ -1715,290 +1531,7 @@ describe("apps/shell preview", () => {
       expect(treeNode(osd.tree, "osd-value").text).toBe("80%");
       expect(treeNode(toasts.tree, "toast-card-1").boundsDevice).toBeDefined();
     } finally {
-      rmSync(workspace, { recursive: true, force: true });
-    }
-  });
-
-  geometryLintTest("Design geometry lint: >=24x24px hit targets, 1280px bar anti-collision, slider alignment, and width tiers", () => {
-    const workspace = mkdtempSync(join(tmpdir(), "z-shell-preview-design-"));
-    const out = join(workspace, "out");
-    const interactiveRoles = new Set(["button", "switch", "slider", "menuItem", "menuItemCheckBox", "menuItemRadio", "tab"]);
-    try {
-      const fixture = join(workspace, "fixture.json");
-      const scenario = join(workspace, "scenario.json");
-      const compactMonitor = { id: "HDMI-A-1", name: "HDMI-A-1", x: 0, y: 0, width: 1280, height: 720, scale: 1 };
-      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
-        id: "z-shell-design-geometry-lint",
-        initialTopics: {
-          "wayland.outputs": {
-            capability: "connected",
-            outputs: [{
-              output_instance_id: 1, name: "HDMI-A-1", description: "Compact Laptop", make: "Test", model: "1280x720",
-              x: 0, y: 0, width: 1280, height: 720, mode_width: 1280, mode_height: 720, refresh_mhz: 60000, scale: 1,
-              physical_width_mm: null, physical_height_mm: null,
-            }],
-          },
-          "wayland.workspaces": {
-            capability: "connected",
-            groups: [{ group_id: 1, output_instance_ids: [1] }],
-            workspaces: [
-              { workspace_id: 1, group_id: 1, name: "1", id_str: "1", coordinates: [1], active: false, urgent: false, hidden: false, capabilities: ["activate"] },
-              { workspace_id: 2, group_id: 1, name: "2", id_str: "2", coordinates: [2], active: true, urgent: false, hidden: false, capabilities: ["activate"] },
-              { workspace_id: 3, group_id: 1, name: "3", id_str: "3", coordinates: [3], active: false, urgent: false, hidden: false, capabilities: ["activate"] },
-            ],
-          },
-          "wayland.windows": {
-            capability: "connected",
-            windows: [{
-              window_id: 10, app_id: "org.example.editor",
-              title: "VeryLongProjectName — crates/z-shell-theme/src/palette.rs — Extremely Verbose Editor Window Title That Must Truncate",
-              activated: true, minimized: false, maximized: false, fullscreen: false, output_instance_ids: [1],
-            }],
-          },
-          "desktop.apps": {
-            available: true,
-            count: 2,
-            pinned_apps: ["org.example.editor", "org.example.browser"],
-            apps: [
-              { id: "org.example.editor", title: "Editor", startup_wm_class: "org.example.editor", icon: null },
-              { id: "org.example.browser", title: "Browser", startup_wm_class: "org.example.browser", icon: null },
-            ],
-          },
-          "desktop.media": {
-            available: true,
-            selected_player_id: "spotify",
-            any_playing: true,
-            cover: null,
-            players: [{
-              id: "spotify", identity: "Spotify", playback_status: "playing", position_us: 60_000_000,
-              capabilities: { can_play: true, can_pause: true, can_go_next: true, can_go_previous: true, can_seek: true },
-              metadata: {
-                title: "An Exceptionally Long Ambient Track Title Designed To Test Bar Collision Constraints",
-                artists: ["Synthetic Orchestra Featuring Extra Guests"],
-                album: "Geometry Verification",
-                length_us: 240_000_000,
-              },
-            }],
-          },
-          "system.audio": {
-            availability: "ready",
-            default_sink: "alsa_output.0",
-            default_source: null,
-            sinks: [{ index: 1, name: "alsa_output.0", description: "Speakers", volume: 0.65, muted: false, channels: 2 }],
-            sources: [],
-            sink_inputs: [],
-            source_outputs: [],
-          },
-        },
-        commands: [
-          {
-            id: 26,
-            name: "wallpaper.list",
-            payload: { offset: 0, limit: 16 },
-            atMs: 2100,
-            result: { total: 0, items: [] },
-          },
-          {
-            id: 27,
-            name: "launcher.query",
-            payload: { query: "", query_id: 1, limit: 18 },
-            atMs: 3000,
-            result: {
-              data: {
-                query_id: 1,
-                items: [
-                  { provider_id: "desktop", item_id: "org.example.editor", title: "Editor", icon: null },
-                  { provider_id: "desktop", item_id: "org.example.browser", title: "Browser", icon: null },
-                ],
-              },
-            },
-          },
-        ],
-      }), null, 2));
-      writeFileSync(scenario, JSON.stringify({
-        schemaVersion: 1,
-        id: "z-shell-design-geometry-lint",
-        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
-        steps: [
-          { id: "outputs", op: "monitors.set", monitors: [compactMonitor] },
-          { id: "daemon-events", op: "clock.advance", byMs: 30 },
-          { id: "ready", op: "settle" },
-          { id: "capture-bar", op: "capture", surface: "bar-hdmi-a-1", captureId: "bar" },
-          { id: "capture-dock", op: "capture", surface: "dock-hdmi-a-1", captureId: "dock" },
-          { id: "hover-dock-app", op: "pointer.move", target: { surface: "dock-hdmi-a-1", testId: "dock-app-org.example.editor" } },
-          { id: "dock-hover-settle", op: "clock.advance", byMs: 250 },
-          { id: "capture-dock-hover", op: "capture", surface: "dock-hdmi-a-1", captureId: "dock-hover" },
-          { id: "open-qs", op: "pointer.click", target: { surface: "bar-hdmi-a-1", testId: "bar-audio" }, button: "primary" },
-          { id: "qs-settle", op: "clock.advance", byMs: 600 },
-          { id: "capture-qs", op: "capture", surface: "panel-quick-settings", captureId: "qs" },
-          { id: "open-calendar", op: "pointer.click", target: { surface: "bar-hdmi-a-1", testId: "bar-clock" }, button: "primary" },
-          { id: "cal-settle", op: "clock.advance", byMs: 600 },
-          { id: "capture-cal", op: "capture", surface: "panel-calendar", captureId: "cal" },
-          { id: "open-media", op: "pointer.click", target: { surface: "bar-hdmi-a-1", testId: "bar-media" }, button: "primary" },
-          { id: "media-settle", op: "clock.advance", byMs: 600 },
-          { id: "capture-media", op: "capture", surface: "panel-media", captureId: "media" },
-          {
-            id: "open-settings", op: "service.emit", channel: "control.message",
-            value: { args: ["settings", "appearance"], reply: { text: "{\"settingsWindowOpen\":true,\"settingsWindowTab\":\"appearance\"}" } },
-          },
-          { id: "settings-settle", op: "clock.advance", byMs: 300 },
-          { id: "capture-settings", op: "capture", surface: "settings-window", captureId: "settings" },
-          {
-            id: "open-power-dialog", op: "service.emit", channel: "control.message",
-            value: { args: ["power", "poweroff"], reply: { text: "{\"pendingPowerAction\":\"poweroff\"}" } },
-          },
-          { id: "power-settle", op: "clock.advance", byMs: 600 },
-          { id: "capture-power", op: "capture", surface: "power-dialog", captureId: "power" },
-          {
-            id: "open-launcher", op: "service.emit", channel: "control.message",
-            value: { args: ["panel", "launcher"], reply: { text: "{\"activePanel\":\"launcher\"}" } },
-          },
-          { id: "launcher-settle", op: "clock.advance", byMs: 400 },
-          { id: "capture-launcher", op: "capture", surface: "launcher-overlay", captureId: "launcher" },
-        ],
-      }, null, 2));
-
-      const result = runPreview(fixture, scenario, out);
-      expectCleanPreview(result, 9, 0);
-      const bar = readCapture(out, "bar-hdmi-a-1", "bar");
-      const dock = readCapture(out, "dock-hdmi-a-1", "dock");
-      const dockHover = readCapture(out, "dock-hdmi-a-1", "dock-hover");
-      const qs = readCapture(out, "panel-quick-settings", "qs");
-      const cal = readCapture(out, "panel-calendar", "cal");
-      const media = readCapture(out, "panel-media", "media");
-      const settings = readCapture(out, "settings-window", "settings");
-      const power = readCapture(out, "power-dialog", "power");
-      const launcher = readCapture(out, "launcher-overlay", "launcher");
-
-      // WCAG 2.2 SC 2.5.8: every visible interactive control must meet >= 24x24px hit area.
-      for (const [label, tree] of [
-        ["bar", bar.tree],
-        ["dock", dock.tree],
-        ["quick-settings", qs.tree],
-        ["calendar", cal.tree],
-        ["media", media.tree],
-        ["settings", settings.tree],
-        ["power-dialog", power.tree],
-        ["launcher", launcher.tree],
-      ] as const) {
-        const controls = tree.nodes.filter(node => node.role && interactiveRoles.has(node.role) && node.boundsLogical);
-        expect(controls.length, label).toBeGreaterThan(0);
-        for (const node of controls) {
-          const bounds = node.boundsLogical!;
-          expect(bounds.width, `${label} ${node.testId ?? node.role} width`).toBeGreaterThanOrEqual(24);
-          expect(bounds.height, `${label} ${node.testId ?? node.role} height`).toBeGreaterThanOrEqual(24);
-        }
-      }
-
-      // Shadow-Clipping Guard: transparent LayerSurface bleed edges must fade to near-zero alpha
-      // so drop shadows are never hard-clipped by the buffer boundary.
-      const maxRowAlpha = (image: DecodedPng, y: number): number => {
-        let max = 0;
-        for (let x = 0; x < image.width; x++) {
-          const alpha = image.data[(y * image.width + x) * 4 + 3] ?? 0;
-          if (alpha > max) max = alpha;
-        }
-        return max;
-      };
-      expect(maxRowAlpha(bar.image, 0), "bar top edge shadow clipping").toBeLessThanOrEqual(8);
-      expect(maxRowAlpha(bar.image, bar.image.height - 1), "bar bottom edge shadow clipping").toBeLessThanOrEqual(8);
-      expect(maxRowAlpha(dock.image, 0), "dock top edge shadow clipping").toBeLessThanOrEqual(8);
-
-      // Rounded Surface Corner Guard: transparent rounded PopupSurface corners
-      // must remain pure transparent (no root boxShadow leaking into square surface corners).
-      for (const [label, capture] of [
-        ["quick-settings", qs],
-        ["calendar", cal],
-        ["media", media],
-      ] as const) {
-        const w = capture.image.width - 1;
-        const h = capture.image.height - 1;
-        expect(pixel(capture.image, 0, 0), `${label} top-left corner transparent`).toEqual([0, 0, 0, 0]);
-        expect(pixel(capture.image, w, 0), `${label} top-right corner transparent`).toEqual([0, 0, 0, 0]);
-        expect(pixel(capture.image, 0, h), `${label} bottom-left corner transparent`).toEqual([0, 0, 0, 0]);
-        expect(pixel(capture.image, w, h), `${label} bottom-right corner transparent`).toEqual([0, 0, 0, 0]);
-      }
-
-      // Opaque Toplevel Edge Guard: Settings WindowSurface delegates outer corners/borders to the
-      // Wayland compositor (prefer-no-csd), so its 4 corners must stay fully opaque (alpha=255).
-      {
-        const w = settings.image.width - 1;
-        const h = settings.image.height - 1;
-        expect(pixel(settings.image, 0, 0)[3], "settings-window top-left opaque").toBe(255);
-        expect(pixel(settings.image, w, 0)[3], "settings-window top-right opaque").toBe(255);
-        expect(pixel(settings.image, 0, h)[3], "settings-window bottom-left opaque").toBe(255);
-        expect(pixel(settings.image, w, h)[3], "settings-window bottom-right opaque").toBe(255);
-      }
-
-      // Dock Vertical Alignment: launcher tile and every app tile must share the capsule's vertical center.
-      const centerY = (bounds: DeviceBounds) => bounds.y + bounds.height / 2;
-      const dockCapsule = treeNode(dock.tree, "dock-root-HDMI-A-1").boundsLogical!;
-      const dockLauncher = treeNode(dock.tree, "dock-launcher").boundsLogical!;
-      expect(Math.abs(centerY(dockLauncher) - centerY(dockCapsule)), "dock-launcher centered in capsule").toBeLessThanOrEqual(1);
-      for (const appId of ["org.example.editor", "org.example.browser"]) {
-        const appBounds = treeNode(dock.tree, `dock-app-${appId}`).boundsLogical!;
-        expect(Math.abs(centerY(appBounds) - centerY(dockLauncher)), `dock-app-${appId} aligned with launcher`).toBeLessThanOrEqual(1);
-      }
-
-      // Hover Hit-Target Stability: hovering a dock button must NEVER move the button's own hit box
-      // (only its pointer-events: none inner visual child translates), preventing hover jitter loops.
-      const dockAppBefore = treeNode(dock.tree, "dock-app-org.example.editor").boundsLogical!;
-      const dockAppAfterHover = treeNode(dockHover.tree, "dock-app-org.example.editor").boundsLogical!;
-      expect(Math.abs(dockAppAfterHover.x - dockAppBefore.x), "hovered dock hit-target x stable").toBeLessThanOrEqual(0.5);
-      expect(Math.abs(dockAppAfterHover.y - dockAppBefore.y), "hovered dock hit-target y stable").toBeLessThanOrEqual(0.5);
-      expect(Math.abs(dockAppAfterHover.width - dockAppBefore.width), "hovered dock hit-target width stable").toBeLessThanOrEqual(0.5);
-      expect(Math.abs(dockAppAfterHover.height - dockAppBefore.height), "hovered dock hit-target height stable").toBeLessThanOrEqual(0.5);
-
-      // Launcher card width (652px) and composite search bar framing.
-      expect(Math.round(treeNode(launcher.tree, "launcher-card").boundsLogical!.width)).toBe(652);
-      const launcherSearchBar = treeNode(launcher.tree, "launcher-search-bar").boundsLogical!;
-      const launcherSearchField = treeNode(launcher.tree, "launcher-search").boundsLogical!;
-      expect(launcherSearchField.x).toBeGreaterThan(launcherSearchBar.x + 20);
-      expect(launcherSearchField.y).toBeGreaterThanOrEqual(launcherSearchBar.y);
-      expect(launcherSearchField.y + launcherSearchField.height).toBeLessThanOrEqual(launcherSearchBar.y + launcherSearchBar.height);
-
-      // Top bar anti-collision at 1280px with long window title and long media label.
-      const activeWin = treeNode(bar.tree, "bar-active-window").boundsLogical!;
-      const clock = treeNode(bar.tree, "bar-clock").boundsLogical!;
-      const mediaBar = treeNode(bar.tree, "bar-media").boundsLogical!;
-      expect(activeWin.x + activeWin.width).toBeLessThanOrEqual(clock.x);
-      expect(clock.x + clock.width).toBeLessThanOrEqual(mediaBar.x);
-
-      // Precision sliders in Quick Settings share identical horizontal track bounds (Vertical Lane Alignment).
-      const sliders = qs.tree.nodes.filter(node => node.role === "slider" && node.boundsLogical);
-      expect(sliders.length).toBeGreaterThanOrEqual(2);
-      const firstSlider = sliders[0]!.boundsLogical!;
-      for (const slider of sliders.slice(1)) {
-        expect(slider.boundsLogical!.x).toBe(firstSlider.x);
-        expect(slider.boundsLogical!.width).toBe(firstSlider.width);
-      }
-
-      // Settled surface width tiers and Zero-Scroll auto-height match DESIGN.md.
-      expect(Math.round(treeNode(qs.tree, "panel-root-quick-settings").boundsLogical!.width)).toBe(396);
-      expect(qs.image.height).toBeLessThanOrEqual(760);
-      expect(Math.round(treeNode(cal.tree, "panel-root-calendar").boundsLogical!.width)).toBe(396);
-      expect(cal.image.height).toBeLessThanOrEqual(760);
-      expect(Math.round(treeNode(media.tree, "panel-root-media").boundsLogical!.width)).toBe(396);
-      expect(media.image.height).toBeLessThanOrEqual(420);
-      expect(Math.round(treeNode(power.tree, "power-dialog-card").boundsLogical!.width)).toBe(360);
-
-      // Settings WindowSurface (820x600 flush toplevel -> 216px left sidebar + 604px content pane).
-      expect([settings.image.width, settings.image.height]).toEqual([820, 600]);
-      expect(Math.round(treeNode(settings.tree, "settings-sidebar").boundsLogical!.width)).toBe(216);
-      expect(Math.round(treeNode(settings.tree, "settings-content-pane").boundsLogical!.width)).toBe(604);
-
-      // Zero-Scroll Popover Rule verified via upstream zgui-js scrollMetrics (commit 33c0fab+).
-      for (const [label, capture, testId] of [
-        ["quick-settings", qs, "qs-main"],
-        ["calendar", cal, "panel-calendar"],
-      ] as const) {
-        const node = treeNode(capture.tree, testId);
-        if (node.scrollMetrics) {
-          expect(node.scrollMetrics.overflowY, `${label} overflowY`).toBe(false);
-        }
-      }
-    } finally {
-      rmSync(workspace, { recursive: true, force: true });
+      cleanup();
     }
   });
 });

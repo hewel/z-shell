@@ -34,7 +34,15 @@
         "zshell/tabular-readout": "error",
         "zshell/bluetooth-safe-action": "error",
         "zshell/composite-input-focus": "error",
-        "zshell/no-hover-hit-target-shift": "error"
+        "zshell/no-hover-hit-target-shift": "error",
+        "zshell/no-flush-surface-shadow": "error",
+        "zshell/no-core-plugin-id-branching": "error"
+      }
+    },
+    {
+      "files": ["plugins/*/src/**/*.tsx"],
+      "rules": {
+        "zshell/no-core-plugin-id-branching": "off"
       }
     },
     {

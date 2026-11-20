@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust format, test, clippy, doc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo doc --workspace --no-deps
+
+  design-lint:
+    name: Design lint & SDK/plugin unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: z-shell
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Checkout sibling zgui-js (when accessible)
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: hewel/zgui-js
+          path: zgui-js
+      - name: Install & run lint/typecheck/tests (requires sibling zgui-js)
+        if: hashFiles('zgui-js/package.json') != ''
+        working-directory: z-shell
+        run: |
+          (cd ../zgui-js && bun install)
+          bun install
+          bun run lint
+          bun run typecheck
+          bun test --timeout=30000 apps/shell/tests/topics.test.ts apps/shell/tests/design-lint.test.ts apps/shell/tests/plugin-services.test.ts plugins/

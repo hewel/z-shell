@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { LOCK_MORPH_SHAPES, SHELL_ROSETTE_PATH } from "../src/shapes.ts";
 import { SHELL_DEFAULT_SCHEME, buildThemeStylesheet } from "../src/theme.ts";
@@ -24,6 +24,7 @@ function lintSnippet(filename: string, code: string, rule: string): { status: nu
   try {
     const configPath = join(dir, ".oxlintrc.json");
     const targetPath = join(dir, filename);
+    mkdirSync(dirname(targetPath), { recursive: true });
     writeFileSync(configPath, JSON.stringify({
       plugins: ["eslint", "typescript", "oxc"],
       jsPlugins: [pluginPath],
@@ -99,6 +100,24 @@ describe("zshell oxlint design plugin", () => {
       });
     `, "zshell/valid-color-roles");
     expect(badTernaryPair.status).not.toBe(0);
+
+    const badChildIcon = lintSnippet("ChildIcon.tsx", `
+      export const x = (
+        <row style={{ backgroundColor: "var(--color-primary-container)" }}>
+          <ShellIcon name="wifi" color="var(--color-primary)" />
+        </row>
+      );
+    `, "zshell/valid-color-roles");
+    expect(badChildIcon.status).not.toBe(0);
+
+    const goodChildIcon = lintSnippet("GoodChildIcon.tsx", `
+      export const x = (
+        <row style={{ backgroundColor: "var(--color-primary-container)" }}>
+          <ShellIcon name="wifi" color="var(--color-on-primary-container)" />
+        </row>
+      );
+    `, "zshell/valid-color-roles");
+    expect(goodChildIcon.status, goodChildIcon.output).toBe(0);
 
     const goodPair = lintSnippet("Good.tsx", `
       export const f = (danger: boolean) => ({
@@ -247,11 +266,14 @@ describe("zshell oxlint design plugin", () => {
     expect(goodSplit.status, goodSplit.output).toBe(0);
   });
 
-  test("zshell/tabular-readout enforces tabular-nums on monospace numeric readout slots", () => {
+  test("zshell/tabular-readout enforces tabular-nums on monospace numeric readout slots (tagged or untagged)", () => {
     const badReadout = lintSnippet("OsdOverlay.tsx", `export const x = <text data-tabular="true" style={{ fontFamily: "var(--font-mono)" }}>68%</text>;`, "zshell/tabular-readout");
     expect(badReadout.status).not.toBe(0);
 
-    const goodReadout = lintSnippet("OsdOverlay.tsx", `export const x = <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>68%</text>;`, "zshell/tabular-readout");
+    const badUntaggedPercent = lintSnippet("BatteryPanel.tsx", `export const x = <text style={{ fontFamily: "var(--font-mono)" }}>{pct}%</text>;`, "zshell/tabular-readout");
+    expect(badUntaggedPercent.status).not.toBe(0);
+
+    const goodReadout = lintSnippet("OsdOverlay.tsx", `export const x = <text style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>68%</text>;`, "zshell/tabular-readout");
     expect(goodReadout.status, goodReadout.output).toBe(0);
   });
 
@@ -307,6 +329,59 @@ describe("zshell oxlint design plugin", () => {
       "zshell/no-hover-hit-target-shift",
     );
     expect(goodHover.status, goodHover.output).toBe(0);
+  });
+
+  test("zshell/no-flush-surface-shadow forbids CSS boxShadow on flush PopupSurface/WindowSurface roots", () => {
+    const badPopupShadow = lintSnippet(
+      "ShellPanels.tsx",
+      `export const s = { borderRadius: "22px", boxShadow: "0 14px 36px rgba(0, 0, 0, 0.50)" };`,
+      "zshell/no-flush-surface-shadow",
+    );
+    expect(badPopupShadow.status).not.toBe(0);
+
+    const badWindowShadow = lintSnippet(
+      "SettingsWindow.tsx",
+      `export const s = { width: "820px", boxShadow: "0 20px 56px rgba(0, 0, 0, 0.60)" };`,
+      "zshell/no-flush-surface-shadow",
+    );
+    expect(badWindowShadow.status).not.toBe(0);
+
+    const badBarPopupShadow = lintSnippet(
+      "BarPopups.tsx",
+      `export const s = { borderRadius: "16px", boxShadow: "0 12px 24px rgba(0, 0, 0, 0.45)" };`,
+      "zshell/no-flush-surface-shadow",
+    );
+    expect(badBarPopupShadow.status).not.toBe(0);
+
+    const goodWindow = lintSnippet(
+      "SettingsWindow.tsx",
+      `export const s = { width: "820px", height: "600px" };`,
+      "zshell/no-flush-surface-shadow",
+    );
+    expect(goodWindow.status, goodWindow.output).toBe(0);
+  });
+
+  test("zshell/no-core-plugin-id-branching forbids hardcoded first-party plugin IDs in core shell", () => {
+    const badCoreBranch = lintSnippet(
+      "apps/shell/src/plugins/PluginHost.tsx",
+      `export const w = (id: string) => id.includes("nosleep") ? 360 : 396;`,
+      "zshell/no-core-plugin-id-branching",
+    );
+    expect(badCoreBranch.status).not.toBe(0);
+
+    const allowedInPlugin = lintSnippet(
+      "plugins/nosleep/src/panel.tsx",
+      `export const id = "z-shell/nosleep";`,
+      "zshell/no-core-plugin-id-branching",
+    );
+    expect(allowedInPlugin.status, allowedInPlugin.output).toBe(0);
+
+    const goodCore = lintSnippet(
+      "apps/shell/src/plugins/PluginHost.tsx",
+      `export const w = () => 396;`,
+      "zshell/no-core-plugin-id-branching",
+    );
+    expect(goodCore.status, goodCore.output).toBe(0);
   });
 });
 
