@@ -146,6 +146,14 @@ function readCapture(out: string, surface: string, captureId: string) {
   };
 }
 
+function previewSurfaces(out: string, stepId: string): readonly string[] {
+  const steps = readFileSync(join(out, "steps.jsonl"), "utf8").trim().split("\n").map(line =>
+    JSON.parse(line) as { readonly id: string; readonly result?: { readonly surfaces?: readonly string[] } });
+  const step = steps.find(candidate => candidate.id === stepId);
+  expect(step, stepId).toBeDefined();
+  return step!.result?.surfaces ?? [];
+}
+
 function treeNode(tree: { readonly nodes: readonly PreviewTreeNode[] }, testId: string): PreviewTreeNode {
   const node = tree.nodes.find(candidate => candidate.testId === testId);
   expect(node, testId).toBeDefined();
@@ -387,7 +395,7 @@ describe("apps/shell preview", () => {
             atMs: 45,
           },
           {
-            id: 22,
+            id: 24,
             name: "wallpaper.list",
             payload: { offset: 0, limit: 24 },
             atMs: 50,
@@ -414,7 +422,7 @@ describe("apps/shell preview", () => {
             result: { data: { bytes: makeTinyPngBytes(0x7c, 0xd4, 0xff) } },
           },
           {
-            id: 23,
+            id: 25,
             name: "wallpaper.set",
             payload: { path: "/wallpapers/aurora.png", output: null, fit: "cover" },
             atMs: 60,
@@ -630,9 +638,9 @@ describe("apps/shell preview", () => {
           },
         },
         commands: [
-          { id: 22, name: "notifications.set-dnd", payload: { dnd: true }, atMs: 40 },
-          { id: 23, name: "media.play-pause", payload: { player_id: "nujabes" }, atMs: 50 },
-          { id: 24, name: "power.set-profile", payload: { profile: "performance" }, atMs: 60 },
+          { id: 24, name: "notifications.set-dnd", payload: { dnd: true }, atMs: 40 },
+          { id: 25, name: "media.play-pause", payload: { player_id: "nujabes" }, atMs: 50 },
+          { id: 26, name: "power.set-profile", payload: { profile: "performance" }, atMs: 60 },
           {
             socket: "host",
             id: 2,
@@ -641,7 +649,7 @@ describe("apps/shell preview", () => {
             atMs: 70,
             result: { data: { bytes: makeTinyPngBytes(0x22, 0xc5, 0x5e) } },
           },
-          { id: 25, name: "clipboard.copy", payload: { id: 11 }, atMs: 90 },
+          { id: 27, name: "clipboard.copy", payload: { id: 11 }, atMs: 90 },
         ],
       }), null, 2));
       writeFileSync(scenario, JSON.stringify({
@@ -759,6 +767,378 @@ describe("apps/shell preview", () => {
       expect(clipboard.tree.nodes.some(node => node.text === "Pinned launch note")).toBe(true);
       expect(centerPixel(clipboard.image, treeNode(clipboard.tree, "clip-image-12").boundsDevice))
         .toEqual([0x22, 0xc5, 0x5e, 255]);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  previewTest("Notification toasts (click-through inputRegion), live-only Volume/IME OSD + auto-dismiss, Idle fade overlay, and Fcitx5 Kimpanel candidate popup", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "z-shell-preview-overlays-"));
+    const out = join(workspace, "out");
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const audio = (volume: number) => ({
+        availability: "available",
+        default_sink: "sink-1",
+        default_source: "source-1",
+        sinks: [{ index: 7, name: "sink-1", description: "Speakers", channels: 2, volume, muted: false }],
+        sources: [{ index: 8, name: "source-1", description: "Microphone", channels: 1, volume: 0.5, muted: false }],
+        sink_inputs: [],
+        source_outputs: [],
+      });
+      const ime = (activeIm: { unique_name: string; label: string; short_label: string; text: string }) => ({
+        mode: "kimpanel",
+        candidate_layout: "auto",
+        switch_osd: true,
+        available: true,
+        enabled: true,
+        active_im: { ...activeIm, icon: null },
+        properties: [],
+        group_ims: [
+          { unique_name: "pinyin", label: "Pinyin", layout: "us" },
+          { unique_name: "rime", label: "Rime", layout: "us" },
+        ],
+        exec_menu: null,
+      });
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-phase-3-overlays",
+        initialTopics: {
+          "desktop.notifications": {
+            available: true,
+            dnd: false,
+            popups: [1, 2].map(id => ({
+              id,
+              revision: 1,
+              app_name: "Shoji",
+              summary: `Notification ${id}`,
+              body: "Phase 3 preview",
+              icon: null,
+              attachment: null,
+              actions: [{ key: "open", label: "Open" }],
+              urgency: 1,
+            })),
+            history: [],
+          },
+          "desktop.ime": ime({ unique_name: "pinyin", label: "Pinyin", short_label: "拼", text: "拼" }),
+          "desktop.ime.panel": {
+            visible: true,
+            aux: "",
+            preedit: "nihao",
+            caret: 0,
+            lookup_table: {
+              labels: ["1", "2", "3"],
+              texts: ["你好", "拟好", "泥蒿"],
+              attrs: ["", "", ""],
+              has_prev: false,
+              has_next: true,
+              cursor: 0,
+              layout: "horizontal",
+            },
+            spot_rect: { x: 120, y: 200, w: 0, h: 24, relative: false, scale: 1 },
+          },
+          "system.audio": audio(0.65),
+        },
+        topicUpdates: [
+          { topic: "system.audio", atMs: 40, revision: 2, sourceBaseline: false, data: audio(0.80) },
+          {
+            topic: "desktop.ime",
+            atMs: 1950,
+            revision: 2,
+            sourceBaseline: false,
+            data: ime({ unique_name: "rime", label: "Rime", short_label: "R", text: "R" }),
+          },
+          {
+            topic: "session.idle",
+            atMs: 1960,
+            revision: 2,
+            sourceBaseline: false,
+            data: {
+              caffeine: false,
+              media_playing: false,
+              active_inhibitors: [],
+              warning: { token: 1, fade_seconds: 5, rules: ["lock"] },
+              rules: [],
+              service_status: { status: "running" },
+            },
+          },
+        ],
+        commands: [
+          {
+            id: 24,
+            name: "notifications.invoke-action",
+            payload: { id: 1, action_key: "open" },
+            atMs: 40,
+          },
+          { id: 25, name: "notifications.dismiss", payload: { id: 1 }, atMs: 40 },
+          { id: 26, name: "ime.select-candidate", payload: { index: 1 }, atMs: 2070 },
+          { id: 27, name: "ime.page-down", payload: {}, atMs: 2070 },
+        ],
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-phase-3-overlays",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: [
+          {
+            id: "outputs",
+            op: "monitors.set",
+            monitors: [{
+              id: "dp-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900,
+              scale: 1, refreshRateMilliHz: 60000,
+            }],
+          },
+          { id: "daemon-events", op: "clock.advance", byMs: 30 },
+          { id: "ready", op: "settle" },
+          {
+            id: "baseline-surfaces",
+            op: "monitors.set",
+            monitors: [{
+              id: "dp-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900,
+              scale: 1, refreshRateMilliHz: 60000,
+            }],
+          },
+          { id: "capture-toasts", op: "capture", surface: "notification-toasts", captureId: "notification-toasts" },
+          {
+            id: "invoke-notification-action",
+            op: "pointer.click",
+            target: { surface: "notification-toasts", testId: "toast-action-1-open" },
+            button: "primary",
+          },
+          {
+            id: "dismiss-notification",
+            op: "pointer.click",
+            target: { surface: "notification-toasts", testId: "toast-dismiss-1" },
+            button: "primary",
+          },
+          { id: "live-volume-update", op: "clock.advance", byMs: 10 },
+          {
+            id: "volume-osd-value",
+            op: "assert",
+            target: { surface: "osd-overlay", testId: "osd-value" },
+            check: { property: "text", equals: "80%" },
+          },
+          { id: "capture-volume-osd", op: "capture", surface: "osd-overlay", captureId: "osd-overlay" },
+          { id: "volume-osd-auto-dismiss", op: "clock.advance", byMs: 1900 },
+          {
+            id: "osd-dismissed-surfaces",
+            op: "monitors.set",
+            monitors: [{
+              id: "dp-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900,
+              scale: 1, refreshRateMilliHz: 60000,
+            }],
+          },
+          { id: "live-ime-update", op: "clock.advance", byMs: 10 },
+          {
+            id: "ime-osd-visible",
+            op: "assert",
+            target: { surface: "osd-overlay", testId: "osd-label" },
+            check: { property: "text", equals: "Rime" },
+          },
+          { id: "idle-warning-and-reveal", op: "clock.advance", byMs: 100 },
+          { id: "capture-idle-fade", op: "capture", surface: "idle-fade-dp-1", captureId: "idle-fade-dp-1" },
+          { id: "capture-kimpanel", op: "capture", surface: "kimpanel-popup", captureId: "kimpanel-popup" },
+          {
+            id: "select-second-candidate",
+            op: "pointer.click",
+            target: { surface: "kimpanel-popup", testId: "kimpanel-cand-1" },
+            button: "primary",
+          },
+          {
+            id: "page-candidates",
+            op: "wheel",
+            target: { surface: "kimpanel-popup", testId: "kimpanel-root" },
+            delta: { x: 0, y: 1, unit: "pixels" },
+          },
+          { id: "command-replies", op: "clock.advance", byMs: 20 },
+        ],
+      }, null, 2));
+
+      const result = runPreview(fixture, scenario, out);
+      expectCleanPreview(result, 4, 2);
+      expect(previewSurfaces(out, "baseline-surfaces")).not.toContain("osd-overlay");
+      expect(previewSurfaces(out, "osd-dismissed-surfaces")).not.toContain("osd-overlay");
+      const toasts = readCapture(out, "notification-toasts", "notification-toasts");
+      const osd = readCapture(out, "osd-overlay", "osd-overlay");
+      const idle = readCapture(out, "idle-fade-dp-1", "idle-fade-dp-1");
+      const kimpanel = readCapture(out, "kimpanel-popup", "kimpanel-popup");
+      for (const capture of [toasts, osd, idle, kimpanel]) {
+        expect(capture.frame.renderer.alphaMode).toBe("PreMultiplied");
+      }
+
+      expect(pixel(toasts.image, 0, 0)).toEqual([0, 0, 0, 0]);
+      expect(treeNode(toasts.tree, "toast-card-1").boundsDevice).toBeDefined();
+      expect(treeNode(toasts.tree, "toast-action-1-open").boundsDevice).toBeDefined();
+      expect(treeNode(toasts.tree, "toast-more-footer").boundsDevice).toBeDefined();
+      expect(toasts.tree.nodes.some(node => node.text === "+1 more")).toBe(true);
+      expect(treeNode(osd.tree, "osd-value").text).toBe("80%");
+
+      const idleScrim = pixel(idle.image, 0, 0);
+      expect(idleScrim[3]).toBeGreaterThan(0);
+      expect(idleScrim[3]).toBeLessThan(255);
+      expect(treeNode(idle.tree, "idle-warning-dp-1").boundsDevice).toBeDefined();
+      expect(idle.tree.nodes.some(node => node.text === "lock")).toBe(true);
+
+      expect(kimpanel.tree.nodes.some(node => node.text === "nihao")).toBe(true);
+      for (const candidate of ["你好", "拟好", "泥蒿"]) {
+        expect(kimpanel.tree.nodes.some(node => node.text === candidate)).toBe(true);
+      }
+      const firstCandidate = treeNode(kimpanel.tree, "kimpanel-cand-0").boundsDevice;
+      const secondCandidate = treeNode(kimpanel.tree, "kimpanel-cand-1").boundsDevice;
+      expect(firstCandidate).toBeDefined();
+      expect(secondCandidate).toBeDefined();
+      expect(secondCandidate!.x).toBeGreaterThan(firstCandidate!.x);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  previewTest("Dock surface (pinned + running apps) and App Launcher overlay (exclusive keyboard, query_id correlation, keyboard activation)", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "z-shell-preview-dock-launcher-"));
+    const out = join(workspace, "out");
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const alacritty = {
+        provider_id: "desktop",
+        item_id: "alacritty.desktop",
+        title: "Alacritty",
+        actions: [],
+        score: 100,
+      };
+      const zen = {
+        provider_id: "desktop",
+        item_id: "zen.desktop",
+        title: "Zen Browser",
+        actions: [],
+        score: 90,
+      };
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-phase-3-dock-launcher",
+        initialTopics: {
+          "desktop.apps": {
+            available: true,
+            count: 2,
+            pinned_apps: ["alacritty.desktop", "zen.desktop"],
+          },
+          "wayland.windows": {
+            capability: "controllable",
+            windows: [
+              {
+                window_id: 41,
+                title: "Terminal — Alacritty",
+                app_id: "Alacritty",
+                activated: true,
+                minimized: false,
+                maximized: false,
+                fullscreen: false,
+                output_instance_ids: [1],
+              },
+              {
+                window_id: 42,
+                title: "Firefox",
+                app_id: "firefox",
+                activated: false,
+                minimized: false,
+                maximized: false,
+                fullscreen: false,
+                output_instance_ids: [1],
+              },
+            ],
+          },
+        },
+        commands: [
+          { id: 24, name: "wayland.window.activate", payload: { window_id: 41 }, atMs: 40 },
+          {
+            id: 25,
+            name: "launcher.query",
+            payload: { query: "", query_id: 1, limit: 18 },
+            atMs: 40,
+            result: { data: { query_id: 1, items: [zen, alacritty] } },
+          },
+          {
+            id: 26,
+            name: "launcher.query",
+            payload: { query: "ala", query_id: 2, limit: 18 },
+            atMs: 50,
+            result: { data: { query_id: 2, items: [alacritty] } },
+          },
+          {
+            id: 27,
+            name: "launcher.activate",
+            payload: { query_id: 2, provider_id: "desktop", item_id: "alacritty.desktop" },
+            atMs: 60,
+          },
+        ],
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-phase-3-dock-launcher",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: [
+          {
+            id: "outputs",
+            op: "monitors.set",
+            monitors: [{
+              id: "dp-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900,
+              scale: 1, refreshRateMilliHz: 60000,
+            }],
+          },
+          { id: "daemon-events", op: "clock.advance", byMs: 30 },
+          { id: "ready", op: "settle" },
+          { id: "capture-dock", op: "capture", surface: "dock-dp-1", captureId: "dock-dp-1" },
+          {
+            id: "activate-running-pinned-app",
+            op: "pointer.click",
+            target: { surface: "dock-dp-1", testId: "dock-app-alacritty.desktop" },
+            button: "primary",
+          },
+          {
+            id: "open-launcher",
+            op: "pointer.click",
+            target: { surface: "dock-dp-1", testId: "dock-launcher" },
+            button: "primary",
+          },
+          { id: "initial-query-reply", op: "clock.advance", byMs: 10 },
+          { id: "capture-launcher", op: "capture", surface: "launcher-overlay", captureId: "launcher-overlay" },
+          {
+            id: "focus-launcher-search",
+            op: "pointer.click",
+            target: { surface: "launcher-overlay", testId: "launcher-search" },
+            button: "primary",
+          },
+          { id: "filter-launcher", op: "text.commit", surface: "launcher-overlay", text: "ala" },
+          { id: "filtered-query-reply", op: "clock.advance", byMs: 10 },
+          { id: "activate-filtered-result", op: "key.press", surface: "launcher-overlay", key: "Enter" },
+          { id: "activation-reply", op: "clock.advance", byMs: 10 },
+          { id: "launcher-closed-settled", op: "settle" },
+          {
+            id: "launcher-closed-surfaces",
+            op: "monitors.set",
+            monitors: [{
+              id: "dp-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900,
+              scale: 1, refreshRateMilliHz: 60000,
+            }],
+          },
+        ],
+      }, null, 2));
+
+      const result = runPreview(fixture, scenario, out);
+      expectCleanPreview(result, 2, 0);
+      expect(previewSurfaces(out, "launcher-closed-surfaces")).not.toContain("launcher-overlay");
+      const dock = readCapture(out, "dock-dp-1", "dock-dp-1");
+      const launcher = readCapture(out, "launcher-overlay", "launcher-overlay");
+      expect(dock.frame.renderer.alphaMode).toBe("PreMultiplied");
+      expect(launcher.frame.renderer.alphaMode).toBe("PreMultiplied");
+      expect(pixel(dock.image, 0, 0)).toEqual([0, 0, 0, 0]);
+      expect(treeNode(dock.tree, "dock-app-alacritty.desktop").boundsDevice).toBeDefined();
+      expect(treeNode(dock.tree, "dock-app-zen.desktop").boundsDevice).toBeDefined();
+      expect(treeNode(dock.tree, "dock-running-firefox").boundsDevice).toBeDefined();
+      expect(treeNode(launcher.tree, "launcher-search").boundsDevice).toBeDefined();
+      expect(treeNode(launcher.tree, "launcher-item-desktop-zen.desktop").boundsDevice).toBeDefined();
+      expect(treeNode(launcher.tree, "launcher-item-desktop-alacritty.desktop").boundsDevice).toBeDefined();
+      expect(launcher.tree.nodes.some(node => node.text === "Zen Browser")).toBe(true);
+      expect(launcher.tree.nodes.some(node => node.text === "Alacritty")).toBe(true);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }

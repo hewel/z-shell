@@ -1,4 +1,4 @@
-import { createEffect, getOwner, mountStylesheet, runWithOwner, type Accessor } from "@hewel/zgui";
+import { createEffect, getSessionGeneration, mountShellStylesheet, onCleanup, type Accessor } from "@hewel/zgui";
 
 export const SHOJI_DEFAULT_SCHEME = Object.freeze({
   surface: "#111318",
@@ -57,19 +57,36 @@ export function buildThemeStylesheet(scheme: ThemeColorScheme, dark: boolean): s
   return `${css} }`;
 }
 
+const sessionThemes = new Map<number, {
+  users: number;
+  snapshot?: ThemeTopicSnapshot;
+  css?: string;
+  dispose?: () => void;
+}>();
+
 export function useShellTheme(theme: Accessor<ThemeTopicSnapshot | undefined>): void {
-  const surfaceOwner = getOwner();
-  createEffect(
-    () => {
-      const snapshot = theme();
-      return buildThemeStylesheet(snapshot?.scheme ?? SHOJI_DEFAULT_SCHEME, snapshot?.dark ?? true);
-    },
-    css => {
-      // Preserve the enclosing surface Region owner so mountStylesheet binds to this surface's bridge
-      // and registers idempotent removal on surface unmount.
-      runWithOwner(surfaceOwner, () => {
-        mountStylesheet("z-shell-theme", css);
-      });
-    },
-  );
+  const generation = getSessionGeneration();
+  let session = sessionThemes.get(generation);
+  if (session === undefined) {
+    session = { users: 0 };
+    sessionThemes.set(generation, session);
+  }
+  const registration = session;
+  registration.users++;
+  // Existing surfaces and the shell root can share this registration. A
+  // surface closing must not remove the stylesheet from the others.
+  onCleanup(() => {
+    if (--registration.users !== 0) return;
+    sessionThemes.delete(generation);
+    registration.dispose?.();
+  });
+  createEffect(theme, snapshot => {
+    if (registration.css !== undefined && registration.snapshot === snapshot) return;
+    const css = buildThemeStylesheet(snapshot?.scheme ?? SHOJI_DEFAULT_SCHEME, snapshot?.dark ?? true);
+    if (css !== registration.css) {
+      registration.dispose = mountShellStylesheet("z-shell-theme", css);
+      registration.css = css;
+    }
+    registration.snapshot = snapshot;
+  });
 }

@@ -37,10 +37,12 @@
           "{\"jsonrpc\":\"2.0\",\"id\":19,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"system.telemetry\"}}",
           "{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"system.user\"}}",
           "{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"session.idle\"}}",
-          "{\"jsonrpc\":\"2.0\",\"id\":22,\"method\":\"command.invoke\",\"params\":{\"name\":\"wayland.workspace.activate\",\"args\":[],\"payload\":{\"workspace_id\":3}}}",
-          "{\"jsonrpc\":\"2.0\",\"id\":23,\"method\":\"command.invoke\",\"params\":{\"name\":\"audio.set-volume\",\"args\":[],\"payload\":{\"kind\":\"sink\",\"index\":7,\"volume\":0.6}}}",
-          "{\"jsonrpc\":\"2.0\",\"id\":24,\"method\":\"command.invoke\",\"params\":{\"name\":\"ime.toggle\",\"args\":[],\"payload\":{}}}",
-          "{\"jsonrpc\":\"2.0\",\"id\":25,\"method\":\"command.invoke\",\"params\":{\"name\":\"tray.menu-item\",\"args\":[],\"payload\":{\"id\":\"discord\",\"menu_id\":101}}}"
+          "{\"jsonrpc\":\"2.0\",\"id\":22,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"desktop.apps\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":23,\"method\":\"topic.subscribe\",\"params\":{\"topic\":\"desktop.ime.panel\"}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":24,\"method\":\"command.invoke\",\"params\":{\"name\":\"wayland.workspace.activate\",\"args\":[],\"payload\":{\"workspace_id\":3}}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":25,\"method\":\"command.invoke\",\"params\":{\"name\":\"audio.set-volume\",\"args\":[],\"payload\":{\"kind\":\"sink\",\"index\":7,\"volume\":0.6}}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":26,\"method\":\"command.invoke\",\"params\":{\"name\":\"ime.toggle\",\"args\":[],\"payload\":{}}}",
+          "{\"jsonrpc\":\"2.0\",\"id\":27,\"method\":\"command.invoke\",\"params\":{\"name\":\"tray.menu-item\",\"args\":[],\"payload\":{\"id\":\"discord\",\"menu_id\":101}}}"
         ],
         "events": [
           {
@@ -150,6 +152,16 @@
           },
           {
             "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":22,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":21,\"topic\":\"desktop.apps\",\"revision\":1,\"data\":{\"available\":true,\"count\":0,\"pinned_apps\":[]}}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 4,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":23,\"result\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":22,\"topic\":\"desktop.ime.panel\",\"revision\":1,\"data\":{\"visible\":false,\"aux\":\"\",\"preedit\":\"\",\"caret\":0,\"lookup_table\":{\"labels\":[],\"texts\":[],\"attrs\":[],\"has_prev\":false,\"has_next\":false,\"cursor\":-1,\"layout\":\"auto\"},\"spot_rect\":null}}}"
+          },
+          {
+            "kind": "message",
             "atMs": 8,
             "text": "{\"jsonrpc\":\"2.0\",\"method\":\"topic.update\",\"params\":{\"daemon_instance_id\":\"preview-daemon\",\"topic_instance_id\":8,\"topic\":\"desktop.tray\",\"revision\":2,\"source_baseline\":false,\"data\":{\"available\":true,\"items\":[{\"id\":\"discord\",\"title\":\"Discord\",\"category\":\"application\",\"status\":\"active\",\"icon_name\":null,\"item_is_menu\":true,\"tooltip\":null,\"icon\":{\"kind\":\"blob_handle\",\"token\":\"tray-discord\",\"mime\":\"image/png\",\"byte_len\":70},\"menu\":{\"revision\":1,\"root\":{\"id\":0,\"label\":null,\"enabled\":true,\"visible\":true,\"separator\":false,\"toggle_type\":null,\"toggle_state\":null,\"children\":[{\"id\":101,\"label\":\"Mute\",\"enabled\":true,\"visible\":true,\"separator\":false,\"toggle_type\":null,\"toggle_state\":null,\"children\":[]}]}}}]}}}"
           },
@@ -161,22 +173,22 @@
           {
             "kind": "message",
             "atMs": 31,
-            "text": "{\"jsonrpc\":\"2.0\",\"id\":22,\"result\":{}}"
-          },
-          {
-            "kind": "message",
-            "atMs": 31,
-            "text": "{\"jsonrpc\":\"2.0\",\"id\":23,\"result\":{}}"
-          },
-          {
-            "kind": "message",
-            "atMs": 31,
             "text": "{\"jsonrpc\":\"2.0\",\"id\":24,\"result\":{}}"
           },
           {
             "kind": "message",
-            "atMs": 51,
+            "atMs": 31,
             "text": "{\"jsonrpc\":\"2.0\",\"id\":25,\"result\":{}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 31,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":26,\"result\":{}}"
+          },
+          {
+            "kind": "message",
+            "atMs": 51,
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":27,\"result\":{}}"
           }
         ]
       },

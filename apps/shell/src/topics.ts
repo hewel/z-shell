@@ -148,6 +148,79 @@ export interface WaylandWindowsSnapshot {
   readonly windows: readonly WaylandWindow[];
 }
 
+export interface DesktopAppsSnapshot {
+  readonly available: boolean;
+  readonly count: number;
+  readonly pinned_apps: readonly string[];
+}
+
+export interface LauncherAction {
+  readonly action_id: string;
+  readonly title: string;
+}
+
+export interface LauncherItem {
+  readonly provider_id: string;
+  readonly item_id: string;
+  readonly title: string;
+  readonly subtitle?: string;
+  readonly icon?: MediaRef;
+  readonly actions: readonly LauncherAction[];
+  readonly score: number;
+  readonly pinned?: boolean;
+}
+
+export interface LauncherQueryResponse {
+  readonly query_id: number;
+  readonly items: readonly LauncherItem[];
+}
+
+export interface DockEntry {
+  readonly appId: string;
+  readonly title: string;
+  readonly pinned: boolean;
+  readonly windows: readonly WaylandWindow[];
+  readonly focused: boolean;
+}
+
+export interface ImeLookupTable {
+  readonly labels: readonly string[];
+  readonly texts: readonly string[];
+  readonly attrs: readonly string[];
+  readonly has_prev: boolean;
+  readonly has_next: boolean;
+  readonly cursor: number;
+  readonly layout: "auto" | "horizontal" | "vertical";
+}
+
+export interface ImeSpotRect {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+  readonly relative: boolean;
+  readonly scale: number;
+}
+
+export interface DesktopImePanelSnapshot {
+  readonly visible: boolean;
+  readonly aux: string;
+  readonly preedit: string;
+  readonly caret: number;
+  readonly lookup_table: ImeLookupTable;
+  readonly spot_rect: ImeSpotRect | null;
+}
+
+export type OsdKind = "volume" | "mute" | "brightness" | "ime";
+
+export interface OsdPayload {
+  readonly kind: OsdKind;
+  readonly label: string;
+  readonly value?: number;
+  readonly muted?: boolean;
+  readonly seq: number;
+}
+
 export type PlaybackStatus = "playing" | "paused" | "stopped" | "unknown";
 
 export interface MediaPlayer {
@@ -686,6 +759,85 @@ export function selectActiveMediaPlayer(media: DesktopMediaSnapshot | undefined)
     ?? media.players.find(player => player.playback_status === "playing")
     ?? media.players[0]
     ?? null;
+}
+
+function normalizeDockAppId(appId: string): string {
+  const normalized = appId.toLowerCase();
+  return normalized.endsWith(".desktop") ? normalized.slice(0, -".desktop".length) : normalized;
+}
+
+export function buildDockItems(
+  pinnedApps: readonly string[],
+  windows: readonly WaylandWindow[],
+): {
+  readonly pinned: readonly DockEntry[];
+  readonly runningOnly: readonly DockEntry[];
+} {
+  const groups = new Map<string, { appId: string; windows: WaylandWindow[] }>();
+  for (const window of windows) {
+    if (window.app_id === null) {
+      continue;
+    }
+    const key = normalizeDockAppId(window.app_id);
+    const group = groups.get(key);
+    if (group) {
+      group.windows.push(window);
+    } else {
+      groups.set(key, { appId: window.app_id, windows: [window] });
+    }
+  }
+
+  const pinnedKeys = new Set(pinnedApps.map(normalizeDockAppId));
+  const pinned = pinnedApps.map(appId => {
+    const appWindows = groups.get(normalizeDockAppId(appId))?.windows ?? [];
+    return {
+      appId,
+      title: appId,
+      pinned: true,
+      windows: appWindows,
+      focused: appWindows.some(window => window.activated),
+    };
+  });
+  const runningOnly: DockEntry[] = [];
+  for (const [key, group] of groups) {
+    if (pinnedKeys.has(key)) {
+      continue;
+    }
+    runningOnly.push({
+      appId: group.appId,
+      title: group.windows[0]?.title ?? group.appId,
+      pinned: false,
+      windows: group.windows,
+      focused: group.windows.some(window => window.activated),
+    });
+  }
+  return { pinned, runningOnly };
+}
+
+export function clampOverlayPosition(
+  spot: ImeSpotRect | null,
+  popupWidth: number,
+  popupHeight: number,
+  monitor: Pick<Monitor, "width" | "height">,
+): { readonly x: number; readonly y: number } {
+  const maxX = Math.max(8, monitor.width - popupWidth - 8);
+  const maxY = Math.max(8, monitor.height - popupHeight - 8);
+
+  if (spot === null) {
+    return {
+      x: Math.max(8, Math.min((monitor.width - popupWidth) / 2, maxX)),
+      y: maxY,
+    };
+  }
+
+  const belowY = spot.y + spot.h + 6;
+  const preferredY = belowY + popupHeight <= monitor.height - 8
+    ? belowY
+    : spot.y - popupHeight - 6;
+  return {
+    x: Math.max(8, Math.min(spot.x, maxX)),
+    y: Math.max(8, Math.min(preferredY, maxY)),
+  };
 }
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;

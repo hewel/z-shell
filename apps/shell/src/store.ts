@@ -1,4 +1,4 @@
-import { createContext, createSignal, flush, onCleanup, runWithOwner, useContext, useMonitors, type Accessor, type Monitor, type NativeChild, type NativeWindowRect } from "@hewel/zgui";
+import { createContext, createEffect, createSignal, flush, onCleanup, runWithOwner, useContext, useMonitors, type Accessor, type Monitor, type NativeChild, type NativeWindowRect } from "@hewel/zgui";
 import { mountOwned } from "@hewel/zgui/renderer";
 import { getResolvedCapabilities, onControlMessage, type JsonValue } from "@hewel/zgui-services";
 import { ZShellClient, type BusHelloResult, type BusTransport, type CommandInvokeResult } from "@z-shell/sdk";
@@ -7,11 +7,14 @@ import type { ThemeTopicSnapshot } from "./theme.ts";
 import { resolveBarLayout } from "./topics.ts";
 import type {
   ClipboardSnapshot,
+  DesktopAppsSnapshot,
+  DesktopImePanelSnapshot,
   DesktopImeSnapshot,
   DesktopMediaSnapshot,
   DesktopNotificationsSnapshot,
   DesktopTraySnapshot,
   IdleSnapshot,
+  OsdPayload,
   PublicSettingsSummary,
   SystemAudioSnapshot,
   SystemBluetoothSnapshot,
@@ -33,6 +36,7 @@ export const SHELL_SUBSCRIBED_TOPICS = [
   "desktop.media", "desktop.tray", "desktop.notifications", "desktop.ime",
   "system.audio", "system.privacy", "system.network", "system.bluetooth", "system.power",
   "clipboard", "system.brightness", "system.telemetry", "system.user", "session.idle",
+  "desktop.apps", "desktop.ime.panel",
 ] as const;
 
 export type SocketStatus = "disconnected" | "connecting" | "ready" | "error";
@@ -108,6 +112,8 @@ interface ShellTopics {
   readonly telemetry: TopicState<SystemTelemetrySnapshot>;
   readonly user: TopicState<SystemUserSnapshot>;
   readonly idle: TopicState<IdleSnapshot>;
+  readonly apps: TopicState<DesktopAppsSnapshot>;
+  readonly imePanel: TopicState<DesktopImePanelSnapshot>;
 }
 
 export interface ShellStore extends ShellTopics {
@@ -131,6 +137,8 @@ export interface ShellStore extends ShellTopics {
   readonly activeImeMenu: Accessor<ImeMenuTarget | null>;
   openImeMenu(target: ImeMenuTarget): void;
   closeImeMenu(): void;
+  readonly activeOsd: Accessor<OsdPayload | null>;
+  showOsd(osd: Omit<OsdPayload, "seq">): void;
   readonly pluginBarWidgets: Accessor<readonly PluginBarWidgetSlot[]>;
   registerPluginBarWidget(slot: PluginBarWidgetSlot): () => void;
 }
@@ -177,6 +185,19 @@ export function createShellStore(): ShellStore {
   const closeOverlay = (kind: BarOverlay["kind"]) => {
     setOverlay(active => active?.kind === kind ? null : active);
   };
+
+  const [activeOsd, setActiveOsd] = createSignal<OsdPayload | null>(null);
+  let osdSeq = 0;
+  let osdTimer: number | undefined;
+  function showOsd(osd: Omit<OsdPayload, "seq">): void {
+    if (disposed) return;
+    if (osdTimer !== undefined) clearTimeout(osdTimer);
+    setActiveOsd({ ...osd, seq: ++osdSeq });
+    osdTimer = setTimeout(() => {
+      osdTimer = undefined;
+      setActiveOsd(null);
+    }, 1800);
+  }
 
   const [pluginBarWidgets, setPluginBarWidgets] = createSignal<readonly PluginBarWidgetSlot[]>([]);
   function registerPluginBarWidget(slot: PluginBarWidgetSlot): () => void {
@@ -254,10 +275,31 @@ export function createShellStore(): ShellStore {
   let disposeTopics: (() => void) | undefined;
   onCleanup(() => {
     disposed = true;
+    if (osdTimer !== undefined) clearTimeout(osdTimer);
     closePublic?.();
     closeHost?.();
     disposeTopics?.();
   });
+
+  function subscribeOsd<T>(topic: string, compare: (current: T, previous: T) => void): TopicState<T> {
+    let previous: T | undefined;
+    const reset = () => { previous = undefined; };
+    const state = useTopic<T>(publicClient, topic, {
+      onLiveUpdate({ data }) {
+        const lastSeen = previous;
+        previous = data;
+        if (lastSeen !== undefined) compare(data, lastSeen);
+      },
+      onBaselineUpdate({ data }) { previous = data; },
+      onRemoved: reset,
+      onReset: reset,
+    });
+    // Initial subscribe snapshots are only exposed through data(). Update
+    // callbacks also remember samples synchronously, before Solid flushes.
+    createEffect(state.data, data => { previous = data; });
+    return state;
+  }
+
   // Solid disposes child effects first. Close the bus before topic cleanup to
   // avoid sending an unsubscribe on a connection that is about to disappear.
   let topics!: ShellTopics;
@@ -272,17 +314,43 @@ export function createShellStore(): ShellStore {
       media: useTopic<DesktopMediaSnapshot>(publicClient, "desktop.media"),
       tray: useTopic<DesktopTraySnapshot>(publicClient, "desktop.tray"),
       notifications: useTopic<DesktopNotificationsSnapshot>(publicClient, "desktop.notifications"),
-      ime: useTopic<DesktopImeSnapshot>(publicClient, "desktop.ime"),
-      audio: useTopic<SystemAudioSnapshot>(publicClient, "system.audio"),
+      ime: subscribeOsd<DesktopImeSnapshot>("desktop.ime", (current, previous) => {
+        const im = current.active_im;
+        if (current.switch_osd === true && im &&
+          (im.unique_name !== previous.active_im?.unique_name || im.short_label !== previous.active_im?.short_label)) {
+          showOsd({ kind: "ime", label: im.label || im.short_label });
+        }
+      }),
+      audio: subscribeOsd<SystemAudioSnapshot>("system.audio", (current, previous) => {
+        const sink = current.sinks.find(device => device.name === current.default_sink);
+        const lastSink = previous.sinks.find(device => device.name === previous.default_sink);
+        if (!sink || !lastSink) return;
+        const { volume, muted } = sink;
+        if (muted !== lastSink.muted) {
+          showOsd({ kind: "mute", label: muted ? "Muted" : "Unmuted", value: Math.round(volume * 100), muted });
+        } else if (volume !== lastSink.volume) {
+          showOsd({ kind: "volume", label: "Volume", value: Math.round(volume * 100), muted });
+        }
+      }),
       privacy: useTopic<SystemPrivacySnapshot>(publicClient, "system.privacy"),
       network: useTopic<SystemNetworkSnapshot>(publicClient, "system.network"),
       bluetooth: useTopic<SystemBluetoothSnapshot>(publicClient, "system.bluetooth"),
       power: useTopic<SystemPowerSnapshot>(publicClient, "system.power"),
       clipboard: useTopic<ClipboardSnapshot>(publicClient, "clipboard"),
-      brightness: useTopic<SystemBrightnessSnapshot>(publicClient, "system.brightness"),
+      brightness: subscribeOsd<SystemBrightnessSnapshot>("system.brightness", (current, previous) => {
+        const device = current.devices[0];
+        const lastDevice = previous.devices[0];
+        if (!device || !lastDevice || device.max_brightness <= 0 || lastDevice.max_brightness <= 0) return;
+        const ratio = device.brightness / device.max_brightness;
+        if (ratio !== lastDevice.brightness / lastDevice.max_brightness) {
+          showOsd({ kind: "brightness", label: "Brightness", value: Math.round(ratio * 100) });
+        }
+      }),
       telemetry: useTopic<SystemTelemetrySnapshot>(publicClient, "system.telemetry"),
       user: useTopic<SystemUserSnapshot>(publicClient, "system.user"),
       idle: useTopic<IdleSnapshot>(publicClient, "session.idle"),
+      apps: useTopic<DesktopAppsSnapshot>(publicClient, "desktop.apps"),
+      imePanel: useTopic<DesktopImePanelSnapshot>(publicClient, "desktop.ime.panel"),
     };
   }));
 
@@ -326,6 +394,8 @@ export function createShellStore(): ShellStore {
     activeImeMenu,
     openImeMenu: target => setOverlay({ kind: "ime", target }),
     closeImeMenu: () => closeOverlay("ime"),
+    activeOsd,
+    showOsd,
     pluginBarWidgets,
     registerPluginBarWidget,
   };

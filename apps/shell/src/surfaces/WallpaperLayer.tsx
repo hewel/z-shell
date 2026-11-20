@@ -61,7 +61,7 @@ function WallpaperContent(props: { readonly monitor: Accessor<Monitor>; readonly
           if (settled) setPreviousSrc(undefined);
         });
 
-        const objectFit = createMemo(previous => {
+        const objectFit = createMemo<string>(previous => {
           if (previous !== undefined && requested() !== request) return previous;
           const fit = props.active()?.fit ?? wallpaper.fit;
           return fit === "center" ? "none" : fit;

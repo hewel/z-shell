@@ -24,6 +24,8 @@ export const SHELL_TOPIC_ORDER = [
   "system.telemetry",
   "system.user",
   "session.idle",
+  "desktop.apps",
+  "desktop.ime.panel",
 ] as const;
 
 type ShellTopic = (typeof SHELL_TOPIC_ORDER)[number];
@@ -105,6 +107,7 @@ function defaultTopicSnapshots(): Record<ShellTopic, unknown> {
     "wayland.outputs": { capability: "disconnected", outputs: [] },
     "wayland.workspaces": { capability: "disconnected", groups: [], workspaces: [] },
     "wayland.windows": { capability: "disconnected", windows: [] },
+    "desktop.apps": { available: true, count: 0, pinned_apps: [] },
     "desktop.media": {
       available: false,
       players: [],
@@ -124,6 +127,22 @@ function defaultTopicSnapshots(): Record<ShellTopic, unknown> {
       properties: [],
       group_ims: [],
       exec_menu: null,
+    },
+    "desktop.ime.panel": {
+      visible: false,
+      aux: "",
+      preedit: "",
+      caret: 0,
+      lookup_table: {
+        labels: [],
+        texts: [],
+        attrs: [],
+        has_prev: false,
+        has_next: false,
+        cursor: -1,
+        layout: "auto",
+      },
+      spot_rect: null,
     },
     "system.audio": {
       availability: "unavailable",

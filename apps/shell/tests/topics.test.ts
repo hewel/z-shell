@@ -4,7 +4,9 @@ import {
   DEFAULT_BAR_SETTINGS,
   TOP_BAR_HEIGHT,
   VERTICAL_BAR_WIDTH,
+  buildDockItems,
   buildMonthCalendarGrid,
+  clampOverlayPosition,
   filterWorkspacesForMonitor,
   findActiveWindowForMonitor,
   formatBarClock,
@@ -362,6 +364,100 @@ describe("selectActiveMediaPlayer", () => {
     expect(selectActiveMediaPlayer(makeMedia([first, second]))).toBe(first);
     expect(selectActiveMediaPlayer(makeMedia([]))).toBeNull();
     expect(selectActiveMediaPlayer(undefined)).toBeNull();
+  });
+});
+
+describe("buildDockItems", () => {
+  test("matches pinned apps case-insensitively and strips the desktop suffix", () => {
+    const window = { ...makeWindow(1, false, []), app_id: "firefox" };
+
+    expect(buildDockItems(["FIREFOX.DESKTOP"], [window])).toEqual({
+      pinned: [{
+        appId: "FIREFOX.DESKTOP",
+        title: "FIREFOX.DESKTOP",
+        pinned: true,
+        windows: [window],
+        focused: false,
+      }],
+      runningOnly: [],
+    });
+  });
+
+  test("groups multiple windows per app and marks any activated window as focused", () => {
+    const first = { ...makeWindow(1, false, []), app_id: "Firefox" };
+    const second = { ...makeWindow(2, true, []), app_id: "firefox.desktop" };
+
+    expect(buildDockItems(["firefox"], [first, second])).toEqual({
+      pinned: [{
+        appId: "firefox",
+        title: "firefox",
+        pinned: true,
+        windows: [first, second],
+        focused: true,
+      }],
+      runningOnly: [],
+    });
+  });
+
+  test("preserves pinned order and separates running-only apps in first-seen order", () => {
+    const gamma = { ...makeWindow(1, true, []), app_id: "Gamma.desktop", title: "Gamma window" };
+    const firefox = { ...makeWindow(2, false, []), app_id: "firefox" };
+    const alpha = { ...makeWindow(3, false, []), app_id: "ALPHA" };
+    const zed = { ...makeWindow(4, false, []), app_id: "Zed" };
+
+    const result = buildDockItems(["Zed", "Firefox"], [gamma, firefox, alpha, zed]);
+
+    expect(result.pinned.map(item => item.appId)).toEqual(["Zed", "Firefox"]);
+    expect(result.runningOnly).toEqual([
+      {
+        appId: "Gamma.desktop",
+        title: "Gamma window",
+        pinned: false,
+        windows: [gamma],
+        focused: true,
+      },
+      {
+        appId: "ALPHA",
+        title: "Window 3",
+        pinned: false,
+        windows: [alpha],
+        focused: false,
+      },
+    ]);
+  });
+});
+
+describe("clampOverlayPosition", () => {
+  const monitor = { width: 1200, height: 800 };
+
+  test("centers horizontally and uses the bottom margin when the spot is null", () => {
+    expect(clampOverlayPosition(null, 300, 200, monitor)).toEqual({ x: 450, y: 592 });
+  });
+
+  test("places the popup below the spot when it fits", () => {
+    const spot = { x: 140, y: 220, w: 10, h: 24, relative: true, scale: 1 };
+
+    expect(clampOverlayPosition(spot, 300, 150, monitor)).toEqual({ x: 140, y: 250 });
+  });
+
+  test("flips the popup above the spot at the bottom edge", () => {
+    const spot = { x: 140, y: 650, w: 10, h: 30, relative: true, scale: 1 };
+
+    expect(clampOverlayPosition(spot, 300, 150, monitor)).toEqual({ x: 140, y: 494 });
+  });
+
+  test("clamps horizontal overflow to the 8px left and right margins", () => {
+    const leftSpot = { x: -50, y: 200, w: 10, h: 20, relative: true, scale: 1 };
+    const rightSpot = { ...leftSpot, x: 1100 };
+
+    expect(clampOverlayPosition(leftSpot, 300, 150, monitor)).toEqual({ x: 8, y: 226 });
+    expect(clampOverlayPosition(rightSpot, 300, 150, monitor)).toEqual({ x: 892, y: 226 });
+  });
+
+  test("clamps a flipped popup to the 8px top margin", () => {
+    const spot = { x: 140, y: 60, w: 10, h: 20, relative: true, scale: 1 };
+
+    expect(clampOverlayPosition(spot, 300, 720, monitor)).toEqual({ x: 140, y: 8 });
   });
 });
 
