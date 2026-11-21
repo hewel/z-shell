@@ -1,7 +1,7 @@
 import { Button, For, Image, Show, createSignal, focus, getWindowRect, type NativeChild } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon, type ShellIconName } from "../icons.tsx";
-import { createEnterProgress, createOpacityEnter, sharedAxisXStyle, useMotionScheme } from "../motion.ts";
+import { SPRING_EPSILON, createEnterProgress, createM3Spring, createOpacityEnter, sharedAxisXStyle, useMotionScheme } from "../motion.ts";
 import { SHELL_ROSETTE_CLIP_40, SHELL_ROSETTE_PATH } from "../shapes.ts";
 import { useShellStore } from "../store.ts";
 import { formatDurationSeconds, type BatteryState, type PowerConfirmAction } from "../topics.ts";
@@ -62,12 +62,17 @@ export function PrecisionSliderRow(props: {
   showTrailingSlot?: boolean;
   valueLabel?: string;
 }): NativeChild {
+  const scheme = useMotionScheme();
+  const [dragging, setDragging] = createSignal(false);
   const value = () => clampPercent(props.value);
-  const change = (next: number) => {
+  const animatedValue = createM3Spring(value, "fastSpatial", { scheme, epsilon: SPRING_EPSILON.px });
+  const change = (next: number, direct = false) => {
     const percent = clampPercent(Math.round(next));
+    if (direct) animatedValue.jump(percent);
     if (percent !== Math.round(props.value)) props.onChange(percent);
   };
-  const thumbLeft = () => `${Math.max(0, Math.min(92, value() - 4))}%`;
+  const displayValue = () => clampPercent(animatedValue());
+  const thumbLeft = () => `${Math.max(0, Math.min(92, displayValue() - 4)).toFixed(2)}%`;
 
   return (
     <row style={{ alignItems: "center", gap: "10px", height: "34px", flexShrink: 0 }}>
@@ -88,22 +93,31 @@ export function PrecisionSliderRow(props: {
           const rect = getWindowRect(event.currentTarget);
           if (!rect || rect.width <= 0) return;
           focus(event.currentTarget);
-          change((event.position.x - rect.x) * 100 / rect.width);
+          setDragging(true);
+          change((event.position.x - rect.x) * 100 / rect.width, false);
         }}
+        onPointerMove={event => {
+          if (!dragging() || props.disabled || !event.primary) return;
+          const rect = getWindowRect(event.currentTarget);
+          if (!rect || rect.width <= 0) return;
+          change((event.position.x - rect.x) * 100 / rect.width, true);
+        }}
+        onPointerUp={() => { if (dragging()) setDragging(false); }}
+        onPointerCancel={() => { if (dragging()) setDragging(false); }}
         onWheel={event => {
           if (props.disabled) return;
           const delta = event.delta.y || event.delta.x;
           if (!delta) return;
           event.preventDefault();
-          change(value() - Math.sign(delta) * 5);
+          change(value() - Math.sign(delta) * 5, false);
         }}
         onKeyDown={event => {
           if (props.disabled) return;
           switch (event.key) {
-            case "ArrowUp": case "ArrowRight": change(value() + 5); break;
-            case "ArrowDown": case "ArrowLeft": change(value() - 5); break;
-            case "Home": change(0); break;
-            case "End": change(100); break;
+            case "ArrowUp": case "ArrowRight": change(value() + 5, false); break;
+            case "ArrowDown": case "ArrowLeft": change(value() - 5, false); break;
+            case "Home": change(0, false); break;
+            case "End": change(100, false); break;
             default: return;
           }
           event.preventDefault();
@@ -113,11 +127,14 @@ export function PrecisionSliderRow(props: {
           opacity: props.disabled ? 0.45 : 1,
         }}>
         <box ariaHidden style={{ width: "100%", height: "6px", borderRadius: "3px", backgroundColor: containerHighest, overflow: "hidden" }}>
-          <box data-percent-fill="true" style={{ width: `${value()}%`, height: "100%", borderRadius: "3px", backgroundColor: primary }} />
+          <box data-percent-fill="true" style={{ width: `${displayValue().toFixed(2)}%`, height: "100%", borderRadius: "3px", backgroundColor: primary }} />
         </box>
         <box ariaHidden style={{
           position: "absolute", left: thumbLeft(), width: "14px", height: "14px", borderRadius: "999px",
-          backgroundColor: primary, border: `2px solid ${containerHigh}`,
+          backgroundColor: primary,
+          border: dragging()
+            ? "3px solid color-mix(in srgb, var(--color-primary) 35%, var(--color-surface-container-high))"
+            : `2px solid ${containerHigh}`,
         }} />
       </box>
       <row style={{ width: "34px", flexShrink: 0, justifyContent: "flex-end" }}>

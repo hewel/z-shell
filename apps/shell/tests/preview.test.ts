@@ -984,6 +984,7 @@ describe("apps/shell preview", () => {
           { id: "filtered-query-reply", op: "clock.advance", byMs: 10 },
           { id: "activate-filtered-result", op: "key.press", surface: "launcher-overlay", key: "Enter" },
           { id: "activation-reply", op: "clock.advance", byMs: 10 },
+          { id: "launcher-exit-motion", op: "clock.advance", byMs: 220 },
           { id: "launcher-closed-settled", op: "settle" },
           {
             id: "launcher-closed-surfaces",

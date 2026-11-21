@@ -8,9 +8,9 @@ import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
 import {
   SPRING_EPSILON,
-  createEnterProgress,
   createM3Spring,
   createOpacityEnter,
+  createPresence,
   useMotionScheme,
 } from "../motion.ts";
 import { LOCK_MORPH_SHAPES, SHELL_ROSETTE_CLIP_104, SHELL_ROSETTE_PATH } from "../shapes.ts";
@@ -44,21 +44,28 @@ const MORPH_SEQUENCE = [
 ] as const;
 const MAX_VISIBLE_DOTS = 14;
 
-function MorphPasswordDot(props: { readonly d: string; readonly viewBox: string }): NativeChild {
+function MorphPasswordDot(props: { readonly d: string; readonly viewBox: string; readonly visible: Accessor<boolean> }): NativeChild {
   const scheme = useMotionScheme();
-  const pop = createEnterProgress("fastSpatial", { scheme, overrideScheme: "expressive" });
-  const fade = createOpacityEnter("fastEffects", scheme);
-  const scale = () => 0.2 + pop() * 0.8;
-  const deg = () => (1 - pop()) * -45;
+  const presence = createPresence(props.visible, {
+    scheme,
+    enterRole: "fastSpatial",
+    enterOpacityRole: "fastEffects",
+    exitRole: "fastEffects",
+    overrideScheme: "expressive",
+  });
+  const scale = () => (props.visible() ? 0.2 + presence.progress() * 0.8 : presence.progress());
+  const deg = () => (props.visible() ? (1 - presence.progress()) * -45 : 0);
   return (
-    <vector ariaHidden d={props.d} viewBox={props.viewBox} style={{
-      width: "14px", height: "14px", flexShrink: 0, color: "var(--color-on-surface)",
-      opacity: Math.max(0, Math.min(1, fade())),
-      transform: scheme() === "reduced"
-        ? "none"
-        : `scale(${scale().toFixed(4)}) rotate(${deg().toFixed(1)}deg)`,
-      transformOrigin: "center",
-    }} />
+    <Show when={presence.mounted()}>
+      <vector ariaHidden d={props.d} viewBox={props.viewBox} style={{
+        width: "14px", height: "14px", flexShrink: 0, color: "var(--color-on-surface)",
+        opacity: Math.max(0, Math.min(1, presence.opacity())),
+        transform: scheme() === "reduced"
+          ? "none"
+          : `scale(${scale().toFixed(4)}) rotate(${deg().toFixed(1)}deg)`,
+        transformOrigin: "center",
+      }} />
+    </Show>
   );
 }
 
@@ -92,13 +99,11 @@ function LockScreen(props: {
   createEffect(() => props.primary() && !controls.disabled() ? field() : undefined, node => {
     if (node) focus(node);
   });
-  const morphDots = createMemo(() => {
-    const count = Math.min(controls.password().length, MAX_VISIBLE_DOTS);
-    return Array.from({ length: count }, (_, index) => ({
-      index,
-      shape: MORPH_SEQUENCE[index % MORPH_SEQUENCE.length]!,
-    }));
-  });
+  const dotSlots = Array.from({ length: MAX_VISIBLE_DOTS }, (_, index) => ({
+    index,
+    shape: MORPH_SEQUENCE[index % MORPH_SEQUENCE.length]!,
+  }));
+  const dotCount = () => Math.min(controls.password().length, MAX_VISIBLE_DOTS);
 
   return (
     <box style={{
@@ -177,11 +182,17 @@ function LockScreen(props: {
             flexGrow: 1, flexBasis: "0px", minWidth: "0px", alignItems: "center", justifyContent: "center",
             gap: "12px", overflow: "hidden", pointerEvents: "none",
           }}>
-            <Show when={morphDots().length > 0} fallback={
+            <Show when={dotCount() > 0} fallback={
               <text style={{ fontSize: "14px", color: "var(--color-on-surface-variant)", opacity: 0.78 }}>Enter password</text>
             }>
-              <For each={morphDots()} keyed={dot => dot.index}>
-                {dot => <MorphPasswordDot d={dot().shape.d} viewBox={dot().shape.viewBox} />}
+              <For each={dotSlots} keyed={slot => slot.index}>
+                {slot => (
+                  <MorphPasswordDot
+                    d={slot().shape.d}
+                    viewBox={slot().shape.viewBox}
+                    visible={() => slot().index < dotCount()}
+                  />
+                )}
               </For>
             </Show>
           </row>

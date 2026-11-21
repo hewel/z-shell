@@ -2,12 +2,12 @@ import { Button, For, LayerSurface, Show, TextField, createEffect, createMemo, c
 import { ShellIcon } from "../icons.tsx";
 import {
   SPRING_EPSILON,
-  createEnterProgress,
   createM3Spring,
-  createOpacityEnter,
+  createRetainedPresence,
   dialogMotionStyle,
   scrimBackdrop,
   useMotionScheme,
+  type M3Spring,
 } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { resolveMonitorLogicalSize, type PolkitPromptView } from "../topics.ts";
@@ -29,7 +29,11 @@ const footerButton = {
   height: "36px", borderRadius: "999px", fontSize: "13px", fontWeight: 600,
 } as const;
 
-function PolkitContent(props: { active: Accessor<PolkitPromptView> }): NativeChild {
+function PolkitContent(props: {
+  active: Accessor<PolkitPromptView>;
+  spatial: M3Spring;
+  opacity: M3Spring;
+}): NativeChild {
   const { invokeHostResult } = useShellStore();
   const { active } = props;
   const scheme = useMotionScheme();
@@ -45,8 +49,6 @@ function PolkitContent(props: { active: Accessor<PolkitPromptView> }): NativeChi
     return list.find(id => id.uid === active().selected_uid) ?? list[0] ?? null;
   });
 
-  const enter = createEnterProgress("defaultSpatial", { scheme });
-  const scrim = createOpacityEnter("defaultEffects", scheme);
   const shakeX = createM3Spring(() => 0, "fastSpatial", {
     scheme,
     overrideScheme: "expressive",
@@ -105,8 +107,8 @@ function PolkitContent(props: { active: Accessor<PolkitPromptView> }): NativeChi
   }
 
   const cardMotion = () => {
-    const base = dialogMotionStyle(enter(), {
-      opacity: scrim(),
+    const base = dialogMotionStyle(props.spatial(), {
+      opacity: props.opacity(),
       reduced: scheme() === "reduced",
       fromScale: 0.92,
       fromY: 0,
@@ -123,7 +125,7 @@ function PolkitContent(props: { active: Accessor<PolkitPromptView> }): NativeChi
     <box style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center",
-      backgroundColor: scrimBackdrop(55, scrim()),
+      backgroundColor: scrimBackdrop(55, props.opacity()),
     }}>
       <box testId="polkit-card" role="dialog" ariaLabel="Authentication required" ariaModal
         ref={node => { registerDismissLayer(node, cancel, { layer: "modal", dismissOnOutsidePress: false }); }} style={{
@@ -259,27 +261,37 @@ function PolkitContent(props: { active: Accessor<PolkitPromptView> }): NativeChi
 
 export function PolkitDialog(): NativeChild {
   const { activeMonitor, monitors, outputs, polkit, sessionLock } = useShellStore();
-  const visiblePrompt = () => {
-    const snapshot = polkit.data();
-    return !snapshot?.locked_suppressed && (sessionLock.data()?.phase ?? "unlocked") === "unlocked"
-      ? snapshot?.active : null;
-  };
-  const targetMonitorId = () => visiblePrompt() ? activeMonitor()?.id : undefined;
+  const scheme = useMotionScheme();
+  const locked = () => polkit.data()?.locked_suppressed === true || (sessionLock.data()?.phase ?? "unlocked") !== "unlocked";
+  const target = createMemo(() => {
+    if (locked()) return null;
+    const prompt = polkit.data()?.active;
+    const output = activeMonitor()?.id;
+    return prompt && output ? { prompt, output } : null;
+  });
+  // ADR-0004: session lock must hide Polkit instantaneously; normal dismissal plays fastEffects exit.
+  const presence = createRetainedPresence(target, {
+    scheme,
+    enterRole: "defaultSpatial",
+    enterOpacityRole: "defaultEffects",
+    exitRole: "fastEffects",
+    instantExit: locked,
+  });
 
   return (
-    <Show when={targetMonitorId()} keyed>
+    <Show when={presence.value()?.output} keyed>
       {output => {
         const size = createMemo(() => {
           const monitor = monitors().find(candidate => candidate.id === output);
           return monitor ? resolveMonitorLogicalSize(monitor, outputs.data()) : { width: 1280, height: 720 };
         });
         return (
-          <Show when={visiblePrompt()}>
-            {active => (
+          <Show when={presence.value()}>
+            {entry => (
               <LayerSurface name="polkit-dialog" output={output} layer="overlay"
                 anchor={["top", "bottom", "left", "right"]} width={size().width} height={size().height}
                 exclusiveZone={-1} keyboard="exclusive">
-                <PolkitContent active={active} />
+                <PolkitContent active={() => entry().prompt} spatial={presence.progress} opacity={presence.opacity} />
               </LayerSurface>
             )}
           </Show>

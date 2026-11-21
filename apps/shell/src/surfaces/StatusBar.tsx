@@ -4,6 +4,7 @@ import {
 } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
+import { createEnterProgress, createM3Spring, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import {
@@ -99,6 +100,8 @@ function secondaryAction(activate: (node: NativeNode) => void): Pick<ButtonProps
 }
 
 function WorkspaceButton(props: { workspace: WaylandWorkspace; vertical: boolean; docked: boolean; activate: () => void }) {
+  const scheme = useMotionScheme();
+  const activeMorph = createM3Spring(() => (props.workspace.active ? 1 : 0), "fastSpatial", { scheme });
   const label = () => props.workspace.name || String(props.workspace.coordinates[0] ?? props.workspace.workspace_id);
   const fill = () => props.workspace.urgent ? error : props.workspace.active ? primary : muted;
   const activeLabel = {
@@ -122,6 +125,7 @@ function WorkspaceButton(props: { workspace: WaylandWorkspace; vertical: boolean
           borderRadius: "999px",
           backgroundColor: fill(),
           opacity: props.workspace.urgent ? 1 : 0.55,
+          transform: scheme() === "reduced" ? "none" : `scale(${(1 + activeMorph() * 0.25).toFixed(4)})`,
         }} />
       }>
         <box ariaHidden data-ws-pill="true" style={{
@@ -132,6 +136,7 @@ function WorkspaceButton(props: { workspace: WaylandWorkspace; vertical: boolean
           borderRadius: "999px",
           backgroundColor: fill(),
           color: props.workspace.urgent ? "var(--color-on-error)" : "var(--color-on-primary)",
+          transform: scheme() === "reduced" ? "none" : `scale(${(0.86 + activeMorph() * 0.14).toFixed(4)})`,
         }}>
           <text style={activeLabel}>{label()}</text>
         </box>
@@ -206,6 +211,20 @@ function TrayButton(props: { item: TrayItem; vertical: boolean; monitorId: strin
   );
 }
 
+function NotificationBadgePill(props: { count: number; dnd: boolean; vertical: boolean }) {
+  const scheme = useMotionScheme();
+  const pop = createEnterProgress("fastSpatial", { scheme });
+  return (
+    <box testId="bar-notifications-badge" style={{
+      ...notificationBadge,
+      transform: scheme() === "reduced" ? "none" : `scale(${(0.7 + pop() * 0.3).toFixed(4)})`,
+    }}>
+      <ShellIcon name={props.dnd ? "bellOff" : "bell"} size={props.vertical ? 10 : 12} color={onPrimaryContainer} />
+      <text style={tabular}>{props.count}</text>
+    </box>
+  );
+}
+
 function ClockPill(props: {
   vertical: boolean;
   docked: boolean;
@@ -244,10 +263,7 @@ function ClockPill(props: {
       </Show>
       <Show when={count() > 0 || dnd()}>
         <Divider vertical={props.vertical} short />
-        <box testId="bar-notifications-badge" style={notificationBadge}>
-          <ShellIcon name={dnd() ? "bellOff" : "bell"} size={props.vertical ? 10 : 12} color={onPrimaryContainer} />
-          <text style={tabular}>{count()}</text>
-        </box>
+        <NotificationBadgePill count={count()} dnd={dnd()} vertical={props.vertical} />
       </Show>
     </Button>
   );

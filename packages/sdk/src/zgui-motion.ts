@@ -53,13 +53,19 @@ export type M3Spring = Accessor<number> & {
 export interface PresenceState {
   readonly mounted: Accessor<boolean>;
   readonly progress: M3Spring;
+  readonly opacity: M3Spring;
+  /** Immediately retires the surface without exit animation (e.g. Wayland compositor `onDismiss`). */
+  readonly dismissInstant: () => void;
 }
 
 export interface PresenceOptions {
   readonly scheme?: Accessor<MotionScheme>;
   readonly enterRole?: SpringRole;
-  readonly exitRole?: SpringRole;
+  readonly enterOpacityRole?: Extract<SpringRole, "fastEffects" | "defaultEffects" | "slowEffects">;
+  readonly exitRole?: Extract<SpringRole, "fastEffects" | "defaultEffects" | "slowEffects">;
   readonly overrideScheme?: "expressive";
+  /** When true while `visible()` becomes false, skips exit animation and unmounts synchronously. */
+  readonly instantExit?: Accessor<boolean>;
 }
 
 function attachSpringControls(
@@ -213,14 +219,20 @@ export function createM3Spring(
 
 /**
  * Coordinates enter/exit presence without blocking input during exit: mounts immediately when
- * `visible()` becomes true, animates out on programmatic close, and unmounts once settled.
+ * `visible()` becomes true, animates out on programmatic close using `exitRole` (`fastEffects` by
+ * default), and unmounts once settled. Call `dismissInstant()` (or supply `instantExit`) for
+ * compositor-driven dismissals and security-critical instant hides.
  */
 export function createPresence(
   visible: Accessor<boolean>,
   options: PresenceOptions = {},
 ): PresenceState {
-  const [mounted, setMounted] = createSignal(untrack(visible));
+  const initialVisible = untrack(visible);
+  const [exiting, setExiting] = createSignal(false);
+  let wasVisible = initialVisible;
+  let skipNextExit = false;
   const enterRole = options.enterRole ?? "defaultSpatial";
+  const enterOpacityRole = options.enterOpacityRole ?? "fastEffects";
   const exitRole = options.exitRole ?? "fastEffects";
   const progress = createM3Spring(
     () => (visible() ? 1 : 0),
@@ -228,19 +240,106 @@ export function createPresence(
     {
       ...(options.scheme ? { scheme: options.scheme } : {}),
       ...(options.overrideScheme ? { overrideScheme: options.overrideScheme } : {}),
-      initial: untrack(visible) ? 1 : 0,
+      initial: initialVisible ? 1 : 0,
+    },
+  );
+  const opacity = createM3Spring(
+    () => (visible() ? 1 : 0),
+    () => (visible() ? enterOpacityRole : exitRole),
+    {
+      ...(options.scheme ? { scheme: options.scheme } : {}),
+      initial: initialVisible ? 1 : 0,
     },
   );
 
+  const dismissInstant = (): void => {
+    skipNextExit = true;
+    setExiting(false);
+    if (!untrack(visible)) {
+      wasVisible = false;
+      progress.jump(0);
+      opacity.jump(0);
+    }
+  };
+
   createEffect(visible, isVisible => {
-    if (isVisible) setMounted(true);
+    if (isVisible) {
+      wasVisible = true;
+      skipNextExit = false;
+      setExiting(false);
+      return;
+    }
+    const shouldExit = wasVisible && !skipNextExit && !options.instantExit?.();
+    wasVisible = false;
+    skipNextExit = false;
+    if (shouldExit) {
+      setExiting(true);
+    } else {
+      setExiting(false);
+      progress.jump(0);
+      opacity.jump(0);
+    }
   });
 
-  createEffect(() => !visible() && progress.settled() && progress() <= SPRING_EPSILON.unit, done => {
-    if (done) setMounted(false);
+  createEffect(
+    () => exiting() && !visible() && opacity.settled() && opacity() <= SPRING_EPSILON.unit,
+    done => {
+      if (done) setExiting(false);
+    },
+  );
+
+  // `mounted` is strictly derived: whenever `visible()` is true the surface can never desync to unmounted.
+  const mounted = (): boolean => visible() || exiting();
+  return { mounted, progress, opacity, dismissInstant };
+}
+
+/**
+ * Linear 0 -> 1 progress ramp driven through the single shared frame scheduler (for timed warning
+ * scrims such as `pre_action_fade_seconds`). Jumps to 1 immediately when `durationMs <= 0` or
+ * reduced motion is active, and unregisters cleanly once finished (0% idle CPU).
+ */
+export function createLinearProgress(
+  durationMs: Accessor<number>,
+  scheme?: Accessor<MotionScheme>,
+): Accessor<number> {
+  const [value, setValue] = createSignal(0);
+  let unregister: (() => void) | undefined;
+  let disposed = false;
+
+  const stop = () => {
+    unregister?.();
+    unregister = undefined;
+  };
+
+  if (getOwner()) {
+    onCleanup(() => {
+      disposed = true;
+      stop();
+    });
+  }
+
+  createEffect(() => [durationMs(), scheme ? scheme() : configuredMotionScheme()] as const, ([ms, activeScheme]) => {
+    stop();
+    const resolved = resolveMotionScheme(activeScheme, isHostReducedMotion());
+    if (resolved === "reduced" || !Number.isFinite(ms) || ms <= 0) {
+      setValue(1);
+      return;
+    }
+    const startMs = motionNowMs();
+    setValue(0);
+    unregister = registerFrameTicker(nowMs => {
+      if (disposed) return false;
+      const t = Math.max(0, Math.min(1, (nowMs - startMs) / ms));
+      setValue(t);
+      if (t >= 1) {
+        unregister = undefined;
+        return false;
+      }
+      return true;
+    });
   });
 
-  return { mounted, progress };
+  return value;
 }
 
 /**

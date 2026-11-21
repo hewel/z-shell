@@ -3,7 +3,7 @@ import {
   type Accessor, type Monitor, type NativeChild, type NativeStyle,
 } from "@hewel/zgui";
 import type { ZShellClient } from "@z-shell/sdk";
-import { createM3Spring, useGlobalMotionScheme, useTopic } from "@z-shell/sdk/zgui";
+import { createPresence, useGlobalMotionScheme, useTopic, type M3Spring } from "@z-shell/sdk/zgui";
 import type { NiriOverviewSnapshot, WorkspaceViewportLayout } from "./service.ts";
 
 const actionStyle: NativeStyle = {
@@ -60,6 +60,9 @@ function OverviewCard(props: {
   readonly monitor: Monitor;
   readonly snapshot: Accessor<NiriOverviewSnapshot | undefined>;
   readonly client: Accessor<ZShellClient | undefined>;
+  readonly open: Accessor<boolean>;
+  readonly progress: M3Spring;
+  readonly opacity: M3Spring;
 }): NativeChild {
   const workspaces = createMemo(() => {
     const layouts = props.snapshot()?.layouts;
@@ -83,16 +86,16 @@ function OverviewCard(props: {
   // Closing must not reopen the overview when two outputs dismiss before receiving the update.
   const close = () => void invoke("toggle", { open: false });
   const scheme = useGlobalMotionScheme();
-  const zoom = createM3Spring(() => 1, "slowSpatial", { initial: 0, scheme });
-  const scrim = createM3Spring(() => 1, "slowEffects", { initial: 0, scheme });
   const reduced = () => scheme() === "reduced";
-  const cardScale = () => 1.06 - zoom() * 0.06;
+  const cardScale = () => (props.open()
+    ? 1.06 - props.progress() * 0.06
+    : 1.0 + (1 - props.progress()) * 0.04);
 
   return (
     <box testId="niri-overview-backdrop" onClick={close} style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center", padding: "14px",
-      backgroundColor: `color-mix(in srgb, var(--color-scrim) ${(55 * Math.max(0, Math.min(1, scrim()))).toFixed(1)}%, transparent)`,
+      backgroundColor: `color-mix(in srgb, var(--color-scrim) ${(55 * Math.max(0, Math.min(1, props.opacity()))).toFixed(1)}%, transparent)`,
     }}>
       <column testId="niri-overview-card" role="dialog" ariaLabel="Workspace Overview" ariaModal tabIndex={-1}
         ref={node => focus(node)} onClick={event => event.stopPropagation()} onKeyDown={event => {
@@ -105,7 +108,7 @@ function OverviewCard(props: {
           backgroundColor: "var(--color-surface-container)", color: "var(--color-on-surface)",
           border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
           boxShadow: "0 20px 56px rgba(0, 0, 0, 0.60)",
-          opacity: Math.max(0, Math.min(1, scrim())),
+          opacity: Math.max(0, Math.min(1, props.opacity())),
           transform: reduced() ? "none" : `scale(${cardScale().toFixed(4)})`,
           transformOrigin: "center",
         }}>
@@ -147,9 +150,17 @@ function formatOverviewSurfaceName(id: string): string {
 export default function NiriOverviewLayer(props: { readonly client: Accessor<ZShellClient | undefined> }): NativeChild {
   const { data: snapshot } = useTopic<NiriOverviewSnapshot>(props.client, "plugin.z-shell.niri-overview.state");
   const monitors = useMonitors();
+  const scheme = useGlobalMotionScheme();
+  const open = () => snapshot()?.open === true;
+  const presence = createPresence(open, {
+    scheme,
+    enterRole: "slowSpatial",
+    enterOpacityRole: "slowEffects",
+    exitRole: "slowEffects",
+  });
 
   return (
-    <Show when={snapshot()?.open === true}>
+    <Show when={presence.mounted()}>
       <For each={monitors()} keyed={m => m.id}>
         {monitor => {
           const size = createMemo(() => {
@@ -167,7 +178,8 @@ export default function NiriOverviewLayer(props: { readonly client: Accessor<ZSh
             <LayerSurface name={formatOverviewSurfaceName(monitor().id)} output={monitor().id} layer="overlay"
               anchor={["top", "bottom", "left", "right"]} width={size().width} height={size().height}
               exclusiveZone={-1} keyboard="exclusive">
-              <OverviewCard monitor={monitor()} snapshot={snapshot} client={props.client} />
+              <OverviewCard monitor={monitor()} snapshot={snapshot} client={props.client}
+                open={open} progress={presence.progress} opacity={presence.opacity} />
             </LayerSurface>
           );
         }}

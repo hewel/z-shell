@@ -482,9 +482,21 @@ describe("apps/shell design geometry & pixel lint", () => {
       // Docked top bar is flush 38px without floating shadow bleed.
       expect([barDocked.image.width, barDocked.image.height]).toEqual([1440, 38]);
 
-      // Reduced motion Media panel settles immediately at 396px width with transparent rounded corners.
+      // Reduced motion Media panel settles immediately at 396px width with transparent rounded corners
+      // and renders a flat horizontal progress track (no vertical sine wave deflection above/below centerline).
       expect(Math.round(treeNode(mediaReduced.tree, "panel-root-media").boundsLogical!.width)).toBe(396);
       expect(pixel(mediaReduced.image, 0, 0)).toEqual([0, 0, 0, 0]);
+      {
+        const track = treeNode(mediaReduced.tree, "media-progress").boundsDevice!;
+        const centerY = Math.round(track.y + track.height / 2);
+        const bgSample = pixel(mediaReduced.image, Math.round(track.x + 8), Math.round(track.y + 2));
+        // Across the played half (15%..40% of track), y-5 and y+5 must match background (flat line, zero wave).
+        for (const frac of [0.18, 0.24, 0.30, 0.36]) {
+          const sx = Math.round(track.x + track.width * frac);
+          expect(pixel(mediaReduced.image, sx, centerY - 6), `reduced media flat above at ${frac}`).toEqual(bgSample);
+          expect(pixel(mediaReduced.image, sx, centerY + 6), `reduced media flat below at ${frac}`).toEqual(bgSample);
+        }
+      }
 
       // Polkit 23 card width (360px) and >= 24px interactive hit targets.
       expect(Math.round(treeNode(polkit.tree, "polkit-card").boundsLogical!.width)).toBe(360);
@@ -504,6 +516,76 @@ describe("apps/shell design geometry & pixel lint", () => {
           expect(bounds.height, `${label} ${node.testId ?? node.role} height`).toBeGreaterThanOrEqual(24);
         }
       }
+    } finally {
+      cleanup();
+    }
+  }, 30_000);
+
+  previewTest("Vertical Left Bar (09B) geometry and bottom-left Control Center anchoring", () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-design-vertical-");
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const monitor = { id: "DP-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900, scale: 1 };
+
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+      timeline.step({ id: "capture-left-bar", op: "capture", surface: "bar-dp-1", captureId: "bar-left" });
+      timeline.step({ id: "open-left-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-audio" }, button: "primary" });
+      timeline.advance("left-qs-settle", 450);
+      timeline.step({ id: "capture-left-qs", op: "capture", surface: "panel-quick-settings", captureId: "qs-left" });
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-design-vertical-left-bar",
+        initialTopics: {
+          settings: {
+            general: { offline_mode: false, log_level: "info" },
+            bar: {
+              position: "left",
+              style: "floating",
+              gaps: 14,
+              edge_overrides: { top: null, right: null, bottom: null, left: null },
+              launcher_enabled: true,
+              dock_enabled: true,
+              clock_24h: true,
+              clock_seconds: false,
+            },
+            theme: {
+              mode: "dark",
+              variant: "tonal",
+              seed_color: null,
+              motion_scheme: "standard",
+              backend: "builtin",
+              gtk_linking: false,
+            },
+            ime: { mode: "indicator_only", candidate_layout: "auto", switch_osd: true },
+            polkit: { enabled: true },
+            wallpaper: { directories: [], fit: "cover", sync_theme: true, slideshow_seconds: 300 },
+            pre_action_fade_seconds: 0,
+            configured_plugins: [],
+          },
+        },
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-vertical-left-bar",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(published.dist, fixture, scenario, out);
+      expectCleanPreview(result, 2, 0);
+      const barLeft = readCapture(out, "bar-dp-1", "bar-left");
+      const qsLeft = readCapture(out, "panel-quick-settings", "qs-left");
+
+      // Floating left bar is 76px wide (40px pill + shadow bleed) with transparent corner.
+      expect([barLeft.image.width, barLeft.image.height]).toEqual([76, 896]);
+      expect(pixel(barLeft.image, 0, 0)).toEqual([0, 0, 0, 0]);
+      // Control Center opens cleanly at 396px width anchored from the bottom-left status island.
+      expect(Math.round(treeNode(qsLeft.tree, "panel-root-quick-settings").boundsLogical!.width)).toBe(396);
+      expect(pixel(qsLeft.image, 0, 0)).toEqual([0, 0, 0, 0]);
     } finally {
       cleanup();
     }

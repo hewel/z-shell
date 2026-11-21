@@ -15,7 +15,7 @@ import {
   type TopicResetNotification,
   type TopicUpdate,
 } from "../src/index.ts";
-import { createZguiSocketTransport, encodeFileUrlPath, useDaemonMedia, useTopic } from "@z-shell/sdk/zgui";
+import { createLinearProgress, createPresence, createZguiSocketTransport, encodeFileUrlPath, useDaemonMedia, useTopic } from "@z-shell/sdk/zgui";
 
 const solidPath = import.meta.resolve("solid-js", import.meta.resolve("@hewel/zgui"));
 if (/\/dist\/server(?:\.[^/]+)?\.js$/.test(solidPath)) {
@@ -411,5 +411,119 @@ if (/\/dist\/server(?:\.[^/]+)?\.js$/.test(solidPath)) {
         expect(images.registered).toEqual([]);
       },
     );
+  });
+
+  describe("createPresence & createLinearProgress", () => {
+    test("createPresence mounts on show, animates fastEffects exit to unmount, and honors dismissInstant/instantExit", () => {
+      let clock = 0;
+      let nextFrameId = 1;
+      const frames = new Map<number, (ts: number) => void>();
+      const origRaf = Object.getOwnPropertyDescriptor(globalThis, "requestAnimationFrame");
+      const origCancel = Object.getOwnPropertyDescriptor(globalThis, "cancelAnimationFrame");
+      const origPerf = Object.getOwnPropertyDescriptor(globalThis, "performance");
+      Object.defineProperty(globalThis, "performance", { value: { now: () => clock }, configurable: true });
+      Object.defineProperty(globalThis, "requestAnimationFrame", {
+        value: (cb: (ts: number) => void) => {
+          const id = nextFrameId++;
+          frames.set(id, cb);
+          return id;
+        },
+        configurable: true,
+      });
+      Object.defineProperty(globalThis, "cancelAnimationFrame", {
+        value: (id: number) => { frames.delete(id); },
+        configurable: true,
+      });
+      const stepFrames = (count: number, dtMs = 16) => {
+        for (let i = 0; i < count; i++) {
+          clock += dtMs;
+          const batch = [...frames.values()];
+          frames.clear();
+          for (const cb of batch) cb(clock);
+          flush();
+        }
+      };
+
+      let disposePresence: (() => void) | undefined;
+      try {
+        const [visible, setVisible] = createSignal(false);
+        const [instant, setInstant] = createSignal(false);
+        const mountedRoot = mount(() => createPresence(visible, {
+          scheme: () => "standard",
+          enterRole: "defaultSpatial",
+          exitRole: "fastEffects",
+          instantExit: instant,
+        }));
+        disposePresence = mountedRoot.dispose;
+        const { state } = mountedRoot;
+        flush();
+        expect(state.mounted()).toBe(false);
+
+        // Show mounts immediately and enters toward 1.
+        flush(() => setVisible(true));
+        expect(state.mounted()).toBe(true);
+        stepFrames(40);
+        expect(state.opacity()).toBe(1);
+
+        // Programmatic close stays mounted while fastEffects exit runs, then unmounts automatically.
+        flush(() => setVisible(false));
+        expect(state.mounted()).toBe(true);
+        stepFrames(2);
+        expect(state.opacity()).toBeLessThan(1);
+        expect(state.opacity()).toBeGreaterThan(0);
+        stepFrames(20);
+        expect(state.mounted()).toBe(false);
+        expect(state.opacity()).toBe(0);
+
+        // dismissInstant retires synchronously without waiting for frames.
+        flush(() => setVisible(true));
+        stepFrames(5);
+        flush(() => setVisible(false));
+        state.dismissInstant();
+        flush();
+        expect(state.mounted()).toBe(false);
+
+        // instantExit bypasses exit animation (e.g. ADR-0004 session lock suppression).
+        flush(() => setVisible(true));
+        stepFrames(5);
+        flush(() => {
+          setInstant(true);
+          setVisible(false);
+        });
+        expect(state.mounted()).toBe(false);
+
+        // Same-tick dismissInstant + reopen (Wayland grab onDismiss -> adjacent bar island click)
+        // must keep the surface mounted and visible.
+        flush(() => {
+          setInstant(false);
+          setVisible(true);
+        });
+        stepFrames(10);
+        state.dismissInstant();
+        setVisible(false);
+        setVisible(true);
+        flush();
+        expect(state.mounted()).toBe(true);
+        expect(state.opacity()).toBeGreaterThan(0.5);
+      } finally {
+        disposePresence?.();
+        if (origRaf) Object.defineProperty(globalThis, "requestAnimationFrame", origRaf);
+        else Reflect.deleteProperty(globalThis, "requestAnimationFrame");
+        if (origCancel) Object.defineProperty(globalThis, "cancelAnimationFrame", origCancel);
+        else Reflect.deleteProperty(globalThis, "cancelAnimationFrame");
+        if (origPerf) Object.defineProperty(globalThis, "performance", origPerf);
+        else Reflect.deleteProperty(globalThis, "performance");
+      }
+    });
+
+    test("createLinearProgress jumps to 1 immediately under reduced motion or zero duration", () => {
+      const { state: reduced } = mount(() => createLinearProgress(() => 5000, () => "reduced"));
+      flush();
+      expect(reduced()).toBe(1);
+
+      const { state: zero } = mount(() => createLinearProgress(() => 0, () => "standard"));
+      flush();
+      expect(zero()).toBe(1);
+    });
   });
 }

@@ -1,9 +1,14 @@
 import {
-  For, PopupSurface, Show, createEffect, createSignal, getWindowRect, onCleanup, onSettled,
+  For, PopupSurface, Show, createEffect, createMemo, createSignal, getWindowRect, onCleanup, onSettled, untrack,
   type Component, type NativeChild, type NativeNode, type NativeWindowRect,
 } from "@hewel/zgui";
 import { type PluginSettingsProps } from "@z-shell/sdk/zgui";
-import { createEnterProgress, createOpacityEnter, panelMotionStyle, useMotionScheme } from "../motion.ts";
+import {
+  createRetainedPresence,
+  panelMotionStyle,
+  useMotionScheme,
+  type M3Spring,
+} from "../motion.ts";
 import { POPOVER_FRAME_STYLE, resolvePopoverGeometry } from "../panels/ShellPanels.tsx";
 import { useShellStore, type ShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
@@ -38,17 +43,21 @@ type ActivePluginPanel = {
 const COMPACT_PLUGIN_PANEL_WIDTH = 360;
 const STANDARD_PLUGIN_PANEL_WIDTH = 396;
 
-function PluginPanelFrame(props: { theme: ShellStore["theme"]; position: BarPosition; children: NativeChild }): NativeChild {
+function PluginPanelFrame(props: {
+  theme: ShellStore["theme"];
+  position: BarPosition;
+  spatial: M3Spring;
+  opacity: M3Spring;
+  children: NativeChild;
+}): NativeChild {
   useShellTheme(props.theme.data);
   const scheme = useMotionScheme();
-  const spatial = createEnterProgress("defaultSpatial", { scheme });
-  const opacity = createOpacityEnter("fastEffects", scheme);
   return (
     <box data-theme-rev={String(props.theme.revision())} style={{
       ...POPOVER_FRAME_STYLE,
       maxHeight: `${PANEL_MAX_HEIGHTS.plugin}px`,
-      ...panelMotionStyle(spatial(), props.position, false, {
-        opacity: opacity(),
+      ...panelMotionStyle(props.spatial(), props.position, false, {
+        opacity: props.opacity(),
         reduced: scheme() === "reduced",
       }),
     }}>
@@ -88,14 +97,29 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
   const [pluginPanelData, setPluginPanelData] = createSignal<ActivePluginPanel | null>(null);
   let serviceController: ComposedServiceController | undefined;
   const panels = bundle.entryInstances.filter(instance => instance.kind === "panel");
-  const activePluginPanel = () => {
+  const scheme = useMotionScheme();
+  const activePluginPanel = createMemo(() => {
     const activeId = activePluginPanelId();
     const data = pluginPanelData();
     return activeId !== null && data?.instanceId === activeId ? data : null;
-  };
+  });
+  const panelPresence = createRetainedPresence(activePluginPanel, {
+    scheme,
+    enterRole: "defaultSpatial",
+    enterOpacityRole: "fastEffects",
+    exitRole: "fastEffects",
+  });
+  const mountedPanelKey = createMemo(() => {
+    const entry = panelPresence.value();
+    return entry ? `${entry.instanceId}:${entry.outputId}` : null;
+  });
   const dismissPluginPanel = () => {
     closePluginPanel();
     setPluginPanelData(null);
+  };
+  const dismissPluginPanelInstant = () => {
+    panelPresence.dismissInstant();
+    dismissPluginPanel();
   };
 
   if (bundle.services.length > 0) {
@@ -218,20 +242,21 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
           return <For each={monitors()} keyed={monitor => monitor.id}>{monitor => register(monitor().id)}</For>;
         }}
       </For>
-      <Show when={activePluginPanel()} keyed>
-        {({ pluginId, instanceId, outputId, width, anchorRect, position, style, Component: PanelComponent }) => {
+      <Show when={mountedPanelKey()} keyed>
+        {_key => {
+          const { pluginId, instanceId, outputId, width, anchorRect, position, style, Component: PanelComponent } = untrack(() => panelPresence.value()!);
           const geometry = resolvePopoverGeometry(position, style, false);
           const ownSettingsPage = () => pluginSettingsPages().find(page => page.pluginId === pluginId);
           const onOpenSettings = () => {
             const page = ownSettingsPage();
-            dismissPluginPanel();
+            dismissPluginPanelInstant();
             openSettingsWindow(page ? page.id : "appearance");
           };
           return (
             <PopupSurface name={formatSurfaceName("plugin-panel", instanceId)} parent={formatSurfaceName("bar", outputId)} anchorRect={anchorRect}
               width={width} height="auto" minHeight={80} maxHeight={PANEL_MAX_HEIGHTS.plugin}
-              placement={geometry.placement} offset={geometry.offset} grab onDismiss={dismissPluginPanel}>
-              <PluginPanelFrame theme={theme} position={position}>
+              placement={geometry.placement} offset={geometry.offset} grab onDismiss={dismissPluginPanelInstant}>
+              <PluginPanelFrame theme={theme} position={position} spatial={panelPresence.progress} opacity={panelPresence.opacity}>
                 <PanelComponent client={publicClient} onClose={dismissPluginPanel} onOpenSettings={onOpenSettings} />
               </PluginPanelFrame>
             </PopupSurface>

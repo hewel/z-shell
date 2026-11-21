@@ -1,7 +1,7 @@
 import { Button, For, Image, LayerSurface, Show, TextField, createEffect, createSignal, flush, focus, onCleanup, type NativeChild, type NativeKeyEvent } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
-import { createEnterProgress, createOpacityEnter, dialogMotionStyle, scrimBackdrop, useMotionScheme } from "../motion.ts";
+import { createRetainedPresence, dialogMotionStyle, scrimBackdrop, useMotionScheme, type M3Spring } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { resolveActiveMonitor, resolveMonitorLogicalSize, type LauncherItem, type LauncherQueryResponse } from "../topics.ts";
 
@@ -45,7 +45,11 @@ function LauncherTile(props: { item: LauncherItem; selected: boolean; activate: 
   );
 }
 
-function LauncherContent(props: { allocateQueryId: () => number }): NativeChild {
+function LauncherContent(props: {
+  allocateQueryId: () => number;
+  spatial: M3Spring;
+  opacity: M3Spring;
+}): NativeChild {
   const { publicClient, invokePublic, closePanels } = useShellStore();
   const [query, setQuery] = createSignal("");
   const [results, setResults] = createSignal<LauncherQueryResponse>();
@@ -109,14 +113,12 @@ function LauncherContent(props: { allocateQueryId: () => number }): NativeChild 
   }
 
   const scheme = useMotionScheme();
-  const enter = createEnterProgress("defaultSpatial", { scheme });
-  const scrim = createOpacityEnter("defaultEffects", scheme);
 
   return (
     <box testId="launcher-backdrop" onClick={dismiss} style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center",
-      backgroundColor: scrimBackdrop(45, scrim()),
+      backgroundColor: scrimBackdrop(45, props.opacity()),
     }}>
       <box testId="launcher-card" role="dialog" ariaLabel="Launcher" ariaModal onClick={event => event.stopPropagation()} style={{
         display: "flex", flexDirection: "column", width: "652px", height: "410px", borderRadius: "22px",
@@ -124,7 +126,7 @@ function LauncherContent(props: { allocateQueryId: () => number }): NativeChild 
         border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
         boxShadow: "0 20px 56px rgba(0, 0, 0, 0.60)",
         padding: "18px", gap: "14px", fontFamily: "var(--font-sans)", color: "var(--color-on-surface)",
-        ...dialogMotionStyle(enter(), { opacity: scrim(), reduced: scheme() === "reduced", fromScale: 0.95, fromY: 10 }),
+        ...dialogMotionStyle(props.spatial(), { opacity: props.opacity(), reduced: scheme() === "reduced", fromScale: 0.95, fromY: 10 }),
       }}>
         <row testId="launcher-search-bar" data-composite-input="true" style={{
           width: "100%", height: "46px", borderRadius: "14px", padding: searchFocused() ? "0 13px" : "0 14px", gap: "10px",
@@ -165,21 +167,28 @@ function LauncherContent(props: { allocateQueryId: () => number }): NativeChild 
 
 export function LauncherOverlay(): NativeChild {
   const { activePanel, activePanelTarget, activeMonitor, monitors, outputs, windows } = useShellStore();
-  const targetMonitor = () => {
-    if (activePanel() !== "launcher") return undefined;
+  const scheme = useMotionScheme();
+  const targetOutputId = () => {
+    if (activePanel() !== "launcher") return null;
     return resolveActiveMonitor(monitors(), {
       preferredMonitorId: activePanelTarget()?.monitorId,
       windows: windows.data(),
       outputs: outputs.data(),
       lastMonitorId: activeMonitor()?.id,
-    });
+    })?.id ?? null;
   };
+  const presence = createRetainedPresence(targetOutputId, {
+    scheme,
+    enterRole: "defaultSpatial",
+    enterOpacityRole: "defaultEffects",
+    exitRole: "fastEffects",
+  });
   // IDs must keep increasing on the same bus connection, including after reopening the overlay.
   let nextQueryId = 1;
   const allocateQueryId = () => nextQueryId++;
 
   return (
-    <Show when={targetMonitor()?.id} keyed>
+    <Show when={presence.value()} keyed>
       {output => {
         const monitor = () => monitors().find(candidate => candidate.id === output);
         const size = () => {
@@ -190,7 +199,7 @@ export function LauncherOverlay(): NativeChild {
           <LayerSurface name="launcher-overlay" output={output} layer="overlay"
             anchor={["top", "bottom", "left", "right"]} width={size().width} height={size().height}
             exclusiveZone={-1} keyboard="exclusive">
-            <LauncherContent allocateQueryId={allocateQueryId} />
+            <LauncherContent allocateQueryId={allocateQueryId} spatial={presence.progress} opacity={presence.opacity} />
           </LayerSurface>
         );
       }}

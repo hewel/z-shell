@@ -1,7 +1,7 @@
 import { Button, For, Image, LayerSurface, Show, createMemo, createSignal, onCleanup, type Accessor, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
-import { createEnterProgress, createOpacityEnter, useMotionScheme } from "../motion.ts";
+import { createEnterProgress, createOpacityEnter, createRetainedPresence, useMotionScheme, type M3Spring } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import type { NotificationItem } from "../topics.ts";
 
@@ -27,7 +27,12 @@ function trackedRef(track: TrackNode): (node: NativeNode) => void {
   return node => { detach = track(node); };
 }
 
-function ToastCard({ toast, track }: { toast: Accessor<NotificationItem>; track: TrackNode }): NativeChild {
+function ToastCard({ toast, track, stackSpatial, stackOpacity }: {
+  toast: Accessor<NotificationItem>;
+  track: TrackNode;
+  stackSpatial: M3Spring;
+  stackOpacity: M3Spring;
+}): NativeChild {
   const { hostClient, invokePublic } = useShellStore();
   const icon = useDaemonMedia(hostClient, () => {
     const ref = toast().icon;
@@ -35,17 +40,18 @@ function ToastCard({ toast, track }: { toast: Accessor<NotificationItem>; track:
   }, notificationMedia);
   const attachment = useDaemonMedia(hostClient, () => toast().attachment, notificationMedia);
   const scheme = useMotionScheme();
-  const enter = createEnterProgress("defaultSpatial", { scheme });
-  const opacity = createOpacityEnter("fastEffects", scheme);
+  const cardReflow = createEnterProgress("defaultSpatial", { scheme });
+  const cardFade = createOpacityEnter("fastEffects", scheme);
+  const combinedOpacity = () => Math.max(0, Math.min(1, cardFade() * stackOpacity()));
 
   return (
     <column ref={trackedRef(track)} testId={`toast-card-${toast().id}`} style={{
       borderRadius: "22px", backgroundColor: container, border: outline, boxShadow: "0 8px 20px rgba(0, 0, 0, 0.45)",
       padding: "14px", gap: "10px", color: onSurface,
-      opacity: Math.max(0, Math.min(1, opacity())),
+      opacity: combinedOpacity(),
       transform: scheme() === "reduced"
         ? "none"
-        : `translateX(${((1 - enter()) * 24).toFixed(2)}px) scale(${(0.96 + enter() * 0.04).toFixed(4)})`,
+        : `translateX(${((1 - stackSpatial()) * 24).toFixed(2)}px) translateY(${((1 - cardReflow()) * 14).toFixed(2)}px) scale(${(0.96 + stackSpatial() * 0.04).toFixed(4)})`,
       transformOrigin: "top right",
     }}>
       <row style={{ gap: "10px", alignItems: "flex-start" }}>
@@ -112,7 +118,12 @@ function ToastFooter({ count, next, track }: { count: number; next: Notification
   );
 }
 
-function ToastSurface({ output, popups }: { output: string; popups: Accessor<readonly NotificationItem[]> }): NativeChild {
+function ToastSurface({ output, popups, spatial, opacity }: {
+  output: string;
+  popups: Accessor<readonly NotificationItem[]>;
+  spatial: M3Spring;
+  opacity: M3Spring;
+}): NativeChild {
   const { settings } = useShellStore();
   const [trackedNodes, setTrackedNodes] = createSignal<readonly NativeNode[]>([]);
   const track: TrackNode = node => {
@@ -129,7 +140,9 @@ function ToastSurface({ output, popups }: { output: string; popups: Accessor<rea
     <LayerSurface name="notification-toasts" output={output} layer="overlay" anchor={["top", "right"]}
       margin={{ top: Math.max(0, topMargin() - 12), right: 0 }} width={396} height={456} keyboard="none" inputRegion={trackedNodes()}>
       <column style={{ width: "100%", padding: "12px 14px 28px 22px", gap: "8px" }}>
-        <Show when={popups()[0]}>{toast => <ToastCard toast={toast} track={track} />}</Show>
+        <Show when={popups()[0]?.id} keyed>
+          {_id => <ToastCard toast={() => popups()[0]!} track={track} stackSpatial={spatial} stackOpacity={opacity} />}
+        </Show>
         <Show when={popups()[1]}>{next => <ToastFooter count={popups().length} next={next()} track={track} />}</Show>
       </column>
     </LayerSurface>
@@ -138,10 +151,31 @@ function ToastSurface({ output, popups }: { output: string; popups: Accessor<rea
 
 export function NotificationToasts(): NativeChild {
   const { activeMonitor, notifications } = useShellStore();
-  const popups = () => notifications.data()?.popups ?? [];
+  const scheme = useMotionScheme();
+  const dnd = () => notifications.data()?.dnd === true;
+  const target = createMemo(() => {
+    if (dnd()) return null;
+    const popups = notifications.data()?.popups ?? [];
+    const output = activeMonitor()?.id;
+    return popups.length > 0 && output ? { output, popups } : null;
+  });
+  const presence = createRetainedPresence(target, {
+    scheme,
+    enterRole: "defaultSpatial",
+    enterOpacityRole: "fastEffects",
+    exitRole: "fastEffects",
+    instantExit: dnd,
+  });
   return (
-    <Show when={!notifications.data()?.dnd && popups().length > 0 && activeMonitor()?.id} keyed>
-      {output => <ToastSurface output={output} popups={popups} />}
+    <Show when={presence.value()?.output} keyed>
+      {output => (
+        <ToastSurface
+          output={output}
+          popups={() => presence.value()?.popups ?? []}
+          spatial={presence.progress}
+          opacity={presence.opacity}
+        />
+      )}
     </Show>
   );
 }

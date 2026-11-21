@@ -1,6 +1,6 @@
 import { Button, LayerSurface, Show, createMemo, focus, registerDismissLayer, type Accessor, type NativeChild } from "@hewel/zgui";
 import { ShellIcon } from "../icons.tsx";
-import { createEnterProgress, createOpacityEnter, dialogMotionStyle, scrimBackdrop, useMotionScheme } from "../motion.ts";
+import { createRetainedPresence, dialogMotionStyle, scrimBackdrop, useMotionScheme, type M3Spring } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { POWER_DIALOG_COPY, resolveMonitorLogicalSize, type PowerConfirmAction } from "../topics.ts";
 
@@ -9,7 +9,11 @@ const footerButton = {
   height: "40px", borderRadius: "999px", fontSize: "14px", fontWeight: 600,
 } as const;
 
-function PowerDialogContent(props: { action: Accessor<PowerConfirmAction> }): NativeChild {
+function PowerDialogContent(props: {
+  action: Accessor<PowerConfirmAction>;
+  spatial: M3Spring;
+  opacity: M3Spring;
+}): NativeChild {
   const { closePowerDialog, invokeHost, invokePublic } = useShellStore();
   const copy = createMemo(() => POWER_DIALOG_COPY[props.action()]);
 
@@ -25,14 +29,12 @@ function PowerDialogContent(props: { action: Accessor<PowerConfirmAction> }): Na
   }
 
   const scheme = useMotionScheme();
-  const enter = createEnterProgress("defaultSpatial", { scheme });
-  const scrim = createOpacityEnter("defaultEffects", scheme);
 
   return (
     <box testId="power-dialog-backdrop" onClick={closePowerDialog} style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center",
-      backgroundColor: scrimBackdrop(55, scrim()),
+      backgroundColor: scrimBackdrop(55, props.opacity()),
     }}>
       <box testId="power-dialog-card" role="dialog" ariaLabel={copy().title} ariaModal
         ref={node => { registerDismissLayer(node, closePowerDialog, { layer: "modal", dismissOnOutsidePress: false }); }}
@@ -42,7 +44,7 @@ function PowerDialogContent(props: { action: Accessor<PowerConfirmAction> }): Na
           border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
           boxShadow: "0 20px 56px rgba(0, 0, 0, 0.60)",
           padding: "24px", gap: "14px", fontFamily: "var(--font-sans)", color: "var(--color-on-surface)",
-          ...dialogMotionStyle(enter(), { opacity: scrim(), reduced: scheme() === "reduced", fromScale: 0.92, fromY: 0 }),
+          ...dialogMotionStyle(props.spatial(), { opacity: props.opacity(), reduced: scheme() === "reduced", fromScale: 0.92, fromY: 0 }),
         }}>
         <box style={{
           display: "flex", alignItems: "center", justifyContent: "center", width: "56px", height: "56px", borderRadius: "999px",
@@ -71,24 +73,36 @@ function PowerDialogContent(props: { action: Accessor<PowerConfirmAction> }): Na
 
 export function PowerDialog(): NativeChild {
   const { monitors, outputs, pendingPowerAction, powerDialogMonitor, sessionLock } = useShellStore();
-  const targetMonitorId = () => (sessionLock.data()?.phase ?? "unlocked") === "unlocked" && pendingPowerAction()
-    ? powerDialogMonitor()?.id
-    : undefined;
+  const scheme = useMotionScheme();
+  const locked = () => (sessionLock.data()?.phase ?? "unlocked") !== "unlocked";
+  const target = createMemo(() => {
+    if (locked()) return null;
+    const action = pendingPowerAction();
+    const output = powerDialogMonitor()?.id;
+    return action && output ? { action, output } : null;
+  });
+  const presence = createRetainedPresence(target, {
+    scheme,
+    enterRole: "defaultSpatial",
+    enterOpacityRole: "defaultEffects",
+    exitRole: "fastEffects",
+    instantExit: locked,
+  });
 
   return (
-    <Show when={targetMonitorId()} keyed>
+    <Show when={presence.value()?.output} keyed>
       {output => {
         const size = createMemo(() => {
           const monitor = monitors().find(candidate => candidate.id === output);
           return monitor ? resolveMonitorLogicalSize(monitor, outputs.data()) : { width: 1280, height: 720 };
         });
         return (
-          <Show when={pendingPowerAction()}>
-            {action => (
+          <Show when={presence.value()}>
+            {entry => (
               <LayerSurface name="power-dialog" output={output} layer="overlay"
                 anchor={["top", "bottom", "left", "right"]} width={size().width} height={size().height}
                 exclusiveZone={-1} keyboard="exclusive">
-                <PowerDialogContent action={action} />
+                <PowerDialogContent action={() => entry().action} spatial={presence.progress} opacity={presence.opacity} />
               </LayerSurface>
             )}
           </Show>

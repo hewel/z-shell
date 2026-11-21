@@ -1,9 +1,10 @@
-import type { Accessor } from "@hewel/zgui";
+import { createEffect, createSignal, type Accessor } from "@hewel/zgui";
 import {
   M3_DURATIONS,
   M3_EASINGS,
   M3_SPRINGS,
   SPRING_EPSILON,
+  createLinearProgress,
   createM3Spring,
   createPhaseLoop,
   createPresence,
@@ -11,6 +12,8 @@ import {
   resolveMotionScheme,
   type M3Spring,
   type MotionScheme,
+  type PresenceOptions,
+  type PresenceState,
   type SpringRole,
 } from "@z-shell/sdk/zgui";
 import { useShellStore } from "./store.ts";
@@ -21,12 +24,15 @@ export {
   M3_EASINGS,
   M3_SPRINGS,
   SPRING_EPSILON,
+  createLinearProgress,
   createM3Spring,
   createPhaseLoop,
   createPresence,
   resolveMotionScheme,
   type M3Spring,
   type MotionScheme,
+  type PresenceOptions,
+  type PresenceState,
   type SpringRole,
 };
 
@@ -171,6 +177,49 @@ export function dialogMotionStyle(
     opacity,
     transform: `translateY(${offsetY.toFixed(2)}px) scale(${scale.toFixed(4)})`,
     transformOrigin: "center",
+  };
+}
+
+/**
+ * Keeps the last non-null value alive while a programmatic `fastEffects` (~100ms) exit animation
+ * runs, swaps immediately on non-null handoffs, and retires synchronously on `dismissInstant()`.
+ */
+export function createRetainedPresence<T>(
+  source: Accessor<T | null | undefined>,
+  options: PresenceOptions = {},
+): {
+  readonly value: Accessor<T | null>;
+  readonly visible: Accessor<boolean>;
+  readonly progress: M3Spring;
+  readonly opacity: M3Spring;
+  readonly dismissInstant: () => void;
+} {
+  const initial = source();
+  const [retained, setRetained] = createSignal<{ readonly current: T } | null>(
+    initial != null ? { current: initial } : null,
+  );
+  const visible = () => source() != null;
+  const presence = createPresence(visible, options);
+
+  createEffect(source, next => {
+    if (next != null) setRetained({ current: next });
+  });
+
+  createEffect(presence.mounted, isMounted => {
+    if (!isMounted && source() == null) setRetained(null);
+  });
+
+  const dismissInstant = (): void => {
+    presence.dismissInstant();
+    setRetained(null);
+  };
+
+  return {
+    value: () => (presence.mounted() ? (source() ?? retained()?.current ?? null) : null),
+    visible,
+    progress: presence.progress,
+    opacity: presence.opacity,
+    dismissInstant,
   };
 }
 

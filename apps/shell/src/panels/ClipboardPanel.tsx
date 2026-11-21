@@ -1,6 +1,7 @@
 import { Button, For, Image, Show, TextField, createMemo, createSignal, mountStylesheet, type Accessor } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
+import { createM3Spring, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { PANEL_MAX_HEIGHTS, type ClipboardEntrySummary } from "../topics.ts";
 
@@ -37,6 +38,8 @@ type Filter = typeof filters[number]["key"];
 function ClipboardRow(props: { entry: Accessor<ClipboardEntrySummary>; selected: boolean }) {
   const { hostClient, invokePublic, closePanels } = useShellStore();
   const { entry } = props;
+  const scheme = useMotionScheme();
+  const focusProgress = createM3Spring(() => (props.selected ? 1 : 0), "fastSpatial", { scheme });
   const { src } = useDaemonMedia(hostClient, () => entry().kind === "image" ? entry().media : undefined, { fetchCommand: "clipboard.fetch-blob" });
   const title = createMemo(() => {
     const current = entry();
@@ -53,6 +56,7 @@ function ClipboardRow(props: { entry: Accessor<ClipboardEntrySummary>; selected:
         ? `1px solid ${primary}`
         : entry().pinned ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
       color: entry().pinned ? onPrimaryContainer : onSurface,
+      transform: scheme() === "reduced" ? "none" : `translateX(${(focusProgress() * 2).toFixed(2)}px)`,
     }}>
       <Show when={src()} fallback={
         <box style={{ ...thumbnail, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: containerHighest }}>
@@ -192,7 +196,7 @@ export function ClipboardPanel() {
             {chip => {
               const active = () => filter() === chip().key;
               return (
-                <Button testId={`clipboard-filter-${chip().key}`} selected={active()}
+                <Button testId={`clipboard-filter-${chip().key}`} data-qs-tile="true" selected={active()}
                   onClick={() => { setFilter(chip().key); setSelectedIndex(0); }} style={{
                     ...pill, flexDirection: "row", gap: "5px",
                     backgroundColor: active() ? primaryContainer : containerHigh,

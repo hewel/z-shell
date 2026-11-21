@@ -1,6 +1,13 @@
 import { For, LayerSurface, Show, createEffect, createMemo, createSignal, type Accessor, type Monitor, type NativeChild } from "@hewel/zgui";
 import { ShellIcon } from "../icons.tsx";
-import { SPRING_EPSILON, createEnterProgress, createM3Spring, createOpacityEnter, useMotionScheme } from "../motion.ts";
+import {
+  SPRING_EPSILON,
+  createLinearProgress,
+  createM3Spring,
+  createRetainedPresence,
+  useMotionScheme,
+  type M3Spring,
+} from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { formatSurfaceName, resolveMonitorLogicalSize, type OsdPayload, type WarningFade } from "../topics.ts";
 
@@ -15,10 +22,12 @@ const capsule = {
   color: onSurface,
 } as const;
 
-function OsdPill({ osd }: { osd: Accessor<OsdPayload> }): NativeChild {
+function OsdPill({ osd, spatial, opacity }: {
+  osd: Accessor<OsdPayload>;
+  spatial: M3Spring;
+  opacity: M3Spring;
+}): NativeChild {
   const scheme = useMotionScheme();
-  const spatial = createEnterProgress("fastSpatial", { scheme });
-  const opacity = createOpacityEnter("fastEffects", scheme);
   const value = () => Math.max(0, Math.min(100, osd().value ?? 0));
   const animatedValue = createM3Spring(value, "fastSpatial", { scheme, epsilon: SPRING_EPSILON.px });
   const icon = () => {
@@ -80,7 +89,8 @@ function IdleScrim({ monitorId, warning, seconds }: {
   seconds: Accessor<number>;
 }): NativeChild {
   const scheme = useMotionScheme();
-  const opacity = createOpacityEnter("slowEffects", scheme);
+  const ramp = createLinearProgress(() => warning().fade_seconds * 1000, scheme);
+  const opacity = () => Math.max(0.25, Math.min(1, ramp()));
   return (
     <box style={{
       position: "fixed", top: "0px", left: "0px", width: "100%", height: "100%",
@@ -135,10 +145,21 @@ function IdleWarning({ warning, monitors }: { warning: Accessor<WarningFade>; mo
 
 export function OsdOverlay(): NativeChild {
   const { activeOsd, activeMonitor, monitors, idle } = useShellStore();
-  const targetMonitorId = () => activeOsd() ? activeMonitor()?.id : undefined;
+  const scheme = useMotionScheme();
+  const osdTarget = () => {
+    const payload = activeOsd();
+    const output = activeMonitor()?.id;
+    return payload && output ? { payload, output } : null;
+  };
+  const osdPresence = createRetainedPresence(osdTarget, {
+    scheme,
+    enterRole: "fastSpatial",
+    enterOpacityRole: "fastEffects",
+    exitRole: "fastEffects",
+  });
   return (
     <>
-      <Show when={targetMonitorId()} keyed>
+      <Show when={osdPresence.value()?.output} keyed>
         {output => (
           <LayerSurface name="osd-overlay" output={output} layer="overlay" anchor={["bottom"]}
             margin={{ bottom: 52 }} width={344} height={108} keyboard="none" inputRegion="empty">
@@ -146,7 +167,9 @@ export function OsdOverlay(): NativeChild {
               width: "100%", height: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center",
               paddingBottom: "36px",
             }}>
-              <OsdPill osd={() => activeOsd()!} />
+              <Show when={osdPresence.value()}>
+                {entry => <OsdPill osd={() => entry().payload} spatial={osdPresence.progress} opacity={osdPresence.opacity} />}
+              </Show>
             </box>
           </LayerSurface>
         )}

@@ -1,6 +1,6 @@
 import { For, PopupSurface, Show, createMemo, type NativeChild, type PopupSurfacePlacement } from "@hewel/zgui";
 import { ShellIcon } from "../icons.tsx";
-import { createEnterProgress, createOpacityEnter, panelMotionStyle, useMotionScheme } from "../motion.ts";
+import { createRetainedPresence, panelMotionStyle, useMotionScheme, type M3Spring } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import type { TrayMenuNode } from "../topics.ts";
@@ -34,12 +34,10 @@ function visibleTrayRows(nodes: readonly TrayMenuNode[]): TrayMenuRow[] {
   return rows;
 }
 
-function PopupContent(props: { padding: string; label: string; children: NativeChild }) {
+function PopupContent(props: { padding: string; label: string; spatial: M3Spring; opacity: M3Spring; children: NativeChild }) {
   const { theme } = useShellStore();
   useShellTheme(theme.data);
   const scheme = useMotionScheme();
-  const spatial = createEnterProgress("defaultSpatial", { scheme });
-  const opacity = createOpacityEnter("fastEffects", scheme);
   return (
     <scroll role="menu" ariaLabel={props.label} data-theme-rev={String(theme.revision())} style={{
       width: "100%",
@@ -50,8 +48,8 @@ function PopupContent(props: { padding: string; label: string; children: NativeC
       color: "var(--color-on-surface)",
       fontFamily: "var(--font-sans)",
       fontSize: "13px",
-      ...panelMotionStyle(spatial(), "top", false, {
-        opacity: opacity(),
+      ...panelMotionStyle(props.spatial(), "top", false, {
+        opacity: props.opacity(),
         reduced: scheme() === "reduced",
       }),
     }}>
@@ -97,15 +95,28 @@ function MenuButton(props: {
 
 export function BarPopups(): NativeChild {
   const { activeTrayMenu, closeTrayMenu, tray, activeImeMenu, closeImeMenu, ime, invokePublic } = useShellStore();
+  const scheme = useMotionScheme();
   const trayTarget = createMemo(() => {
     const target = activeTrayMenu();
     if (!target) return null;
     const item = tray.data()?.items.find(candidate => candidate.id === target.itemId);
     return item?.menu ? { target, label: item.title || item.id, menu: item.menu } : null;
   });
+  const trayPresence = createRetainedPresence(trayTarget, {
+    scheme,
+    enterRole: "defaultSpatial",
+    enterOpacityRole: "fastEffects",
+    exitRole: "fastEffects",
+  });
   const trayRows = createMemo(() => {
-    const target = trayTarget();
+    const target = trayPresence.value();
     return target ? visibleTrayRows(target.menu.root.children) : [];
+  });
+  const imePresence = createRetainedPresence(activeImeMenu, {
+    scheme,
+    enterRole: "defaultSpatial",
+    enterOpacityRole: "fastEffects",
+    exitRole: "fastEffects",
   });
   const imeRowCount = createMemo(() => {
     const snapshot = ime.data();
@@ -114,12 +125,12 @@ export function BarPopups(): NativeChild {
 
   return (
     <>
-      <Show when={trayTarget()}>
+      <Show when={trayPresence.value()}>
         {item => (
           <PopupSurface name="tray-menu" parent={item().target.parentSurface} anchorRect={item().target.anchorRect}
             width={220} height={Math.min(340, Math.max(88, trayRows().length * 36 + 16))}
-            placement={placement} offset={offset} grab onDismiss={closeTrayMenu}>
-            <PopupContent padding="8px" label={item().label}>
+            placement={placement} offset={offset} grab onDismiss={() => { trayPresence.dismissInstant(); closeTrayMenu(); }}>
+            <PopupContent padding="8px" label={item().label} spatial={trayPresence.progress} opacity={trayPresence.opacity}>
               <For each={trayRows()} keyed={row => row.node.id}>
                 {row => (
                   <Show when={!row().node.separator} fallback={<box ariaHidden style={separator} />}>
@@ -136,12 +147,12 @@ export function BarPopups(): NativeChild {
           </PopupSurface>
         )}
       </Show>
-      <Show when={activeImeMenu()}>
+      <Show when={imePresence.value()}>
         {target => (
           <PopupSurface name="ime-menu" parent={target().parentSurface} anchorRect={target().anchorRect}
             width={220} height={Math.min(340, Math.max(100, imeRowCount() * 36 + 24))}
-            placement={placement} offset={offset} grab onDismiss={closeImeMenu}>
-            <PopupContent padding="12px 8px" label="Input method">
+            placement={placement} offset={offset} grab onDismiss={() => { imePresence.dismissInstant(); closeImeMenu(); }}>
+            <PopupContent padding="12px 8px" label="Input method" spatial={imePresence.progress} opacity={imePresence.opacity}>
               <For each={ime.data()?.group_ims} keyed={im => im.unique_name}>
                 {im => (
                   <MenuButton testId={`ime-im-${im().unique_name}`} label={im().label}
