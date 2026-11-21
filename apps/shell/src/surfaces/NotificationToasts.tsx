@@ -1,7 +1,7 @@
 import { Button, For, Image, LayerSurface, Show, createMemo, createSignal, onCleanup, type Accessor, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
-import { TOAST_SPRING, createEnterProgress } from "../motion.ts";
+import { createEnterProgress, createOpacityEnter, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import type { NotificationItem } from "../topics.ts";
 
@@ -34,14 +34,18 @@ function ToastCard({ toast, track }: { toast: Accessor<NotificationItem>; track:
     return typeof ref === "string" ? null : ref;
   }, notificationMedia);
   const attachment = useDaemonMedia(hostClient, () => toast().attachment, notificationMedia);
-  const enter = createEnterProgress(TOAST_SPRING);
+  const scheme = useMotionScheme();
+  const enter = createEnterProgress("defaultSpatial", { scheme });
+  const opacity = createOpacityEnter("fastEffects", scheme);
 
   return (
     <column ref={trackedRef(track)} testId={`toast-card-${toast().id}`} style={{
       borderRadius: "22px", backgroundColor: container, border: outline, boxShadow: "0 8px 20px rgba(0, 0, 0, 0.45)",
       padding: "14px", gap: "10px", color: onSurface,
-      opacity: Math.max(0, Math.min(1, enter() * 1.35)),
-      transform: `translateX(${((1 - enter()) * 24).toFixed(2)}px) scale(${(0.96 + enter() * 0.04).toFixed(4)})`,
+      opacity: Math.max(0, Math.min(1, opacity())),
+      transform: scheme() === "reduced"
+        ? "none"
+        : `translateX(${((1 - enter()) * 24).toFixed(2)}px) scale(${(0.96 + enter() * 0.04).toFixed(4)})`,
       transformOrigin: "top right",
     }}>
       <row style={{ gap: "10px", alignItems: "flex-start" }}>

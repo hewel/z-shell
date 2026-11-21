@@ -46,15 +46,19 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.step({ id: "capture-dock-hover", op: "capture", surface: "dock-hdmi-a-1", captureId: "dock-hover" });
 
       timeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-hdmi-a-1", testId: "bar-audio" }, button: "primary" });
-      timeline.advance("qs-settle", 600);
+      timeline.advance("qs-settle", 450);
       timeline.step({ id: "capture-qs", op: "capture", surface: "panel-quick-settings", captureId: "qs" });
 
+      timeline.step({ id: "open-qs-battery", op: "pointer.click", target: { surface: "panel-quick-settings", testId: "qs-battery-row" }, button: "primary" });
+      timeline.advance("qs-battery-settle", 400);
+      timeline.step({ id: "capture-qs-battery", op: "capture", surface: "panel-quick-settings", captureId: "qs-battery" });
+
       timeline.step({ id: "open-calendar", op: "pointer.click", target: { surface: "bar-hdmi-a-1", testId: "bar-clock" }, button: "primary" });
-      timeline.advance("cal-settle", 600);
+      timeline.advance("cal-settle", 450);
       timeline.step({ id: "capture-cal", op: "capture", surface: "panel-calendar", captureId: "cal" });
 
       timeline.step({ id: "open-media", op: "pointer.click", target: { surface: "bar-hdmi-a-1", testId: "bar-media" }, button: "primary" });
-      timeline.advance("media-settle", 600);
+      timeline.advance("media-settle", 250);
       timeline.step({ id: "capture-media", op: "capture", surface: "panel-media", captureId: "media" });
 
       const wallpaperListAtMs = timeline.after(20);
@@ -62,14 +66,26 @@ describe("apps/shell design geometry & pixel lint", () => {
         id: "open-settings", op: "service.emit", channel: "control.message",
         value: { args: ["settings", "appearance"], reply: { text: "{\"settingsWindowOpen\":true,\"settingsWindowTab\":\"appearance\"}" } },
       });
-      timeline.advance("settings-settle", 300);
+      timeline.advance("settings-settle", 250);
       timeline.step({ id: "capture-settings", op: "capture", surface: "settings-window", captureId: "settings" });
+
+      timeline.step({ id: "open-settings-bar", op: "pointer.click", target: { surface: "settings-window", testId: "settings-nav-bar" }, button: "primary" });
+      timeline.advance("settings-bar-settle", 250);
+      timeline.step({ id: "capture-settings-bar", op: "capture", surface: "settings-window", captureId: "settings-bar" });
+
+      timeline.step({ id: "open-settings-idle", op: "pointer.click", target: { surface: "settings-window", testId: "settings-nav-idle" }, button: "primary" });
+      timeline.advance("settings-idle-settle", 250);
+      timeline.step({ id: "capture-settings-idle", op: "capture", surface: "settings-window", captureId: "settings-idle" });
+
+      timeline.step({ id: "open-settings-power", op: "pointer.click", target: { surface: "settings-window", testId: "settings-nav-power" }, button: "primary" });
+      timeline.advance("settings-power-settle", 250);
+      timeline.step({ id: "capture-settings-power", op: "capture", surface: "settings-window", captureId: "settings-power" });
 
       timeline.step({
         id: "open-power-dialog", op: "service.emit", channel: "control.message",
         value: { args: ["power", "poweroff"], reply: { text: "{\"pendingPowerAction\":\"poweroff\"}" } },
       });
-      timeline.advance("power-settle", 600);
+      timeline.advance("power-settle", 450);
       timeline.step({ id: "capture-power", op: "capture", surface: "power-dialog", captureId: "power" });
 
       const launcherQueryAtMs = timeline.after(20);
@@ -77,7 +93,7 @@ describe("apps/shell design geometry & pixel lint", () => {
         id: "open-launcher", op: "service.emit", channel: "control.message",
         value: { args: ["panel", "launcher"], reply: { text: "{\"activePanel\":\"launcher\"}" } },
       });
-      timeline.advance("launcher-settle", 400);
+      timeline.advance("launcher-settle", 350);
       timeline.step({ id: "capture-launcher", op: "capture", surface: "launcher-overlay", captureId: "launcher" });
 
       writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
@@ -142,6 +158,30 @@ describe("apps/shell design geometry & pixel lint", () => {
             sink_inputs: [],
             source_outputs: [],
           },
+          "system.power": {
+            available: true,
+            on_ac: false,
+            battery: {
+              percentage: 82,
+              state: "discharging",
+              time_to_empty_seconds: 19320,
+              time_to_full_seconds: null,
+              energy_rate_watts: 11.4,
+              capacity_percent: 96,
+              charge_cycles: 142,
+            },
+            profiles: { available: true, active_profile: "balanced", profiles: ["performance", "balanced", "power-saver"] },
+          },
+          "session.idle": {
+            service_status: { status: "running" },
+            caffeine: false,
+            inhibited: false,
+            active_inhibitors: [],
+            rules: [
+              { name: "lock", timeout_seconds: 300, locked_timeout_seconds: null, action: "lock", resume_command: null, pre_action_fade_seconds: 2, enabled: true },
+              { name: "dpms", timeout_seconds: 600, locked_timeout_seconds: 30, action: "screen_off", resume_command: null, pre_action_fade_seconds: 2, enabled: true },
+            ],
+          },
         },
         commands: [
           {
@@ -176,14 +216,18 @@ describe("apps/shell design geometry & pixel lint", () => {
       }, null, 2));
 
       const result = runPreview(published.dist, fixture, scenario, out);
-      expectCleanPreview(result, 9, 0);
+      expectCleanPreview(result, 13, 0);
       const bar = readCapture(out, "bar-hdmi-a-1", "bar");
       const dock = readCapture(out, "dock-hdmi-a-1", "dock");
       const dockHover = readCapture(out, "dock-hdmi-a-1", "dock-hover");
       const qs = readCapture(out, "panel-quick-settings", "qs");
+      const qsBattery = readCapture(out, "panel-quick-settings", "qs-battery");
       const cal = readCapture(out, "panel-calendar", "cal");
       const media = readCapture(out, "panel-media", "media");
       const settings = readCapture(out, "settings-window", "settings");
+      const settingsBar = readCapture(out, "settings-window", "settings-bar");
+      const settingsIdle = readCapture(out, "settings-window", "settings-idle");
+      const settingsPower = readCapture(out, "settings-window", "settings-power");
       const power = readCapture(out, "power-dialog", "power");
       const launcher = readCapture(out, "launcher-overlay", "launcher");
 
@@ -192,9 +236,13 @@ describe("apps/shell design geometry & pixel lint", () => {
         ["bar", bar.tree],
         ["dock", dock.tree],
         ["quick-settings", qs.tree],
+        ["quick-settings-battery", qsBattery.tree],
         ["calendar", cal.tree],
         ["media", media.tree],
         ["settings", settings.tree],
+        ["settings-bar", settingsBar.tree],
+        ["settings-idle", settingsIdle.tree],
+        ["settings-power", settingsPower.tree],
         ["power-dialog", power.tree],
         ["launcher", launcher.tree],
       ] as const) {
@@ -215,6 +263,7 @@ describe("apps/shell design geometry & pixel lint", () => {
       // Rounded Surface Corner Guard: transparent rounded PopupSurface corners must remain pure transparent.
       for (const [label, capture] of [
         ["quick-settings", qs],
+        ["quick-settings-battery", qsBattery],
         ["calendar", cal],
         ["media", media],
       ] as const) {
@@ -281,6 +330,9 @@ describe("apps/shell design geometry & pixel lint", () => {
       // Settled surface width tiers and Zero-Scroll auto-height match DESIGN.md.
       expect(Math.round(treeNode(qs.tree, "panel-root-quick-settings").boundsLogical!.width)).toBe(396);
       expect(qs.image.height).toBeLessThanOrEqual(760);
+      expect(Math.round(treeNode(qsBattery.tree, "panel-root-quick-settings").boundsLogical!.width)).toBe(396);
+      expect(treeNode(qsBattery.tree, "qs-page-battery").boundsLogical).toBeDefined();
+      expect(qsBattery.image.height).toBeLessThanOrEqual(760);
       expect(Math.round(treeNode(cal.tree, "panel-root-calendar").boundsLogical!.width)).toBe(396);
       expect(cal.image.height).toBeLessThanOrEqual(760);
       expect(Math.round(treeNode(media.tree, "panel-root-media").boundsLogical!.width)).toBe(396);
@@ -288,9 +340,19 @@ describe("apps/shell design geometry & pixel lint", () => {
       expect(Math.round(treeNode(power.tree, "power-dialog-card").boundsLogical!.width)).toBe(360);
 
       // Settings WindowSurface (820x600 flush toplevel -> 216px left sidebar + 604px content pane).
-      expect([settings.image.width, settings.image.height]).toEqual([820, 600]);
+      for (const [label, cap] of [
+        ["appearance", settings],
+        ["bar", settingsBar],
+        ["idle", settingsIdle],
+        ["power", settingsPower],
+      ] as const) {
+        expect([cap.image.width, cap.image.height], label).toEqual([820, 600]);
+      }
       expect(Math.round(treeNode(settings.tree, "settings-sidebar").boundsLogical!.width)).toBe(216);
       expect(Math.round(treeNode(settings.tree, "settings-content-pane").boundsLogical!.width)).toBe(604);
+      expect(treeNode(settingsBar.tree, "settings-bar-pane").boundsLogical).toBeDefined();
+      expect(treeNode(settingsIdle.tree, "settings-idle-pane").boundsLogical).toBeDefined();
+      expect(treeNode(settingsPower.tree, "settings-power-pane").boundsLogical).toBeDefined();
 
       // Zero-Scroll Popover Rule verified via upstream zgui-js scrollMetrics (commit 33c0fab+).
       for (const [label, capture, testId] of [
@@ -305,5 +367,145 @@ describe("apps/shell design geometry & pixel lint", () => {
     } finally {
       cleanup();
     }
-  });
+  }, 30_000);
+
+  previewTest("Docked Top Bar (38px), Polkit 23 Auth Prompt (360px), and Reduced Motion surface checks", () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-design-docked-");
+    const interactiveRoles = new Set(["button", "switch", "slider", "menuItem", "menuItemCheckBox", "menuItemRadio", "tab"]);
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const monitor = { id: "DP-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900, scale: 1 };
+
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+      timeline.step({ id: "capture-bar-docked", op: "capture", surface: "bar-dp-1", captureId: "bar-docked" });
+
+      timeline.step({ id: "open-media", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-media" }, button: "primary" });
+      timeline.advance("media-reduced-settle", 120);
+      timeline.step({ id: "capture-media-reduced", op: "capture", surface: "panel-media", captureId: "media-reduced" });
+
+      const polkitAtMs = timeline.after(15);
+      timeline.advance("polkit-prompt", 30);
+      timeline.advance("polkit-settle", 120);
+      timeline.step({ id: "capture-polkit", op: "capture", surface: "polkit-dialog", captureId: "polkit-23" });
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-design-docked-polkit-reduced",
+        initialTopics: {
+          settings: {
+            general: { offline_mode: false, log_level: "info" },
+            bar: {
+              position: "top",
+              style: "docked",
+              gaps: 0,
+              edge_overrides: { top: null, right: null, bottom: null, left: null },
+              launcher_enabled: true,
+              dock_enabled: false,
+              clock_24h: true,
+              clock_seconds: false,
+            },
+            theme: {
+              mode: "dark",
+              variant: "tonal",
+              seed_color: null,
+              motion_scheme: "reduced",
+              backend: "builtin",
+              gtk_linking: false,
+            },
+            ime: { mode: "indicator_only", candidate_layout: "auto", switch_osd: true },
+            polkit: { enabled: true },
+            wallpaper: { directories: [], fit: "cover", sync_theme: true, slideshow_seconds: 300 },
+            pre_action_fade_seconds: 0,
+            configured_plugins: [],
+          },
+          "desktop.media": {
+            available: true,
+            selected_player_id: "spotify",
+            any_playing: true,
+            cover: null,
+            players: [{
+              id: "spotify", identity: "Spotify", playback_status: "playing", position_us: 90_000_000,
+              capabilities: { can_play: true, can_pause: true, can_go_next: true, can_go_previous: true, can_seek: true },
+              metadata: {
+                title: "Reduced Motion Track",
+                artists: ["z-shell"],
+                album: "Calm",
+                length_us: 180_000_000,
+              },
+            }],
+          },
+        },
+        topicUpdates: [
+          {
+            atMs: polkitAtMs,
+            topic: "session.polkit",
+            revision: 2,
+            data: {
+              enabled: true,
+              registered: true,
+              locked_suppressed: false,
+              last_error: null,
+              active: {
+                request_id: 7,
+                action_id: "org.freedesktop.systemd1.manage-units",
+                message: "Authentication is required to restart system services.",
+                icon_name: "system-lock-screen",
+                prompt: "Password",
+                echo_on: false,
+                selected_uid: 1000,
+                identities: [{ uid: 1000, username: "hewel" }],
+                details: { unit: "NetworkManager.service" },
+                info_message: null,
+                error_message: null,
+                authenticating: false,
+              },
+            },
+          },
+        ],
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-docked-polkit-reduced",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(published.dist, fixture, scenario, out);
+      expectCleanPreview(result, 3, 0);
+      const barDocked = readCapture(out, "bar-dp-1", "bar-docked");
+      const mediaReduced = readCapture(out, "panel-media", "media-reduced");
+      const polkit = readCapture(out, "polkit-dialog", "polkit-23");
+
+      // Docked top bar is flush 38px without floating shadow bleed.
+      expect([barDocked.image.width, barDocked.image.height]).toEqual([1440, 38]);
+
+      // Reduced motion Media panel settles immediately at 396px width with transparent rounded corners.
+      expect(Math.round(treeNode(mediaReduced.tree, "panel-root-media").boundsLogical!.width)).toBe(396);
+      expect(pixel(mediaReduced.image, 0, 0)).toEqual([0, 0, 0, 0]);
+
+      // Polkit 23 card width (360px) and >= 24px interactive hit targets.
+      expect(Math.round(treeNode(polkit.tree, "polkit-card").boundsLogical!.width)).toBe(360);
+      expect(treeNode(polkit.tree, "polkit-input").boundsLogical).toBeDefined();
+      expect(treeNode(polkit.tree, "polkit-action-id").text).toBe("org.freedesktop.systemd1.manage-units");
+
+      for (const [label, tree] of [
+        ["bar-docked", barDocked.tree],
+        ["media-reduced", mediaReduced.tree],
+        ["polkit-23", polkit.tree],
+      ] as const) {
+        const controls = tree.nodes.filter(node => node.role && interactiveRoles.has(node.role) && node.boundsLogical);
+        expect(controls.length, label).toBeGreaterThan(0);
+        for (const node of controls) {
+          const bounds = node.boundsLogical!;
+          expect(bounds.width, `${label} ${node.testId ?? node.role} width`).toBeGreaterThanOrEqual(24);
+          expect(bounds.height, `${label} ${node.testId ?? node.role} height`).toBeGreaterThanOrEqual(24);
+        }
+      }
+    } finally {
+      cleanup();
+    }
+  }, 30_000);
 });

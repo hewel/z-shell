@@ -1,6 +1,7 @@
-import { createEffect, createMemo, createSignal, createSpring, For, Image, LayerSurface, Show, type Accessor, type Monitor, type NativeChild } from "@hewel/zgui";
+import { createEffect, createMemo, createSignal, For, Image, LayerSurface, Show, type Accessor, type Monitor, type NativeChild } from "@hewel/zgui";
 import type { MediaRef } from "@z-shell/sdk";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
+import { createM3Spring, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import { formatSurfaceName, resolveMonitorLogicalSize, resolveMonitorWallpaper, type ActiveWallpaper } from "../topics.ts";
@@ -17,6 +18,7 @@ function sameMedia(a: MediaRef, b: MediaRef): boolean {
 function WallpaperContent(props: { readonly monitor: Accessor<Monitor>; readonly active: Accessor<ActiveWallpaper | null> }): NativeChild {
   const { theme, hostClient } = useShellStore();
   useShellTheme(theme.data);
+  const scheme = useMotionScheme();
 
   const requested = createMemo<WallpaperRequest | null>(previous => {
     const wallpaper = props.active();
@@ -46,8 +48,7 @@ function WallpaperContent(props: { readonly monitor: Accessor<Monitor>; readonly
         const isCurrent = () => currentSrc()?.request === request;
         const isPrevious = () => previousSrc()?.request === request;
         const [target, setTarget] = createSignal(0);
-        // createSpring has no jump API. Each new image owns a fresh spring starting at zero.
-        const progress = createSpring(target, { stiffness: 180, damping: 26 });
+        const progress = createM3Spring(target, "slowEffects", { scheme });
         createEffect(media.src, src => {
           if (src === undefined || requested() !== request) return;
           const current = currentSrc();

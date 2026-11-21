@@ -36,7 +36,9 @@
         "zshell/composite-input-focus": "error",
         "zshell/no-hover-hit-target-shift": "error",
         "zshell/no-flush-surface-shadow": "error",
-        "zshell/no-core-plugin-id-branching": "error"
+        "zshell/no-core-plugin-id-branching": "error",
+        "zshell/m3-motion-tokens": "error",
+        "zshell/no-direct-raf-loop": "error"
       }
     },
     {

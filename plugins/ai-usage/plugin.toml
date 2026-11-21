@@ -50,3 +50,8 @@ title = "AI Usage Bar Quota"
 id = "panel"
 entry = "src/panel.tsx"
 title = "AI Usage Panel"
+
+[[settings_page]]
+id = "settings"
+entry = "src/settings-page.tsx"
+title = "AI Usage"

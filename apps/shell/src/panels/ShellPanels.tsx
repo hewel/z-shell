@@ -1,5 +1,5 @@
 import { PopupSurface, Show, createMemo, type NativeChild, type PopupSurfacePlacement } from "@hewel/zgui";
-import { createEnterProgress, panelMotionStyle } from "../motion.ts";
+import { createEnterProgress, createOpacityEnter, panelMotionStyle, useMotionScheme } from "../motion.ts";
 import { useShellStore, type PanelId, type ShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import { PANEL_MAX_HEIGHTS, type BarPosition, type BarStyle } from "../topics.ts";
@@ -13,7 +13,7 @@ const panels = {
   "quick-settings": { width: 396, maxHeight: PANEL_MAX_HEIGHTS["quick-settings"], Component: QuickSettingsPanel },
   calendar: { width: 396, maxHeight: PANEL_MAX_HEIGHTS.calendar, Component: CalendarPanel },
   media: { width: 396, maxHeight: PANEL_MAX_HEIGHTS.media, Component: MediaPanel },
-  battery: { width: 360, maxHeight: PANEL_MAX_HEIGHTS.battery, Component: BatteryPanel },
+  battery: { width: 396, maxHeight: PANEL_MAX_HEIGHTS.battery, Component: BatteryPanel },
   clipboard: { width: 560, maxHeight: PANEL_MAX_HEIGHTS.clipboard, Component: ClipboardPanel },
 };
 
@@ -65,12 +65,17 @@ function PanelContent(props: {
   children: NativeChild;
 }) {
   useShellTheme(props.theme.data);
-  const progress = createEnterProgress();
+  const scheme = useMotionScheme();
+  const spatial = createEnterProgress("defaultSpatial", { scheme });
+  const opacity = createOpacityEnter("fastEffects", scheme);
   return (
     <box testId={`panel-root-${props.id}`} data-theme-rev={String(props.theme.revision())} style={{
       ...POPOVER_FRAME_STYLE,
       maxHeight: `${props.maxHeight}px`,
-      ...panelMotionStyle(progress(), props.position, props.centered),
+      ...panelMotionStyle(spatial(), props.position, props.centered, {
+        opacity: opacity(),
+        reduced: scheme() === "reduced",
+      }),
     }}>
       {props.children}
     </box>

@@ -1,4 +1,4 @@
-import { Button, For, type Accessor, type NativeChild } from "@hewel/zgui";
+import { Button, For, Show, type Accessor, type NativeChild } from "@hewel/zgui";
 import type { ZShellClient } from "@z-shell/sdk";
 import { useTopic } from "@z-shell/sdk/zgui";
 import { NOSLEEP_DEFAULTS, type NoSleepSnapshot } from "./service.ts";
@@ -14,10 +14,12 @@ const containerHigh = "var(--color-surface-container-high)";
 const containerHighest = "var(--color-surface-container-highest)";
 const coffee = "M20 3H4v10c0 2.21 1.79 4 4 4h6c2.21 0 4-1.79 4-4v-3h2c1.11 0 2-.89 2-2V5c0-1.11-.89-2-2-2zm0 5h-2V5h2v3zM4 19h16v2H4z";
 const smartToy = "M20 9V7c0-1.1-.9-2-2-2h-3c0-1.66-1.34-3-3-3S9 3.34 9 5H6c-1.1 0-2 .9-2 2v2c-1.66 0-3 1.34-3 3s1.34 3 3 3v4c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4c1.66 0 3-1.34 3-3s-1.34-3-3-3zM7.5 11.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5S9.83 13 9 13s-1.5-.67-1.5-1.5zM16 17H8v-2h8v2zm-.5-4c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z";
+const settingsIcon = "M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z";
 
 export default function Panel(props: {
   readonly client: Accessor<ZShellClient | undefined>;
   readonly onClose?: () => void;
+  readonly onOpenSettings?: () => void;
 }): NativeChild {
   const { data: snapshot } = useTopic<NoSleepSnapshot>(props.client, "plugin.z-shell.nosleep.state");
   const active = () => snapshot()?.active === true;
@@ -29,19 +31,31 @@ export default function Panel(props: {
       backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
     }}>
       <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-        <column style={{ gap: "2px", minWidth: "0px" }}>
-          <text role="heading" style={{ fontSize: "18px", fontWeight: 600 }}>Nosleep</text>
+        <column style={{ flexGrow: 1, flexBasis: "0px", gap: "2px", minWidth: "0px" }}>
+          <text role="heading" style={{ fontSize: "20px", fontWeight: 600 }}>Nosleep</text>
           <text style={{ fontSize: "11px", color: muted }}>
-            {`Scope: ${snapshot()?.scope ?? NOSLEEP_DEFAULTS.inhibit_scope}`}
+            {`Sleep block & agent guard · ${snapshot()?.scope ?? NOSLEEP_DEFAULTS.inhibit_scope}`}
           </text>
         </column>
-        <box style={{
-          padding: "5px 10px", borderRadius: "999px", fontSize: "11px", fontWeight: 600,
-          backgroundColor: active() ? primaryContainer : containerHigh,
-          color: active() ? onPrimaryContainer : muted,
-        }}>
-          <text>{active() ? "Awake" : "Idle"}</text>
-        </box>
+        <row style={{ alignItems: "center", gap: "6px", flexShrink: 0 }}>
+          <box style={{
+            padding: "5px 10px", borderRadius: "999px", fontSize: "11px", fontWeight: 600,
+            backgroundColor: active() ? primaryContainer : containerHigh,
+            color: active() ? onPrimaryContainer : muted,
+          }}>
+            <text>{active() ? "Awake" : "Idle"}</text>
+          </box>
+          <Show when={props.onOpenSettings}>
+            {openSettings => (
+              <Button testId="nosleep-open-settings" ariaLabel="Open Nosleep settings" onClick={openSettings()} style={{
+                display: "flex", width: "36px", height: "36px", borderRadius: "10px", flexShrink: 0,
+                alignItems: "center", justifyContent: "center", backgroundColor: containerHighest,
+              }}>
+                <vector d={settingsIcon} viewBox="0 0 24 24" style={{ width: "16px", height: "16px", color: onSurface }} />
+              </Button>
+            )}
+          </Show>
+        </row>
       </row>
 
       <row style={{
@@ -59,14 +73,14 @@ export default function Panel(props: {
           <text style={{ fontWeight: 600, fontSize: "13px" }}>Manual protection</text>
           <text style={{ fontSize: "11px", color: muted }}>Keep screen and session awake</text>
         </column>
-        <Button testId="nosleep-toggle-btn" checked={manual()} ariaLabel={manual() ? "Disable manual" : "Enable manual"}
+        <Button testId="nosleep-toggle-btn" data-switch-root="true" checked={manual()} ariaLabel={manual() ? "Disable manual" : "Enable manual"}
           onClick={() => void props.client()?.invokeCommand("plugin.z-shell.nosleep.toggle").catch(() => undefined)}
           style={{
-            display: "flex", width: "42px", height: "24px", borderRadius: "999px", padding: "3px", flexShrink: 0,
+            display: "flex", width: "44px", height: "26px", borderRadius: "999px", padding: "3px", flexShrink: 0,
             alignItems: "center", justifyContent: manual() ? "flex-end" : "flex-start",
             backgroundColor: manual() ? primary : containerHighest,
           }}>
-          <box ariaHidden style={{
+          <box ariaHidden data-switch-thumb="true" style={{
             width: "18px", height: "18px", borderRadius: "999px",
             backgroundColor: manual() ? onPrimary : muted,
           }} />

@@ -10,6 +10,7 @@ export interface ComposedServiceDescriptor {
   readonly entry: string;
   readonly title?: string;
   readonly description?: string;
+  readonly widthTier?: "compact" | "standard";
   readonly settings: Readonly<Record<string, unknown>>;
   readonly pluginSettings: Readonly<Record<string, unknown>>;
   readonly importKey: string;
@@ -23,6 +24,7 @@ export interface ComposedEntryInstanceDescriptor {
   readonly entry: string;
   readonly title?: string;
   readonly description?: string;
+  readonly widthTier?: "compact" | "standard";
   readonly settings: Readonly<Record<string, unknown>>;
   readonly pluginSettings: Readonly<Record<string, unknown>>;
   readonly instanceId: string;

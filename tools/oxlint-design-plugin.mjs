@@ -1026,6 +1026,130 @@ const rules = {
     },
   },
 
+  "m3-motion-tokens": {
+    meta: {
+      type: "problem",
+      docs: { description: "Enforce M3 Motion tokens: ban ad-hoc spring literals outside motion.ts, non-M3 CSS timing curves, and outline-width transitions" },
+      schema: [],
+    },
+    create(context) {
+      const filename = (context.filename ?? "").replace(/\\/g, "/");
+      const isMotionCore =
+        filename.endsWith("/packages/sdk/src/motion.ts") ||
+        filename.endsWith("packages/sdk/src/motion.ts") ||
+        filename.endsWith("/apps/shell/src/motion.ts") ||
+        filename.endsWith("apps/shell/src/motion.ts");
+
+      const ALLOWED_M3_BEZIERS = new Set([
+        "0.05,0.7,0.1,1",
+        "0.3,0,0.8,0.15",
+        "0.2,0,0,1",
+        "0,0,0,1",
+        "0.3,0,1,1",
+      ]);
+
+      const normalizeBezier = raw =>
+        raw
+          .split(",")
+          .map(part => String(Number(part.trim())))
+          .join(",");
+
+      const checkTimingValue = (node, value) => {
+        const trimmed = value.trim();
+        if (!trimmed || trimmed === "linear" || /^var\(--motion-easing-[a-z0-9-]+\)$/.test(trimmed)) return;
+        const bezierMatch = /^cubic-bezier\(([^)]+)\)$/i.exec(trimmed);
+        if (bezierMatch && ALLOWED_M3_BEZIERS.has(normalizeBezier(bezierMatch[1]))) return;
+        context.report({
+          node,
+          message: `M3 Motion Rule: disallow non-M3 timing function "${trimmed}". Use var(--motion-easing-*) or official M3 cubic-bezier / linear tokens.`,
+        });
+      };
+
+      const checkCssString = (node, text) => {
+        if (!text.includes("transition")) return;
+        const timingRe = /transition-timing-function\s*:\s*([^;}\n]+)/gi;
+        let match;
+        while ((match = timingRe.exec(text)) !== null) {
+          checkTimingValue(node, match[1]);
+        }
+        const outlineWidthRe = /transition(?:-property)?\s*:[^;}\n]*\boutline-width\b/i;
+        if (outlineWidthRe.test(text)) {
+          context.report({
+            node,
+            message: "M3 Motion Rule: never animate outline-width (docs/design/motion.md §5.8); fade focus ring color/opacity instead.",
+          });
+        }
+      };
+
+      return {
+        ObjectExpression(node) {
+          if (isMotionCore) return;
+          const { map } = getStyleProps(node);
+          if (map.has("stiffness") && (map.has("damping") || map.has("dampingRatio"))) {
+            context.report({
+              node,
+              message: "M3 Motion Rule: do not inline ad-hoc { stiffness, damping } spring configs; use M3 spring roles from motion.ts / @z-shell/sdk/zgui.",
+            });
+          }
+        },
+        Property(node) {
+          const key = propertyName(node);
+          if (key === "transitionTimingFunction" || key === "transition-timing-function") {
+            const val = staticString(node.value);
+            if (val !== null) checkTimingValue(node.value, val);
+          } else if (key === "transitionProperty" || key === "transition-property" || key === "transition") {
+            const val = staticString(node.value);
+            if (val !== null && /\boutline-width\b/i.test(val)) {
+              context.report({
+                node: node.value,
+                message: "M3 Motion Rule: never animate outline-width (docs/design/motion.md §5.8); fade focus ring color/opacity instead.",
+              });
+            }
+          }
+        },
+        Literal(node) {
+          if (typeof node.value === "string") checkCssString(node, node.value);
+        },
+        TemplateLiteral(node) {
+          if (node.expressions.length === 0) {
+            checkCssString(node, node.quasis[0]?.value?.cooked ?? "");
+          }
+        },
+      };
+    },
+  },
+
+  "no-direct-raf-loop": {
+    meta: {
+      type: "problem",
+      docs: { description: "Enforce single shared frame scheduler: ban direct requestAnimationFrame calls outside packages/sdk/src/motion.ts" },
+      schema: [],
+    },
+    create(context) {
+      const filename = (context.filename ?? "").replace(/\\/g, "/");
+      if (filename.endsWith("/packages/sdk/src/motion.ts") || filename.endsWith("packages/sdk/src/motion.ts")) {
+        return {};
+      }
+      return {
+        CallExpression(node) {
+          const callee = node.callee;
+          const isRaf =
+            (callee?.type === "Identifier" && callee.name === "requestAnimationFrame") ||
+            (callee?.type === "MemberExpression" &&
+              !callee.computed &&
+              callee.property?.type === "Identifier" &&
+              callee.property.name === "requestAnimationFrame");
+          if (isRaf) {
+            context.report({
+              node,
+              message: "Single Frame Scheduler Rule: do not call requestAnimationFrame directly; use createM3Spring / createPhaseLoop / registerFrameTicker from @z-shell/sdk/zgui.",
+            });
+          }
+        },
+      };
+    },
+  },
+
   "no-lint-suppression": {
     meta: {
       type: "problem",

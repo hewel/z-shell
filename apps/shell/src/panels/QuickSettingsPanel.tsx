@@ -1,12 +1,13 @@
 import { Button, For, Image, Show, createSignal, focus, getWindowRect, type NativeChild } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon, type ShellIconName } from "../icons.tsx";
+import { createEnterProgress, createOpacityEnter, sharedAxisXStyle, useMotionScheme } from "../motion.ts";
 import { SHELL_ROSETTE_CLIP_40, SHELL_ROSETTE_PATH } from "../shapes.ts";
 import { useShellStore } from "../store.ts";
 import { formatDurationSeconds, type BatteryState, type PowerConfirmAction } from "../topics.ts";
 import { QuickSettingsIconButton, QuickSettingsSubpage } from "./QuickSettingsSubpages.tsx";
 
-export type QuickSettingsPage = "main" | "wifi" | "bluetooth" | "sound";
+export type QuickSettingsPage = "main" | "wifi" | "bluetooth" | "sound" | "battery";
 
 const primary = "var(--color-primary)";
 const primaryContainer = "var(--color-primary-container)";
@@ -59,6 +60,7 @@ export function PrecisionSliderRow(props: {
   trailingLabel?: string;
   onTrailingClick?: () => void;
   showTrailingSlot?: boolean;
+  valueLabel?: string;
 }): NativeChild {
   const value = () => clampPercent(props.value);
   const change = (next: number) => {
@@ -123,7 +125,7 @@ export function PrecisionSliderRow(props: {
           fontFamily: "var(--font-mono)", fontSize: "11px", fontWeight: 500, color: muted,
           fontVariantNumeric: "tabular-nums",
         }}>
-          {Math.round(props.value)}%
+          {props.valueLabel ?? `${Math.round(props.value)}%`}
         </text>
       </row>
       <Show when={props.showTrailingSlot !== false}>
@@ -243,8 +245,8 @@ function Sliders(props: { openSound: () => void }): NativeChild {
   );
 }
 
-function BatteryCompactRow(): NativeChild {
-  const { power, openSettingsWindow } = useShellStore();
+function BatteryCompactRow(props: { openBattery: () => void }): NativeChild {
+  const { power } = useShellStore();
   return (
     <Show when={power.data()?.battery} fallback={<box style={hiddenSection} />}>
       {battery => {
@@ -258,7 +260,7 @@ function BatteryCompactRow(): NativeChild {
           return parts.join(" · ") || batteryLabels[battery().state];
         };
         return (
-          <Button testId="qs-battery-row" ariaLabel="Open power and battery settings" onClick={() => openSettingsWindow("power")} style={{
+          <Button testId="qs-battery-row" ariaLabel="Open battery and power sub-panel" onClick={props.openBattery} style={{
             display: "flex", flexDirection: "row", alignItems: "center", gap: "10px",
             borderRadius: "16px", backgroundColor: containerHigh, padding: "10px 12px", color: onSurface,
           }}>
@@ -315,12 +317,37 @@ function PowerActionButton(props: {
   );
 }
 
+function PowerMenuRow(props: { onSelect: (action: PowerConfirmAction) => void }): NativeChild {
+  const scheme = useMotionScheme();
+  const reveal = createEnterProgress("fastSpatial", { scheme });
+  const fade = createOpacityEnter("fastEffects", scheme);
+  return (
+    <row testId="qs-power-menu" style={{
+      borderRadius: "16px", backgroundColor: containerHigh, padding: "6px", gap: "6px", alignItems: "center",
+      opacity: Math.max(0, Math.min(1, fade())),
+      transform: scheme() === "reduced" ? "none" : `translateY(${((1 - reveal()) * -6).toFixed(2)}px) scale(${(0.97 + reveal() * 0.03).toFixed(4)})`,
+      transformOrigin: "top center",
+    }}>
+      <For each={safePowerActions} keyed={entry => entry.action}>
+        {entry => <PowerActionButton label={entry().label} icon={entry().icon} action={entry().action} onSelect={props.onSelect} />}
+      </For>
+      <box ariaHidden style={{ width: "1px", height: "28px", flexShrink: 0, backgroundColor: "var(--color-outline-variant)" }} />
+      <For each={sessionPowerActions} keyed={entry => entry.action}>
+        {entry => <PowerActionButton label={entry().label} icon={entry().icon} action={entry().action} danger={entry().danger} onSelect={props.onSelect} />}
+      </For>
+    </row>
+  );
+}
+
 function MainPage(props: {
   navigate: (page: QuickSettingsPage) => void;
+  fromSubpage: boolean;
   powerMenuOpen: boolean;
   togglePowerMenu: () => void;
   closePowerMenu: () => void;
 }): NativeChild {
+  const scheme = useMotionScheme();
+  const backEnter = createEnterProgress("defaultSpatial", { scheme });
   const { user, hostClient, network, bluetooth, idle, power, wallpaper, clipboard,
     invokePublic, togglePanel, closePanels, requestPowerDialog, openSettingsWindow } = useShellStore();
   const avatar = useDaemonMedia(hostClient, () => user.data()?.avatar, { fetchCommand: "user.fetch-blob" });
@@ -357,6 +384,7 @@ function MainPage(props: {
     <column testId="qs-main" ariaLabel="Quick settings" style={{
       width: "100%", padding: "14px", gap: "10px", flexDirection: "column",
       backgroundColor: "var(--color-surface-container)", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
+      ...(props.fromSubpage ? sharedAxisXStyle(backEnter(), -1, scheme() === "reduced") : {}),
     }}>
       <row style={{ ...row, gap: "10px", padding: "0 2px" }}>
         <box ariaHidden style={{
@@ -395,15 +423,7 @@ function MainPage(props: {
         </row>
       </row>
       <Show when={props.powerMenuOpen} fallback={<box style={hiddenSection} />}>
-        <row testId="qs-power-menu" style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "6px", gap: "6px", alignItems: "center" }}>
-          <For each={safePowerActions} keyed={entry => entry.action}>
-            {entry => <PowerActionButton label={entry().label} icon={entry().icon} action={entry().action} onSelect={handlePowerSelect} />}
-          </For>
-          <box ariaHidden style={{ width: "1px", height: "28px", flexShrink: 0, backgroundColor: "var(--color-outline-variant)" }} />
-          <For each={sessionPowerActions} keyed={entry => entry.action}>
-            {entry => <PowerActionButton label={entry().label} icon={entry().icon} action={entry().action} danger={entry().danger} onSelect={handlePowerSelect} />}
-          </For>
-        </row>
+        <PowerMenuRow onSelect={handlePowerSelect} />
       </Show>
       <column style={{ gap: "8px" }}>
         <row style={{ gap: "8px" }}>
@@ -436,13 +456,14 @@ function MainPage(props: {
         </row>
       </column>
       <Sliders openSound={() => props.navigate("sound")} />
-      <BatteryCompactRow />
+      <BatteryCompactRow openBattery={() => props.navigate("battery")} />
     </column>
   );
 }
 
 export function QuickSettingsPanel(): NativeChild {
   const [page, setPage] = createSignal<QuickSettingsPage>("main");
+  const [returnedFromSubpage, setReturnedFromSubpage] = createSignal(false);
   const [powerMenuOpen, setPowerMenuOpen] = createSignal(false);
   const subpage = () => {
     const current = page();
@@ -450,10 +471,15 @@ export function QuickSettingsPanel(): NativeChild {
   };
   return (
     <Show when={subpage()} fallback={
-      <MainPage navigate={setPage} powerMenuOpen={powerMenuOpen()}
-        togglePowerMenu={() => setPowerMenuOpen(open => !open)} closePowerMenu={() => setPowerMenuOpen(false)} />
+      <MainPage
+        navigate={next => { setReturnedFromSubpage(false); setPage(next); }}
+        fromSubpage={returnedFromSubpage()}
+        powerMenuOpen={powerMenuOpen()}
+        togglePowerMenu={() => setPowerMenuOpen(open => !open)}
+        closePowerMenu={() => setPowerMenuOpen(false)}
+      />
     }>
-      {current => <QuickSettingsSubpage page={current()} onBack={() => setPage("main")} />}
+      {current => <QuickSettingsSubpage page={current()} onBack={() => { setReturnedFromSubpage(true); setPage("main"); }} />}
     </Show>
   );
 }

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { definePlugin, PLUGIN_API_LEVEL } from "@z-shell/plugin-api";
 import type { ZShellClient } from "@z-shell/sdk";
 import type { ComposedServiceDescriptor } from "../src/plugins/composed.ts";
-import { startComposedPluginServices } from "../src/plugins/services.ts";
+import { createComposedServiceController, startComposedPluginServices } from "../src/plugins/services.ts";
 
 function makeServiceDescriptor(pluginId: string, importKey: string, settings: Record<string, unknown> = {}): ComposedServiceDescriptor {
   return {
@@ -106,5 +106,77 @@ describe("startComposedPluginServices", () => {
     });
     await Promise.resolve();
     expect(events).toEqual(["setup:sync:42", "setup:deferred", "cleanup:sync", "cleanup:deferred"]);
+  });
+
+  test("restartPlugin tears down and restarts only the targeted plugin with updated settings overrides", () => {
+    const events: string[] = [];
+
+    const alphaPlugin = definePlugin({
+      manifest: {
+        id: "z-shell/alpha",
+        version: "0.1.0",
+        pluginApi: PLUGIN_API_LEVEL,
+        title: "Alpha",
+        entries: [{ name: "service", kind: "service", title: "Alpha" }],
+        defaults: { poll: 1000 },
+      },
+      setup(ctx) {
+        events.push(`setup:alpha:${ctx.config.poll}`);
+        return () => {
+          events.push(`cleanup:alpha:${ctx.config.poll}`);
+        };
+      },
+    });
+
+    const betaPlugin = definePlugin({
+      manifest: {
+        id: "z-shell/beta",
+        version: "0.1.0",
+        pluginApi: PLUGIN_API_LEVEL,
+        title: "Beta",
+        entries: [{ name: "service", kind: "service", title: "Beta" }],
+        defaults: { enabled: true },
+      },
+      setup(ctx) {
+        events.push(`setup:beta:${ctx.config.enabled}`);
+        return () => {
+          events.push("cleanup:beta");
+        };
+      },
+    });
+
+    const controller = createComposedServiceController(
+      {
+        entryImports: {
+          "z-shell/alpha:service": { default: alphaPlugin },
+          "z-shell/beta:service": { default: betaPlugin },
+        },
+        services: [
+          makeServiceDescriptor("z-shell/alpha", "z-shell/alpha:service", { poll: 2000 }),
+          makeServiceDescriptor("z-shell/beta", "z-shell/beta:service", { enabled: true }),
+        ],
+      },
+      {} as ZShellClient,
+    );
+
+    expect(events).toEqual(["setup:alpha:2000", "setup:beta:true"]);
+
+    controller.restartPlugin("z-shell/alpha", { poll: 5000 });
+    expect(events).toEqual([
+      "setup:alpha:2000",
+      "setup:beta:true",
+      "cleanup:alpha:2000",
+      "setup:alpha:5000",
+    ]);
+
+    controller.dispose();
+    expect(events).toEqual([
+      "setup:alpha:2000",
+      "setup:beta:true",
+      "cleanup:alpha:2000",
+      "setup:alpha:5000",
+      "cleanup:alpha:5000",
+      "cleanup:beta",
+    ]);
   });
 });

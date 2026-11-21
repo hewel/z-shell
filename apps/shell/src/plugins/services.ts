@@ -12,21 +12,31 @@ export type PluginServiceErrorHandler = (
   error: unknown,
 ) => void;
 
+export interface ComposedServiceController {
+  /** Cleanly restarts every service owned by `pluginId` with updated `[plugin_settings]` overrides. */
+  restartPlugin(pluginId: string, pluginSettingsOverrides: Readonly<Record<string, unknown>>): void;
+  /** Disposes all running plugin services synchronously. */
+  dispose(): void;
+}
+
+interface RunningService {
+  readonly service: ComposedServiceDescriptor;
+  readonly token: number;
+  cleanup?: PluginCleanup;
+}
+
 /**
  * Starts all composed plugin service entries against the active public bus client and returns a
- * synchronous teardown callback. Each service runs in isolation so a bad plugin never blocks
- * peer services or shell surfaces, and cleanups that resolve after disposal are retired immediately.
+ * controller capable of restarting an individual plugin's services when its settings change.
  */
-export function startComposedPluginServices(
+export function createComposedServiceController(
   bundle: ComposedServiceBundle,
   client: ZShellClient,
   onError?: PluginServiceErrorHandler,
-): () => void {
+): ComposedServiceController {
   let disposed = false;
-  const activeCleanups: Array<{
-    readonly service: ComposedServiceDescriptor;
-    readonly cleanup: PluginCleanup;
-  }> = [];
+  let nextToken = 1;
+  const running = new Map<string, RunningService>();
 
   function invokeCleanup(service: ComposedServiceDescriptor, cleanup: PluginCleanup): void {
     try {
@@ -39,49 +49,103 @@ export function startComposedPluginServices(
     }
   }
 
-  for (const service of bundle.services) {
+  function stopEntry(entryId: string): void {
+    const active = running.get(entryId);
+    if (!active) return;
+    running.delete(entryId);
+    if (active.cleanup) {
+      invokeCleanup(active.service, active.cleanup);
+    }
+  }
+
+  function startEntry(
+    service: ComposedServiceDescriptor,
+    pluginSettingsOverride?: Readonly<Record<string, unknown>>,
+  ): void {
+    if (disposed) return;
+    stopEntry(service.entryId);
+    const token = nextToken++;
+    const record: RunningService = { service, token };
+    running.set(service.entryId, record);
+
     try {
       const definition = bundle.entryImports[service.importKey]?.default as PluginDefinition | undefined;
       if (!definition || typeof definition.setup !== "function") {
         throw new Error(`Plugin service entry ${service.entryId} must default-export a PluginDefinition`);
       }
       const defaults = definition.manifest?.defaults ?? {};
-      const overrides = { ...service.pluginSettings, ...service.settings };
+      const overrides = {
+        ...service.pluginSettings,
+        ...(pluginSettingsOverride ?? {}),
+        ...service.settings,
+      };
       const ctx = createPluginContext(service.pluginId, client, defaults, overrides);
       const result = definition.setup(ctx);
       if (typeof result === "function") {
-        if (disposed) {
+        if (disposed || running.get(service.entryId)?.token !== token) {
           invokeCleanup(service, result);
         } else {
-          activeCleanups.push({ service, cleanup: result });
+          record.cleanup = result;
         }
       } else if (result && typeof (result as PromiseLike<unknown>).then === "function") {
         void Promise.resolve(result).then(
           cleanup => {
             if (typeof cleanup !== "function") return;
-            if (disposed) {
+            if (disposed || running.get(service.entryId)?.token !== token) {
               invokeCleanup(service, cleanup);
             } else {
-              activeCleanups.push({ service, cleanup });
+              record.cleanup = cleanup;
             }
           },
           error => {
-            if (!disposed) onError?.(service, error);
+            if (!disposed && running.get(service.entryId)?.token === token) {
+              onError?.(service, error);
+            }
           },
         );
       }
     } catch (error) {
+      running.delete(service.entryId);
       onError?.(service, error);
     }
   }
 
-  return () => {
-    if (disposed) return;
-    disposed = true;
-    for (let index = activeCleanups.length - 1; index >= 0; index -= 1) {
-      const entry = activeCleanups[index]!;
-      invokeCleanup(entry.service, entry.cleanup);
-    }
-    activeCleanups.length = 0;
+  for (const service of bundle.services) {
+    startEntry(service);
+  }
+
+  return {
+    restartPlugin(pluginId, pluginSettingsOverrides) {
+      if (disposed) return;
+      for (const service of bundle.services) {
+        if (service.pluginId === pluginId) {
+          startEntry(service, pluginSettingsOverrides);
+        }
+      }
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      const entries = [...running.values()].reverse();
+      running.clear();
+      for (const entry of entries) {
+        if (entry.cleanup) {
+          invokeCleanup(entry.service, entry.cleanup);
+        }
+      }
+    },
   };
+}
+
+/**
+ * Starts all composed plugin service entries against the active public bus client and returns a
+ * synchronous teardown callback.
+ */
+export function startComposedPluginServices(
+  bundle: ComposedServiceBundle,
+  client: ZShellClient,
+  onError?: PluginServiceErrorHandler,
+): () => void {
+  const controller = createComposedServiceController(bundle, client, onError);
+  return () => controller.dispose();
 }

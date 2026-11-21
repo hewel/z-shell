@@ -1,6 +1,7 @@
 import { Button, For, Image, Show, createMemo, getWindowRect, type Accessor } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
+import { createM3Spring, createPhaseLoop, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { formatTrackTimeUs, selectActiveMediaPlayer, type MediaPlayer } from "../topics.ts";
 
@@ -31,41 +32,43 @@ const tenSecondsUs = 10_000_000;
 /**
  * Generates an analytically regular wavy playback progress SVG path on 0 0 328 28.
  * Expressive-Budget Rule: wavy progress tracks are reserved strictly for MediaPanel.tsx.
+ * When `amplitudeScale === 0` (paused or reduced motion), flattens to a crisp straight track.
  */
-function buildWavyWavePath(playheadX: number): string {
+function buildWavyWavePath(playheadX: number, amplitudeScale: number, phasePx: number): string {
   const halfPeriod = 9;
-  const amplitude = 4.5;
+  const amplitude = 4.5 * Math.max(0, Math.min(1, amplitudeScale));
   const midY = 14;
   const waveEnd = Math.max(8, playheadX - 5);
-  let wave = `M 4 ${midY}`;
-  let x = 4;
-  let up = true;
-  while (x + halfPeriod <= waveEnd) {
-    const cx = x + halfPeriod / 2;
-    const cy = up ? midY - amplitude : midY + amplitude;
-    const nx = x + halfPeriod;
-    wave += ` Q ${cx.toFixed(1)} ${cy.toFixed(1)} ${nx.toFixed(1)} ${midY}`;
-    x = nx;
-    up = !up;
+  if (amplitude < 0.05) {
+    return `M 4 ${midY} L ${waveEnd.toFixed(1)} ${midY}`;
   }
-  if (waveEnd - x > 1) {
-    const cx = (x + waveEnd) / 2;
-    const cy = up ? midY - amplitude * ((waveEnd - x) / halfPeriod) : midY + amplitude * ((waveEnd - x) / halfPeriod);
-    wave += ` Q ${cx.toFixed(1)} ${cy.toFixed(1)} ${waveEnd.toFixed(1)} ${midY}`;
+  const period = halfPeriod * 2;
+  const phaseOffset = ((phasePx % period) + period) % period;
+  const samples = Math.max(8, Math.ceil((waveEnd - 4) / 3));
+  let wave = "";
+  for (let i = 0; i <= samples; i++) {
+    const x = 4 + ((waveEnd - 4) * i) / samples;
+    const angle = ((x - phaseOffset) / halfPeriod) * Math.PI;
+    const y = midY - Math.sin(angle) * amplitude;
+    wave += i === 0 ? `M ${x.toFixed(1)} ${y.toFixed(1)}` : ` L ${x.toFixed(1)} ${y.toFixed(1)}`;
   }
   return wave;
 }
 
 function WavyProgressTrack(props: {
   fraction: number;
+  playing: boolean;
   canScrub: boolean;
   lengthUs: number | null;
   positionUs: number | null;
   onSeekOffset: (offsetUs: number) => void;
 }) {
+  const scheme = useMotionScheme();
+  const waveAmplitude = createM3Spring(() => props.playing && scheme() !== "reduced" ? 1 : 0, "defaultSpatial", { scheme });
+  const phase = createPhaseLoop(() => props.playing, 24, scheme);
   const clamped = () => Math.max(0.03, Math.min(0.97, props.fraction));
   const playheadX = () => Math.round(clamped() * 316) + 6;
-  const wavePath = createMemo(() => buildWavyWavePath(playheadX()));
+  const wavePath = createMemo(() => buildWavyWavePath(playheadX(), waveAmplitude(), phase()));
   const restPct = () => `${Math.max(0, 100 - clamped() * 100 - 2.5).toFixed(2)}%`;
 
   return (
@@ -152,7 +155,7 @@ function TrackControls(props: { player: Accessor<MediaPlayer> }) {
       </row>
 
       <column style={{ gap: "2px", width: "100%" }}>
-        <WavyProgressTrack fraction={fraction()} canScrub={canScrub()} lengthUs={length()} positionUs={position()} onSeekOffset={seek} />
+        <WavyProgressTrack fraction={fraction()} playing={playing()} canScrub={canScrub()} lengthUs={length()} positionUs={position()} onSeekOffset={seek} />
         <row style={{ justifyContent: "space-between", alignItems: "center", padding: "0 2px" }}>
           <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", color: muted, fontSize: "11px", fontVariantNumeric: "tabular-nums" }}>
             {formatTrackTimeUs(position()) || "—"}

@@ -1,6 +1,6 @@
 import { For, PopupSurface, Show, createMemo, type NativeChild, type PopupSurfacePlacement } from "@hewel/zgui";
 import { ShellIcon } from "../icons.tsx";
-import { createEnterProgress, panelMotionStyle } from "../motion.ts";
+import { createEnterProgress, createOpacityEnter, panelMotionStyle, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import type { TrayMenuNode } from "../topics.ts";
@@ -37,7 +37,9 @@ function visibleTrayRows(nodes: readonly TrayMenuNode[]): TrayMenuRow[] {
 function PopupContent(props: { padding: string; label: string; children: NativeChild }) {
   const { theme } = useShellStore();
   useShellTheme(theme.data);
-  const progress = createEnterProgress();
+  const scheme = useMotionScheme();
+  const spatial = createEnterProgress("defaultSpatial", { scheme });
+  const opacity = createOpacityEnter("fastEffects", scheme);
   return (
     <scroll role="menu" ariaLabel={props.label} data-theme-rev={String(theme.revision())} style={{
       width: "100%",
@@ -48,7 +50,10 @@ function PopupContent(props: { padding: string; label: string; children: NativeC
       color: "var(--color-on-surface)",
       fontFamily: "var(--font-sans)",
       fontSize: "13px",
-      ...panelMotionStyle(progress(), "top"),
+      ...panelMotionStyle(spatial(), "top", false, {
+        opacity: opacity(),
+        reduced: scheme() === "reduced",
+      }),
     }}>
       <column style={{ padding: props.padding }}>{props.children}</column>
     </scroll>

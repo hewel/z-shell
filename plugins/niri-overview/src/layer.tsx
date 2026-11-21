@@ -3,7 +3,7 @@ import {
   type Accessor, type Monitor, type NativeChild, type NativeStyle,
 } from "@hewel/zgui";
 import type { ZShellClient } from "@z-shell/sdk";
-import { useTopic } from "@z-shell/sdk/zgui";
+import { createM3Spring, useGlobalMotionScheme, useTopic } from "@z-shell/sdk/zgui";
 import type { NiriOverviewSnapshot, WorkspaceViewportLayout } from "./service.ts";
 
 const actionStyle: NativeStyle = {
@@ -82,12 +82,17 @@ function OverviewCard(props: {
 
   // Closing must not reopen the overview when two outputs dismiss before receiving the update.
   const close = () => void invoke("toggle", { open: false });
+  const scheme = useGlobalMotionScheme();
+  const zoom = createM3Spring(() => 1, "slowSpatial", { initial: 0, scheme });
+  const scrim = createM3Spring(() => 1, "slowEffects", { initial: 0, scheme });
+  const reduced = () => scheme() === "reduced";
+  const cardScale = () => 1.06 - zoom() * 0.06;
 
   return (
     <box testId="niri-overview-backdrop" onClick={close} style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center", padding: "14px",
-      backgroundColor: "color-mix(in srgb, var(--color-scrim) 55%, transparent)",
+      backgroundColor: `color-mix(in srgb, var(--color-scrim) ${(55 * Math.max(0, Math.min(1, scrim()))).toFixed(1)}%, transparent)`,
     }}>
       <column testId="niri-overview-card" role="dialog" ariaLabel="Workspace Overview" ariaModal tabIndex={-1}
         ref={node => focus(node)} onClick={event => event.stopPropagation()} onKeyDown={event => {
@@ -100,6 +105,9 @@ function OverviewCard(props: {
           backgroundColor: "var(--color-surface-container)", color: "var(--color-on-surface)",
           border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
           boxShadow: "0 20px 56px rgba(0, 0, 0, 0.60)",
+          opacity: Math.max(0, Math.min(1, scrim())),
+          transform: reduced() ? "none" : `scale(${cardScale().toFixed(4)})`,
+          transformOrigin: "center",
         }}>
         <row style={{ alignItems: "center", flexShrink: 0, gap: "10px" }}>
           <column style={{ flexGrow: 1, minWidth: "0px", gap: "2px" }}>

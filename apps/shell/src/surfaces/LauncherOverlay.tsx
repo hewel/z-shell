@@ -1,7 +1,7 @@
 import { Button, For, Image, LayerSurface, Show, TextField, createEffect, createSignal, flush, focus, onCleanup, type NativeChild, type NativeKeyEvent } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
-import { DIALOG_SPRING, createEnterProgress, dialogMotionStyle, scrimBackdrop } from "../motion.ts";
+import { createEnterProgress, createOpacityEnter, dialogMotionStyle, scrimBackdrop, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { resolveActiveMonitor, resolveMonitorLogicalSize, type LauncherItem, type LauncherQueryResponse } from "../topics.ts";
 
@@ -108,13 +108,15 @@ function LauncherContent(props: { allocateQueryId: () => number }): NativeChild 
     flush(() => setSelectedIndex(index => Math.max(0, Math.min(index + delta, items().length - 1))));
   }
 
-  const enter = createEnterProgress(DIALOG_SPRING);
+  const scheme = useMotionScheme();
+  const enter = createEnterProgress("defaultSpatial", { scheme });
+  const scrim = createOpacityEnter("defaultEffects", scheme);
 
   return (
     <box testId="launcher-backdrop" onClick={dismiss} style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center",
-      backgroundColor: scrimBackdrop(45, enter()),
+      backgroundColor: scrimBackdrop(45, scrim()),
     }}>
       <box testId="launcher-card" role="dialog" ariaLabel="Launcher" ariaModal onClick={event => event.stopPropagation()} style={{
         display: "flex", flexDirection: "column", width: "652px", height: "410px", borderRadius: "22px",
@@ -122,7 +124,7 @@ function LauncherContent(props: { allocateQueryId: () => number }): NativeChild 
         border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
         boxShadow: "0 20px 56px rgba(0, 0, 0, 0.60)",
         padding: "18px", gap: "14px", fontFamily: "var(--font-sans)", color: "var(--color-on-surface)",
-        ...dialogMotionStyle(enter()),
+        ...dialogMotionStyle(enter(), { opacity: scrim(), reduced: scheme() === "reduced", fromScale: 0.95, fromY: 10 }),
       }}>
         <row testId="launcher-search-bar" data-composite-input="true" style={{
           width: "100%", height: "46px", borderRadius: "14px", padding: searchFocused() ? "0 13px" : "0 14px", gap: "10px",

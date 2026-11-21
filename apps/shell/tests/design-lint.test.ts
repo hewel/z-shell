@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
+import { M3_EASINGS, M3_SPRINGS } from "@z-shell/sdk/zgui";
 import { LOCK_MORPH_SHAPES, SHELL_ROSETTE_PATH } from "../src/shapes.ts";
 import { SHELL_DEFAULT_SCHEME, buildThemeStylesheet } from "../src/theme.ts";
 import {
@@ -383,6 +384,59 @@ describe("zshell oxlint design plugin", () => {
     );
     expect(goodCore.status, goodCore.output).toBe(0);
   });
+
+  test("zshell/m3-motion-tokens bans ad-hoc springs, non-M3 CSS curves, and outline-width transitions", () => {
+    const badSpring = lintSnippet(
+      "OsdOverlay.tsx",
+      `export const opts = { stiffness: 260, damping: 33 };`,
+      "zshell/m3-motion-tokens",
+    );
+    expect(badSpring.status).not.toBe(0);
+
+    const badCurve = lintSnippet(
+      "Widget.tsx",
+      `export const css = \`.x { transition-timing-function: ease-out; }\`;`,
+      "zshell/m3-motion-tokens",
+    );
+    expect(badCurve.status).not.toBe(0);
+
+    const badBezier = lintSnippet(
+      "Widget.tsx",
+      `export const css = \`.x { transition-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1.15); }\`;`,
+      "zshell/m3-motion-tokens",
+    );
+    expect(badBezier.status).not.toBe(0);
+
+    const badOutlineWidth = lintSnippet(
+      "Widget.tsx",
+      `export const s = { transitionProperty: "outline-width" };`,
+      "zshell/m3-motion-tokens",
+    );
+    expect(badOutlineWidth.status).not.toBe(0);
+
+    const goodMotion = lintSnippet(
+      "Widget.tsx",
+      `export const css = \`.x { transition-property: transform, opacity; transition-timing-function: var(--motion-easing-standard); }\`; export const y = { transitionTimingFunction: "cubic-bezier(0.05, 0.7, 0.1, 1.0)" };`,
+      "zshell/m3-motion-tokens",
+    );
+    expect(goodMotion.status, goodMotion.output).toBe(0);
+  });
+
+  test("zshell/no-direct-raf-loop bans direct requestAnimationFrame outside packages/sdk/src/motion.ts", () => {
+    const badRaf = lintSnippet(
+      "MediaPanel.tsx",
+      `export const tick = () => requestAnimationFrame(tick);`,
+      "zshell/no-direct-raf-loop",
+    );
+    expect(badRaf.status).not.toBe(0);
+
+    const allowedCore = lintSnippet(
+      "packages/sdk/src/motion.ts",
+      `export const tick = () => requestAnimationFrame(tick);`,
+      "zshell/no-direct-raf-loop",
+    );
+    expect(allowedCore.status, allowedCore.output).toBe(0);
+  });
 });
 
 function parseCubicPoints(d: string): { x: number; y: number }[] {
@@ -523,11 +577,41 @@ describe("DESIGN.md token and surface contract sync", () => {
     expect(shellPanels).toMatch(/"quick-settings":\s*\{\s*width:\s*396\b/);
     expect(shellPanels).toMatch(/calendar:\s*\{\s*width:\s*396\b/);
     expect(shellPanels).toMatch(/media:\s*\{\s*width:\s*396\b/);
-    expect(shellPanels).toMatch(/battery:\s*\{\s*width:\s*360\b/);
+    expect(shellPanels).toMatch(/battery:\s*\{\s*width:\s*396\b/);
     expect(shellPanels).toMatch(/clipboard:\s*\{\s*width:\s*560\b/);
     expect(powerDialog).toContain(`width: "360px"`);
     expect(polkitDialog).toContain(`width: "360px"`);
     expect(launcher).toContain(`width: "652px"`);
     expect(overview).toContain(`width: "684px"`);
+  });
+
+  test(".impeccable/design.json motion tokens match packages/sdk/src/motion.ts and app.css", () => {
+    const designJson = JSON.parse(readFileSync(join(repoRoot, ".impeccable/design.json"), "utf8")) as {
+      extensions?: { motion?: { name: string; value: string }[] };
+    };
+    const appCss = readFileSync(join(shellDir, "src/app.css"), "utf8");
+    const motionMap = new Map((designJson.extensions?.motion ?? []).map(item => [item.name, item.value]));
+
+    const expectedSprings = [
+      ["spring-standard-fast-spatial", M3_SPRINGS.standard.fastSpatial],
+      ["spring-standard-default-spatial", M3_SPRINGS.standard.defaultSpatial],
+      ["spring-standard-slow-spatial", M3_SPRINGS.standard.slowSpatial],
+      ["spring-expressive-fast-spatial", M3_SPRINGS.expressive.fastSpatial],
+      ["spring-expressive-default-spatial", M3_SPRINGS.expressive.defaultSpatial],
+      ["spring-expressive-slow-spatial", M3_SPRINGS.expressive.slowSpatial],
+      ["spring-fast-effects", M3_SPRINGS.standard.fastEffects],
+      ["spring-default-effects", M3_SPRINGS.standard.defaultEffects],
+      ["spring-slow-effects", M3_SPRINGS.standard.slowEffects],
+    ] as const;
+
+    for (const [name, spec] of expectedSprings) {
+      const expected = `spring(stiffness=${spec.stiffness}, dampingRatio=${spec.dampingRatio.toFixed(1)})`;
+      expect(motionMap.get(name), name).toBe(expected);
+    }
+
+    expect(appCss).toContain(`--motion-easing-emphasized-decelerate: ${M3_EASINGS.emphasizedDecelerate};`);
+    expect(appCss).toContain(`--motion-easing-emphasized-accelerate: ${M3_EASINGS.emphasizedAccelerate};`);
+    expect(appCss).toContain(`--motion-easing-standard: ${M3_EASINGS.standard};`);
+    expect(appCss).toContain(`--motion-duration-short2: 100ms;`);
   });
 });

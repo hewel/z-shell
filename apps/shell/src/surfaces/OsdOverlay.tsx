@@ -1,5 +1,6 @@
-import { For, LayerSurface, Show, createEffect, createMemo, createSignal, createSpring, onSettled, type Accessor, type Monitor, type NativeChild } from "@hewel/zgui";
+import { For, LayerSurface, Show, createEffect, createMemo, createSignal, type Accessor, type Monitor, type NativeChild } from "@hewel/zgui";
 import { ShellIcon } from "../icons.tsx";
+import { SPRING_EPSILON, createEnterProgress, createM3Spring, createOpacityEnter, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { formatSurfaceName, resolveMonitorLogicalSize, type OsdPayload, type WarningFade } from "../topics.ts";
 
@@ -14,16 +15,12 @@ const capsule = {
   color: onSurface,
 } as const;
 
-function createReveal(): Accessor<number> {
-  const [target, setTarget] = createSignal(0);
-  const opacity = createSpring(target, { stiffness: 260, damping: 33 });
-  onSettled(() => { setTarget(1); });
-  return opacity;
-}
-
 function OsdPill({ osd }: { osd: Accessor<OsdPayload> }): NativeChild {
-  const opacity = createReveal();
+  const scheme = useMotionScheme();
+  const spatial = createEnterProgress("fastSpatial", { scheme });
+  const opacity = createOpacityEnter("fastEffects", scheme);
   const value = () => Math.max(0, Math.min(100, osd().value ?? 0));
+  const animatedValue = createM3Spring(value, "fastSpatial", { scheme, epsilon: SPRING_EPSILON.px });
   const icon = () => {
     const { kind, muted } = osd();
     return kind === "brightness" ? "brightness" : kind === "ime" ? "terminal" : muted ? "volumeMute" : "volumeHigh";
@@ -32,8 +29,10 @@ function OsdPill({ osd }: { osd: Accessor<OsdPayload> }): NativeChild {
   return (
     <row role="status" ariaLabel={osd().label} style={{
       ...capsule, width: "280px", height: "48px", padding: "0 10px 0 8px", gap: "10px", alignItems: "center",
-      opacity: Math.max(0, Math.min(1, opacity() * 1.35)),
-      transform: `translateY(${((1 - opacity()) * 12).toFixed(2)}px) scale(${(0.94 + opacity() * 0.06).toFixed(4)})`,
+      opacity: Math.max(0, Math.min(1, opacity())),
+      transform: scheme() === "reduced"
+        ? "none"
+        : `translateY(${((1 - spatial()) * 12).toFixed(2)}px) scale(${(0.94 + spatial() * 0.06).toFixed(4)})`,
       transformOrigin: "bottom center",
     }}>
       <box style={{
@@ -49,10 +48,10 @@ function OsdPill({ osd }: { osd: Accessor<OsdPayload> }): NativeChild {
               width: "100%", height: "6px", borderRadius: "3px", overflow: "hidden",
               backgroundColor: "var(--color-surface-container-highest)",
             }}>
-              <box data-percent-fill="true" style={{ width: `${value()}%`, height: "100%", borderRadius: "3px", backgroundColor: primary }} />
+              <box data-percent-fill="true" style={{ width: `${Math.max(0, Math.min(100, animatedValue())).toFixed(2)}%`, height: "100%", borderRadius: "3px", backgroundColor: primary }} />
             </box>
             <box ariaHidden style={{
-              position: "absolute", left: `${Math.max(0, Math.min(92, value() - 4))}%`,
+              position: "absolute", left: `${Math.max(0, Math.min(92, animatedValue() - 4)).toFixed(2)}%`,
               width: "14px", height: "14px", borderRadius: "999px",
               backgroundColor: primary, border: "2px solid var(--color-surface-container)",
             }} />
@@ -80,7 +79,8 @@ function IdleScrim({ monitorId, warning, seconds }: {
   warning: Accessor<WarningFade>;
   seconds: Accessor<number>;
 }): NativeChild {
-  const opacity = createReveal();
+  const scheme = useMotionScheme();
+  const opacity = createOpacityEnter("slowEffects", scheme);
   return (
     <box style={{
       position: "fixed", top: "0px", left: "0px", width: "100%", height: "100%",

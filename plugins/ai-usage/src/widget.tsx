@@ -1,6 +1,6 @@
 import { Button, Show, createMemo, type Accessor, type NativeChild } from "@hewel/zgui";
 import type { ZShellClient } from "@z-shell/sdk";
-import { useTopic } from "@z-shell/sdk/zgui";
+import { SPRING_EPSILON, createM3Spring, useGlobalMotionScheme, useTopic } from "@z-shell/sdk/zgui";
 import type { AiUsageSnapshot } from "./service.ts";
 
 function compactReset(reset: string): string {
@@ -47,6 +47,11 @@ export default function Widget(props: {
     const reset = quota?.resetsAt;
     return { remaining, percent, horizontal: reset ? `${percent} · ${compactReset(reset)}` : percent };
   });
+  const scheme = useGlobalMotionScheme();
+  const animatedPercent = createM3Spring(() => summary().remaining ?? 0, "defaultSpatial", {
+    scheme,
+    epsilon: SPRING_EPSILON.px,
+  });
   const ringSize = () => props.vertical ? "24px" : "20px";
 
   return (
@@ -67,7 +72,7 @@ export default function Widget(props: {
           position: "absolute", inset: "0px", width: ringSize(), height: ringSize(),
           color: "var(--color-surface-container-highest)",
         }} />
-        <vector svg={buildQuotaArcSvg(summary().remaining)} style={{
+        <vector svg={buildQuotaArcSvg(summary().remaining == null ? null : animatedPercent())} style={{
           position: "absolute", inset: "0px", width: ringSize(), height: ringSize(),
           color: "var(--color-primary)",
         }} />

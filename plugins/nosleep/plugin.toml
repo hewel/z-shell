@@ -47,3 +47,9 @@ title = "NoSleep Bar Indicator"
 id = "panel"
 entry = "src/panel.tsx"
 title = "NoSleep Panel"
+width_tier = "compact"
+
+[[settings_page]]
+id = "settings"
+entry = "src/settings-page.tsx"
+title = "Nosleep"

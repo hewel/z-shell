@@ -2,13 +2,14 @@ import {
   For, PopupSurface, Show, createEffect, createSignal, getWindowRect, onCleanup, onSettled,
   type Component, type NativeChild, type NativeNode, type NativeWindowRect,
 } from "@hewel/zgui";
-import { createEnterProgress, panelMotionStyle } from "../motion.ts";
+import { type PluginSettingsProps } from "@z-shell/sdk/zgui";
+import { createEnterProgress, createOpacityEnter, panelMotionStyle, useMotionScheme } from "../motion.ts";
 import { POPOVER_FRAME_STYLE, resolvePopoverGeometry } from "../panels/ShellPanels.tsx";
 import { useShellStore, type ShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import { PANEL_MAX_HEIGHTS, formatSurfaceName, resolveBarLayout, resolveBarPopupAnchor, type BarPosition, type BarStyle } from "../topics.ts";
 import { composedPlugins, type ComposedEntryInstanceDescriptor, type ComposedServiceDescriptor } from "./composed.ts";
-import { startComposedPluginServices } from "./services.ts";
+import { createComposedServiceController, type ComposedServiceController } from "./services.ts";
 
 // The generated module exports the descriptors but does not need to know the host's bundle type.
 export type ComposedPluginBundle = {
@@ -20,28 +21,36 @@ export type ComposedPluginBundle = {
 type ClientProps = { readonly client: ShellStore["publicClient"] };
 type OpenPanel = (entryId?: string, anchor?: NativeNode) => void;
 type WidgetProps = ClientProps & { readonly vertical: boolean; readonly onOpenPanel: OpenPanel };
-type PanelProps = ClientProps & { readonly onClose: () => void };
+type PanelProps = ClientProps & { readonly onClose: () => void; readonly onOpenSettings?: () => void };
+export type PluginSettingsPageProps = PluginSettingsProps;
 type ActivePluginPanel = {
   readonly pluginId: string;
   readonly entryId: string;
   readonly instanceId: string;
   readonly outputId: string;
+  readonly width: number;
   readonly anchorRect: NativeWindowRect;
   readonly position: BarPosition;
   readonly style: BarStyle;
   readonly Component: Component<PanelProps>;
 };
 
+const COMPACT_PLUGIN_PANEL_WIDTH = 360;
 const STANDARD_PLUGIN_PANEL_WIDTH = 396;
 
 function PluginPanelFrame(props: { theme: ShellStore["theme"]; position: BarPosition; children: NativeChild }): NativeChild {
   useShellTheme(props.theme.data);
-  const progress = createEnterProgress();
+  const scheme = useMotionScheme();
+  const spatial = createEnterProgress("defaultSpatial", { scheme });
+  const opacity = createOpacityEnter("fastEffects", scheme);
   return (
     <box data-theme-rev={String(props.theme.revision())} style={{
       ...POPOVER_FRAME_STYLE,
       maxHeight: `${PANEL_MAX_HEIGHTS.plugin}px`,
-      ...panelMotionStyle(progress(), props.position),
+      ...panelMotionStyle(spatial(), props.position, false, {
+        opacity: opacity(),
+        reduced: scheme() === "reduced",
+      }),
     }}>
       <scroll style={{ width: "100%", maxHeight: `${PANEL_MAX_HEIGHTS.plugin}px`, overflow: "hidden auto" }}>
         {props.children}
@@ -72,10 +81,12 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
   if (bundle.entryInstances.length === 0 && bundle.services.length === 0) return null;
 
   const {
-    publicClient, registerPluginBarWidget, registerPluginSettingsPage, monitors, outputs, settings, theme,
+    publicClient, invokeHostResult, registerPluginBarWidget, registerPluginSettingsPage, pluginSettingsPages, openSettingsWindow,
+    monitors, outputs, settings, theme,
     activePluginPanelId, openPluginPanel, closePluginPanel, recordActiveMonitor,
   } = useShellStore();
   const [pluginPanelData, setPluginPanelData] = createSignal<ActivePluginPanel | null>(null);
+  let serviceController: ComposedServiceController | undefined;
   const panels = bundle.entryInstances.filter(instance => instance.kind === "panel");
   const activePluginPanel = () => {
     const activeId = activePluginPanelId();
@@ -89,8 +100,16 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
 
   if (bundle.services.length > 0) {
     createEffect(publicClient, client => {
-      if (!client) return;
-      return startComposedPluginServices(bundle, client);
+      if (!client) {
+        serviceController = undefined;
+        return;
+      }
+      const controller = createComposedServiceController(bundle, client);
+      serviceController = controller;
+      return () => {
+        if (serviceController === controller) serviceController = undefined;
+        controller.dispose();
+      };
     });
   }
 
@@ -121,6 +140,7 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
       entryId: panel.entryId,
       instanceId: panel.instanceId,
       outputId,
+      width: panel.widthTier === "compact" ? COMPACT_PLUGIN_PANEL_WIDTH : STANDARD_PLUGIN_PANEL_WIDTH,
       anchorRect: resolveBarPopupAnchor(layout, {
         align: anchor ? "target" : "end",
         targetRect: anchor ? getWindowRect(anchor) : null,
@@ -141,14 +161,38 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
             return <LayerComponent client={publicClient} />;
           }
           if (instance.kind === "settings_page") {
-            const SettingsComponent = entryComponent<ClientProps>(bundle, instance);
+            const SettingsComponent = entryComponent<PluginSettingsPageProps>(bundle, instance);
+            const readSettings = async (): Promise<Readonly<Record<string, unknown>>> => {
+              const res = await invokeHostResult("settings.get-plugin", { plugin_id: instance.pluginId });
+              const data = res.ok ? (res.result.data as { settings?: Record<string, unknown> } | undefined) : undefined;
+              return { ...instance.pluginSettings, ...(data?.settings ?? {}) };
+            };
+            const patchSettings = async (
+              patch: Readonly<Record<string, unknown>>,
+            ): Promise<Readonly<Record<string, unknown>> | undefined> => {
+              const res = await invokeHostResult("settings.patch-plugin", {
+                plugin_id: instance.pluginId,
+                settings: patch,
+              });
+              if (!res.ok) return undefined;
+              const data = res.result.data as { settings?: Record<string, unknown> } | undefined;
+              const committed = data?.settings ?? patch;
+              serviceController?.restartPlugin(instance.pluginId, committed);
+              return committed;
+            };
             let unregister: (() => void) | undefined;
             onSettled(() => {
               unregister = registerPluginSettingsPage({
                 id: instance.instanceId,
                 pluginId: instance.pluginId,
                 title: formatPluginTitle(instance.pluginId, instance.entryId),
-                render: () => <SettingsComponent client={publicClient} />,
+                render: () => (
+                  <SettingsComponent
+                    client={publicClient}
+                    readSettings={readSettings}
+                    patchSettings={patchSettings}
+                  />
+                ),
               });
             });
             onCleanup(() => unregister?.());
@@ -175,14 +219,20 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
         }}
       </For>
       <Show when={activePluginPanel()} keyed>
-        {({ instanceId, outputId, anchorRect, position, style, Component: PanelComponent }) => {
+        {({ pluginId, instanceId, outputId, width, anchorRect, position, style, Component: PanelComponent }) => {
           const geometry = resolvePopoverGeometry(position, style, false);
+          const ownSettingsPage = () => pluginSettingsPages().find(page => page.pluginId === pluginId);
+          const onOpenSettings = () => {
+            const page = ownSettingsPage();
+            dismissPluginPanel();
+            openSettingsWindow(page ? page.id : "appearance");
+          };
           return (
             <PopupSurface name={formatSurfaceName("plugin-panel", instanceId)} parent={formatSurfaceName("bar", outputId)} anchorRect={anchorRect}
-              width={STANDARD_PLUGIN_PANEL_WIDTH} height="auto" minHeight={80} maxHeight={PANEL_MAX_HEIGHTS.plugin}
+              width={width} height="auto" minHeight={80} maxHeight={PANEL_MAX_HEIGHTS.plugin}
               placement={geometry.placement} offset={geometry.offset} grab onDismiss={dismissPluginPanel}>
               <PluginPanelFrame theme={theme} position={position}>
-                <PanelComponent client={publicClient} onClose={dismissPluginPanel} />
+                <PanelComponent client={publicClient} onClose={dismissPluginPanel} onOpenSettings={onOpenSettings} />
               </PluginPanelFrame>
             </PopupSurface>
           );

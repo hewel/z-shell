@@ -41,3 +41,8 @@ title = "Niri Overview Coordinator"
 id = "overview"
 entry = "src/layer.tsx"
 title = "Niri Workspace Overview"
+
+[[settings_page]]
+id = "settings"
+entry = "src/settings-page.tsx"
+title = "Niri Overview"

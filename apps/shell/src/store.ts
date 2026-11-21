@@ -2,7 +2,7 @@ import { createContext, createEffect, createSignal, flush, getSessionGeneration,
 import { mountOwned } from "@hewel/zgui/renderer";
 import { getResolvedCapabilities, onControlMessage, type JsonValue } from "@hewel/zgui-services";
 import { ZShellClient, type BusHelloResult, type BusTransport, type CommandInvokeResult } from "@z-shell/sdk";
-import { createZguiSocketTransport, useTopic, type TopicState } from "@z-shell/sdk/zgui";
+import { createZguiSocketTransport, setGlobalMotionScheme, useTopic, type TopicState } from "@z-shell/sdk/zgui";
 import type { ThemeTopicSnapshot } from "./theme.ts";
 import { formatSurfaceName, resolveActiveMonitor, resolveBarLayout, resolveBarPopupAnchor } from "./topics.ts";
 import type {
@@ -304,7 +304,7 @@ export function createShellStore(): ShellStore {
     osdTimer = setTimeout(() => {
       osdTimer = undefined;
       setActiveOsd(null);
-    }, 1800);
+    }, 1500);
   }
 
   const [pluginBarWidgets, setPluginBarWidgets] = createSignal<readonly PluginBarWidgetSlot[]>([]);
@@ -488,6 +488,7 @@ export function createShellStore(): ShellStore {
       sessionLock: useTopic<LockSnapshot>(publicClient, "session.lock"),
       polkit: useTopic<PolkitSnapshot>(publicClient, "session.polkit"),
     };
+    createEffect(() => topics.settings.data()?.theme.motion_scheme, setGlobalMotionScheme);
   }));
 
   onControlMessage((args): JsonValue | undefined => {

@@ -24,6 +24,7 @@ export interface WallpaperSnapshot {
 
 export type BarPosition = "top" | "left" | "right";
 export type BarStyle = "floating" | "docked";
+export type MotionScheme = "standard" | "expressive" | "reduced";
 
 export interface EdgeOverrides {
   readonly top: number | null;
@@ -54,6 +55,7 @@ export interface PublicSettingsSummary {
     readonly variant: string;
     readonly seed_color: string | null;
     readonly backend: string;
+    readonly motion_scheme?: MotionScheme;
     readonly gtk_linking: boolean;
   };
   readonly ime: {

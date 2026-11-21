@@ -6,6 +6,13 @@ import {
 import { Input as TextField } from "@hewel/zgui/components";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
+import {
+  SPRING_EPSILON,
+  createEnterProgress,
+  createM3Spring,
+  createOpacityEnter,
+  useMotionScheme,
+} from "../motion.ts";
 import { LOCK_MORPH_SHAPES, SHELL_ROSETTE_CLIP_104, SHELL_ROSETTE_PATH } from "../shapes.ts";
 import { useShellStore } from "../store.ts";
 import { formatBarClock, formatFullDate, formatSurfaceName, resolveMonitorWallpaper, selectActiveMediaPlayer, type UnlockApproval } from "../topics.ts";
@@ -37,6 +44,24 @@ const MORPH_SEQUENCE = [
 ] as const;
 const MAX_VISIBLE_DOTS = 14;
 
+function MorphPasswordDot(props: { readonly d: string; readonly viewBox: string }): NativeChild {
+  const scheme = useMotionScheme();
+  const pop = createEnterProgress("fastSpatial", { scheme, overrideScheme: "expressive" });
+  const fade = createOpacityEnter("fastEffects", scheme);
+  const scale = () => 0.2 + pop() * 0.8;
+  const deg = () => (1 - pop()) * -45;
+  return (
+    <vector ariaHidden d={props.d} viewBox={props.viewBox} style={{
+      width: "14px", height: "14px", flexShrink: 0, color: "var(--color-on-surface)",
+      opacity: Math.max(0, Math.min(1, fade())),
+      transform: scheme() === "reduced"
+        ? "none"
+        : `scale(${scale().toFixed(4)}) rotate(${deg().toFixed(1)}deg)`,
+      transformOrigin: "center",
+    }} />
+  );
+}
+
 function LockScreen(props: {
   readonly monitor: Accessor<Monitor>;
   readonly primary: Accessor<boolean>;
@@ -46,6 +71,16 @@ function LockScreen(props: {
 }): NativeChild {
   const { hostClient, wallpaper, power, ime, media } = useShellStore();
   const { monitor, controls } = props;
+  const scheme = useMotionScheme();
+  const entryFade = createOpacityEnter("slowEffects", scheme);
+  const shakeX = createM3Spring(() => 0, "fastSpatial", {
+    scheme,
+    overrideScheme: "expressive",
+    epsilon: SPRING_EPSILON.px,
+  });
+  createEffect(controls.error, err => {
+    if (err) shakeX.impulse(650);
+  });
   const activeWallpaper = createMemo(() => resolveMonitorWallpaper(wallpaper.data(), monitor().name));
   const backdrop = useDaemonMedia(hostClient, () => activeWallpaper()?.media, { fetchCommand: "wallpaper.fetch-blob" });
   const playing = () => {
@@ -70,6 +105,7 @@ function LockScreen(props: {
       ...centeredColumn, position: "fixed", top: "0px", left: "0px", width: "100%", height: "100%", overflow: "hidden",
       backgroundColor: "var(--color-surface)", fontFamily: "var(--font-sans)",
       color: "var(--color-on-surface)",
+      opacity: Math.max(0, Math.min(1, entryFade())),
     }}>
       <Show when={backdrop.src()}>{src => <>
         <Image ariaHidden src={src()} style={{
@@ -126,10 +162,15 @@ function LockScreen(props: {
           alignItems: "center", justifyContent: "space-between", gap: "8px",
           borderRadius: "999px",
           backgroundColor: "color-mix(in srgb, var(--color-on-surface) 14%, transparent)",
-          border: passwordFocused()
-            ? "2px solid var(--color-primary)"
-            : "1px solid color-mix(in srgb, var(--color-on-surface) 24%, transparent)",
-          padding: passwordFocused() ? "0px 11px" : "0px 12px",
+          border: controls.error()
+            ? "2px solid var(--color-error)"
+            : passwordFocused()
+              ? "2px solid var(--color-primary)"
+              : "1px solid color-mix(in srgb, var(--color-on-surface) 24%, transparent)",
+          padding: passwordFocused() || controls.error() ? "0px 11px" : "0px 12px",
+          transform: scheme() === "reduced" || Math.abs(shakeX()) < SPRING_EPSILON.px
+            ? "none"
+            : `translateX(${shakeX().toFixed(2)}px)`,
         }}>
           <box ariaHidden style={{ width: "36px", height: "32px", flexShrink: 0 }} />
           <row testId="lock-morph-dots" ariaHidden style={{
@@ -140,10 +181,7 @@ function LockScreen(props: {
               <text style={{ fontSize: "14px", color: "var(--color-on-surface-variant)", opacity: 0.78 }}>Enter password</text>
             }>
               <For each={morphDots()} keyed={dot => dot.index}>
-                {dot => (
-                  <vector ariaHidden d={dot().shape.d} viewBox={dot().shape.viewBox}
-                    style={{ width: "14px", height: "14px", flexShrink: 0, color: "var(--color-on-surface)" }} />
-                )}
+                {dot => <MorphPasswordDot d={dot().shape.d} viewBox={dot().shape.viewBox} />}
               </For>
             </Show>
           </row>

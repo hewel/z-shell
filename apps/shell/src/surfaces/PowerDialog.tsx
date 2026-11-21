@@ -1,6 +1,6 @@
 import { Button, LayerSurface, Show, createMemo, focus, registerDismissLayer, type Accessor, type NativeChild } from "@hewel/zgui";
 import { ShellIcon } from "../icons.tsx";
-import { DIALOG_SPRING, createEnterProgress, dialogMotionStyle, scrimBackdrop } from "../motion.ts";
+import { createEnterProgress, createOpacityEnter, dialogMotionStyle, scrimBackdrop, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { POWER_DIALOG_COPY, resolveMonitorLogicalSize, type PowerConfirmAction } from "../topics.ts";
 
@@ -24,13 +24,15 @@ function PowerDialogContent(props: { action: Accessor<PowerConfirmAction> }): Na
     closePowerDialog();
   }
 
-  const enter = createEnterProgress(DIALOG_SPRING);
+  const scheme = useMotionScheme();
+  const enter = createEnterProgress("defaultSpatial", { scheme });
+  const scrim = createOpacityEnter("defaultEffects", scheme);
 
   return (
     <box testId="power-dialog-backdrop" onClick={closePowerDialog} style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center",
-      backgroundColor: scrimBackdrop(55, enter()),
+      backgroundColor: scrimBackdrop(55, scrim()),
     }}>
       <box testId="power-dialog-card" role="dialog" ariaLabel={copy().title} ariaModal
         ref={node => { registerDismissLayer(node, closePowerDialog, { layer: "modal", dismissOnOutsidePress: false }); }}
@@ -40,7 +42,7 @@ function PowerDialogContent(props: { action: Accessor<PowerConfirmAction> }): Na
           border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
           boxShadow: "0 20px 56px rgba(0, 0, 0, 0.60)",
           padding: "24px", gap: "14px", fontFamily: "var(--font-sans)", color: "var(--color-on-surface)",
-          ...dialogMotionStyle(enter()),
+          ...dialogMotionStyle(enter(), { opacity: scrim(), reduced: scheme() === "reduced", fromScale: 0.92, fromY: 0 }),
         }}>
         <box style={{
           display: "flex", alignItems: "center", justifyContent: "center", width: "56px", height: "56px", borderRadius: "999px",

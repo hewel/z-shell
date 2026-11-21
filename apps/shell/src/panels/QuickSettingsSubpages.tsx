@@ -1,13 +1,14 @@
 import { Button, For, Match, Show, Switch, TextField, createMemo, createSignal, type Accessor, type NativeChild } from "@hewel/zgui";
 import { ShellIcon, type ShellIconName } from "../icons.tsx";
-import { createEnterProgress } from "../motion.ts";
+import { createEnterProgress, createOpacityEnter, sharedAxisXStyle, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { PANEL_MAX_HEIGHTS, type AudioDevice, type BluetoothDevice } from "../topics.ts";
+import { BatteryPowerContent } from "./BatteryPanel.tsx";
 import { PrecisionSliderRow, type QuickSettingsPage } from "./QuickSettingsPanel.tsx";
 
 type Subpage = Exclude<QuickSettingsPage, "main">;
 
-const titles: Record<Subpage, string> = {
+const titles: Record<Exclude<Subpage, "battery">, string> = {
   wifi: "Wi-Fi", bluetooth: "Bluetooth", sound: "Sound",
 };
 const primary = "var(--color-primary)";
@@ -72,17 +73,17 @@ function Action(props: {
 
 function Toggle(props: { label: string; checked: boolean; disabled?: boolean; onClick: () => void }): NativeChild {
   return (
-    <control role="switch" tabIndex={props.disabled ? -1 : 0} ariaLabel={props.label} checked={props.checked}
+    <control role="switch" data-switch-root="true" tabIndex={props.disabled ? -1 : 0} ariaLabel={props.label} checked={props.checked}
       disabled={props.disabled ?? false} onClick={props.onClick} style={{
         ...row, padding: "4px 8px", borderRadius: "999px",
         flexShrink: 0, minHeight: "30px", backgroundColor: containerHigh, opacity: props.disabled ? 0.45 : 1,
       }}>
       <text style={{ fontSize: "12px" }}>{props.label}</text>
       <row ariaHidden data-switch-track="true" style={{
-        width: "28px", height: "16px", borderRadius: "8px", padding: "2px", alignItems: "center",
+        width: "32px", height: "18px", borderRadius: "999px", padding: "2px", alignItems: "center",
         justifyContent: props.checked ? "flex-end" : "flex-start", backgroundColor: props.checked ? primary : "var(--color-outline-variant)",
       }}>
-        <box style={{ width: "12px", height: "12px", borderRadius: "6px", backgroundColor: props.checked ? "var(--color-on-primary)" : muted }} />
+        <box data-switch-thumb="true" style={{ width: "14px", height: "14px", borderRadius: "999px", backgroundColor: props.checked ? "var(--color-on-primary)" : muted }} />
       </row>
     </control>
   );
@@ -97,14 +98,14 @@ function Section(props: { title: string; children: NativeChild }): NativeChild {
   );
 }
 
-function Page(props: { page: Subpage; onBack: () => void; controls?: NativeChild; scanning?: boolean; children: NativeChild }): NativeChild {
-  const enter = createEnterProgress({ stiffness: 420, damping: 32 });
+function Page(props: { page: Exclude<Subpage, "battery">; onBack: () => void; controls?: NativeChild; scanning?: boolean; children: NativeChild }): NativeChild {
+  const scheme = useMotionScheme();
+  const enter = createEnterProgress("defaultSpatial", { scheme });
   return (
     <QuickSettingsScroll testId={`qs-page-${props.page}`} label={titles[props.page]}>
       <column style={{
         width: "100%", gap: "10px",
-        opacity: Math.max(0, Math.min(1, enter() * 1.35)),
-        transform: `translateX(${((1 - enter()) * 16).toFixed(2)}px)`,
+        ...sharedAxisXStyle(enter(), 1, scheme() === "reduced"),
       }}>
         <row style={row}>
           <QuickSettingsIconButton testId="qs-back" label="Back" icon="arrowLeft" onClick={props.onBack} />
@@ -122,7 +123,25 @@ function Page(props: { page: Subpage; onBack: () => void; controls?: NativeChild
   );
 }
 
+function BatterySubpage(props: { onBack: () => void }): NativeChild {
+  const scheme = useMotionScheme();
+  const enter = createEnterProgress("defaultSpatial", { scheme });
+  return (
+    <QuickSettingsScroll testId="qs-page-battery" label="Battery & power">
+      <column style={{
+        width: "100%",
+        ...sharedAxisXStyle(enter(), 1, scheme() === "reduced"),
+      }}>
+        <BatteryPowerContent onBack={props.onBack} />
+      </column>
+    </QuickSettingsScroll>
+  );
+}
+
 function WifiPassword(props: { ssid: string; onCancel: () => void; onConnect: (password: string) => void }): NativeChild {
+  const scheme = useMotionScheme();
+  const reveal = createEnterProgress("fastSpatial", { scheme });
+  const fade = createOpacityEnter("fastEffects", scheme);
   const [password, setPassword] = createSignal("");
   const connect = () => {
     if (!password()) return;
@@ -130,7 +149,11 @@ function WifiPassword(props: { ssid: string; onCancel: () => void; onConnect: (p
     setPassword("");
   };
   return (
-    <column style={itemCard}>
+    <column style={{
+      ...itemCard,
+      opacity: Math.max(0, Math.min(1, fade())),
+      transform: scheme() === "reduced" ? "none" : `translateY(${((1 - reveal()) * -4).toFixed(2)}px)`,
+    }}>
       <TextField testId="wifi-password-input" secure ariaLabel={`Password for ${props.ssid}`} placeholder="Wi-Fi password"
         value={password()} onInput={event => setPassword(event.value)} style={{
           height: "36px", lineHeight: "18px", padding: "8px 10px",
@@ -402,6 +425,7 @@ export function QuickSettingsSubpage(props: { readonly page: Subpage; readonly o
       <Match when={props.page === "wifi"}><WifiPage onBack={props.onBack} /></Match>
       <Match when={props.page === "bluetooth"}><BluetoothPage onBack={props.onBack} /></Match>
       <Match when={props.page === "sound"}><SoundPage onBack={props.onBack} /></Match>
+      <Match when={props.page === "battery"}><BatterySubpage onBack={props.onBack} /></Match>
     </Switch>
   );
 }

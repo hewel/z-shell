@@ -1,4 +1,4 @@
-import { Button, For, Show, createMemo } from "@hewel/zgui";
+import { Button, For, Show, createMemo, type NativeChild } from "@hewel/zgui";
 import { ShellIcon, type ShellIconName } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
 import { PANEL_MAX_HEIGHTS, formatBytesGiB, formatDurationSeconds, maxThermalCelsius, type BatteryState } from "../topics.ts";
@@ -13,10 +13,20 @@ const containerHigh = "var(--color-surface-container-high)";
 const containerHighest = "var(--color-surface-container-highest)";
 const card = { borderRadius: "16px", backgroundColor: containerHigh, padding: "12px", gap: "10px" } as const;
 const metric = { flexBasis: "0px", flexGrow: 1, minWidth: "0px", borderRadius: "10px", padding: "8px", gap: "2px" } as const;
-const pill = { display: "flex", borderRadius: "10px", minHeight: "32px", padding: "0 10px", alignItems: "center", justifyContent: "center" } as const;
+const headerBtn = {
+  display: "flex", width: "36px", height: "36px", borderRadius: "10px",
+  alignItems: "center", justifyContent: "center", flexShrink: 0, backgroundColor: containerHighest,
+} as const;
 const hiddenSection = { display: "none" } as const;
-const defaultProfiles = ["power-saver", "balanced", "performance"] as const;
-const profileLabels: Readonly<Record<string, string>> = { "power-saver": "Power Saver", balanced: "Balanced", performance: "Performance" };
+const clipped = { minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
+const defaultProfiles = ["performance", "balanced", "power-saver"] as const;
+
+const profileMeta: Readonly<Record<string, { readonly label: string; readonly detail: string; readonly icon: ShellIconName }>> = {
+  performance: { label: "Performance", detail: "Maximum CPU boost and fan headroom", icon: "cpu" },
+  balanced: { label: "Balanced", detail: "Standard desktop responsiveness & thermals", icon: "battery" },
+  "power-saver": { label: "Power saver", detail: "Lower clocks & extended unplugged runtime", icon: "batteryCharging" },
+};
+
 const batteryLabels: Readonly<Record<BatteryState, string>> = {
   unknown: "Unknown",
   charging: "Charging",
@@ -26,7 +36,7 @@ const batteryLabels: Readonly<Record<BatteryState, string>> = {
   pending_discharge: "Pending discharge",
 };
 
-function percent(value: number | null | undefined) {
+function percent(value: number | null | undefined): string {
   return value == null ? "—" : `${Math.round(value)}%`;
 }
 
@@ -66,87 +76,151 @@ export function SystemTelemetryCards() {
   );
 }
 
-function BatteryMetric(props: { label: string; value: string }) {
+/**
+ * Paper `04B · Battery & Power` (`396px`) content used both as a Control Center Shared Axis X
+ * sub-panel (with Back button) and when opened directly via the standalone `battery` panel route.
+ */
+export function BatteryPowerContent(props: { onBack?: () => void }): NativeChild {
+  const { power, invokePublic, openSettingsWindow } = useShellStore();
+  const battery = () => power.data()?.battery;
+  const profiles = () => power.data()?.profiles;
+  const charging = () => battery()?.state === "charging" || battery()?.state === "pending_charge" || battery()?.state === "full";
+  const pctValue = () => Math.max(0, Math.min(100, battery()?.percentage ?? 0));
+  const remaining = () => formatDurationSeconds(
+    charging() ? battery()?.time_to_full_seconds : battery()?.time_to_empty_seconds,
+  );
+  const watts = () => battery()?.energy_rate_watts != null ? `${battery()!.energy_rate_watts!.toFixed(1)} W` : null;
+  const healthSummary = createMemo(() => {
+    const b = battery();
+    const parts: string[] = [];
+    if (b?.capacity_percent != null) parts.push(`${Math.round(b.capacity_percent)}%`);
+    if (b?.charge_cycles != null) parts.push(`${b.charge_cycles} cycles`);
+    if (power.data()?.available) parts.push("UPower");
+    return parts.join(" · ") || "Unavailable";
+  });
+
   return (
-    <column style={{ ...metric, backgroundColor: containerHighest }}>
-      <text style={{ color: muted, fontSize: "11px" }}>{props.label}</text>
-      <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "13px", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
-        {props.value}
-      </text>
+    <column style={{ width: "100%", gap: "10px", flexDirection: "column" }}>
+      <row style={{ alignItems: "center", gap: "8px" }}>
+        <Show when={props.onBack} fallback={<box style={hiddenSection} />}>
+          {onBack => (
+            <Button testId="qs-back" ariaLabel="Back" onClick={onBack()} style={headerBtn}>
+              <ShellIcon name="arrowLeft" size={16} color={onSurface} />
+            </Button>
+          )}
+        </Show>
+        <text role="heading" style={{ flexGrow: 1, flexBasis: "0px", ...clipped, fontSize: "20px", fontWeight: 600 }}>
+          Battery & power
+        </text>
+        <Button testId="battery-open-settings" ariaLabel="Open power settings" onClick={() => openSettingsWindow("power")} style={headerBtn}>
+          <ShellIcon name="settings" size={16} color={onSurface} />
+        </Button>
+      </row>
+
+      <column style={{ ...card, padding: "14px", gap: "10px" }}>
+        <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+          <row style={{ alignItems: "baseline", gap: "8px" }}>
+            <text testId="battery-percent" data-tabular="true" style={{
+              fontFamily: "var(--font-mono)", fontSize: "34px", fontWeight: 600, lineHeight: "38px",
+              color: primary, fontVariantNumeric: "tabular-nums",
+            }}>
+              {percent(battery()?.percentage)}
+            </text>
+            <text style={{ fontSize: "13px", fontWeight: 500, color: charging() ? primary : muted }}>
+              {battery() ? batteryLabels[battery()!.state] : "No battery"}
+            </text>
+          </row>
+          <Show when={watts()} fallback={<box style={hiddenSection} />}>
+            {w => (
+              <row style={{
+                alignItems: "center", gap: "4px", padding: "4px 8px", borderRadius: "8px",
+                backgroundColor: containerHighest, color: onSurface, flexShrink: 0,
+              }}>
+                <ShellIcon name={charging() ? "batteryCharging" : "battery"} size={14} color={primary} />
+                <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+                  {w()}
+                </text>
+              </row>
+            )}
+          </Show>
+        </row>
+        <box ariaHidden style={{ width: "100%", height: "8px", borderRadius: "4px", backgroundColor: containerHighest, overflow: "hidden" }}>
+          <box data-percent-fill="true" style={{ width: `${pctValue()}%`, height: "100%", borderRadius: "4px", backgroundColor: primary }} />
+        </box>
+        <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+          <text style={{ ...clipped, fontSize: "12px", color: muted }}>
+            {remaining() ? (charging() ? `${remaining()} until full` : `${remaining()} remaining`) : (power.data()?.on_ac ? "AC power online" : "On battery")}
+          </text>
+          <Show when={power.data()?.on_ac !== null} fallback={<box style={hiddenSection} />}>
+            <text style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: muted, flexShrink: 0 }}>
+              {power.data()?.on_ac ? "AC" : "Battery"}
+            </text>
+          </Show>
+        </row>
+      </column>
+
+      <column style={card}>
+        <text role="heading" style={{ fontSize: "13px", fontWeight: 600, color: muted }}>Power profile</text>
+        <column style={{ gap: "6px" }}>
+          <For each={profiles()?.profiles.length ? profiles()!.profiles : defaultProfiles} keyed={name => name}>
+            {name => {
+              const active = () => name() === profiles()?.active_profile;
+              const info = () => profileMeta[name()] ?? { label: name(), detail: "System power profile", icon: "battery" as const };
+              return (
+                <Button testId={`battery-profile-${name()}`} selected={active()} disabled={!profiles()?.available}
+                  onClick={() => { void invokePublic("power.set-profile", { profile: name() }); }}
+                  style={{
+                    display: "flex", flexDirection: "row", alignItems: "center", gap: "10px",
+                    minHeight: "52px", padding: "8px 10px", borderRadius: "14px",
+                    backgroundColor: active() ? primaryContainer : containerHighest,
+                    border: active() ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
+                    color: active() ? onPrimaryContainer : onSurface,
+                    opacity: profiles()?.available === false ? 0.5 : 1,
+                  }}>
+                  <box ariaHidden style={{
+                    display: "flex", width: "32px", height: "32px", borderRadius: "10px", flexShrink: 0,
+                    alignItems: "center", justifyContent: "center",
+                    backgroundColor: active() ? "color-mix(in srgb, var(--color-primary) 18%, transparent)" : containerHigh,
+                  }}>
+                    <ShellIcon name={info().icon} size={16} color={active() ? onPrimaryContainer : muted} />
+                  </box>
+                  <column style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "1px", alignItems: "flex-start" }}>
+                    <text style={{ ...clipped, fontSize: "13px", fontWeight: 600 }}>{info().label}</text>
+                    <text style={{ ...clipped, fontSize: "11px", color: active() ? onPrimaryContainer : muted, opacity: active() ? 0.8 : 1 }}>
+                      {info().detail}
+                    </text>
+                  </column>
+                  <Show when={active()} fallback={<box style={hiddenSection} />}>
+                    <ShellIcon name="check" size={16} color={active() ? onPrimaryContainer : muted} />
+                  </Show>
+                </Button>
+              );
+            }}
+          </For>
+        </column>
+      </column>
+
+      <row style={{
+        alignItems: "center", justifyContent: "space-between", gap: "8px",
+        borderRadius: "14px", backgroundColor: containerHigh, padding: "10px 12px",
+      }}>
+        <text style={{ fontSize: "12px", fontWeight: 500, color: muted }}>Battery health</text>
+        <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: onSurface, fontVariantNumeric: "tabular-nums" }}>
+          {healthSummary()}
+        </text>
+      </row>
     </column>
   );
 }
 
-export function BatteryPanel() {
-  const { power, invokePublic } = useShellStore();
-  const battery = () => power.data()?.battery;
-  const profiles = () => power.data()?.profiles;
-  const charging = () => battery()?.state === "charging" || battery()?.state === "full";
-  const remaining = () => formatDurationSeconds(battery()?.time_to_full_seconds ?? battery()?.time_to_empty_seconds);
-  const watts = () => battery()?.energy_rate_watts?.toFixed(1);
-
+export function BatteryPanel(): NativeChild {
   return (
     <scroll testId="panel-battery" style={{
       width: "100%", maxHeight: `${PANEL_MAX_HEIGHTS.battery}px`, overflow: "hidden auto",
       backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
     }}>
-      <column style={{ padding: "14px", gap: "10px", flexDirection: "column" }}>
-        <column style={{ ...card, padding: "14px" }}>
-          <row style={{ alignItems: "center", gap: "8px" }}>
-            <ShellIcon name={charging() ? "batteryCharging" : "battery"} size={22} color={primary} />
-            <text style={{ fontWeight: 600 }}>Battery</text>
-            <Show when={battery()}>
-              {current => (
-                <text style={{
-                  marginLeft: "auto", borderRadius: "10px", padding: "4px 8px", fontSize: "11px", fontWeight: 500,
-                  backgroundColor: charging() ? primaryContainer : "var(--color-secondary-container)",
-                  color: charging() ? onPrimaryContainer : "var(--color-on-secondary-container)",
-                }}>
-                  {batteryLabels[current().state]}
-                </text>
-              )}
-            </Show>
-          </row>
-          <row style={{ alignItems: "baseline", gap: "8px" }}>
-            <text testId="battery-percent" data-tabular="true" style={{
-              fontFamily: "var(--font-mono)", fontSize: "34px", fontWeight: 600, color: primary, fontVariantNumeric: "tabular-nums",
-            }}>
-              {percent(battery()?.percentage)}
-            </text>
-            <Show when={remaining()}>
-              <text style={{ color: muted }}>{remaining()}</text>
-            </Show>
-          </row>
-          <row style={{ gap: "8px" }}>
-            <BatteryMetric label="Power" value={watts() === undefined ? "—" : `${watts()} W`} />
-            <BatteryMetric label="Health" value={percent(battery()?.capacity_percent)} />
-            <BatteryMetric label="Cycles" value={String(battery()?.charge_cycles ?? "—")} />
-          </row>
-        </column>
-        <column style={card}>
-          <text style={{ fontWeight: 600 }}>Power Profile</text>
-          <row style={{ gap: "6px", flexWrap: "wrap" }}>
-            <For each={profiles()?.profiles ?? defaultProfiles} keyed={name => name}>
-              {name => {
-                const active = () => name() === profiles()?.active_profile;
-                return (
-                  <Button testId={`battery-profile-${name()}`} selected={active()}
-                    onClick={() => { void invokePublic("power.set-profile", { profile: name() }); }}
-                    style={{
-                      ...pill,
-                      backgroundColor: active() ? primaryContainer : containerHighest,
-                      border: active() ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
-                      color: active() ? onPrimaryContainer : onSurface,
-                      fontWeight: active() ? 600 : 500,
-                    }}>
-                    <text>{profileLabels[name()] ?? name()}</text>
-                  </Button>
-                );
-              }}
-            </For>
-          </row>
-        </column>
-        <SystemTelemetryCards />
+      <column style={{ padding: "14px", flexDirection: "column" }}>
+        <BatteryPowerContent />
       </column>
     </scroll>
   );

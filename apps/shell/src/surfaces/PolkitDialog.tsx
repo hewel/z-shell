@@ -1,23 +1,58 @@
 import { Button, For, LayerSurface, Show, TextField, createEffect, createMemo, createSignal, focus, onCleanup, registerDismissLayer, type Accessor, type NativeChild, type NativeKeyEvent, type NativeNode } from "@hewel/zgui";
 import { ShellIcon } from "../icons.tsx";
-import { DIALOG_SPRING, createEnterProgress, dialogMotionStyle, scrimBackdrop } from "../motion.ts";
+import {
+  SPRING_EPSILON,
+  createEnterProgress,
+  createM3Spring,
+  createOpacityEnter,
+  dialogMotionStyle,
+  scrimBackdrop,
+  useMotionScheme,
+} from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { resolveMonitorLogicalSize, type PolkitPromptView } from "../topics.ts";
 
 // An empty native child becomes a text marker that would occupy space in the flex card.
 const hiddenSection = { display: "none" } as const;
+const container = "var(--color-surface-container)";
+const containerHigh = "var(--color-surface-container-high)";
+const containerHighest = "var(--color-surface-container-highest)";
+const onSurface = "var(--color-on-surface)";
+const muted = "var(--color-on-surface-variant)";
+const primary = "var(--color-primary)";
+const onPrimary = "var(--color-on-primary)";
+const primaryContainer = "var(--color-primary-container)";
+const onPrimaryContainer = "var(--color-on-primary-container)";
+const clipped = { minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
 const footerButton = {
   display: "flex", alignItems: "center", justifyContent: "center",
-  height: "40px", borderRadius: "999px", fontSize: "14px", fontWeight: 600,
+  height: "36px", borderRadius: "999px", fontSize: "13px", fontWeight: 600,
 } as const;
 
 function PolkitContent(props: { active: Accessor<PolkitPromptView> }): NativeChild {
   const { invokeHostResult } = useShellStore();
   const { active } = props;
+  const scheme = useMotionScheme();
   const [response, setResponse] = createSignal("");
   const [localError, setLocalError] = createSignal<string>();
+  const [inputFocused, setInputFocused] = createSignal(false);
+  const [revealSecret, setRevealSecret] = createSignal(false);
   const detailEntries = createMemo(() => Object.entries(active().details));
-  const prompt = createMemo(() => active().prompt ?? "Password:");
+  const prompt = createMemo(() => active().prompt ?? "Password");
+  const errorText = () => localError() || active().error_message || null;
+  const selectedIdentity = createMemo(() => {
+    const list = active().identities;
+    return list.find(id => id.uid === active().selected_uid) ?? list[0] ?? null;
+  });
+
+  const enter = createEnterProgress("defaultSpatial", { scheme });
+  const scrim = createOpacityEnter("defaultEffects", scheme);
+  const shakeX = createM3Spring(() => 0, "fastSpatial", {
+    scheme,
+    overrideScheme: "expressive",
+    epsilon: SPRING_EPSILON.px,
+  });
+
   let input: NativeNode | undefined;
   let cancelButton: NativeNode | undefined;
   let commandRevision = 0;
@@ -26,6 +61,10 @@ function PolkitContent(props: { active: Accessor<PolkitPromptView> }): NativeChi
     commandRevision++;
     setResponse("");
     setLocalError(undefined);
+    setRevealSecret(false);
+  });
+  createEffect(errorText, err => {
+    if (err) shakeX.impulse(280);
   });
   createEffect(() => active().authenticating, authenticating => {
     const target = authenticating ? cancelButton : input;
@@ -61,90 +100,156 @@ function PolkitContent(props: { active: Accessor<PolkitPromptView> }): NativeChi
     if (!event.repeat) submit();
   }
 
-  const enter = createEnterProgress(DIALOG_SPRING);
+  function selectIdentity(uid: number): void {
+    void invokeHostResult("host.polkit-select-identity", { request_id: active().request_id, uid });
+  }
+
+  const cardMotion = () => {
+    const base = dialogMotionStyle(enter(), {
+      opacity: scrim(),
+      reduced: scheme() === "reduced",
+      fromScale: 0.92,
+      fromY: 0,
+    });
+    const dx = shakeX();
+    if (scheme() === "reduced" || Math.abs(dx) < SPRING_EPSILON.px) return base;
+    return {
+      ...base,
+      transform: `translateX(${dx.toFixed(2)}px) ${base.transform === "none" ? "" : base.transform}`.trim(),
+    };
+  };
 
   return (
     <box style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center",
-      backgroundColor: scrimBackdrop(55, enter()),
+      backgroundColor: scrimBackdrop(55, scrim()),
     }}>
-      <box testId="polkit-card" role="dialog" ariaLabel="Authentication Required" ariaModal
+      <box testId="polkit-card" role="dialog" ariaLabel="Authentication required" ariaModal
         ref={node => { registerDismissLayer(node, cancel, { layer: "modal", dismissOnOutsidePress: false }); }} style={{
-        display: "flex", flexDirection: "column", width: "360px", borderRadius: "22px",
-        backgroundColor: "var(--color-surface)", border: "1px solid var(--color-outline-variant)",
-        padding: "24px", gap: "14px", fontFamily: "var(--font-sans)", color: "var(--color-on-surface)",
-        ...dialogMotionStyle(enter()),
-      }}>
+          display: "flex", flexDirection: "column", width: "360px", borderRadius: "22px",
+          backgroundColor: container,
+          border: errorText()
+            ? "1px solid var(--color-error)"
+            : "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
+          boxShadow: "0 20px 56px rgba(0, 0, 0, 0.60)",
+          padding: "18px", gap: "12px", fontFamily: "var(--font-sans)", color: onSurface,
+          ...cardMotion(),
+        }}>
         <row style={{ alignItems: "center", gap: "12px" }}>
-          <box style={{
-            display: "flex", width: "44px", height: "44px", flexShrink: 0, borderRadius: "22px",
-            alignItems: "center", justifyContent: "center", backgroundColor: "var(--color-primary-container)",
+          <box ariaHidden style={{
+            display: "flex", width: "42px", height: "42px", flexShrink: 0, borderRadius: "14px",
+            alignItems: "center", justifyContent: "center", backgroundColor: primaryContainer,
           }}>
-            <ShellIcon name="lock" size={22} color="var(--color-on-primary-container)" />
+            <ShellIcon name="lock" size={20} color={onPrimaryContainer} />
           </box>
-          <column style={{ minWidth: "0px", alignItems: "flex-start", gap: "4px" }}>
-            <text role="heading" style={{ fontSize: "20px", fontWeight: 700 }}>Authentication Required</text>
-            <text testId="polkit-action-id" style={{
-              padding: "3px 8px", borderRadius: "10px", maxWidth: "100%", whiteSpace: "nowrap",
-              overflow: "hidden", textOverflow: "ellipsis", backgroundColor: "var(--color-surface-container)",
-              color: "var(--color-on-surface-variant)", fontSize: "12px",
-            }}>{active().action_id}</text>
+          <column style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "2px" }}>
+            <text role="heading" style={{ fontSize: "16px", fontWeight: 600, lineHeight: "22px" }}>Authentication required</text>
+            <text style={{ ...clipped, fontSize: "12px", color: muted, lineHeight: "16px" }}>System privileges requested via Polkit</text>
           </column>
         </row>
-        <text testId="polkit-message" style={{ fontSize: "14px" }}>{active().message}</text>
-        <Show when={detailEntries().length > 0} fallback={<box style={hiddenSection} />}>
-          <column style={{ backgroundColor: "var(--color-surface-container)", borderRadius: "10px", padding: "10px 12px", gap: "4px" }}>
-            <For each={detailEntries()} keyed={entry => entry[0]}>
-              {entry => (
-                <row style={{ alignItems: "flex-start", gap: "10px", fontSize: "12px" }}>
-                  <text style={{ color: "var(--color-on-surface-variant)" }}>{entry()[0]}</text>
-                  <text style={{ flexGrow: 1, minWidth: "0px" }}>{entry()[1]}</text>
+
+        <column style={{ borderRadius: "14px", backgroundColor: containerHigh, padding: "10px 12px", gap: "4px" }}>
+          <text testId="polkit-message" style={{ fontSize: "13px", fontWeight: 500, lineHeight: "18px" }}>{active().message}</text>
+          <text testId="polkit-action-id" style={{
+            ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", color: muted,
+          }}>{active().action_id}</text>
+          <Show when={detailEntries().length > 0} fallback={<box style={hiddenSection} />}>
+            <column style={{ paddingTop: "6px", gap: "3px" }}>
+              <For each={detailEntries()} keyed={entry => entry[0]}>
+                {entry => (
+                  <row style={{ alignItems: "flex-start", gap: "8px", fontSize: "11px" }}>
+                    <text style={{ color: muted, flexShrink: 0 }}>{entry()[0]}</text>
+                    <text style={{ ...clipped, flexGrow: 1, fontFamily: "var(--font-mono)" }}>{entry()[1]}</text>
+                  </row>
+                )}
+              </For>
+            </column>
+          </Show>
+        </column>
+
+        <column style={{ borderRadius: "14px", backgroundColor: containerHigh, padding: "10px", gap: "8px" }}>
+          <Show when={active().identities.length > 1} fallback={
+            <Show when={selectedIdentity()} fallback={<box style={hiddenSection} />}>
+              {identity => (
+                <row testId={`polkit-identity-${identity().uid}`} style={{ alignItems: "center", gap: "8px", padding: "2px 4px" }}>
+                  <box ariaHidden style={{
+                    display: "flex", width: "24px", height: "24px", borderRadius: "999px", flexShrink: 0,
+                    alignItems: "center", justifyContent: "center", backgroundColor: containerHighest,
+                  }}>
+                    <ShellIcon name="person" size={14} color={primary} />
+                  </box>
+                  <text style={{ ...clipped, flexGrow: 1, fontSize: "13px", fontWeight: 500 }}>{identity().username}</text>
+                  <text style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: muted }}>{`uid ${identity().uid}`}</text>
                 </row>
               )}
-            </For>
-          </column>
-        </Show>
-        <Show when={active().identities.length > 0} fallback={<box style={hiddenSection} />}>
-          <row role="group" ariaLabel="Identity" style={{ flexWrap: "wrap", gap: "8px" }}>
-            <For each={active().identities} keyed={identity => identity.uid}>
-              {id => {
-                const selected = () => id().uid === active().selected_uid;
-                return (
-                  <Button testId={`polkit-identity-${id().uid}`} selected={selected()} onClick={() => {
-                    void invokeHostResult("host.polkit-select-identity", { request_id: active().request_id, uid: id().uid });
-                  }} style={{
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    height: "32px", padding: "0px 12px", borderRadius: "16px", fontSize: "13px",
-                    backgroundColor: selected() ? "var(--color-primary)" : "var(--color-surface-container)",
-                    color: selected() ? "var(--color-on-primary)" : "var(--color-on-surface-variant)",
-                  }}>{id().username}</Button>
-                );
-              }}
-            </For>
+            </Show>
+          }>
+            <row style={{ alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+              <For each={active().identities} keyed={item => item.uid}>
+                {identity => {
+                  const selected = () => identity().uid === selectedIdentity()?.uid;
+                  return (
+                    <Button testId={`polkit-identity-${identity().uid}`} selected={selected()}
+                      disabled={active().authenticating}
+                      onClick={() => selectIdentity(identity().uid)} style={{
+                        display: "flex", flexDirection: "row", alignItems: "center", gap: "6px",
+                        minHeight: "28px", padding: "4px 10px", borderRadius: "999px",
+                        backgroundColor: selected() ? primaryContainer : containerHighest,
+                        color: selected() ? onPrimaryContainer : muted,
+                        fontSize: "12px", fontWeight: selected() ? 600 : 500,
+                      }}>
+                      <ShellIcon name="person" size={13} color={selected() ? onPrimaryContainer : muted} />
+                      <text>{identity().username}</text>
+                    </Button>
+                  );
+                }}
+              </For>
+            </row>
+          </Show>
+
+          <row data-composite-input="true" style={{
+            height: "42px", alignItems: "center", gap: "6px", borderRadius: "10px",
+            backgroundColor: containerHighest, padding: inputFocused() ? "0 7px 0 11px" : "0 8px 0 12px",
+            border: errorText()
+              ? "2px solid var(--color-error)"
+              : inputFocused()
+                ? `2px solid ${primary}`
+                : "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
+          }}>
+            <TextField testId="polkit-input" class="shell-composite-field" ariaLabel={prompt()} placeholder={prompt()}
+              secure={!active().echo_on && !revealSecret()} disabled={active().authenticating}
+              value={response()} onInput={event => setResponse(event.value)}
+              onFocus={() => setInputFocused(true)} onBlur={() => setInputFocused(false)}
+              onKeyDown={handleKeyDown} ref={node => { input = node; focus(node); }} style={{
+                flexGrow: 1, flexBasis: "0px", minWidth: "0px", height: "38px", lineHeight: "20px",
+                padding: "9px 0px", border: "0px", backgroundColor: "transparent", color: onSurface, fontSize: "14px",
+              }} />
+            <Button ariaLabel={revealSecret() ? "Hide password" : "Show password"} disabled={active().echo_on}
+              onClick={() => setRevealSecret(v => !v)} style={{
+                display: "flex", width: "28px", height: "28px", borderRadius: "8px", flexShrink: 0,
+                alignItems: "center", justifyContent: "center", backgroundColor: "transparent",
+                opacity: active().echo_on ? 0.35 : 1,
+              }}>
+              <ShellIcon name={revealSecret() ? "visibilityOff" : "visibility"} size={15} color={revealSecret() ? primary : muted} />
+            </Button>
           </row>
-        </Show>
-        <column style={{ gap: "6px" }}>
-          <text testId="polkit-prompt" style={{ fontSize: "14px" }}>{prompt()}</text>
-          <TextField testId="polkit-input" ariaLabel={prompt()} secure={!active().echo_on}
-            disabled={active().authenticating} value={response()} onInput={event => setResponse(event.value)}
-            onKeyDown={handleKeyDown} ref={node => { input = node; focus(node); }} style={{
-              width: "100%", height: "44px", lineHeight: "20px", borderRadius: "10px", padding: "12px 12px",
-              backgroundColor: "var(--color-surface-container-high)", color: "var(--color-on-surface)", fontSize: "14px",
-            }} />
         </column>
+
         <Show when={active().info_message} fallback={<box style={hiddenSection} />}>
-          {message => <text role="status" style={{ fontSize: "13px", color: "var(--color-on-surface-variant)" }}>{message()}</text>}
+          {message => <text role="status" style={{ fontSize: "12px", color: muted }}>{message()}</text>}
         </Show>
-        <Show when={localError() || active().error_message} fallback={<box style={hiddenSection} />}>
-          {message => <text testId="polkit-error" role="alert" style={{ fontSize: "13px", color: "var(--color-error)" }}>{message()}</text>}
+        <Show when={errorText()} fallback={<box style={hiddenSection} />}>
+          {message => <text testId="polkit-error" role="alert" style={{ fontSize: "12px", color: "var(--color-error)" }}>{message()}</text>}
         </Show>
-        <row style={{ justifyContent: "flex-end", gap: "10px" }}>
-          <Button testId="polkit-cancel" onClick={cancel} ref={node => { cancelButton = node; }}
-            style={{ ...footerButton, padding: "0px 16px", backgroundColor: "transparent", color: "var(--color-primary)" }}>Cancel</Button>
+
+        <row style={{ justifyContent: "flex-end", gap: "8px" }}>
+          <Button testId="polkit-cancel" onClick={cancel} ref={node => { cancelButton = node; }} style={{
+            ...footerButton, padding: "0px 16px", backgroundColor: containerHigh, color: onSurface,
+          }}>Cancel</Button>
           <Button testId="polkit-submit" disabled={active().authenticating} onClick={submit} style={{
-            ...footerButton, padding: "0px 20px", opacity: active().authenticating ? 0.5 : 1,
-            backgroundColor: "var(--color-primary)", color: "var(--color-on-primary)",
+            ...footerButton, padding: "0px 18px", opacity: active().authenticating ? 0.5 : 1,
+            backgroundColor: primary, color: onPrimary,
           }}>Authenticate</Button>
         </row>
       </box>

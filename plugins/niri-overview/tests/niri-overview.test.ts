@@ -103,6 +103,7 @@ test("manifest exposes the Niri layer, named socket and only the overview Bus op
   expect(manifest.entries).toMatchObject([
     { kind: "service", entry: "src/zgui-adapter.ts", title: "Niri Overview Coordinator" },
     { kind: "layer", id: "overview", entry: "src/layer.tsx", title: "Niri Workspace Overview" },
+    { kind: "settings_page", id: "settings", entry: "src/settings-page.tsx", title: "Niri Overview" },
   ]);
 });
 

@@ -1,10 +1,10 @@
 import {
-  Button, For, Image, LayerSurface, Show, createEffect, createMemo, createSignal, createSpring, onCleanup,
+  Button, For, Image, LayerSurface, Show, createEffect, createMemo, createSignal, onCleanup,
   type Accessor, type Monitor, type NativeChild, type NativeStyle, type NativeWindowRect,
 } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
-import { DOCK_SPRING } from "../motion.ts";
+import { createM3Spring, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import { buildDockItems, formatSurfaceName, resolveMonitorLogicalSize, type DockEntry } from "../topics.ts";
@@ -125,7 +125,8 @@ function DockCapsule(props: {
 }) {
   const { theme, togglePanel, dismissOverlay } = useShellStore();
   useShellTheme(theme.data);
-  const slideProgress = createSpring(() => props.revealed() ? 0 : 1, DOCK_SPRING);
+  const scheme = useMotionScheme();
+  const slideProgress = createM3Spring(() => props.revealed() ? 0 : 1, "defaultSpatial", { scheme });
   const slots = createMemo<readonly DockSlot[]>(() => {
     const result: DockSlot[] = props.pinned.map(entry => ({ key: `pinned:${entry.appId}`, kind: "app", entry }));
     if (props.pinned.length > 0 && props.runningOnly.length > 0) {
