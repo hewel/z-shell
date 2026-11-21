@@ -21,11 +21,12 @@ const hiddenSection = { display: "none" } as const;
 const clipped = { minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
 const defaultProfiles = ["performance", "balanced", "power-saver"] as const;
 
-const profileMeta: Readonly<Record<string, { readonly label: string; readonly detail: string; readonly icon: ShellIconName }>> = {
-  performance: { label: "Performance", detail: "Maximum CPU boost and fan headroom", icon: "cpu" },
-  balanced: { label: "Balanced", detail: "Standard desktop responsiveness & thermals", icon: "battery" },
-  "power-saver": { label: "Power saver", detail: "Lower clocks & extended unplugged runtime", icon: "batteryCharging" },
+export const POWER_PROFILE_META: Readonly<Record<string, { readonly label: string; readonly detail: string; readonly shortDetail: string; readonly icon: ShellIconName }>> = {
+  performance: { label: "Performance", detail: "Maximum CPU boost and fan headroom", shortDetail: "Max boost clocks", icon: "cpu" },
+  balanced: { label: "Balanced", detail: "Standard desktop responsiveness & thermals", shortDetail: "Recommended", icon: "battery" },
+  "power-saver": { label: "Power saver", detail: "Lower clocks & extended unplugged runtime", shortDetail: "Quiet & cool", icon: "batteryCharging" },
 };
+const profileMeta = POWER_PROFILE_META;
 
 const batteryLabels: Readonly<Record<BatteryState, string>> = {
   unknown: "Unknown",
