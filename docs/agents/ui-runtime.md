@@ -36,3 +36,11 @@ Reference for agents working on `apps/shell/`, `plugins/*/src/`, or `tools/oxlin
 2. **Token & Geometry Sync**: `apps/shell/tests/design-lint.test.ts` (`DESIGN.md` ↔ `app.css` ↔ `theme.ts` ↔ `shapes.ts` ↔ `topics.ts`).
 3. **Rust WCAG 2.2 Contrast**: `crates/z-shell-theme/tests/`.
 4. **Headless Preview Pixel & Geometry Guards**: `apps/shell/tests/design-preview.test.ts` (hit targets, bar anti-collision, shadow clipping, popup corner transparency, opaque toplevel edges, dock vertical centering, hover hit-target stability, `scrollMetrics.overflowY`).
+
+## Runtime & Test Gotchas
+
+- **Stale Rust binaries**: `packages/composer/tests/first-party-plugins.test.ts` spawns `target/debug/z-shell` and `target/debug/z-shelld`. After editing Rust crates (`crates/*`), run `cargo build --bins` before targeted `bun test` runs.
+- **Plugin UI Bus subscriptions**: `first-party-plugins.test.ts` asserts a strict sequential list of `topic.subscribe` frames (`plugin.*` only). Plugin UIs must read shared motion state via `useGlobalMotionScheme()` from `@z-shell/sdk/zgui` rather than opening extra `settings` or `theme` subscriptions.
+- **QuickJS & `@hewel/zgui` typing**: `tsconfig.quickjs.json` omits global `performance` (guard via `globalThis` + `Date.now()` fallback); `Button` has no `role` prop; host reduced-motion lives on `globalThis.__zgui.getReducedMotion` (use `isHostReducedMotion()` from `@z-shell/sdk/zgui`); Bun unit tests have no global `requestAnimationFrame`.
+- **Solid 2 `<Show keyed>`**: Keyed `<Show>` render callbacks must accept a parameter (`_key => ...`) to remount on truthy-to-truthy key changes, and read non-key retained state inside `untrack(...)` so programmatic exit transitions never remount child surfaces.
+- **Fast UI feedback loop**: Use `bun run test:ui` during UI iteration (~25s); reserve `bun run check` for the final pre-commit gate.

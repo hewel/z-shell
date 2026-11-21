@@ -311,7 +311,7 @@ function SystemPill(props: {
       <Show when={ime.data()?.available && ime.data()?.mode !== "disabled"}>
         <Button testId="bar-ime" ariaLabel="Input method" ariaHasPopup="menu"
           style={{
-            ...center, minWidth: "26px", height: "22px", padding: "0 6px", borderRadius: "999px",
+            ...center, minWidth: "26px", height: "24px", padding: "0 6px", borderRadius: "999px",
             backgroundColor: primaryContainer, color: onPrimaryContainer, fontWeight: 700, fontSize: "11px",
           }}
           onClick={() => { void invokePublic("ime.toggle", {}); }}

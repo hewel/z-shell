@@ -437,6 +437,38 @@ describe("zshell oxlint design plugin", () => {
     );
     expect(allowedCore.status, allowedCore.output).toBe(0);
   });
+
+  test("zshell/solid-show-keyed-callback requires a parameter on <Show keyed> render callbacks", () => {
+    const bad = lintSnippet(
+      "ShellPanels.tsx",
+      `export const View = (k: () => string | null) => <Show when={k()} keyed>{() => <box />}</Show>;`,
+      "zshell/solid-show-keyed-callback",
+    );
+    expect(bad.status).not.toBe(0);
+
+    const good = lintSnippet(
+      "ShellPanels.tsx",
+      `export const View = (k: () => string | null) => <Show when={k()} keyed>{_key => <box />}</Show>;`,
+      "zshell/solid-show-keyed-callback",
+    );
+    expect(good.status, good.output).toBe(0);
+  });
+
+  test("zshell/min-hit-target-size flags Button/control literal dimensions below 24px", () => {
+    const bad = lintSnippet(
+      "Settings.tsx",
+      `export const Switch = () => <Button style={{ width: "38px", height: "22px" }} />;`,
+      "zshell/min-hit-target-size",
+    );
+    expect(bad.status).not.toBe(0);
+
+    const good = lintSnippet(
+      "Settings.tsx",
+      `export const Switch = () => <Button style={{ width: "42px", height: "24px" }} />;`,
+      "zshell/min-hit-target-size",
+    );
+    expect(good.status, good.output).toBe(0);
+  });
 });
 
 function parseCubicPoints(d: string): { x: number; y: number }[] {

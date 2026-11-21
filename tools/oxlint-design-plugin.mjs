@@ -1150,6 +1150,93 @@ const rules = {
     },
   },
 
+  "solid-show-keyed-callback": {
+    meta: {
+      type: "problem",
+      docs: { description: "Require a parameter on <Show keyed> render callbacks so Solid 2 rebuilds children when the key changes between truthy values" },
+      schema: [],
+    },
+    create(context) {
+      return {
+        JSXElement(node) {
+          const opening = node.openingElement;
+          if (opening?.name?.type !== "JSXIdentifier" || opening.name.name !== "Show") return;
+          const isKeyed = (opening.attributes ?? []).some(
+            attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === "keyed",
+          );
+          if (!isKeyed) return;
+          for (const child of node.children ?? []) {
+            if (child.type !== "JSXExpressionContainer") continue;
+            const expr = child.expression;
+            if (
+              (expr?.type === "ArrowFunctionExpression" || expr?.type === "FunctionExpression") &&
+              (expr.params?.length ?? 0) === 0
+            ) {
+              context.report({
+                node: expr,
+                message:
+                  "Solid 2 <Show keyed> Rule: keyed render callbacks must accept at least one parameter (e.g. `_key => ...`). Zero-arg callbacks have `fn.length === 0` and do not remount when the key changes between truthy values.",
+              });
+            }
+          }
+        },
+      };
+    },
+  },
+
+  "min-hit-target-size": {
+    meta: {
+      type: "problem",
+      docs: { description: "Enforce WCAG 2.2 SC 2.5.8 minimum 24x24px interactive hit target size on static Button/control styles" },
+      schema: [],
+    },
+    create(context) {
+      const PX_RE = /^(\d+(?:\.\d+)?)px$/;
+      const checkDim = (propNode, propName, rawVal) => {
+        if (typeof rawVal !== "string") return;
+        const match = PX_RE.exec(rawVal.trim());
+        if (!match) return;
+        const px = Number(match[1]);
+        if (px > 0 && px < 24) {
+          context.report({
+            node: propNode,
+            message: `WCAG 2.2 SC 2.5.8 Hit-Target Rule: interactive control declares ${propName}: "${rawVal}" (< 24px). Keep interactive hit targets >= 24x24px.`,
+          });
+        }
+      };
+      const inspectStyleExpr = expr => {
+        if (!expr) return;
+        if (expr.type === "ObjectExpression") {
+          for (const prop of expr.properties) {
+            if (prop.type !== "Property") continue;
+            const key = propertyName(prop);
+            if (key !== "width" && key !== "height" && key !== "minWidth" && key !== "minHeight") continue;
+            if (prop.value?.type === "ConditionalExpression") {
+              checkDim(prop.value.consequent, key, staticString(prop.value.consequent));
+              checkDim(prop.value.alternate, key, staticString(prop.value.alternate));
+            } else {
+              checkDim(prop.value, key, staticString(prop.value));
+            }
+          }
+        } else if (expr.type === "ConditionalExpression") {
+          inspectStyleExpr(expr.consequent);
+          inspectStyleExpr(expr.alternate);
+        }
+      };
+      return {
+        JSXOpeningElement(node) {
+          if (node.name?.type !== "JSXIdentifier" || (node.name.name !== "Button" && node.name.name !== "control")) return;
+          for (const attr of node.attributes ?? []) {
+            if (attr.type !== "JSXAttribute" || attr.name?.type !== "JSXIdentifier" || attr.name.name !== "style") continue;
+            if (attr.value?.type === "JSXExpressionContainer") {
+              inspectStyleExpr(attr.value.expression);
+            }
+          }
+        },
+      };
+    },
+  },
+
   "no-lint-suppression": {
     meta: {
       type: "problem",

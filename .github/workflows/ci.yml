@@ -48,4 +48,4 @@ jobs:
           bun install
           bun run lint
           bun run typecheck
-          bun test --timeout=30000 apps/shell/tests/topics.test.ts apps/shell/tests/design-lint.test.ts apps/shell/tests/plugin-services.test.ts plugins/
+          bun test --timeout=30000 packages/sdk/tests/motion.test.ts packages/sdk/tests/zgui.test.ts packages/plugin-api/tests/ apps/shell/tests/topics.test.ts apps/shell/tests/design-lint.test.ts apps/shell/tests/plugin-services.test.ts plugins/

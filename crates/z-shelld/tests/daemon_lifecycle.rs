@@ -319,16 +319,22 @@ enabled = false
         .await
         .unwrap();
 
-    let Some(ServerMessage::Notification { method, params }) =
-        timeout(Duration::from_secs(2), public_client.next_notification())
-            .await
-            .expect("settings reload must publish an input method update")
-    else {
-        panic!("expected input method topic.update");
-    };
-    assert_eq!(method, methods::TOPIC_UPDATE);
-    let ime_update: TopicUpdate = serde_json::from_value(params).unwrap();
-    assert_eq!(ime_update.topic.as_str(), "desktop.ime");
+    let ime_update: TopicUpdate = timeout(Duration::from_secs(2), async {
+        loop {
+            let Some(ServerMessage::Notification { method, params }) =
+                public_client.next_notification().await
+            else {
+                panic!("expected input method topic.update before socket closed");
+            };
+            assert_eq!(method, methods::TOPIC_UPDATE);
+            let update: TopicUpdate = serde_json::from_value(params).unwrap();
+            if update.topic.as_str() == "desktop.ime" {
+                return update;
+            }
+        }
+    })
+    .await
+    .expect("settings reload must publish an input method update");
     assert!(ime_update.revision > ime_snap.revision);
     assert!(ime_update.source_baseline);
     assert_eq!(ime_update.data["mode"], json!("indicator_only"));

@@ -38,7 +38,9 @@
         "zshell/no-flush-surface-shadow": "error",
         "zshell/no-core-plugin-id-branching": "error",
         "zshell/m3-motion-tokens": "error",
-        "zshell/no-direct-raf-loop": "error"
+        "zshell/no-direct-raf-loop": "error",
+        "zshell/solid-show-keyed-callback": "error",
+        "zshell/min-hit-target-size": "error"
       }
     },
     {
