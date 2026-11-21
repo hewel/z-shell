@@ -55,9 +55,18 @@
       { "name": "modal", "value": "0 20px 56px rgba(0, 0, 0, 0.60)", "purpose": "Centered modals and independent Settings window over dimmed scrim." }
     ],
     "motion": [
-      { "name": "emphasized-decelerate", "value": "cubic-bezier(0.05, 0.7, 0.1, 1.0)", "purpose": "Opening popovers, modals, and drawers (180-220ms)." },
-      { "name": "emphasized-accelerate", "value": "cubic-bezier(0.3, 0.0, 0.8, 0.15)", "purpose": "Dismissing transient surfaces (120-150ms)." },
-      { "name": "standard-fast", "value": "cubic-bezier(0.2, 0.0, 0.0, 1.0)", "purpose": "Quick toggles, hover state layers, focus rings (100-150ms)." }
+      { "name": "spring-standard-fast-spatial", "value": "spring(stiffness=1400, dampingRatio=0.9)", "purpose": "M3 Standard fast spatial: switches, workspace pill morph, chevrons, OSD, container expand." },
+      { "name": "spring-standard-default-spatial", "value": "spring(stiffness=700, dampingRatio=0.9)", "purpose": "M3 Standard default spatial: bar popovers, Shared Axis X sub-panels, modals, dock, toast reflow." },
+      { "name": "spring-standard-slow-spatial", "value": "spring(stiffness=300, dampingRatio=0.9)", "purpose": "M3 Standard slow spatial: Workspace Overview zoom and Lock Screen transitions." },
+      { "name": "spring-expressive-fast-spatial", "value": "spring(stiffness=800, dampingRatio=0.6)", "purpose": "M3 Expressive fast spatial: Lock Screen password shape pop/morph, error shake, expressive bounce." },
+      { "name": "spring-expressive-default-spatial", "value": "spring(stiffness=380, dampingRatio=0.8)", "purpose": "M3 Expressive default spatial: lively popovers, modals, and dock when expressive scheme is active." },
+      { "name": "spring-expressive-slow-spatial", "value": "spring(stiffness=200, dampingRatio=0.8)", "purpose": "M3 Expressive slow spatial: fullscreen overview and hero transitions in expressive mode." },
+      { "name": "spring-fast-effects", "value": "spring(stiffness=3800, dampingRatio=1.0)", "purpose": "M3 critically damped fast effects: state layers, focus rings, toggle fills, popover exit opacity." },
+      { "name": "spring-default-effects", "value": "spring(stiffness=1600, dampingRatio=1.0)", "purpose": "M3 critically damped default effects: scrim opacity, Settings Fade Through, active row tints." },
+      { "name": "spring-slow-effects", "value": "spring(stiffness=800, dampingRatio=1.0)", "purpose": "M3 critically damped slow effects: Lock Screen unlock fade, wallpaper crossfade, palette commit." },
+      { "name": "emphasized-decelerate", "value": "cubic-bezier(0.05, 0.7, 0.1, 1.0)", "purpose": "M3 CSS fallback for entering elements." },
+      { "name": "emphasized-accelerate", "value": "cubic-bezier(0.3, 0.0, 0.8, 0.15)", "purpose": "M3 CSS fallback for exiting elements." },
+      { "name": "standard", "value": "cubic-bezier(0.2, 0.0, 0.0, 1.0)", "purpose": "M3 CSS fallback for utilitarian on-screen shifts." }
     ],
     "breakpoints": [
       { "name": "compact-laptop", "value": "1280px" },
