@@ -115,18 +115,26 @@ describe("apps/shell design geometry & pixel lint", () => {
             capability: "connected",
             groups: [{ group_id: 1, output_instance_ids: [1] }],
             workspaces: [
-              { workspace_id: 1, group_id: 1, name: "1", id_str: "1", coordinates: [1], active: false, urgent: false, hidden: false, capabilities: ["activate"] },
-              { workspace_id: 2, group_id: 1, name: "2", id_str: "2", coordinates: [2], active: true, urgent: false, hidden: false, capabilities: ["activate"] },
-              { workspace_id: 3, group_id: 1, name: "3", id_str: "3", coordinates: [3], active: false, urgent: false, hidden: false, capabilities: ["activate"] },
+              { workspace_id: 1, group_id: 1, name: "design", id_str: "1", coordinates: [1], active: false, urgent: false, hidden: false, capabilities: ["activate"] },
+              { workspace_id: 2, group_id: 1, name: "main", id_str: "2", coordinates: [2], active: true, urgent: false, hidden: false, capabilities: ["activate"] },
+              { workspace_id: 3, group_id: 1, name: "chat", id_str: "3", coordinates: [3], active: false, urgent: true, hidden: false, capabilities: ["activate"] },
+              { workspace_id: 4, group_id: 1, name: "4", id_str: "4", coordinates: [4], active: false, urgent: false, hidden: false, capabilities: ["activate"] },
             ],
           },
           "wayland.windows": {
             capability: "connected",
-            windows: [{
-              window_id: 10, app_id: "org.example.editor",
-              title: "VeryLongProjectName — crates/z-shell-theme/src/palette.rs — Extremely Verbose Editor Window Title That Must Truncate",
-              activated: true, minimized: false, maximized: false, fullscreen: false, output_instance_ids: [1],
-            }],
+            windows: [
+              {
+                window_id: 10, app_id: "org.example.editor",
+                title: "VeryLongProjectName — crates/z-shell-theme/src/palette.rs — Extremely Verbose Editor Window Title That Must Truncate",
+                activated: true, minimized: false, maximized: false, fullscreen: false, output_instance_ids: [1],
+              },
+              {
+                window_id: 11, app_id: "org.example.browser",
+                title: "Paper — z-shell",
+                activated: false, minimized: false, maximized: false, fullscreen: false, output_instance_ids: [1],
+              },
+            ],
           },
           "desktop.apps": {
             available: true,

@@ -253,6 +253,10 @@ export const SHELL_ICON_PATHS = {
     viewBox: "0 0 24 24",
     d: "M12 3v10.55A4 4 0 1014 17V7h4V3h-6z",
   },
+  add: {
+    viewBox: "0 0 24 24",
+    d: "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z",
+  },
 } as const;
 
 export type ShellIconName = keyof typeof SHELL_ICON_PATHS;
