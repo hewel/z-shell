@@ -36,21 +36,42 @@ const tenSecondsUs = 10_000_000;
  */
 function buildWavyWavePath(playheadX: number, amplitudeScale: number, phasePx: number): string {
   const halfPeriod = 9;
+  const quarterPeriod = halfPeriod / 2;
   const amplitude = 4.5 * Math.max(0, Math.min(1, amplitudeScale));
   const midY = 14;
-  const waveEnd = Math.max(8, playheadX - 5);
+  const waveStart = 4;
+  const waveEnd = Math.max(8, playheadX - 7);
   if (amplitude < 0.05) {
-    return `M 4 ${midY} L ${waveEnd.toFixed(1)} ${midY}`;
+    return `M ${waveStart} ${midY} L ${waveEnd.toFixed(2)} ${midY}`;
   }
   const period = halfPeriod * 2;
   const phaseOffset = ((phasePx % period) + period) % period;
-  const samples = Math.max(8, Math.ceil((waveEnd - 4) / 3));
-  let wave = "";
-  for (let i = 0; i <= samples; i++) {
-    const x = 4 + ((waveEnd - 4) * i) / samples;
-    const angle = ((x - phaseOffset) / halfPeriod) * Math.PI;
-    const y = midY - Math.sin(angle) * amplitude;
-    wave += i === 0 ? `M ${x.toFixed(1)} ${y.toFixed(1)}` : ` L ${x.toFixed(1)} ${y.toFixed(1)}`;
+  const k = Math.PI / halfPeriod;
+  const yAt = (x: number): number => midY - Math.sin((x - phaseOffset) * k) * amplitude;
+  const dyAt = (x: number): number => -Math.cos((x - phaseOffset) * k) * amplitude * k;
+
+  // Split at every quarter-period knot so each Hermite cubic Bezier segment spans <= pi/2
+  // with exact C1 tangents (0 slope at peaks/troughs) and < 0.05px deviation from sin(x).
+  const knots: number[] = [waveStart];
+  const firstIndex = Math.floor((waveStart - phaseOffset) / quarterPeriod) + 1;
+  for (let x = phaseOffset + firstIndex * quarterPeriod; x < waveEnd - 0.05; x += quarterPeriod) {
+    if (x > waveStart + 0.05) knots.push(x);
+  }
+  knots.push(waveEnd);
+
+  const startY = yAt(waveStart);
+  let wave = `M ${waveStart.toFixed(2)} ${startY.toFixed(2)}`;
+  for (let i = 1; i < knots.length; i++) {
+    const x0 = knots[i - 1]!;
+    const x1 = knots[i]!;
+    const dx = x1 - x0;
+    const y0 = yAt(x0);
+    const y1 = yAt(x1);
+    const cx1 = x0 + dx / 3;
+    const cy1 = y0 + dyAt(x0) * (dx / 3);
+    const cx2 = x1 - dx / 3;
+    const cy2 = y1 - dyAt(x1) * (dx / 3);
+    wave += ` C ${cx1.toFixed(2)} ${cy1.toFixed(2)} ${cx2.toFixed(2)} ${cy2.toFixed(2)} ${x1.toFixed(2)} ${y1.toFixed(2)}`;
   }
   return wave;
 }
@@ -67,7 +88,8 @@ function WavyProgressTrack(props: {
   const waveAmplitude = createM3Spring(() => props.playing && scheme() !== "reduced" ? 1 : 0, "defaultSpatial", { scheme });
   const phase = createPhaseLoop(() => props.playing, 24, scheme);
   const clamped = () => Math.max(0.03, Math.min(0.97, props.fraction));
-  const playheadX = () => Math.round(clamped() * 316) + 6;
+  // Track inner width is 340px (396 - 56 padding); viewBox 0..328 is centered at x=[6, 334].
+  const playheadX = () => Math.round(clamped() * 340) - 6;
   const wavePath = createMemo(() => buildWavyWavePath(playheadX(), waveAmplitude(), phase()));
   const restPct = () => `${Math.max(0, 100 - clamped() * 100 - 2.5).toFixed(2)}%`;
 

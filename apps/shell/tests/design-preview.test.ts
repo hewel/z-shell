@@ -96,6 +96,10 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.advance("launcher-settle", 350);
       timeline.step({ id: "capture-launcher", op: "capture", surface: "launcher-overlay", captureId: "launcher" });
 
+      timeline.step({ id: "open-overview", op: "pointer.click", target: { surface: "bar-hdmi-a-1", testId: "bar-overview" }, button: "primary" });
+      timeline.advance("overview-settle", 450);
+      timeline.step({ id: "capture-overview", op: "capture", surface: "overview-overlay", captureId: "overview" });
+
       writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
         id: "z-shell-design-geometry-lint",
         initialTopics: {
@@ -216,7 +220,7 @@ describe("apps/shell design geometry & pixel lint", () => {
       }, null, 2));
 
       const result = runPreview(published.dist, fixture, scenario, out);
-      expectCleanPreview(result, 13, 0);
+      expectCleanPreview(result, 14, 0);
       const bar = readCapture(out, "bar-hdmi-a-1", "bar");
       const dock = readCapture(out, "dock-hdmi-a-1", "dock");
       const dockHover = readCapture(out, "dock-hdmi-a-1", "dock-hover");
@@ -230,6 +234,7 @@ describe("apps/shell design geometry & pixel lint", () => {
       const settingsPower = readCapture(out, "settings-window", "settings-power");
       const power = readCapture(out, "power-dialog", "power");
       const launcher = readCapture(out, "launcher-overlay", "launcher");
+      const overview = readCapture(out, "overview-overlay", "overview");
 
       // WCAG 2.2 SC 2.5.8: every visible interactive control must meet >= 24x24px hit area.
       for (const [label, tree] of [
@@ -245,6 +250,7 @@ describe("apps/shell design geometry & pixel lint", () => {
         ["settings-power", settingsPower.tree],
         ["power-dialog", power.tree],
         ["launcher", launcher.tree],
+        ["overview", overview.tree],
       ] as const) {
         const controls = tree.nodes.filter(node => node.role && interactiveRoles.has(node.role) && node.boundsLogical);
         expect(controls.length, label).toBeGreaterThan(0);
@@ -308,6 +314,27 @@ describe("apps/shell design geometry & pixel lint", () => {
       const launcherSearchBar = treeNode(launcher.tree, "launcher-search-bar").boundsLogical!;
       const launcherSearchField = treeNode(launcher.tree, "launcher-search").boundsLogical!;
       expect(launcherSearchField.x).toBeGreaterThan(launcherSearchBar.x + 20);
+
+      // Overview card width (684px) and interactive workspaces + windows.
+      expect(Math.round(treeNode(overview.tree, "overview-card").boundsLogical!.width)).toBe(684);
+      expect(treeNode(overview.tree, "overview-ws-2").boundsLogical).toBeDefined();
+
+      // Slider fill-to-thumb alignment on wide Settings slider (Tiling gap = 14px -> 22% on 448px track):
+      // fill must end at thumb center without poking past the thumb's right edge.
+      {
+        const gapSlider = settingsBar.tree.nodes.find(node => node.role === "slider" && node.name === "Tiling gap");
+        expect(gapSlider?.boundsDevice, "settings-bar Tiling gap slider").toBeDefined();
+        const bounds = gapSlider!.boundsDevice!;
+        const midY = Math.round(bounds.y + bounds.height / 2);
+        const pct = Math.round((14 / 64) * 100) / 100;
+        const thumbCenterX = bounds.x + 7 + pct * (bounds.width - 14);
+        const filledSample = pixel(settingsBar.image, Math.round(bounds.x + 20), midY);
+        const unfilledSample = pixel(settingsBar.image, Math.round(bounds.x + bounds.width - 20), midY);
+        expect(filledSample).not.toEqual(unfilledSample);
+        // Center of thumb is filled primary; 10px past thumb center (3px outside thumb right edge) is unfilled track.
+        expect(pixel(settingsBar.image, Math.round(thumbCenterX), midY), "thumb center filled").toEqual(filledSample);
+        expect(pixel(settingsBar.image, Math.round(thumbCenterX + 10), midY), "no fill overhang past thumb").toEqual(unfilledSample);
+      }
       expect(launcherSearchField.y).toBeGreaterThanOrEqual(launcherSearchBar.y);
       expect(launcherSearchField.y + launcherSearchField.height).toBeLessThanOrEqual(launcherSearchBar.y + launcherSearchBar.height);
 

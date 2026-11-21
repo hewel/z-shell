@@ -605,6 +605,7 @@ describe("DESIGN.md token and surface contract sync", () => {
     const polkitDialog = readFileSync(join(shellDir, "src/surfaces/PolkitDialog.tsx"), "utf8");
     const launcher = readFileSync(join(shellDir, "src/surfaces/LauncherOverlay.tsx"), "utf8");
     const overview = readFileSync(join(repoRoot, "plugins/niri-overview/src/layer.tsx"), "utf8");
+    const builtinOverview = readFileSync(join(shellDir, "src/surfaces/OverviewOverlay.tsx"), "utf8");
 
     expect(shellPanels).toMatch(/"quick-settings":\s*\{\s*width:\s*396\b/);
     expect(shellPanels).toMatch(/calendar:\s*\{\s*width:\s*396\b/);
@@ -615,6 +616,7 @@ describe("DESIGN.md token and surface contract sync", () => {
     expect(polkitDialog).toContain(`width: "360px"`);
     expect(launcher).toContain(`width: "652px"`);
     expect(overview).toContain(`width: "684px"`);
+    expect(builtinOverview).toContain(`width: "684px"`);
   });
 
   test(".impeccable/design.json motion tokens match packages/sdk/src/motion.ts and app.css", () => {

@@ -72,7 +72,26 @@ export function PrecisionSliderRow(props: {
     if (percent !== Math.round(props.value)) props.onChange(percent);
   };
   const displayValue = () => clampPercent(animatedValue());
-  const thumbLeft = () => `${Math.max(0, Math.min(92, displayValue() - 4)).toFixed(2)}%`;
+  const thumbDiameter = 14;
+  const thumbRadius = thumbDiameter / 2;
+  const fillWidth = () => {
+    const pct = displayValue();
+    if (pct <= 0) return "0px";
+    const delta = thumbRadius - (pct / 100) * thumbDiameter;
+    return delta >= 0
+      ? `calc(${pct.toFixed(2)}% + ${delta.toFixed(2)}px)`
+      : `calc(${pct.toFixed(2)}% - ${Math.abs(delta).toFixed(2)}px)`;
+  };
+  const thumbLeft = () => {
+    const pct = displayValue();
+    return `calc(${pct.toFixed(2)}% - ${((pct / 100) * thumbDiameter).toFixed(2)}px)`;
+  };
+  const pointerToPercent = (clientX: number, rect: { readonly x: number; readonly width: number }): number => {
+    const travel = rect.width - thumbDiameter;
+    return travel > 0
+      ? ((clientX - rect.x - thumbRadius) * 100) / travel
+      : ((clientX - rect.x) * 100) / rect.width;
+  };
 
   return (
     <row style={{ alignItems: "center", gap: "10px", height: "34px", flexShrink: 0 }}>
@@ -94,13 +113,13 @@ export function PrecisionSliderRow(props: {
           if (!rect || rect.width <= 0) return;
           focus(event.currentTarget);
           setDragging(true);
-          change((event.position.x - rect.x) * 100 / rect.width, false);
+          change(pointerToPercent(event.position.x, rect), false);
         }}
         onPointerMove={event => {
           if (!dragging() || props.disabled || !event.primary) return;
           const rect = getWindowRect(event.currentTarget);
           if (!rect || rect.width <= 0) return;
-          change((event.position.x - rect.x) * 100 / rect.width, true);
+          change(pointerToPercent(event.position.x, rect), true);
         }}
         onPointerUp={() => { if (dragging()) setDragging(false); }}
         onPointerCancel={() => { if (dragging()) setDragging(false); }}
@@ -127,9 +146,9 @@ export function PrecisionSliderRow(props: {
           opacity: props.disabled ? 0.45 : 1,
         }}>
         <box ariaHidden style={{ width: "100%", height: "6px", borderRadius: "3px", backgroundColor: containerHighest, overflow: "hidden" }}>
-          <box data-percent-fill="true" style={{ width: `${displayValue().toFixed(2)}%`, height: "100%", borderRadius: "3px", backgroundColor: primary }} />
+          <box data-percent-fill="true" style={{ width: fillWidth(), height: "100%", borderRadius: "3px", backgroundColor: primary }} />
         </box>
-        <box ariaHidden style={{
+        <box ariaHidden data-slider-thumb="true" style={{
           position: "absolute", left: thumbLeft(), width: "14px", height: "14px", borderRadius: "999px",
           backgroundColor: primary,
           border: dragging()

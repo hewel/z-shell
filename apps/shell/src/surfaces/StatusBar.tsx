@@ -481,12 +481,13 @@ function BarContent(props: {
             {workspace => <WorkspaceButton workspace={workspace()} vertical={vertical()} docked={docked()} activate={() => activateWorkspace(workspace().workspace_id)} />}
           </For>
           <Divider vertical={vertical()} short />
-          <Button testId="bar-overview" ariaLabel="Overview" style={vertical() ? verticalIconButton : iconButton}
+          <Button testId="bar-overview" ariaLabel="Overview" selected={activePanel() === "overview"}
+            style={vertical() ? verticalIconButton : iconButton}
             onClick={event => {
               event.stopPropagation();
               togglePanel("overview", { monitorId: props.monitor.id });
             }}>
-            <ShellIcon name="overview" size={16} color={muted} />
+            <ShellIcon name="overview" size={16} color={activePanel() === "overview" ? primary : muted} />
           </Button>
         </box>
         <Show when={activeWindow()}>

@@ -8,6 +8,7 @@ import { KimpanelPopup } from "./surfaces/KimpanelPopup.tsx";
 import { LauncherOverlay } from "./surfaces/LauncherOverlay.tsx";
 import { NotificationToasts } from "./surfaces/NotificationToasts.tsx";
 import { OsdOverlay } from "./surfaces/OsdOverlay.tsx";
+import { OverviewOverlay } from "./surfaces/OverviewOverlay.tsx";
 import { PolkitDialog } from "./surfaces/PolkitDialog.tsx";
 import { PowerDialog } from "./surfaces/PowerDialog.tsx";
 import { SessionLockOverlay } from "./surfaces/SessionLockOverlay.tsx";
@@ -31,6 +32,7 @@ function ShellApp() {
       <OsdOverlay />
       <KimpanelPopup />
       <LauncherOverlay />
+      <OverviewOverlay />
       <PowerDialog />
       <PolkitDialog />
       <SettingsWindow />

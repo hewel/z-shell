@@ -3,6 +3,7 @@ import { mountOwned } from "@hewel/zgui/renderer";
 import { getResolvedCapabilities, onControlMessage, type JsonValue } from "@hewel/zgui-services";
 import { ZShellClient, type BusHelloResult, type BusTransport, type CommandInvokeResult } from "@z-shell/sdk";
 import { createZguiSocketTransport, setGlobalMotionScheme, useTopic, type TopicState } from "@z-shell/sdk/zgui";
+import { composedPlugins } from "./plugins/composed.ts";
 import type { ThemeTopicSnapshot } from "./theme.ts";
 import { formatSurfaceName, resolveActiveMonitor, resolveBarLayout, resolveBarPopupAnchor } from "./topics.ts";
 import type {
@@ -253,10 +254,19 @@ export function createShellStore(): ShellStore {
       monitorId: monitor.id,
     };
   }
+  const overviewPluginLayer = composedPlugins.entryInstances.find(
+    instance => instance.kind === "layer" && instance.id === "overview",
+  );
   const togglePanel = (id: PanelId, target?: PanelAnchor) => {
     const currentOutputs = monitors();
     const explicitMonitorId = target?.monitorId ?? inferMonitorId(target?.parentSurface, currentOutputs);
     if (explicitMonitorId) recordActiveMonitor(explicitMonitorId);
+    if (id === "overview" && overviewPluginLayer) {
+      setOverlay(null);
+      const commandPrefix = `plugin.${overviewPluginLayer.pluginId.replace("/", ".")}`;
+      void invoke(publicClient(), `${commandPrefix}.toggle`, {});
+      return;
+    }
     setOverlay(active => {
       const activeMonitorId = overlayMonitorId(active, currentOutputs);
       const resolved = target?.parentSurface !== undefined && target.anchorRect !== undefined
