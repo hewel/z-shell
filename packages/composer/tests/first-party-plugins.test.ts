@@ -193,6 +193,7 @@ describe("First-party reference plugins end-to-end", () => {
       for (const plugin of plugins) {
         expect(composedSource).toContain(`${plugin.id}:service`);
       }
+      expect(composedSource).toContain('"widthTier": "compact"');
       // This preview fixture mocks daemon-published plugin topics rather than live plugin services
       // (which spawn external commands/sockets; service startup/teardown is tested in
       // apps/shell/tests/plugin-services.test.ts and the live z-shelld test below).

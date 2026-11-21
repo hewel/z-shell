@@ -55,6 +55,7 @@ const ENTRY_KEYS: Record<string, true> = {
   entry: true,
   title: true,
   description: true,
+  width_tier: true,
   setting: true,
 };
 const SETTING_KEYS: Record<string, true> = {
@@ -90,6 +91,8 @@ export interface PluginSettingSchema {
   readonly secret: boolean;
 }
 
+export type PanelWidthTier = "compact" | "standard";
+
 export interface ParsedPluginEntry {
   readonly id: string;
   readonly entryId: string;
@@ -98,6 +101,7 @@ export interface ParsedPluginEntry {
   readonly absoluteEntry: string;
   readonly title?: string;
   readonly description?: string;
+  readonly widthTier?: PanelWidthTier;
   readonly settings: readonly PluginSettingSchema[];
 }
 
@@ -353,6 +357,7 @@ function parseEntries(
         absoluteEntry: string;
         title?: string;
         description?: string;
+        widthTier?: PanelWidthTier;
         settings: PluginSettingSchema[];
       } = {
         id,
@@ -364,6 +369,16 @@ function parseEntries(
       };
       const title = optionalString(record, "title", context);
       const description = optionalString(record, "description", context);
+      const widthTier = optionalString(record, "width_tier", context);
+      if (widthTier !== undefined) {
+        if (kind !== "panel") {
+          throw new Error(`${context}.width_tier is only valid on [[panel]] entries`);
+        }
+        if (widthTier !== "compact" && widthTier !== "standard") {
+          throw new Error(`${context}.width_tier must be "compact" or "standard", got ${JSON.stringify(widthTier)}`);
+        }
+        result.widthTier = widthTier;
+      }
       if (title !== undefined) result.title = title;
       if (description !== undefined) result.description = description;
       entries.push(result);

@@ -251,6 +251,36 @@ impl ThemeEngine {
         .await
     }
 
+    /// Applies updated `[theme]` settings (`mode`, `variant`, `seed_color`, `backend`,
+    /// `gtk_linking`) and regenerates the active color scheme.
+    ///
+    /// When `settings.seed_color` is cleared (`None`) while the active source is a fixed seed,
+    /// switches back to `wallpaper_fallback` (when present) or [`ThemeSource::default()`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configured seed or backend fails to produce a palette.
+    pub async fn apply_settings(
+        &self,
+        settings: &ThemeSettings,
+        wallpaper_fallback: Option<PathBuf>,
+    ) -> Result<GenerationOutcome, ThemeError> {
+        self.generate_next(|request| {
+            request.mode = settings.mode;
+            request.variant = settings.variant;
+            request.backend = settings.backend;
+            request.gtk_linking = settings.gtk_linking;
+            if let Some(seed) = &settings.seed_color {
+                request.source = ThemeSource::Seed(seed.clone());
+            } else if matches!(request.source, ThemeSource::Seed(_)) {
+                request.source = wallpaper_fallback
+                    .map(ThemeSource::WallpaperPath)
+                    .unwrap_or_default();
+            }
+        })
+        .await
+    }
+
     async fn generate_started(
         &self,
         request: GenerationRequest,

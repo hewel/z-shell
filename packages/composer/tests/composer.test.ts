@@ -322,6 +322,31 @@ describe("parsePluginManifest", () => {
     expect(() => parsePluginManifest(root)).toThrow(/outside|escapes|strictly inside/i);
     expect(realpathSync(root)).toBe(root);
   });
+
+  test("accepts width_tier on [[panel]] entries and rejects it on non-panel entries or invalid values", () => {
+    const root = temporaryDirectory();
+    writePlugin(
+      root,
+      `${validManifest}\n[[panel]]\nid = "compact-pop"\nentry = "src/indicator.tsx"\nwidth_tier = "compact"\n`,
+    );
+    const manifest = parsePluginManifest(root);
+    const panel = manifest.entries.find(entry => entry.id === "compact-pop");
+    expect(panel?.widthTier).toBe("compact");
+
+    const badWidget = temporaryDirectory();
+    writePlugin(
+      badWidget,
+      validManifest.replace('entry = "src/indicator.tsx"', 'entry = "src/indicator.tsx"\nwidth_tier = "compact"'),
+    );
+    expect(() => parsePluginManifest(badWidget)).toThrow(/width_tier/i);
+
+    const badTier = temporaryDirectory();
+    writePlugin(
+      badTier,
+      `${validManifest}\n[[panel]]\nid = "bad-pop"\nentry = "src/indicator.tsx"\nwidth_tier = "wide"\n`,
+    );
+    expect(() => parsePluginManifest(badTier)).toThrow(/width_tier/i);
+  });
 });
 
 describe("composePlugins", () => {

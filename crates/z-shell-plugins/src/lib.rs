@@ -7,4 +7,6 @@ mod manifest;
 pub mod registry;
 
 pub use git::GitError;
-pub use manifest::{Manifest, ManifestEntry, ManifestError, SUPPORTED_PLUGIN_API_LEVEL};
+pub use manifest::{
+    Manifest, ManifestEntry, ManifestError, PanelWidthTier, SUPPORTED_PLUGIN_API_LEVEL,
+};

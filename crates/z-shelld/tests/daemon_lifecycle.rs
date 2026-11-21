@@ -723,3 +723,170 @@ async fn wires_wallpaper_to_durable_state_theme_reload_and_session_lock() {
         .unwrap()
         .unwrap();
 }
+
+#[tokio::test]
+async fn settings_patch_and_patch_plugin_require_host_socket_preserve_comments_and_broadcast() {
+    let dir = TempDir::new().unwrap();
+    let paths = ShellPaths::from_roots(
+        dir.path().join("config"),
+        dir.path().join("state"),
+        dir.path().join("runtime"),
+        dir.path().join("runtime/bus.sock"),
+    );
+    paths.ensure_dirs().unwrap();
+    std::fs::write(
+        paths.settings_file(),
+        "# Keep user comment\n[bar]\nposition = \"top\"\ngaps = 14\n",
+    )
+    .unwrap();
+
+    let app = DaemonApp::bootstrap(paths.clone()).unwrap();
+    let server_task = tokio::spawn(async move { app.run().await });
+
+    let mut public_client = BusClient::connect(paths.socket_path()).await.unwrap();
+    let host_client = BusClient::connect(paths.host_socket_path()).await.unwrap();
+
+    // Public socket must be denied both settings.patch and settings.patch-plugin.
+    for (cmd, payload) in [
+        ("settings.patch", json!({ "bar": { "gaps": 8 } })),
+        (
+            "settings.patch-plugin",
+            json!({ "plugin_id": "z-shell/example", "patch": { "refresh_seconds": 120 } }),
+        ),
+    ] {
+        let err = public_client
+            .invoke_command(CommandInvokeParams {
+                name: CommandName::try_new(cmd).unwrap(),
+                args: Vec::new(),
+                payload: Some(payload),
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ClientError::Rpc(ref rpc) if rpc.code == ErrorCode::PermissionDenied),
+            "{cmd} must reject public callers: {err:?}"
+        );
+    }
+
+    let settings_snap = public_client
+        .subscribe(TopicName::try_new("settings").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        settings_snap.data["theme"]["motion_scheme"],
+        json!("standard")
+    );
+
+    // Host client patches bar + theme.motion_scheme losslessly and triggers live broadcast.
+    let patched = host_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("settings.patch").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({
+                "bar": { "style": "docked", "gaps": 8 },
+                "theme": { "motion_scheme": "expressive" }
+            })),
+        })
+        .await
+        .unwrap()
+        .data
+        .unwrap();
+    assert_eq!(patched["bar"]["style"], json!("docked"));
+    assert_eq!(patched["bar"]["gaps"], json!(8));
+    assert_eq!(patched["theme"]["motion_scheme"], json!("expressive"));
+
+    let on_disk = std::fs::read_to_string(paths.settings_file()).unwrap();
+    assert!(
+        on_disk.contains("# Keep user comment"),
+        "settings.patch must preserve user comments:\n{on_disk}"
+    );
+    assert!(on_disk.contains("motion_scheme = \"expressive\""));
+
+    let Some(ServerMessage::Notification { method, params, .. }) =
+        timeout(Duration::from_secs(2), public_client.next_notification())
+            .await
+            .unwrap()
+    else {
+        panic!("expected live settings topic.update after settings.patch");
+    };
+    assert_eq!(method, methods::TOPIC_UPDATE);
+    let update: TopicUpdate = serde_json::from_value(params).unwrap();
+    assert_eq!(update.topic.as_str(), "settings");
+    assert_eq!(update.data["bar"]["style"], json!("docked"));
+    assert_eq!(update.data["theme"]["motion_scheme"], json!("expressive"));
+
+    // Host client patches plugin settings and reads them back via settings.get-plugin.
+    let plugin_patched = host_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("settings.patch-plugin").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({
+                "plugin_id": "z-shell/nosleep",
+                "settings": { "inhibit_scope": "idle", "poll_interval_ms": 5000 }
+            })),
+        })
+        .await
+        .unwrap()
+        .data
+        .unwrap();
+    assert_eq!(plugin_patched["settings"]["inhibit_scope"], json!("idle"));
+    assert_eq!(plugin_patched["settings"]["poll_interval_ms"], json!(5000));
+
+    let plugin_read = host_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("settings.get-plugin").unwrap(),
+            args: vec!["z-shell/nosleep".to_owned()],
+            payload: None,
+        })
+        .await
+        .unwrap()
+        .data
+        .unwrap();
+    assert_eq!(plugin_read["settings"]["inhibit_scope"], json!("idle"));
+    assert_eq!(plugin_read["settings"]["poll_interval_ms"], json!(5000));
+
+    // Setting and then clearing theme.seed_color regenerates theme source from Seed back to Default.
+    host_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("settings.patch").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({ "theme": { "seed_color": "#7C4DFF" } })),
+        })
+        .await
+        .unwrap();
+    let seeded_theme = public_client
+        .subscribe(TopicName::try_new("theme").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(seeded_theme.data["source"]["kind"], json!("seed"));
+    assert_eq!(seeded_theme.data["source"]["value"], json!("#7C4DFF"));
+
+    host_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("settings.patch").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({ "theme": { "seed_color": null } })),
+        })
+        .await
+        .unwrap();
+    let cleared_theme = public_client
+        .subscribe(TopicName::try_new("theme").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(cleared_theme.data["source"]["kind"], json!("seed"));
+    assert_eq!(cleared_theme.data["source"]["value"], json!("#6750a4"));
+
+    host_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("quit").unwrap(),
+            args: Vec::new(),
+            payload: None,
+        })
+        .await
+        .unwrap();
+    timeout(Duration::from_secs(3), server_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}

@@ -55,10 +55,12 @@ type DesktopSlot = Mutex<Option<DesktopHandle>>;
 
 #[derive(Clone)]
 struct SettingsTargets {
+    store: Arc<ConfigStore>,
     desktop: Option<Weak<DesktopSlot>>,
     session: Weak<SessionService>,
     polkit: Weak<PolkitService>,
     wallpaper: Weak<WallpaperService>,
+    theme: ThemeEngine,
 }
 
 /// Running daemon assembly owning the config store, bus hub, domain services, and dual Unix socket server.
@@ -162,7 +164,7 @@ impl DaemonApp {
         );
         wallpaper.install_on_bus(&hub);
         let mut wallpaper_theme = WallpaperThemeBridge {
-            theme,
+            theme: theme.clone(),
             settings: Arc::clone(&shared_settings),
             pending: Some(updates),
             task: None,
@@ -249,14 +251,16 @@ impl DaemonApp {
         register_plugin_commands(&hub, plugins);
         register_core_commands(
             &hub,
-            store,
+            Arc::clone(&store),
             shared_settings,
             shared_state,
             SettingsTargets {
+                store,
                 desktop: desktop.as_ref().map(Arc::downgrade),
                 session: Arc::downgrade(&session),
                 polkit: Arc::downgrade(&polkit),
                 wallpaper: Arc::downgrade(&wallpaper),
+                theme,
             },
             shutdown,
         );
@@ -418,6 +422,109 @@ fn require_host_role(call: &CommandCall, action: &str) -> Result<(), RpcError> {
     Ok(())
 }
 
+async fn apply_and_publish_settings(
+    hub: &BusHub,
+    guard: &mut UserSettings,
+    fresh: UserSettings,
+    targets: &SettingsTargets,
+    verb: &str,
+) -> Result<CommandInvokeResult, RpcError> {
+    if *guard == fresh {
+        let data =
+            serde_json::to_value(guard.public_summary()).expect("PublicSettingsSummary serializes");
+        return Ok(CommandInvokeResult {
+            message: Some("settings unchanged".to_owned()),
+            data: Some(data),
+        });
+    }
+    let old_offline = guard.general.offline_mode;
+    let idle_changed = guard.idle != fresh.idle;
+    let ime_changed = guard.ime != fresh.ime;
+    let polkit_changed = guard.polkit != fresh.polkit;
+    let wallpaper_changed = guard.wallpaper != fresh.wallpaper;
+    let palette_changed = guard.theme.mode != fresh.theme.mode
+        || guard.theme.variant != fresh.theme.variant
+        || guard.theme.seed_color != fresh.theme.seed_color
+        || guard.theme.backend != fresh.theme.backend
+        || guard.theme.gtk_linking != fresh.theme.gtk_linking;
+    let summary_changed = guard.public_summary() != fresh.public_summary();
+    *guard = fresh.clone();
+    let summary_json =
+        serde_json::to_value(guard.public_summary()).expect("PublicSettingsSummary serializes");
+
+    if (old_offline != fresh.general.offline_mode || ime_changed)
+        && let Some(slot) = targets.desktop.as_ref().and_then(Weak::upgrade)
+        && let Some(desktop) = slot.lock().expect("desktop slot mutex poisoned").as_ref()
+    {
+        if old_offline != fresh.general.offline_mode {
+            desktop.set_offline_policy(if fresh.general.offline_mode {
+                OfflinePolicy::Offline
+            } else {
+                OfflinePolicy::Online
+            });
+        }
+        if ime_changed {
+            desktop.set_ime_settings(fresh.ime.clone());
+        }
+    }
+    if polkit_changed && let Some(polkit) = targets.polkit.upgrade() {
+        polkit.set_enabled(PolkitEnabled::from(&fresh.polkit));
+    }
+    if idle_changed && let Some(session) = targets.session.upgrade() {
+        session.apply_settings(&fresh.idle).await;
+    }
+    if wallpaper_changed
+        && let Some(wallpaper) = targets.wallpaper.upgrade()
+        && let Err(error) = wallpaper.apply_settings(&fresh.wallpaper).await
+    {
+        tracing::error!(%error, "wallpaper settings worker failed");
+    }
+    if palette_changed {
+        let wallpaper_fallback = if fresh.theme.seed_color.is_none() && fresh.wallpaper.sync_theme {
+            targets
+                .store
+                .load_state()
+                .ok()
+                .and_then(|state| state.last_wallpaper)
+        } else {
+            None
+        };
+        if let Err(error) = targets
+            .theme
+            .apply_settings(&fresh.theme, wallpaper_fallback)
+            .await
+        {
+            tracing::error!(%error, "theme regeneration failed after settings update");
+        }
+    }
+
+    let msg = if summary_changed {
+        let rev = hub.publish_core_topic(
+            topic(topics::SETTINGS),
+            summary_json.clone(),
+            UpdateKind::Live,
+        );
+        if old_offline != fresh.general.offline_mode {
+            hub.publish_core_topic(
+                topic(topics::DAEMON_STATUS),
+                json!({
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "daemon_instance_id": hub.daemon_instance_id(),
+                    "offline_mode": fresh.general.offline_mode,
+                }),
+                UpdateKind::Live,
+            );
+        }
+        format!("settings {verb} (revision {rev})")
+    } else {
+        format!("settings {verb} (private overrides updated)")
+    };
+    Ok(CommandInvokeResult {
+        message: Some(msg),
+        data: Some(summary_json),
+    })
+}
+
 fn register_core_commands(
     hub: &BusHub,
     store: Arc<ConfigStore>,
@@ -533,7 +640,7 @@ fn register_core_commands(
     {
         let store_ref = Arc::clone(&store);
         let settings_ref = Arc::clone(&settings_cell);
-        let targets = settings_targets;
+        let targets = settings_targets.clone();
         let handler: CommandHandler = Arc::new(move |call: CommandCall| {
             let store_ref = Arc::clone(&store_ref);
             let settings_ref = Arc::clone(&settings_ref);
@@ -546,83 +653,130 @@ fn register_core_commands(
                         format!("failed to reload settings.toml: {err}"),
                     )
                 })?;
-                if *guard == fresh {
-                    let data = serde_json::to_value(guard.public_summary())
-                        .expect("PublicSettingsSummary serializes");
-                    return Ok(CommandInvokeResult {
-                        message: Some("settings unchanged".to_owned()),
-                        data: Some(data),
-                    });
-                }
-                let old_offline = guard.general.offline_mode;
-                let idle_changed = guard.idle != fresh.idle;
-                let ime_changed = guard.ime != fresh.ime;
-                let polkit_changed = guard.polkit != fresh.polkit;
-                let wallpaper_changed = guard.wallpaper != fresh.wallpaper;
-                let summary_changed = guard.public_summary() != fresh.public_summary();
-                *guard = fresh.clone();
-                let summary_json = serde_json::to_value(guard.public_summary())
-                    .expect("PublicSettingsSummary serializes");
-
-                if (old_offline != fresh.general.offline_mode || ime_changed)
-                    && let Some(slot) = targets.desktop.as_ref().and_then(Weak::upgrade)
-                    && let Some(desktop) =
-                        slot.lock().expect("desktop slot mutex poisoned").as_ref()
-                {
-                    if old_offline != fresh.general.offline_mode {
-                        desktop.set_offline_policy(if fresh.general.offline_mode {
-                            OfflinePolicy::Offline
-                        } else {
-                            OfflinePolicy::Online
-                        });
-                    }
-                    if ime_changed {
-                        desktop.set_ime_settings(fresh.ime.clone());
-                    }
-                }
-                if polkit_changed && let Some(polkit) = targets.polkit.upgrade() {
-                    polkit.set_enabled(PolkitEnabled::from(&fresh.polkit));
-                }
-                if idle_changed && let Some(session) = targets.session.upgrade() {
-                    session.apply_settings(&fresh.idle).await;
-                }
-                if wallpaper_changed
-                    && let Some(wallpaper) = targets.wallpaper.upgrade()
-                    && let Err(error) = wallpaper.apply_settings(&fresh.wallpaper).await
-                {
-                    tracing::error!(%error, "wallpaper settings worker failed");
-                }
-
-                let msg = if summary_changed {
-                    let rev = call.hub.publish_core_topic(
-                        topic(topics::SETTINGS),
-                        summary_json.clone(),
-                        UpdateKind::Live,
-                    );
-                    if old_offline != fresh.general.offline_mode {
-                        call.hub.publish_core_topic(
-                            topic(topics::DAEMON_STATUS),
-                            json!({
-                                "version": env!("CARGO_PKG_VERSION"),
-                                "daemon_instance_id": call.hub.daemon_instance_id(),
-                                "offline_mode": fresh.general.offline_mode,
-                            }),
-                            UpdateKind::Live,
-                        );
-                    }
-                    format!("settings reloaded (revision {rev})")
-                } else {
-                    "settings reloaded (private overrides updated)".to_owned()
-                };
-                Ok(CommandInvokeResult {
-                    message: Some(msg),
-                    data: Some(summary_json),
-                })
+                apply_and_publish_settings(&call.hub, &mut guard, fresh, &targets, "reloaded").await
             })
         });
         hub.register_core_command(
             cmd("settings.reload"),
             "Reload settings.toml from disk and broadcast public changes",
+            handler,
+        );
+    }
+
+    // settings.patch (privileged host only: lossless toml_edit patch + validate + atomic write + live apply)
+    {
+        let store_ref = Arc::clone(&store);
+        let settings_ref = Arc::clone(&settings_cell);
+        let targets = settings_targets.clone();
+        let handler: CommandHandler = Arc::new(move |call: CommandCall| {
+            let store_ref = Arc::clone(&store_ref);
+            let settings_ref = Arc::clone(&settings_ref);
+            let targets = targets.clone();
+            Box::pin(async move {
+                require_host_role(&call, "settings.patch")?;
+                let patch = call
+                    .params
+                    .payload
+                    .as_ref()
+                    .and_then(Value::as_object)
+                    .ok_or_else(|| {
+                        RpcError::new(
+                            ErrorCode::InvalidParams,
+                            "settings.patch requires a JSON object payload",
+                        )
+                    })?;
+                let mut guard = settings_ref.lock().await;
+                let fresh = store_ref.patch_settings(patch).map_err(|err| {
+                    RpcError::new(
+                        ErrorCode::InvalidParams,
+                        format!("failed to patch settings.toml: {err}"),
+                    )
+                })?;
+                apply_and_publish_settings(&call.hub, &mut guard, fresh, &targets, "updated").await
+            })
+        });
+        hub.register_core_command(
+            cmd("settings.patch"),
+            "Patch settings.toml losslessly and apply changes live (privileged host only)",
+            handler,
+        );
+    }
+
+    // settings.patch-plugin (privileged host only: scoped lossless patch of [plugin_settings."<id>"])
+    {
+        let store_ref = Arc::clone(&store);
+        let settings_ref = Arc::clone(&settings_cell);
+        let targets = settings_targets;
+        let handler: CommandHandler = Arc::new(move |call: CommandCall| {
+            let store_ref = Arc::clone(&store_ref);
+            let settings_ref = Arc::clone(&settings_ref);
+            let targets = targets.clone();
+            Box::pin(async move {
+                require_host_role(&call, "settings.patch-plugin")?;
+                let payload = call
+                    .params
+                    .payload
+                    .as_ref()
+                    .and_then(Value::as_object)
+                    .ok_or_else(|| {
+                        RpcError::new(
+                            ErrorCode::InvalidParams,
+                            "settings.patch-plugin requires a JSON object payload",
+                        )
+                    })?;
+                let raw_id = payload
+                    .get("plugin_id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        RpcError::new(
+                            ErrorCode::InvalidParams,
+                            "settings.patch-plugin requires payload.plugin_id",
+                        )
+                    })?;
+                let plugin_id = PluginId::try_new(raw_id).map_err(|err| {
+                    RpcError::new(
+                        ErrorCode::InvalidParams,
+                        format!("invalid plugin_id: {err}"),
+                    )
+                })?;
+                let patch = payload
+                    .get("settings")
+                    .and_then(Value::as_object)
+                    .ok_or_else(|| {
+                        RpcError::new(
+                            ErrorCode::InvalidParams,
+                            "settings.patch-plugin requires object payload.settings",
+                        )
+                    })?;
+                let mut guard = settings_ref.lock().await;
+                let fresh = store_ref
+                    .patch_plugin_settings(&plugin_id, patch)
+                    .map_err(|err| {
+                        RpcError::new(
+                            ErrorCode::InvalidParams,
+                            format!("failed to patch plugin settings: {err}"),
+                        )
+                    })?;
+                let plugin_value = fresh
+                    .plugin_settings
+                    .get(&plugin_id)
+                    .map(|v| serde_json::to_value(v).expect("toml::Value serializes"))
+                    .unwrap_or_else(|| json!({}));
+                let _ =
+                    apply_and_publish_settings(&call.hub, &mut guard, fresh, &targets, "updated")
+                        .await?;
+                Ok(CommandInvokeResult {
+                    message: Some(format!("plugin settings updated for {plugin_id}")),
+                    data: Some(json!({
+                        "plugin_id": plugin_id,
+                        "settings": plugin_value,
+                    })),
+                })
+            })
+        });
+        hub.register_core_command(
+            cmd("settings.patch-plugin"),
+            "Patch one plugin's settings table in settings.toml (privileged host only)",
             handler,
         );
     }

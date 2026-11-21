@@ -76,6 +76,17 @@ impl Manifest {
     }
 }
 
+/// Width tier declared by a plugin `[[panel]]` entry (`DESIGN.md` Compact 360px vs Standard 396px).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum PanelWidthTier {
+    /// Compact popover (`360px` wide).
+    Compact,
+    /// Standard popover (`396px` wide).
+    Standard,
+}
+
 /// A validated static plugin contribution and its entry-scoped settings schema.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -90,6 +101,8 @@ pub struct ManifestEntry {
     pub title: Option<String>,
     /// Optional human-readable description.
     pub description: Option<String>,
+    /// Optional popover width tier (valid only on `[[panel]]` entries).
+    pub width_tier: Option<PanelWidthTier>,
     settings: Settings,
 }
 
@@ -363,6 +376,7 @@ struct RawEntry {
     entry: PathBuf,
     title: Option<String>,
     description: Option<String>,
+    width_tier: Option<PanelWidthTier>,
     #[serde(default)]
     setting: Vec<TableOnly<RawSetting>>,
 }
@@ -381,6 +395,12 @@ impl RawEntry {
                 problem: "expected a valid entry slug with a qualified id of at most 128 bytes",
             }
         })?;
+        if self.width_tier.is_some() && kind != PluginEntryKind::Panel {
+            return Err(ManifestIssue::Field {
+                field: "width_tier",
+                problem: "width_tier is only valid on [[panel]] entries",
+            });
+        }
         contained_file(root, &self.entry).map_err(|issue| ManifestIssue::EntryFile {
             id: id.clone(),
             issue,
@@ -392,6 +412,7 @@ impl RawEntry {
             path: self.entry,
             title: self.title,
             description: self.description,
+            width_tier: self.width_tier,
             settings,
         })
     }

@@ -419,3 +419,46 @@ fn rejects_positional_tables_and_non_string_setting_types() {
         assert!(!error.to_string().contains("private-"), "{error}");
     }
 }
+
+#[test]
+fn panel_width_tier_is_accepted_on_panel_and_rejected_elsewhere() {
+    let root = fixture(
+        r#"
+[[panel]]
+id = "compact-panel"
+entry = "main.tsx"
+width_tier = "compact"
+
+[[panel]]
+id = "standard-panel"
+entry = "main.tsx"
+"#,
+    );
+    let manifest = Manifest::load(root.path()).unwrap();
+    let compact = manifest
+        .entries
+        .iter()
+        .find(|entry| entry.id.entry() == "compact-panel")
+        .unwrap();
+    let standard = manifest
+        .entries
+        .iter()
+        .find(|entry| entry.id.entry() == "standard-panel")
+        .unwrap();
+    assert_eq!(
+        compact.width_tier,
+        Some(z_shell_plugins::PanelWidthTier::Compact)
+    );
+    assert_eq!(standard.width_tier, None);
+
+    for bad in [
+        "[[widget]]\nid = 'w'\nentry = 'main.tsx'\nwidth_tier = 'compact'",
+        "[[panel]]\nid = 'p'\nentry = 'main.tsx'\nwidth_tier = 'wide'",
+    ] {
+        let invalid = fixture(bad);
+        assert!(
+            Manifest::load(invalid.path()).is_err(),
+            "expected error for:\n{bad}"
+        );
+    }
+}

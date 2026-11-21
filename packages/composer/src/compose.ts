@@ -205,6 +205,7 @@ function descriptor(entry: ParsedPluginEntry, settings: Record<string, unknown>)
   };
   if (entry.title !== undefined) result.title = entry.title;
   if (entry.description !== undefined) result.description = entry.description;
+  if (entry.widthTier !== undefined) result.widthTier = entry.widthTier;
   return result;
 }
 
@@ -293,6 +294,7 @@ function generateModule(
     "  readonly entry: string;",
     "  readonly title?: string;",
     "  readonly description?: string;",
+    '  readonly widthTier?: "compact" | "standard";',
     "  readonly settings: Readonly<Record<string, unknown>>;",
     "  readonly pluginSettings: Readonly<Record<string, unknown>>;",
     "  readonly instanceId: string;",

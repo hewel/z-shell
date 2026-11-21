@@ -4,12 +4,28 @@ use crate::paths::{PathError, ShellPaths};
 use crate::settings::UserSettings;
 use crate::state::RuntimeState;
 use rustix::fs::{FlockOperation, flock};
+use serde_json::{Map as JsonMap, Value as JsonValue};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
+use toml_edit::{
+    Array as TomlArray, ArrayOfTables, DocumentMut, InlineTable, Item as TomlItem,
+    Table as TomlTable, Value as TomlValue,
+};
+use z_shell_protocol::PluginId;
+
+const ALLOWED_PATCH_SECTIONS: [&str; 7] = [
+    "general",
+    "bar",
+    "theme",
+    "ime",
+    "polkit",
+    "wallpaper",
+    "idle",
+];
 
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -40,6 +56,15 @@ pub enum ConfigError {
     /// Serializing TOML failed.
     #[error("failed to serialize TOML: {0}")]
     TomlWrite(#[from] toml::ser::Error),
+    /// Lossless TOML document parsing failed while patching.
+    #[error("failed to parse TOML document at {path}: {source}")]
+    TomlEdit {
+        /// Affected file path.
+        path: PathBuf,
+        /// Underlying `toml_edit` parse error (boxed to keep `ConfigError` small).
+        #[source]
+        source: Box<toml_edit::TomlError>,
+    },
     /// Semantic validation of settings failed.
     #[error("invalid settings: {0}")]
     Validation(String),
@@ -93,6 +118,76 @@ impl ConfigStore {
         self.paths.ensure_dirs()?;
         let body = toml::to_string_pretty(settings)?;
         atomic_write(&self.paths.settings_file(), body.as_bytes())
+    }
+
+    /// Merges a partial JSON patch into `settings.toml` while preserving user comments and key
+    /// ordering via `toml_edit`, validating the full [`UserSettings`] before atomic commit.
+    ///
+    /// Only top-level core sections (`general`, `bar`, `theme`, `ime`, `polkit`, `wallpaper`,
+    /// `idle`) are accepted; plugin overrides must go through [`Self::patch_plugin_settings`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError`] if any section is unknown, parsing or validation fails, or atomic
+    /// persistence fails. On error, `settings.toml` on disk is left untouched.
+    pub fn patch_settings(
+        &self,
+        patch: &JsonMap<String, JsonValue>,
+    ) -> Result<UserSettings, ConfigError> {
+        let path = self.paths.settings_file();
+        let mut doc = load_toml_document(&path)?;
+        for (section, value) in patch {
+            if !ALLOWED_PATCH_SECTIONS.contains(&section.as_str()) {
+                return Err(ConfigError::Validation(format!(
+                    "unsupported settings patch section {section:?}"
+                )));
+            }
+            let Some(section_map) = value.as_object() else {
+                return Err(ConfigError::Validation(format!(
+                    "settings patch section {section:?} must be an object"
+                )));
+            };
+            let table = ensure_table(doc.as_table_mut(), section, false)?;
+            merge_json_into_table(table, section_map)?;
+        }
+        self.commit_patched_document(&path, &doc)
+    }
+
+    /// Merges a partial JSON patch into `[plugin_settings."<plugin_id>"]` in `settings.toml` while
+    /// preserving comments and unrelated sections, validating the full [`UserSettings`] before
+    /// atomic commit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError`] if parsing, validation, or atomic persistence fails.
+    pub fn patch_plugin_settings(
+        &self,
+        plugin_id: &PluginId,
+        patch: &JsonMap<String, JsonValue>,
+    ) -> Result<UserSettings, ConfigError> {
+        let path = self.paths.settings_file();
+        let mut doc = load_toml_document(&path)?;
+        let plugins_table = ensure_table(doc.as_table_mut(), "plugin_settings", true)?;
+        let plugin_table = ensure_table(plugins_table, plugin_id.as_str(), false)?;
+        merge_json_into_table(plugin_table, patch)?;
+        self.commit_patched_document(&path, &doc)
+    }
+
+    fn commit_patched_document(
+        &self,
+        path: &Path,
+        doc: &DocumentMut,
+    ) -> Result<UserSettings, ConfigError> {
+        let rendered = doc.to_string();
+        let validated: UserSettings =
+            toml::from_str(&rendered).map_err(|source| ConfigError::TomlRead {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        validated.validate().map_err(ConfigError::Validation)?;
+        self.paths.ensure_dirs()?;
+        atomic_write(path, rendered.as_bytes())?;
+        Ok(validated)
     }
 
     /// Loads `state.toml`, returning [`RuntimeState::default()`] when absent.
@@ -161,6 +256,141 @@ impl ConfigStore {
             source: io::Error::from(err),
         })?;
         Ok(file)
+    }
+}
+
+fn load_toml_document(path: &Path) -> Result<DocumentMut, ConfigError> {
+    let raw = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(source) => {
+            return Err(ConfigError::Io {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    raw.parse::<DocumentMut>()
+        .map_err(|source| ConfigError::TomlEdit {
+            path: path.to_path_buf(),
+            source: Box::new(source),
+        })
+}
+
+fn ensure_table<'a>(
+    parent: &'a mut TomlTable,
+    key: &str,
+    implicit: bool,
+) -> Result<&'a mut TomlTable, ConfigError> {
+    if !parent.contains_key(key) {
+        let mut table = TomlTable::new();
+        table.set_implicit(implicit);
+        parent.insert(key, TomlItem::Table(table));
+    }
+    parent
+        .get_mut(key)
+        .and_then(TomlItem::as_table_mut)
+        .ok_or_else(|| ConfigError::Validation(format!("expected TOML table at {key:?}")))
+}
+
+fn merge_json_into_table(
+    table: &mut TomlTable,
+    patch: &JsonMap<String, JsonValue>,
+) -> Result<(), ConfigError> {
+    for (key, value) in patch {
+        match value {
+            JsonValue::Null => {
+                table.remove(key);
+            }
+            JsonValue::Object(nested) => {
+                let subtable = ensure_table(table, key, false)?;
+                merge_json_into_table(subtable, nested)?;
+            }
+            JsonValue::Array(items)
+                if !items.is_empty() && items.iter().all(JsonValue::is_object) =>
+            {
+                let mut aot = ArrayOfTables::new();
+                for item in items {
+                    let obj = item
+                        .as_object()
+                        .expect("array of objects element is an object");
+                    aot.push(json_object_to_table(obj)?);
+                }
+                table.insert(key, TomlItem::ArrayOfTables(aot));
+            }
+            JsonValue::Array(items) if items.is_empty() => {
+                // Keep empty arrays as `key = []` (also clears prior [[array.of.tables]] cleanly).
+                set_preserving_decor(table, key, TomlValue::Array(TomlArray::new()));
+            }
+            _ => {
+                let toml_value = json_to_toml_value(value, key)?;
+                set_preserving_decor(table, key, toml_value);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn set_preserving_decor(table: &mut TomlTable, key: &str, mut value: TomlValue) {
+    if let Some(existing) = table.get(key).and_then(TomlItem::as_value) {
+        *value.decor_mut() = existing.decor().clone();
+    }
+    table.insert(key, TomlItem::Value(value));
+}
+
+fn json_object_to_table(obj: &JsonMap<String, JsonValue>) -> Result<TomlTable, ConfigError> {
+    let mut table = TomlTable::new();
+    for (key, value) in obj {
+        if value.is_null() {
+            continue;
+        }
+        let toml_value = json_to_toml_value(value, key)?;
+        table.insert(key, TomlItem::Value(toml_value));
+    }
+    Ok(table)
+}
+
+fn json_to_toml_value(value: &JsonValue, context: &str) -> Result<TomlValue, ConfigError> {
+    match value {
+        JsonValue::Null => Err(ConfigError::Validation(format!(
+            "null is not allowed inside array/inline table at {context:?}"
+        ))),
+        JsonValue::Bool(b) => Ok(TomlValue::from(*b)),
+        JsonValue::Number(num) => {
+            if let Some(i) = num.as_i64() {
+                Ok(TomlValue::from(i))
+            } else if let Some(u) = num.as_u64() {
+                i64::try_from(u).map(TomlValue::from).map_err(|_| {
+                    ConfigError::Validation(format!(
+                        "integer out of TOML range at {context:?}: {u}"
+                    ))
+                })
+            } else if let Some(f) = num.as_f64().filter(|f| f.is_finite()) {
+                Ok(TomlValue::from(f))
+            } else {
+                Err(ConfigError::Validation(format!(
+                    "non-finite number at {context:?}"
+                )))
+            }
+        }
+        JsonValue::String(s) => Ok(TomlValue::from(s.as_str())),
+        JsonValue::Array(items) => {
+            let mut arr = TomlArray::new();
+            for item in items {
+                arr.push(json_to_toml_value(item, context)?);
+            }
+            Ok(TomlValue::Array(arr))
+        }
+        JsonValue::Object(map) => {
+            let mut inline = InlineTable::new();
+            for (k, v) in map {
+                if v.is_null() {
+                    continue;
+                }
+                inline.insert(k, json_to_toml_value(v, k)?);
+            }
+            Ok(TomlValue::InlineTable(inline))
+        }
     }
 }
 
@@ -484,5 +714,93 @@ switch_osd = false
         let settings = store.load_settings().unwrap();
         assert!(!settings.polkit.enabled);
         assert!(!settings.public_summary().polkit.enabled);
+    }
+
+    #[test]
+    fn patches_settings_losslessly_preserving_comments_and_validating_before_write() {
+        let (_dir, store) = test_store();
+        store.paths().ensure_dirs().unwrap();
+        let path = store.paths().settings_file();
+        let initial = r##"# User top-level comment
+[bar]
+# Keep my bar comment
+position = "top" # inline comment
+gaps = 14
+
+[theme]
+mode = "dark"
+seed_color = "#A6C8FF"
+"##;
+        fs::write(&path, initial).unwrap();
+
+        let patch: JsonMap<String, JsonValue> = serde_json::from_value(serde_json::json!({
+            "bar": { "style": "docked", "gaps": 10 },
+            "theme": { "motion_scheme": "expressive", "seed_color": null },
+            "idle": {
+                "rules": [
+                    { "name": "lock", "enabled": true, "timeout_seconds": 300, "action": "lock" }
+                ]
+            }
+        }))
+        .unwrap();
+        let committed = store.patch_settings(&patch).unwrap();
+        assert_eq!(committed.bar.style, crate::settings::BarStyle::Docked);
+        assert_eq!(committed.bar.gaps, 10);
+        assert_eq!(committed.bar.position, BarPosition::Top);
+        assert_eq!(
+            committed.theme.motion_scheme,
+            crate::settings::MotionScheme::Expressive
+        );
+        assert_eq!(committed.theme.seed_color, None);
+        assert_eq!(committed.idle.rules.len(), 1);
+        assert_eq!(committed.idle.rules[0].name, "lock");
+
+        let on_disk = fs::read_to_string(&path).unwrap();
+        assert!(on_disk.contains("# User top-level comment"), "{on_disk}");
+        assert!(on_disk.contains("# Keep my bar comment"), "{on_disk}");
+        assert!(on_disk.contains("# inline comment"), "{on_disk}");
+        assert!(!on_disk.contains("seed_color"), "{on_disk}");
+
+        // Invalid patch must fail validation without mutating the file on disk.
+        let bad_patch: JsonMap<String, JsonValue> = serde_json::from_value(serde_json::json!({
+            "bar": { "gaps": 999 }
+        }))
+        .unwrap();
+        assert!(matches!(
+            store.patch_settings(&bad_patch),
+            Err(ConfigError::Validation(_))
+        ));
+        assert_eq!(fs::read_to_string(&path).unwrap(), on_disk);
+
+        // Plugin settings must be rejected via patch_settings and written via patch_plugin_settings.
+        let forbidden: JsonMap<String, JsonValue> = serde_json::from_value(serde_json::json!({
+            "plugin_settings": {}
+        }))
+        .unwrap();
+        assert!(matches!(
+            store.patch_settings(&forbidden),
+            Err(ConfigError::Validation(_))
+        ));
+
+        let plugin_id = PluginId::try_new("z-shell/ai-usage").unwrap();
+        let plugin_patch: JsonMap<String, JsonValue> = serde_json::from_value(serde_json::json!({
+            "refresh_seconds": 120,
+            "codex_resets_url": "https://codex-resets.com/api"
+        }))
+        .unwrap();
+        let with_plugin = store
+            .patch_plugin_settings(&plugin_id, &plugin_patch)
+            .unwrap();
+        assert!(with_plugin.plugin_settings.contains_key(&plugin_id));
+        let reloaded = store.load_settings().unwrap();
+        assert_eq!(
+            reloaded.plugin_settings[&plugin_id]["refresh_seconds"].as_integer(),
+            Some(120)
+        );
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("# User top-level comment")
+        );
     }
 }

@@ -115,6 +115,20 @@ pub enum ThemeBackend {
     Matugen,
 }
 
+/// Material Design 3 motion physics scheme (`[theme].motion_scheme`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum MotionScheme {
+    /// Crisp high-damping springs for everyday desktop productivity.
+    #[default]
+    Standard,
+    /// Livelier Material 3 Expressive spatial springs.
+    Expressive,
+    /// Accessibility reduced motion: zero spatial displacement, fast opacity fades (`WCAG 2.2 SC 2.3.3`).
+    Reduced,
+}
+
 /// General daemon-wide switches.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -188,6 +202,8 @@ pub struct ThemeSettings {
     pub seed_color: Option<String>,
     /// Palette generator backend (`builtin` or `matugen`).
     pub backend: ThemeBackend,
+    /// Material Design 3 motion physics scheme (`standard`, `expressive`, or `reduced`).
+    pub motion_scheme: MotionScheme,
     /// Reversible opt-in GTK 3/4 theme linking (off by default).
     pub gtk_linking: bool,
 }
