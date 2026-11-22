@@ -10,7 +10,7 @@ import { useShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import {
   DEFAULT_BAR_SETTINGS, filterWorkspacesForMonitor, findActiveWindowForMonitor,
-  formatBarClock, formatSurfaceName, resolveBarLayout, resolveBarPopupAnchor, resolveDesktopApp, selectActiveMediaPlayer,
+  formatBarClock, formatSurfaceName, isImeTrayItem, resolveBarLayout, resolveBarPopupAnchor, resolveDesktopApp, selectActiveMediaPlayer,
   type ResolvedBarLayout, type TrayItem, type WaylandWindow, type WaylandWorkspace,
 } from "../topics.ts";
 
@@ -640,6 +640,10 @@ function BarContent(props: {
     return active ? [active.metadata.title, active.metadata.artists.join(", ")].filter(Boolean).join(" — ") || active.identity : "";
   });
   const slots = createMemo(() => store.pluginBarWidgets().filter(slot => slot.outputId == null || slot.outputId === props.monitor.id));
+  const showImeIndicator = createMemo(() => Boolean(store.ime.data()?.available && store.ime.data()?.mode !== "disabled"));
+  const trayItems = createMemo(() =>
+    (store.tray.data()?.items ?? []).filter(item => !(showImeIndicator() && isImeTrayItem(item))),
+  );
   const activateWorkspace = (id: number) => { void invokePublic("wayland.workspace.activate", { workspace_id: id }); };
 
   const rootStyle = createMemo((): StyleObj => {
@@ -795,7 +799,7 @@ function BarContent(props: {
             </>;
           }}
         </Show>
-        <Show when={(store.tray.data()?.items.length ?? 0) > 0}>
+        <Show when={trayItems().length > 0}>
           {() => {
             const trayRef = props.blur.useTarget();
             return <>
@@ -803,7 +807,7 @@ function BarContent(props: {
               <box ref={trayRef} testId="bar-tray" style={vertical()
                 ? { ...segmentChrome(true, docked()), width: docked() ? "30px" : "40px", gap: "2px", padding: "8px 0" }
                 : { ...segmentChrome(false, docked()), height: docked() ? "28px" : "32px", gap: "2px", padding: "0 4px" }}>
-                <For each={store.tray.data()?.items} keyed={item => item.id}>
+                <For each={trayItems()} keyed={item => item.id}>
                   {item => <TrayButton item={item()} vertical={vertical()} monitorId={props.monitor.id} surfaceName={surfaceName()} layout={props.layout} />}
                 </For>
               </box>

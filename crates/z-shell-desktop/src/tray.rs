@@ -111,6 +111,8 @@ struct Endpoint {
 
 #[derive(Default, PartialEq, Eq, Serialize)]
 struct ItemInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    app_id: Option<String>,
     title: Option<String>,
     category: Option<String>,
     status: Option<String>,
@@ -970,6 +972,7 @@ fn parse_properties(
     Some(Properties {
         interface,
         info: ItemInfo {
+            app_id: get("Id").and_then(as_str).and_then(text),
             title: get("Title").and_then(as_str).and_then(text),
             category: get("Category").and_then(as_str).and_then(text),
             status: status.and_then(text),

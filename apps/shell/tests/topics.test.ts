@@ -19,6 +19,7 @@ import {
   formatSurfaceName,
   formatTrackTimeUs,
   hasWindowsOnMonitor,
+  isImeTrayItem,
   maxThermalCelsius,
   resolveActiveMonitor,
   resolveBarLayout,
@@ -862,5 +863,28 @@ describe("splitNotificationActions", () => {
         { key: "copy", label: "Copy" },
       ],
     });
+  });
+});
+
+describe("isImeTrayItem", () => {
+  const baseTray = {
+    id: ":1.42/StatusNotifierItem",
+    title: null,
+    category: "ApplicationStatus",
+    status: "Active",
+    icon_name: null,
+    item_is_menu: false,
+    tooltip: null,
+    icon: null,
+    menu: null,
+  } as const;
+
+  test("matches Fcitx5/IBus SNI tray items without hiding ordinary apps", () => {
+    expect(isImeTrayItem({ ...baseTray, app_id: "Fcitx", icon_name: "input-keyboard" })).toBe(true);
+    expect(isImeTrayItem({ ...baseTray, icon_name: "fcitx-rime" })).toBe(true);
+    expect(isImeTrayItem({ ...baseTray, category: "SystemServices", title: "Input Method" })).toBe(true);
+    expect(isImeTrayItem({ ...baseTray, category: "SystemServices", title: "输入法" })).toBe(true);
+    expect(isImeTrayItem({ ...baseTray, app_id: "discord", title: "Discord" })).toBe(false);
+    expect(isImeTrayItem({ ...baseTray, title: "Polychromatic" })).toBe(false);
   });
 });

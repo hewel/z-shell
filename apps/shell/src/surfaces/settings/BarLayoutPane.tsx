@@ -32,11 +32,15 @@ const GAP_PRESETS = [0, 8, 14, 20] as const;
 export function BarLayoutPane(): NativeChild {
   const { settings, outputs, monitors, invokeHost } = useShellStore();
   const bar = () => settings.data()?.bar;
+  const ime = () => settings.data()?.ime;
   const style = (): BarStyle => bar()?.style ?? "floating";
   const position = (): BarPosition => bar()?.position ?? "top";
   const gaps = () => bar()?.gaps ?? 14;
   const patchBar = (patch: Record<string, unknown>) => {
     void invokeHost("settings.patch", { bar: patch });
+  };
+  const patchIme = (patch: Record<string, unknown>) => {
+    void invokeHost("settings.patch", { ime: patch });
   };
   const primaryOutput = createMemo(() => outputs.data()?.outputs[0]);
   const monitorLabel = createMemo(() => {
@@ -132,6 +136,12 @@ export function BarLayoutPane(): NativeChild {
           <SettingsSwitch testId="settings-bar-seconds" label="Clock seconds (1Hz)" detail="Off by default to prevent flicker"
             checked={bar()?.clock_seconds === true}
             onToggle={() => patchBar({ clock_seconds: !(bar()?.clock_seconds === true) })} />
+        </row>
+        <row style={{ gap: "8px", width: "100%" }}>
+          <SettingsSwitch testId="settings-ime-osd" label="IME switch OSD" detail="Show popup when active input method changes"
+            checked={ime()?.switch_osd !== false}
+            onToggle={() => patchIme({ switch_osd: !(ime()?.switch_osd !== false) })} />
+          <box ariaHidden style={{ ...grow }} />
         </row>
       </column>
 

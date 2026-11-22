@@ -280,6 +280,7 @@ export interface TrayMenuNode {
 
 export interface TrayItem {
   readonly id: string;
+  readonly app_id?: string | null;
   readonly title: string | null;
   readonly category: string | null;
   readonly status: string | null;
@@ -323,6 +324,20 @@ export interface NotificationItem {
  * labelled buttons so empty-label `"default"` actions (e.g. Ghostty / Chrome / Electron) never
  * render blank pill buttons while remaining invocable via card click.
  */
+/**
+ * Identifies SNI tray icons belonging to an input method daemon (Fcitx5 / IBus) so the bar can
+ * omit duplicate tray icons while the dedicated `bar-ime` capsule is active.
+ */
+export function isImeTrayItem(item: TrayItem): boolean {
+  const appId = item.app_id?.trim().toLowerCase();
+  if (appId === "fcitx" || appId === "fcitx5" || appId === "ibus") return true;
+  const icon = item.icon_name?.trim().toLowerCase();
+  if (icon && (icon === "fcitx" || icon.startsWith("fcitx-") || icon === "ibus" || icon.startsWith("ibus-"))) {
+    return true;
+  }
+  return item.category === "SystemServices" && (item.title === "Input Method" || item.title === "输入法");
+}
+
 export function splitNotificationActions(actions: readonly NotificationAction[]): {
   readonly defaultAction: NotificationAction | undefined;
   readonly buttonActions: readonly NotificationAction[];
