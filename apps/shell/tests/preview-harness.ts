@@ -213,6 +213,7 @@ export function readCapture(out: string, surface: string, captureId: string) {
     frame: JSON.parse(readFileSync(`${capture}.frame.json`, "utf8")) as {
       readonly renderer: { readonly alphaMode: string };
       readonly blurRegion?: RecordedBlurRegion;
+      readonly windowGeometry?: DeviceBounds;
     },
     tree: JSON.parse(readFileSync(`${capture}.tree.json`, "utf8")) as {
       readonly nodes: readonly PreviewTreeNode[];
@@ -314,6 +315,15 @@ export function pixel(image: DecodedPng, x: number, y: number): number[] {
 export function maxRowAlpha(image: DecodedPng, y: number): number {
   let max = 0;
   for (let x = 0; x < image.width; x++) {
+    const alpha = image.data[(y * image.width + x) * 4 + 3] ?? 0;
+    if (alpha > max) max = alpha;
+  }
+  return max;
+}
+
+export function maxColAlpha(image: DecodedPng, x: number): number {
+  let max = 0;
+  for (let y = 0; y < image.height; y++) {
     const alpha = image.data[(y * image.width + x) * 4 + 3] ?? 0;
     if (alpha > max) max = alpha;
   }

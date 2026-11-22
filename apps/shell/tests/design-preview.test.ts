@@ -12,6 +12,7 @@ import {
   createVirtualTimeline,
   diffRegionPixels,
   expectCleanPreview,
+  maxColAlpha,
   maxRowAlpha,
   pixel,
   pixelChannelDiff,
@@ -301,12 +302,15 @@ describe("apps/shell design geometry & pixel lint", () => {
       expect(maxRowAlpha(bar.image, bar.image.height - 1), "bar bottom edge shadow clipping").toBeLessThanOrEqual(8);
       expect(maxRowAlpha(dock.image, 0), "dock top edge shadow clipping").toBeLessThanOrEqual(8);
 
-      // Rounded Surface Corner Guard: transparent rounded PopupSurface corners must remain pure transparent.
-      for (const [label, capture] of [
-        ["quick-settings", qs],
-        ["quick-settings-battery", qsBattery],
-        ["calendar", cal],
-        ["media", media],
+      // Rounded Surface Corner & geometryInsets Outer Shadow Guard:
+      // PopupSurface reserves POPOVER_SHADOW_INSETS (20/28/38/28) around visual windowGeometry G,
+      // renders --shadow-level-2 cleanly in the bleed gutter fading to alpha <= 8 at all 4 buffer edges,
+      // and keeps blurRegion strictly inside G.
+      for (const [label, capture, rootTestId] of [
+        ["quick-settings", qs, "panel-root-quick-settings"],
+        ["quick-settings-battery", qsBattery, "panel-root-quick-settings"],
+        ["calendar", cal, "panel-root-calendar"],
+        ["media", media, "panel-root-media"],
       ] as const) {
         const w = capture.image.width - 1;
         const h = capture.image.height - 1;
@@ -314,10 +318,34 @@ describe("apps/shell design geometry & pixel lint", () => {
         expect(pixel(capture.image, w, 0), `${label} top-right corner transparent`).toEqual([0, 0, 0, 0]);
         expect(pixel(capture.image, 0, h), `${label} bottom-left corner transparent`).toEqual([0, 0, 0, 0]);
         expect(pixel(capture.image, w, h), `${label} bottom-right corner transparent`).toEqual([0, 0, 0, 0]);
-        // Declarative ext_background_effect_v1 blurRegion: <=45 strictly interior strips, zero corner leak.
+        expect(maxRowAlpha(capture.image, 0), `${label} top shadow edge <= 8`).toBeLessThanOrEqual(8);
+        expect(maxRowAlpha(capture.image, h), `${label} bottom shadow edge <= 8`).toBeLessThanOrEqual(8);
+        expect(maxColAlpha(capture.image, 0), `${label} left shadow edge <= 8`).toBeLessThanOrEqual(8);
+        expect(maxColAlpha(capture.image, w), `${label} right shadow edge <= 8`).toBeLessThanOrEqual(8);
+
+        const geom = capture.frame.windowGeometry;
+        expect(geom, `${label} records xdg windowGeometry`).toBeDefined();
+        expect(geom!.x, `${label} windowGeometry.x = left inset 28`).toBe(28);
+        expect(geom!.y, `${label} windowGeometry.y = top inset 20`).toBe(20);
+        expect(geom!.width, `${label} windowGeometry.width = 396`).toBe(396);
+        expect(capture.image.width, `${label} surface buffer width = 396 + 56`).toBe(396 + 56);
+        expect(capture.image.height, `${label} surface buffer height = visual height + 58`).toBe(geom!.height + 58);
+
+        const cardBounds = treeNode(capture.tree, rootTestId).boundsLogical!;
+        expect(Math.round(cardBounds.x), `${label} visual card x`).toBe(28);
+        expect(Math.round(cardBounds.y), `${label} visual card y`).toBe(20);
+        // Bottom bleed gutter right below visual card renders visible drop shadow alpha.
+        const shadowSample = pixel(
+          capture.image,
+          Math.round(geom!.x + geom!.width / 2),
+          Math.round(geom!.y + geom!.height + 6),
+        );
+        expect(shadowSample[3], `${label} outer shadow visible in bottom bleed gutter`).toBeGreaterThan(15);
+
+        // Declarative ext_background_effect_v1 blurRegion: <=45 strictly interior strips inside visual card G.
         assertRoundedBlurStrips(
           capture.frame.blurRegion,
-          { x: 0, y: 0, width: capture.image.width, height: capture.image.height },
+          geom!,
           22,
           `${label} blurRegion`,
         );
@@ -458,16 +486,16 @@ describe("apps/shell design geometry & pixel lint", () => {
         expect(slider.boundsLogical!.width).toBe(firstSlider.width);
       }
 
-      // Settled surface width tiers and Zero-Scroll auto-height match DESIGN.md.
+      // Settled surface width tiers and Zero-Scroll auto-height match DESIGN.md (visual windowGeometry excluding shadow bleed).
       expect(Math.round(treeNode(qs.tree, "panel-root-quick-settings").boundsLogical!.width)).toBe(396);
-      expect(qs.image.height).toBeLessThanOrEqual(760);
+      expect(qs.frame.windowGeometry!.height).toBeLessThanOrEqual(760);
       expect(Math.round(treeNode(qsBattery.tree, "panel-root-quick-settings").boundsLogical!.width)).toBe(396);
       expect(treeNode(qsBattery.tree, "qs-page-battery").boundsLogical).toBeDefined();
-      expect(qsBattery.image.height).toBeLessThanOrEqual(760);
+      expect(qsBattery.frame.windowGeometry!.height).toBeLessThanOrEqual(760);
       expect(Math.round(treeNode(cal.tree, "panel-root-calendar").boundsLogical!.width)).toBe(396);
-      expect(cal.image.height).toBeLessThanOrEqual(760);
+      expect(cal.frame.windowGeometry!.height).toBeLessThanOrEqual(760);
       expect(Math.round(treeNode(media.tree, "panel-root-media").boundsLogical!.width)).toBe(396);
-      expect(media.image.height).toBeLessThanOrEqual(420);
+      expect(media.frame.windowGeometry!.height).toBeLessThanOrEqual(420);
       expect(Math.round(treeNode(power.tree, "power-dialog-card").boundsLogical!.width)).toBe(360);
 
       // Settings WindowSurface (820x600 flush toplevel -> 216px left sidebar + 604px content pane).
@@ -878,10 +906,12 @@ describe("apps/shell design geometry & pixel lint", () => {
       const trayMenuLong = readCapture(out, "tray-menu", "tray-menu-long");
 
       // Long nested tray menu auto-sizes width (beyond old 220px cap) and height (beyond old 340px cap)
-      // with all 4 rounded corners intact and bottom row fully inside surface bounds.
-      expect(trayMenuLong.image.width, "tray-menu widens for long nested labels").toBeGreaterThanOrEqual(270);
-      expect(trayMenuLong.image.width, "tray-menu bounded within compact 360px tier").toBeLessThanOrEqual(360);
-      expect(trayMenuLong.image.height, "tray-menu expands past old 340px clip").toBeGreaterThan(360);
+      // with geometryInsets outer shadow bleed, all 4 corners transparent, and bottom row inside visual windowGeometry.
+      const trayGeom = trayMenuLong.frame.windowGeometry!;
+      expect(trayGeom, "tray-menu records windowGeometry").toBeDefined();
+      expect(trayGeom.width, "tray-menu widens for long nested labels").toBeGreaterThanOrEqual(270);
+      expect(trayGeom.width, "tray-menu bounded within compact 360px tier").toBeLessThanOrEqual(360);
+      expect(trayGeom.height, "tray-menu expands past old 340px clip").toBeGreaterThan(360);
       {
         const w = trayMenuLong.image.width - 1;
         const h = trayMenuLong.image.height - 1;
@@ -889,11 +919,15 @@ describe("apps/shell design geometry & pixel lint", () => {
         expect(pixel(trayMenuLong.image, w, 0), "tray-menu top-right transparent").toEqual([0, 0, 0, 0]);
         expect(pixel(trayMenuLong.image, 0, h), "tray-menu bottom-left transparent").toEqual([0, 0, 0, 0]);
         expect(pixel(trayMenuLong.image, w, h), "tray-menu bottom-right transparent").toEqual([0, 0, 0, 0]);
+        expect(maxRowAlpha(trayMenuLong.image, 0), "tray-menu top shadow edge <= 8").toBeLessThanOrEqual(8);
+        expect(maxRowAlpha(trayMenuLong.image, h), "tray-menu bottom shadow edge <= 8").toBeLessThanOrEqual(8);
+        expect(maxColAlpha(trayMenuLong.image, 0), "tray-menu left shadow edge <= 8").toBeLessThanOrEqual(8);
+        expect(maxColAlpha(trayMenuLong.image, w), "tray-menu right shadow edge <= 8").toBeLessThanOrEqual(8);
         const lastItem = treeNode(trayMenuLong.tree, "tray-menu-item-10").boundsLogical!;
-        expect(lastItem.y + lastItem.height, "last tray menu item fully inside surface").toBeLessThanOrEqual(trayMenuLong.image.height - 6);
+        expect(lastItem.y + lastItem.height, "last tray menu item fully inside visual card").toBeLessThanOrEqual(trayGeom.y + trayGeom.height - 6);
         assertRoundedBlurStrips(
           trayMenuLong.frame.blurRegion,
-          { x: 0, y: 0, width: trayMenuLong.image.width, height: trayMenuLong.image.height },
+          trayGeom,
           16,
           "tray-menu blurRegion",
         );
@@ -1185,7 +1219,8 @@ describe("apps/shell design geometry & pixel lint", () => {
       const powerLight = readCapture(out, "power-dialog", "power-light");
 
       // Light Mode surface pixels must be genuinely high-luminance (matching #EDEDF4 / #F9F9FF).
-      const qsBg = pixel(qsLight.image, 10, 10);
+      const qsLightCard = treeNode(qsLight.tree, "panel-root-quick-settings").boundsDevice!;
+      const qsBg = pixel(qsLight.image, Math.round(qsLightCard.x + 12), Math.round(qsLightCard.y + 12));
       expect(qsBg[0]! + qsBg[1]! + qsBg[2]!, "qs-light surface-container bright RGB").toBeGreaterThan(680);
       const settingsCorner = pixel(settingsLight.image, 0, 0);
       expect(settingsCorner[3], "settings-light opaque toplevel").toBe(255);

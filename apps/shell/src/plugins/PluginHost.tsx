@@ -11,7 +11,7 @@ import {
   useMotionScheme,
   type M3Spring,
 } from "../motion.ts";
-import { POPOVER_FRAME_STYLE, resolvePopoverGeometry } from "../panels/ShellPanels.tsx";
+import { POPOVER_BLEED_STYLE, POPOVER_FRAME_STYLE, POPOVER_SHADOW_INSETS, resolvePopoverGeometry } from "../panels/ShellPanels.tsx";
 import { useShellStore, type ShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import { PANEL_MAX_HEIGHTS, formatSurfaceName, resolveBarLayout, resolveBarPopupAnchor, type BarPosition, type BarStyle } from "../topics.ts";
@@ -50,21 +50,30 @@ function PluginPanelFrame(props: {
   position: BarPosition;
   spatial: M3Spring;
   opacity: M3Spring;
+  cardRef?: (node: NativeNode) => void;
   blurRef?: (node: NativeNode) => void;
   children: NativeChild;
 }): NativeChild {
   useShellTheme(props.theme.data);
   const scheme = useMotionScheme();
   return (
-    <box ref={props.blurRef} style={{ width: "100%" }}>
-      <box data-theme-rev={String(props.theme.revision())} style={{
-        ...POPOVER_FRAME_STYLE,
-        maxHeight: `${PANEL_MAX_HEIGHTS.plugin}px`,
-        ...panelMotionStyle(props.spatial(), props.position, false, {
-          opacity: props.opacity(),
-          reduced: scheme() === "reduced",
-        }),
-      }}>
+    <box style={POPOVER_BLEED_STYLE}>
+      <box
+        ref={node => {
+          props.cardRef?.(node);
+          props.blurRef?.(node);
+        }}
+        testId="plugin-panel-root"
+        data-theme-rev={String(props.theme.revision())}
+        style={{
+          ...POPOVER_FRAME_STYLE,
+          maxHeight: `${PANEL_MAX_HEIGHTS.plugin}px`,
+          ...panelMotionStyle(props.spatial(), props.position, false, {
+            opacity: props.opacity(),
+            reduced: scheme() === "reduced",
+          }),
+        }}
+      >
         <scroll style={{
           width: "100%",
           maxHeight: `${PANEL_MAX_HEIGHTS.plugin}px`,
@@ -273,12 +282,15 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
             dismissPluginPanel();
             openSettingsWindow(page ? page.id : "appearance");
           };
+          const [cardNode, setCardNode] = createSignal<NativeNode | null>(null);
           const blur = createSingleNodeRoundedBlur(22, () => panelPresence.visible() && panelPresence.progress.settled());
           return (
             <PopupSurface name={formatSurfaceName("plugin-panel", instanceId)} parent={formatSurfaceName("bar", outputId)} anchorRect={current().anchorRect}
               width={width} height="auto" minHeight={80} maxHeight={PANEL_MAX_HEIGHTS.plugin}
+              geometryInsets={POPOVER_SHADOW_INSETS}
+              inputRegion={cardNode() ? [cardNode()!] : []}
               placement={geometry().placement} offset={geometry().offset} grab blurRegion={blur.region()} onDismiss={dismissPluginPanelInstant}>
-              <PluginPanelFrame theme={theme} position={current().position} spatial={panelPresence.progress} opacity={panelPresence.opacity} blurRef={blur.ref}>
+              <PluginPanelFrame theme={theme} position={current().position} spatial={panelPresence.progress} opacity={panelPresence.opacity} cardRef={setCardNode} blurRef={blur.ref}>
                 <PanelComponent client={publicClient} onClose={dismissPluginPanel} onOpenSettings={onOpenSettings} />
               </PluginPanelFrame>
             </PopupSurface>

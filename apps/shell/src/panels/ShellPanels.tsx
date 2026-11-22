@@ -1,4 +1,4 @@
-import { PopupSurface, Show, createMemo, untrack, type NativeChild, type NativeNode, type PopupSurfacePlacement } from "@hewel/zgui";
+import { PopupSurface, Show, createMemo, createSignal, untrack, type NativeChild, type NativeNode, type PopupSurfacePlacement } from "@hewel/zgui";
 import { createSingleNodeRoundedBlur } from "../blur.ts";
 import {
   createRetainedPresence,
@@ -24,11 +24,22 @@ const panels = {
   clipboard: { width: 560, maxHeight: PANEL_MAX_HEIGHTS.clipboard, Component: ClipboardPanel },
 };
 
+/** Outer drawable shadow bleed for Level 2 popovers (`--shadow-level-2`: `0 10px 24px`). */
+export const POPOVER_SHADOW_INSETS = { top: 20, right: 28, bottom: 38, left: 28 } as const;
+
+export const POPOVER_BLEED_STYLE = {
+  width: "100%",
+  padding: `${POPOVER_SHADOW_INSETS.top}px ${POPOVER_SHADOW_INSETS.right}px ${POPOVER_SHADOW_INSETS.bottom}px ${POPOVER_SHADOW_INSETS.left}px`,
+  boxSizing: "border-box",
+  backgroundColor: "transparent",
+} as const;
+
 export const POPOVER_FRAME_STYLE = {
   width: "100%",
   borderRadius: "22px",
   backgroundColor: "var(--color-surface-container)",
   border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
+  boxShadow: "var(--shadow-level-2)",
   overflow: "hidden",
   fontFamily: "var(--font-sans)",
 } as const;
@@ -71,21 +82,30 @@ function PanelContent(props: {
   theme: ShellStore["theme"];
   spatial: M3Spring;
   opacity: M3Spring;
+  cardRef?: (node: NativeNode) => void;
   blurRef?: (node: NativeNode) => void;
   children: NativeChild;
 }) {
   useShellTheme(props.theme.data);
   const scheme = useMotionScheme();
   return (
-    <box ref={props.blurRef} style={{ width: "100%" }}>
-      <box testId={`panel-root-${props.id}`} data-theme-rev={String(props.theme.revision())} style={{
-        ...POPOVER_FRAME_STYLE,
-        maxHeight: `${props.maxHeight}px`,
-        ...panelMotionStyle(props.spatial(), props.position, props.centered, {
-          opacity: props.opacity(),
-          reduced: scheme() === "reduced",
-        }),
-      }}>
+    <box style={POPOVER_BLEED_STYLE}>
+      <box
+        ref={node => {
+          props.cardRef?.(node);
+          props.blurRef?.(node);
+        }}
+        testId={`panel-root-${props.id}`}
+        data-theme-rev={String(props.theme.revision())}
+        style={{
+          ...POPOVER_FRAME_STYLE,
+          maxHeight: `${props.maxHeight}px`,
+          ...panelMotionStyle(props.spatial(), props.position, props.centered, {
+            opacity: props.opacity(),
+            reduced: scheme() === "reduced",
+          }),
+        }}
+      >
         <box style={{
           width: "100%",
           ...popoverContentMotionStyle(props.spatial(), props.opacity(), scheme() === "reduced"),
@@ -129,13 +149,16 @@ export function ShellPanels(): NativeChild {
           presence.dismissInstant();
           closePanels();
         };
+        const [cardNode, setCardNode] = createSignal<NativeNode | null>(null);
         const blur = createSingleNodeRoundedBlur(22, () => presence.visible() && presence.progress.settled());
         return (
           <PopupSurface name={`panel-${target.id}`} parent={target.parentSurface} anchorRect={target.anchorRect}
             width={width} height="auto" minHeight={80} maxHeight={maxHeight}
+            geometryInsets={POPOVER_SHADOW_INSETS}
+            inputRegion={cardNode() ? [cardNode()!] : []}
             placement={geometry().placement} offset={geometry().offset} grab blurRegion={blur.region()} onDismiss={handleDismiss}>
             <PanelContent id={target.id} maxHeight={maxHeight} position={position()} centered={centered}
-              theme={theme} spatial={presence.progress} opacity={presence.opacity} blurRef={blur.ref}>
+              theme={theme} spatial={presence.progress} opacity={presence.opacity} cardRef={setCardNode} blurRef={blur.ref}>
               <Component />
             </PanelContent>
           </PopupSurface>

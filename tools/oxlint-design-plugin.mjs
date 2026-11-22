@@ -1007,24 +1007,44 @@ const rules = {
   "no-flush-surface-shadow": {
     meta: {
       type: "problem",
-      docs: { description: "Disallow CSS boxShadow on flush PopupSurface/WindowSurface root containers where shadow bleeds into clipped square corners" },
+      docs: { description: "Disallow CSS boxShadow on flush WindowSurface (prefer-no-csd) or PopupSurface containers lacking geometryInsets bleed" },
       schema: [],
     },
     create(context) {
       const FLUSH_FILES = new Set(["ShellPanels.tsx", "PluginHost.tsx", "SettingsWindow.tsx", "BarPopups.tsx"]);
       const basename = path.basename(context.filename ?? "");
       if (!FLUSH_FILES.has(basename)) return {};
+      const isToplevelWindow = basename === "SettingsWindow.tsx";
+      let hasGeometryInsets = false;
+      const shadowNodes = [];
       return {
+        JSXOpeningElement(node) {
+          if (node.name?.type !== "JSXIdentifier" || node.name.name !== "PopupSurface") return;
+          if (
+            (node.attributes ?? []).some(
+              attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === "geometryInsets",
+            )
+          ) {
+            hasGeometryInsets = true;
+          }
+        },
         Property(node) {
           const key = propertyName(node);
           if (key !== "boxShadow" && key !== "box-shadow") return;
           const val = staticString(node.value);
           if (val !== null && val.trim().toLowerCase() === "none") return;
-          context.report({
-            node,
-            message:
-              "Flush Surface Shadow Rule: do not apply CSS boxShadow on flush PopupSurface or WindowSurface containers (shadow leaks outside borderRadius and clips at surface bounds).",
-          });
+          shadowNodes.push(node);
+        },
+        "Program:exit"() {
+          if (!isToplevelWindow && hasGeometryInsets) return;
+          for (const node of shadowNodes) {
+            context.report({
+              node,
+              message: isToplevelWindow
+                ? "Flush Surface Shadow Rule: do not apply CSS boxShadow on WindowSurface (xdg_toplevel prefers compositor-owned shadows)."
+                : "Flush Surface Shadow Rule: do not apply CSS boxShadow on flush PopupSurface containers without geometryInsets bleed (shadow leaks outside borderRadius and clips at surface bounds).",
+            });
+          }
         },
       };
     },

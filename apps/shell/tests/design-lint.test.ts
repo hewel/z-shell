@@ -332,27 +332,35 @@ describe("zshell oxlint design plugin", () => {
     expect(goodHover.status, goodHover.output).toBe(0);
   });
 
-  test("zshell/no-flush-surface-shadow forbids CSS boxShadow on flush PopupSurface/WindowSurface roots", () => {
+  test("zshell/no-flush-surface-shadow forbids CSS boxShadow on WindowSurface and flush PopupSurface roots without geometryInsets", () => {
     const badPopupShadow = lintSnippet(
       "ShellPanels.tsx",
-      `export const s = { borderRadius: "22px", boxShadow: "0 14px 36px rgba(0, 0, 0, 0.50)" };`,
+      `export const s = { borderRadius: "22px", boxShadow: "var(--shadow-level-2)" };`,
       "zshell/no-flush-surface-shadow",
     );
     expect(badPopupShadow.status).not.toBe(0);
 
     const badWindowShadow = lintSnippet(
       "SettingsWindow.tsx",
-      `export const s = { width: "820px", boxShadow: "0 20px 56px rgba(0, 0, 0, 0.60)" };`,
+      `export const s = { width: "820px", boxShadow: "var(--shadow-level-3)" };`,
       "zshell/no-flush-surface-shadow",
     );
     expect(badWindowShadow.status).not.toBe(0);
 
     const badBarPopupShadow = lintSnippet(
       "BarPopups.tsx",
-      `export const s = { borderRadius: "16px", boxShadow: "0 12px 24px rgba(0, 0, 0, 0.45)" };`,
+      `export const s = { borderRadius: "16px", boxShadow: "var(--shadow-level-2)" };`,
       "zshell/no-flush-surface-shadow",
     );
     expect(badBarPopupShadow.status).not.toBe(0);
+
+    const goodInsetPopup = lintSnippet(
+      "BarPopups.tsx",
+      `export const card = { borderRadius: "16px", boxShadow: "var(--shadow-level-2)" };
+       export const view = () => <PopupSurface name="tray-menu" parent="bar" anchorRect={{ x: 0, y: 0, width: 10, height: 10 }} width={220} geometryInsets={{ top: 20, right: 28, bottom: 38, left: 28 }}><box style={card} /></PopupSurface>;`,
+      "zshell/no-flush-surface-shadow",
+    );
+    expect(goodInsetPopup.status, goodInsetPopup.output).toBe(0);
 
     const goodWindow = lintSnippet(
       "SettingsWindow.tsx",

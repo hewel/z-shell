@@ -1,9 +1,9 @@
-import { For, PopupSurface, Show, createMemo, type NativeChild, type NativeNode } from "@hewel/zgui";
+import { For, PopupSurface, Show, createMemo, createSignal, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { MenuItemPrimitive, MenuListPrimitive, MenuRootPrimitive } from "@hewel/zgui/primitives";
 import { createSingleNodeRoundedBlur } from "../blur.ts";
 import { ShellIcon } from "../icons.tsx";
 import { createRetainedPresence, panelMotionStyle, popoverContentMotionStyle, useMotionScheme, type M3Spring } from "../motion.ts";
-import { resolvePopoverGeometry } from "../panels/ShellPanels.tsx";
+import { POPOVER_BLEED_STYLE, POPOVER_SHADOW_INSETS, resolvePopoverGeometry } from "../panels/ShellPanels.tsx";
 import { useShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import type { BarPosition, BarStyle, TrayMenuNode } from "../topics.ts";
@@ -70,9 +70,11 @@ function PopupContent(props: {
   padding: string;
   label: string;
   header?: string;
+  cardTestId?: string;
   position: BarPosition;
   spatial: M3Spring;
   opacity: M3Spring;
+  cardRef?: (node: NativeNode) => void;
   blurRef?: (node: NativeNode) => void;
   onDismiss: () => void;
   children: NativeChild;
@@ -82,21 +84,30 @@ function PopupContent(props: {
   const scheme = useMotionScheme();
   return (
     <MenuRootPrimitive open onDismiss={props.onDismiss}>
-      <box ref={props.blurRef} style={{ width: "100%" }}>
-        <box data-theme-rev={String(theme.revision())} style={{
-          width: "100%",
-          borderRadius: "16px",
-          backgroundColor: "var(--color-surface-container)",
-          border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
-          color: "var(--color-on-surface)",
-          fontFamily: "var(--font-sans)",
-          fontSize: "13px",
-          overflow: "hidden",
-          ...panelMotionStyle(props.spatial(), props.position, false, {
-            opacity: props.opacity(),
-            reduced: scheme() === "reduced",
-          }),
-        }}>
+      <box style={POPOVER_BLEED_STYLE}>
+        <box
+          ref={node => {
+            props.cardRef?.(node);
+            props.blurRef?.(node);
+          }}
+          testId={props.cardTestId ?? null}
+          data-theme-rev={String(theme.revision())}
+          style={{
+            width: "100%",
+            borderRadius: "16px",
+            backgroundColor: "var(--color-surface-container)",
+            border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
+            boxShadow: "var(--shadow-level-2)",
+            color: "var(--color-on-surface)",
+            fontFamily: "var(--font-sans)",
+            fontSize: "13px",
+            overflow: "hidden",
+            ...panelMotionStyle(props.spatial(), props.position, false, {
+              opacity: props.opacity(),
+              reduced: scheme() === "reduced",
+            }),
+          }}
+        >
           <scroll style={{
             width: "100%",
             maxHeight: `${MENU_MAX_HEIGHT - 2}px`,
@@ -229,14 +240,17 @@ export function BarPopups(): NativeChild {
     <>
       <Show when={trayPresence.value()}>
         {item => {
+          const [cardNode, setCardNode] = createSignal<NativeNode | null>(null);
           const blur = createSingleNodeRoundedBlur(16, () => trayPresence.visible() && trayPresence.progress.settled());
           return (
             <PopupSurface name="tray-menu" parent={item().target.parentSurface} anchorRect={item().target.anchorRect}
               width={trayWidth()} height="auto" minHeight={48} maxHeight={MENU_MAX_HEIGHT}
+              geometryInsets={POPOVER_SHADOW_INSETS}
+              inputRegion={cardNode() ? [cardNode()!] : []}
               placement={geometry().placement} offset={geometry().offset} grab blurRegion={blur.region()}
               onDismiss={() => { trayPresence.dismissInstant(); closeTrayMenu(); }}>
-              <PopupContent padding="8px" label={item().label} header={item().label} position={position()} spatial={trayPresence.progress} opacity={trayPresence.opacity}
-                blurRef={blur.ref} onDismiss={closeTrayMenu}>
+              <PopupContent padding="8px" label={item().label} header={item().label} cardTestId="tray-menu-card" position={position()} spatial={trayPresence.progress} opacity={trayPresence.opacity}
+                cardRef={setCardNode} blurRef={blur.ref} onDismiss={closeTrayMenu}>
                 <For each={trayRows()} keyed={row => row.node.id}>
                   {row => (
                     <Show when={!row().node.separator} fallback={<box ariaHidden style={separator} />}>
@@ -256,14 +270,17 @@ export function BarPopups(): NativeChild {
       </Show>
       <Show when={imePresence.value()}>
         {target => {
+          const [cardNode, setCardNode] = createSignal<NativeNode | null>(null);
           const blur = createSingleNodeRoundedBlur(16, () => imePresence.visible() && imePresence.progress.settled());
           return (
             <PopupSurface name="ime-menu" parent={target().parentSurface} anchorRect={target().anchorRect}
               width={imeWidth()} height="auto" minHeight={48} maxHeight={MENU_MAX_HEIGHT}
+              geometryInsets={POPOVER_SHADOW_INSETS}
+              inputRegion={cardNode() ? [cardNode()!] : []}
               placement={geometry().placement} offset={geometry().offset} grab blurRegion={blur.region()}
               onDismiss={() => { imePresence.dismissInstant(); closeImeMenu(); }}>
-              <PopupContent padding="8px" label="Input method" header="Input method" position={position()} spatial={imePresence.progress} opacity={imePresence.opacity}
-                blurRef={blur.ref} onDismiss={closeImeMenu}>
+              <PopupContent padding="8px" label="Input method" header="Input method" cardTestId="ime-menu-card" position={position()} spatial={imePresence.progress} opacity={imePresence.opacity}
+                cardRef={setCardNode} blurRef={blur.ref} onDismiss={closeImeMenu}>
                 <For each={ime.data()?.group_ims} keyed={im => im.unique_name}>
                   {im => {
                     const isActive = () => im().unique_name === ime.data()?.active_im?.unique_name;
