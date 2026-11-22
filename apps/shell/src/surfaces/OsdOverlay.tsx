@@ -17,7 +17,7 @@ const muted = "var(--color-on-surface-variant)";
 const capsule = {
   backgroundColor: "var(--color-surface-container)",
   border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
-  boxShadow: "0 10px 24px rgba(0, 0, 0, 0.45)",
+  boxShadow: "var(--shadow-level-2)",
   borderRadius: "999px",
   color: onSurface,
 } as const;

@@ -50,7 +50,8 @@ function LauncherContent(props: {
   spatial: M3Spring;
   opacity: M3Spring;
 }): NativeChild {
-  const { publicClient, invokePublic, closePanels } = useShellStore();
+  const { publicClient, invokePublic, closePanels, theme } = useShellStore();
+  const dark = () => theme.data()?.dark ?? true;
   const [query, setQuery] = createSignal("");
   const [results, setResults] = createSignal<LauncherQueryResponse>();
   const [selectedIndex, setSelectedIndex] = createSignal(0);
@@ -118,13 +119,13 @@ function LauncherContent(props: {
     <box testId="launcher-backdrop" onClick={dismiss} style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center",
-      backgroundColor: scrimBackdrop(45, props.opacity()),
+      backgroundColor: scrimBackdrop(45, props.opacity(), dark()),
     }}>
       <box testId="launcher-card" role="dialog" ariaLabel="Launcher" ariaModal onClick={event => event.stopPropagation()} style={{
         display: "flex", flexDirection: "column", width: "652px", height: "410px", borderRadius: "22px",
         backgroundColor: "var(--color-surface-container)",
         border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
-        boxShadow: "0 20px 56px rgba(0, 0, 0, 0.60)",
+        boxShadow: "var(--shadow-level-3)",
         padding: "18px", gap: "14px", fontFamily: "var(--font-sans)", color: "var(--color-on-surface)",
         ...dialogMotionStyle(props.spatial(), { opacity: props.opacity(), reduced: scheme() === "reduced", fromScale: 0.95, fromY: 10 }),
       }}>

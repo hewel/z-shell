@@ -46,7 +46,7 @@ function ToastCard({ toast, track, stackSpatial, stackOpacity }: {
 
   return (
     <column ref={trackedRef(track)} testId={`toast-card-${toast().id}`} style={{
-      borderRadius: "22px", backgroundColor: container, border: outline, boxShadow: "0 8px 20px rgba(0, 0, 0, 0.45)",
+      borderRadius: "22px", backgroundColor: container, border: outline, boxShadow: "var(--shadow-level-2)",
       padding: "14px", gap: "10px", color: onSurface,
       opacity: combinedOpacity(),
       transform: scheme() === "reduced"
@@ -103,7 +103,7 @@ function ToastFooter({ count, next, track }: { count: number; next: Notification
   const { invokePublic } = useShellStore();
   return (
     <row ref={trackedRef(track)} testId="toast-more-footer" style={{
-      borderRadius: "16px", backgroundColor: container, border: outline, boxShadow: "0 8px 20px rgba(0, 0, 0, 0.45)",
+      borderRadius: "16px", backgroundColor: container, border: outline, boxShadow: "var(--shadow-level-2)",
       padding: "6px 10px", gap: "8px", alignItems: "center",
     }}>
       <box style={{ ...pill, minHeight: "24px", padding: "2px 8px", backgroundColor: containerHigh, color: primary, fontSize: "11px" }}>

@@ -97,7 +97,7 @@ export const SHELL_MOTION_CSS = `
   transition-timing-function: var(--motion-easing-standard);
 }
 [data-switch-root]:active [data-switch-thumb] {
-  width: 22px;
+  width: 20px;
 }
 `;
 
@@ -156,8 +156,9 @@ export function panelMotionStyle(
   }
 }
 
-export function scrimBackdrop(maxPercent: number, progress: number): string {
-  const pct = (maxPercent * Math.max(0, Math.min(1, progress))).toFixed(1);
+export function scrimBackdrop(maxPercent: number, progress: number, dark = true): string {
+  const effectiveMax = dark ? maxPercent : Math.min(28, Math.round(maxPercent * 0.5));
+  const pct = (effectiveMax * Math.max(0, Math.min(1, progress))).toFixed(1);
   return `color-mix(in srgb, var(--color-scrim) ${pct}%, transparent)`;
 }
 

@@ -67,7 +67,7 @@ function segmentChrome(vertical: boolean, docked: boolean, active = false): Styl
     backgroundColor: active ? "var(--color-surface-container-high)" : "var(--color-surface-container)",
     color: onSurface,
     border: active ? activeIslandBorder : islandBorder,
-    boxShadow: "0 4px 12px rgba(0, 0, 0, 0.36)",
+    boxShadow: "var(--shadow-level-1)",
   };
 }
 

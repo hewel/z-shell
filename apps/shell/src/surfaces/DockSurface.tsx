@@ -26,7 +26,7 @@ const capsule = {
   borderRadius: "999px",
   backgroundColor: "var(--color-surface-container)",
   border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
-  boxShadow: "0 10px 24px rgba(0, 0, 0, 0.45)",
+  boxShadow: "var(--shadow-level-2)",
   overflow: "visible",
 } satisfies NativeStyle;
 const tile = {
@@ -37,7 +37,7 @@ const tileStack = {
   position: "relative", width: `${tileSize}px`, height: `${dockHeight}px`, flexShrink: 0,
   alignItems: "center", justifyContent: "center",
 } as const;
-const dot = { width: "4px", height: "4px", flexShrink: 0, borderRadius: "2px", backgroundColor: onSurfaceVariant } as const;
+const dot = { width: "4px", height: "4px", flexShrink: 0, borderRadius: "2px", backgroundColor: "color-mix(in srgb, var(--color-on-surface) 84%, transparent)" } as const;
 const tints = ["primary", "secondary", "tertiary"] as const;
 
 function DockApp(props: { entry: Accessor<DockEntry> }) {

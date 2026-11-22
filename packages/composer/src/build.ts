@@ -18,7 +18,6 @@ export interface BuildShellOptions {
   readonly capabilitiesFile?: string;
   readonly extraCapabilities?: HostCapabilities;
   readonly development?: boolean;
-  readonly stylexDiagnostics?: boolean;
 }
 
 export async function buildShellApplication(options: BuildShellOptions): Promise<PublishedApplication> {
@@ -35,7 +34,6 @@ export async function buildShellApplication(options: BuildShellOptions): Promise
       extraCapabilities: normalizeHostCapabilities(extra) as Capabilities,
     }),
     ...(options.development === undefined ? {} : { development: options.development }),
-    ...(options.stylexDiagnostics === undefined ? {} : { stylexDiagnostics: options.stylexDiagnostics }),
   };
   return buildApplication(options.app ?? "shell", buildOptions);
 }
@@ -45,7 +43,6 @@ export interface ComposeAndBuildOptions extends ComposePluginsOptions {
   readonly appDirectory: string;
   readonly root?: string;
   readonly development?: boolean;
-  readonly stylexDiagnostics?: boolean;
 }
 
 export interface ComposeAndBuildResult {
@@ -61,7 +58,6 @@ export async function composeAndBuildShell(options: ComposeAndBuildOptions): Pro
     ...(options.root === undefined ? {} : { root: options.root }),
     capabilitiesFile: join(options.outDir, "manifest-capabilities.json"),
     ...(options.development === undefined ? {} : { development: options.development }),
-    ...(options.stylexDiagnostics === undefined ? {} : { stylexDiagnostics: options.stylexDiagnostics }),
   });
   return { compose, published };
 }

@@ -70,6 +70,15 @@
   --motion-duration-medium2: 300ms;
   --motion-duration-long1: 450ms;
   --motion-duration-long2: 500ms;
+  --shadow-level-1: 0 4px 12px rgba(0, 0, 0, 0.36);
+  --shadow-level-2: 0 10px 24px rgba(0, 0, 0, 0.45);
+  --shadow-level-3: 0 20px 56px rgba(0, 0, 0, 0.60);
+  --state-hover: 8%;
+  --state-focus: 12%;
+  --state-pressed: 12%;
+  --state-dragged: 16%;
+  --disabled-ink: 38%;
+  --disabled-container: 12%;
 }
 
 .shell-composite-field:focus-visible {

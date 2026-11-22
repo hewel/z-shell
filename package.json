@@ -27,13 +27,11 @@
     "@hewel/zgui": "link:../zgui-js/packages/ui",
     "@hewel/zgui-build": "link:../zgui-js/packages/build",
     "@hewel/zgui-services": "link:../zgui-js/packages/services",
-    "@stylexjs/stylex": "0.19.2",
     "@z-shell/composer": "workspace:*",
     "@z-shell/plugin-api": "workspace:*",
     "@z-shell/sdk": "workspace:*",
     "oxlint": "1.94.0",
     "solid-js": "2.0.1",
-    "styleq": "0.2.1",
     "tsrs": "7.1.0-beta.tsrs2"
   }
 }

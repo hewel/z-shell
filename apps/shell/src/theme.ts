@@ -51,8 +51,24 @@ const hexColor = /^#[0-9a-fA-F]{6}$/;
 const roles = (Object.keys(SHELL_DEFAULT_SCHEME) as (keyof ThemeColorScheme)[])
   .map(role => ({ role, property: `--color-${role.replaceAll("_", "-")}`, fallback: SHELL_DEFAULT_SCHEME[role] }));
 
+export const SHELL_ELEVATION_SHADOWS = Object.freeze({
+  dark: Object.freeze({
+    level1: "0 4px 12px rgba(0, 0, 0, 0.36)",
+    level2: "0 10px 24px rgba(0, 0, 0, 0.45)",
+    level3: "0 20px 56px rgba(0, 0, 0, 0.60)",
+  }),
+  light: Object.freeze({
+    level1: "0 2px 10px rgba(25, 28, 32, 0.08)",
+    level2: "0 10px 24px rgba(25, 28, 32, 0.12)",
+    level3: "0 18px 48px rgba(25, 28, 32, 0.16)",
+  }),
+});
+
 export function buildThemeStylesheet(scheme: ThemeColorScheme, dark: boolean): string {
+  const shadows = dark ? SHELL_ELEVATION_SHADOWS.dark : SHELL_ELEVATION_SHADOWS.light;
   let css = `:root { color-scheme: ${dark ? "dark" : "light"}; --zgui-ring: var(--color-primary);`;
+  css += ` --shadow-level-1: ${shadows.level1}; --shadow-level-2: ${shadows.level2}; --shadow-level-3: ${shadows.level3};`;
+  css += " --state-hover: 8%; --state-focus: 12%; --state-pressed: 12%; --state-dragged: 16%; --disabled-ink: 38%; --disabled-container: 12%;";
   for (const { role, property, fallback } of roles) {
     const value = scheme?.[role];
     css += ` ${property}: ${typeof value === "string" && hexColor.test(value) ? value : fallback};`;

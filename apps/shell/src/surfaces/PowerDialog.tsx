@@ -14,7 +14,8 @@ function PowerDialogContent(props: {
   spatial: M3Spring;
   opacity: M3Spring;
 }): NativeChild {
-  const { closePowerDialog, invokeHost, invokePublic } = useShellStore();
+  const { closePowerDialog, invokeHost, invokePublic, theme } = useShellStore();
+  const dark = () => theme.data()?.dark ?? true;
   const copy = createMemo(() => POWER_DIALOG_COPY[props.action()]);
 
   function confirm(): void {
@@ -34,7 +35,7 @@ function PowerDialogContent(props: {
     <box testId="power-dialog-backdrop" onClick={closePowerDialog} style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center",
-      backgroundColor: scrimBackdrop(55, props.opacity()),
+      backgroundColor: scrimBackdrop(55, props.opacity(), dark()),
     }}>
       <box testId="power-dialog-card" role="dialog" ariaLabel={copy().title} ariaModal
         ref={node => { registerDismissLayer(node, closePowerDialog, { layer: "modal", dismissOnOutsidePress: false }); }}
@@ -42,7 +43,7 @@ function PowerDialogContent(props: {
           display: "flex", flexDirection: "column", alignItems: "center", width: "360px", borderRadius: "22px",
           backgroundColor: "var(--color-surface-container)",
           border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
-          boxShadow: "0 20px 56px rgba(0, 0, 0, 0.60)",
+          boxShadow: "var(--shadow-level-3)",
           padding: "24px", gap: "14px", fontFamily: "var(--font-sans)", color: "var(--color-on-surface)",
           ...dialogMotionStyle(props.spatial(), { opacity: props.opacity(), reduced: scheme() === "reduced", fromScale: 0.92, fromY: 0 }),
         }}>

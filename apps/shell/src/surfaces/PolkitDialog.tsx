@@ -34,7 +34,8 @@ function PolkitContent(props: {
   spatial: M3Spring;
   opacity: M3Spring;
 }): NativeChild {
-  const { invokeHostResult } = useShellStore();
+  const { invokeHostResult, theme } = useShellStore();
+  const dark = () => theme.data()?.dark ?? true;
   const { active } = props;
   const scheme = useMotionScheme();
   const [response, setResponse] = createSignal("");
@@ -125,7 +126,7 @@ function PolkitContent(props: {
     <box style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center",
-      backgroundColor: scrimBackdrop(55, props.opacity()),
+      backgroundColor: scrimBackdrop(55, props.opacity(), dark()),
     }}>
       <box testId="polkit-card" role="dialog" ariaLabel="Authentication required" ariaModal
         ref={node => { registerDismissLayer(node, cancel, { layer: "modal", dismissOnOutsidePress: false }); }} style={{
@@ -134,7 +135,7 @@ function PolkitContent(props: {
           border: errorText()
             ? "1px solid var(--color-error)"
             : "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
-          boxShadow: "0 20px 56px rgba(0, 0, 0, 0.60)",
+          boxShadow: "var(--shadow-level-3)",
           padding: "18px", gap: "12px", fontFamily: "var(--font-sans)", color: onSurface,
           ...cardMotion(),
         }}>

@@ -190,7 +190,7 @@ function OverviewCard(props: {
           width: "684px", maxWidth: "100%", maxHeight: "760px", padding: "18px", gap: "16px", borderRadius: "22px",
           backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)",
           border: "1px solid color-mix(in srgb, var(--color-outline-variant) 65%, transparent)",
-          boxShadow: "0 20px 56px rgba(0, 0, 0, 0.60)",
+          boxShadow: "var(--shadow-level-3)",
           opacity: Math.max(0, Math.min(1, props.opacity())),
           transform: reduced() ? "none" : `scale(${cardScale().toFixed(4)})`,
           transformOrigin: "center",

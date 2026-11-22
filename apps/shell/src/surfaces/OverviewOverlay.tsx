@@ -242,7 +242,8 @@ function OverviewContent(props: {
   readonly spatial: M3Spring;
   readonly opacity: M3Spring;
 }): NativeChild {
-  const { hostClient, workspaces, windows, outputs, apps, wallpaper, invokePublic, closePanels } = useShellStore();
+  const { hostClient, workspaces, windows, outputs, apps, wallpaper, theme, invokePublic, closePanels } = useShellStore();
+  const dark = () => theme.data()?.dark ?? true;
   const scheme = useMotionScheme();
   const monitorName = () => props.monitor()?.name ?? props.monitor()?.id ?? "Display";
   const monitorWorkspaces = createMemo(() => filterWorkspacesForMonitor(workspaces.data(), outputs.data(), monitorName()));
@@ -304,7 +305,7 @@ function OverviewContent(props: {
     <box testId="overview-backdrop" onClick={closePanels} style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center", padding: "14px",
-      backgroundColor: scrimBackdrop(48, props.opacity()),
+      backgroundColor: scrimBackdrop(48, props.opacity(), dark()),
     }}>
       <column testId="overview-card" role="dialog" ariaLabel="Workspace overview" ariaModal
         onClick={event => event.stopPropagation()} onKeyDown={handleKeyDown}
@@ -312,7 +313,7 @@ function OverviewContent(props: {
           width: "684px", maxWidth: "100%", maxHeight: "760px", padding: "18px", gap: "16px", borderRadius: "22px",
           backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)",
           border: "1px solid color-mix(in srgb, var(--color-outline-variant) 65%, transparent)",
-          boxShadow: "0 20px 56px rgba(0, 0, 0, 0.60)",
+          boxShadow: "var(--shadow-level-3)",
           ...dialogMotionStyle(props.spatial(), { opacity: props.opacity(), reduced: scheme() === "reduced", fromScale: 0.96, fromY: 8 }),
         }}>
         <row style={{ alignItems: "center", gap: "12px", width: "100%", flexShrink: 0 }}>
