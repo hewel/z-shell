@@ -85,6 +85,114 @@
   outline-color: transparent;
 }
 
+control:not(:disabled):not([data-progress="true"]):not([role="progressIndicator"]):not([role="progressBar"]),
+[data-slider="true"]:not(:disabled),
+[role="slider"]:not(:disabled),
+[role="menuItem"]:not(:disabled),
+[role="menuItemCheckBox"]:not(:disabled),
+[role="menuItemRadio"]:not(:disabled),
+[role="tab"]:not(:disabled),
+[data-clickable="true"] {
+  cursor: pointer;
+}
+
+:disabled,
+[data-disabled="true"],
+[data-progress="true"],
+[role="progressIndicator"],
+[role="progressBar"] {
+  cursor: default;
+}
+
+/* Universal Material 3 pointer hover/press state layer: inset shadow clips cleanly to border-radius
+   and stays visible even when a Button sets an inline semantic backgroundColor. */
+control:not(:disabled):not([data-switch-root="true"]):not([data-dock-item="true"]):not([data-slider="true"]):not([data-progress="true"]):not([role="slider"]):not([role="progressIndicator"]):not([role="progressBar"]):not([data-bar-segment]) {
+  transition-property: background-color, border-color, color, box-shadow;
+  transition-duration: var(--motion-duration-short2);
+  transition-timing-function: var(--motion-easing-standard);
+}
+
+control:not(:disabled):not([data-switch-root="true"]):not([data-dock-item="true"]):not([data-slider="true"]):not([data-progress="true"]):not([role="slider"]):not([role="progressIndicator"]):not([role="progressBar"]):not([data-bar-segment]):hover {
+  box-shadow: inset 0 0 0 240px color-mix(in srgb, var(--color-on-surface) var(--state-hover), transparent);
+}
+
+control:not(:disabled):not([data-switch-root="true"]):not([data-dock-item="true"]):not([data-slider="true"]):not([data-progress="true"]):not([role="slider"]):not([role="progressIndicator"]):not([role="progressBar"]):not([data-bar-segment]):active {
+  box-shadow: inset 0 0 0 240px color-mix(in srgb, var(--color-on-surface) var(--state-dragged), transparent);
+}
+
+[data-slider="true"]:not(:disabled):hover [data-slider-thumb],
+[role="slider"]:not(:disabled):hover [data-slider-thumb] {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 24%, transparent);
+}
+
+/* Bar island triggers preserve their outer var(--shadow-level-1) while giving clear hover/active elevation. */
+[data-bar-segment="floating"] {
+  background-color: var(--color-surface-container);
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 48%, transparent);
+  transition-property: background-color, border-color, color;
+  transition-duration: var(--motion-duration-short2);
+  transition-timing-function: var(--motion-easing-standard);
+}
+
+[data-bar-segment="floating"]:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), var(--color-surface-container));
+  border-color: color-mix(in srgb, var(--color-outline) 60%, transparent);
+}
+
+[data-bar-segment="floating"]:not(:disabled):active {
+  background-color: color-mix(in srgb, var(--color-on-surface) var(--state-dragged), var(--color-surface-container));
+}
+
+[data-bar-segment="floating"][data-active="true"] {
+  background-color: var(--color-surface-container-high);
+  border-color: color-mix(in srgb, var(--color-primary) 60%, transparent);
+}
+
+[data-bar-segment="floating"][data-active="true"]:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), var(--color-surface-container-high));
+}
+
+[data-bar-segment="docked"] {
+  background-color: transparent;
+  border: 1px solid transparent;
+  transition-property: background-color, border-color, color;
+  transition-duration: var(--motion-duration-short2);
+  transition-timing-function: var(--motion-easing-standard);
+}
+
+[data-bar-segment="docked"]:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), transparent);
+}
+
+[data-bar-segment="docked"]:not(:disabled):active {
+  background-color: color-mix(in srgb, var(--color-on-surface) var(--state-dragged), transparent);
+}
+
+[data-bar-segment="docked"][data-active="true"] {
+  background-color: var(--color-primary-container);
+  border-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+}
+
+[data-bar-segment="docked"][data-active="true"]:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--color-on-primary-container) var(--state-hover), var(--color-primary-container));
+}
+
+/* Inner-visual tactile press compression (hit targets remain strictly stationary per zshell/no-hover-hit-target-shift). */
+[data-press-visual] {
+  pointer-events: none;
+  transition-property: transform;
+  transition-duration: var(--motion-duration-short2);
+  transition-timing-function: var(--motion-easing-standard);
+}
+
+control:not(:disabled):active > [data-press-visual="compact"] {
+  transform: scale(0.955);
+}
+
+control:not(:disabled):active > [data-press-visual="card"] {
+  transform: scale(0.975);
+}
+
 [data-highlighted="true"]:not([data-disabled="true"]) {
   background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), transparent);
 }

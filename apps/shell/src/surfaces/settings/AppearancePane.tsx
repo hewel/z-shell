@@ -187,17 +187,23 @@ export function AppearancePane(): NativeChild {
               <text>{settings.data()?.theme.seed_color ? "Use wallpaper" : (wallpaper.data()?.sync_theme ? "Sync wallpaper" : "Manual seed")}</text>
             </Button>
           </row>
-          <row style={{ alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+          <row style={{ alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
             <For each={THEME_SEED_SWATCHES} keyed={seed => seed}>
               {seed => {
                 const selected = () => settings.data()?.theme.seed_color?.toUpperCase() === seed().toUpperCase();
                 return (
-                  <Button ariaLabel={`Set seed color ${seed()}`} onClick={() => patchTheme({ seed_color: seed() }, { seed: seed() })}
+                  <Button ariaLabel={`Set seed color ${seed()}`} selected={selected()} onClick={() => patchTheme({ seed_color: seed() }, { seed: seed() })}
                     style={{
-                      width: "24px", height: "24px", borderRadius: "999px", flexShrink: 0,
-                      backgroundColor: seed(),
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      width: "24px", height: "24px", borderRadius: "999px", flexShrink: 0, padding: "2px",
+                      backgroundColor: selected() ? containerHigh : "transparent",
                       border: selected() ? "2px solid var(--color-on-surface)" : "2px solid transparent",
+                    }}>
+                    <box ariaHidden style={{
+                      width: "100%", height: "100%", borderRadius: "999px",
+                      backgroundColor: seed(),
                     }} />
+                  </Button>
                 );
               }}
             </For>

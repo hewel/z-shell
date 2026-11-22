@@ -301,6 +301,11 @@ export interface DesktopTraySnapshot {
   readonly items: readonly TrayItem[];
 }
 
+export interface NotificationAction {
+  readonly key: string;
+  readonly label: string;
+}
+
 export interface NotificationItem {
   readonly id: number;
   readonly revision: number;
@@ -309,11 +314,24 @@ export interface NotificationItem {
   readonly body: string;
   readonly icon: string | MediaRef | null;
   readonly attachment: MediaRef | null;
-  readonly actions: readonly {
-    readonly key: string;
-    readonly label: string;
-  }[];
+  readonly actions: readonly NotificationAction[];
   readonly urgency: number;
+}
+
+/**
+ * Splits FreeDesktop notification actions into the card-click `"default"` action and visible
+ * labelled buttons so empty-label `"default"` actions (e.g. Ghostty / Chrome / Electron) never
+ * render blank pill buttons while remaining invocable via card click.
+ */
+export function splitNotificationActions(actions: readonly NotificationAction[]): {
+  readonly defaultAction: NotificationAction | undefined;
+  readonly buttonActions: readonly NotificationAction[];
+} {
+  const defaultAction = actions.find(action => action.key === "default");
+  const buttonActions = actions.filter(
+    action => action.key !== "default" && action.label.trim().length > 0,
+  );
+  return { defaultAction, buttonActions };
 }
 
 export interface DesktopNotificationsSnapshot {
@@ -944,7 +962,7 @@ export function resolveBarLayout(
     const shadowBleed: BarShadowBleed = {
       top: Math.min(desiredTop, 10),
       right: 22,
-      bottom: Math.min(desiredBottom, 18),
+      bottom: Math.min(desiredBottom, 22),
       left: Math.min(desiredLeft, 14),
     };
     const margin = {
@@ -993,7 +1011,7 @@ export function resolveBarLayout(
   const shadowBleed: BarShadowBleed = {
     top: Math.min(desiredTop, 10),
     right: Math.min(desiredRight, 14),
-    bottom: Math.min(desiredBottom, 18),
+    bottom: Math.min(desiredBottom, 22),
     left: 22,
   };
   const margin = {

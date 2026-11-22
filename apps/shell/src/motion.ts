@@ -133,27 +133,48 @@ export function panelMotionStyle(
     return { opacity, transform: "none", transformOrigin: "center" };
   }
   const remaining = 1 - spatialProgress;
-  const scale = 0.94 + spatialProgress * 0.06;
+  const scale = 0.95 + spatialProgress * 0.05;
   switch (position) {
     case "left":
       return {
         opacity,
-        transform: `translateX(${(-8 * remaining).toFixed(2)}px) scale(${scale.toFixed(4)})`,
+        transform: `translateX(${(-6 * remaining).toFixed(2)}px) scale(${scale.toFixed(4)})`,
         transformOrigin: centered ? "center left" : "bottom left",
       };
     case "right":
       return {
         opacity,
-        transform: `translateX(${(8 * remaining).toFixed(2)}px) scale(${scale.toFixed(4)})`,
+        transform: `translateX(${(6 * remaining).toFixed(2)}px) scale(${scale.toFixed(4)})`,
         transformOrigin: centered ? "center right" : "bottom right",
       };
     default:
       return {
         opacity,
-        transform: `translateY(${(-8 * remaining).toFixed(2)}px) scale(${scale.toFixed(4)})`,
+        transform: `translateY(${(-6 * remaining).toFixed(2)}px) scale(${scale.toFixed(4)})`,
         transformOrigin: centered ? "top center" : "top right",
       };
   }
+}
+
+/**
+ * Two-layer shell/content micro-parallax (docs/design/motion.md §5.9):
+ * inner content settles ~20-30ms behind the outer shell unfold with a subtle 4px glide.
+ */
+export function popoverContentMotionStyle(
+  spatialProgress: number,
+  opacityProgress: number,
+  reduced = false,
+): { readonly opacity: number; readonly transform: string } {
+  const clampedOpacity = Math.max(0, Math.min(1, opacityProgress));
+  if (reduced) {
+    return { opacity: clampedOpacity, transform: "none" };
+  }
+  const delayedOpacity = Math.max(0, Math.min(1, (clampedOpacity - 0.14) / 0.86));
+  const glideY = (1 - Math.max(0, Math.min(1.04, spatialProgress))) * -4;
+  return {
+    opacity: delayedOpacity,
+    transform: `translateY(${glideY.toFixed(2)}px)`,
+  };
 }
 
 export function scrimBackdrop(maxPercent: number, progress: number, dark = true): string {

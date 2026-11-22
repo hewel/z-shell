@@ -1,4 +1,5 @@
 declare const styles: {
+  readonly pressInner: string;
   readonly button: string;
   readonly iconButton: string;
   readonly switchTrack: string;

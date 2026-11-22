@@ -1,7 +1,7 @@
 import { Button, For, Match, Show, Switch, TextField, createMemo, createSignal, type Accessor, type NativeChild } from "@hewel/zgui";
-import { M3Button, M3Switch } from "@z-shell/sdk/primitives";
+import { M3Button, M3Collapsible, M3Switch } from "@z-shell/sdk/primitives";
 import { ShellIcon, type ShellIconName } from "../icons.tsx";
-import { createEnterProgress, createOpacityEnter, sharedAxisXStyle, useMotionScheme } from "../motion.ts";
+import { SPRING_EPSILON, createEnterProgress, createM3Spring, sharedAxisXStyle, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { PANEL_MAX_HEIGHTS, type AudioDevice, type BluetoothDevice } from "../topics.ts";
 import { BatteryPowerContent } from "./BatteryPanel.tsx";
@@ -28,9 +28,9 @@ const detail = { ...clipped, color: muted, fontSize: "12px" } as const;
 const card = { borderRadius: "16px", backgroundColor: containerHigh, padding: "12px", gap: "8px" } as const;
 const itemCard = { borderRadius: "14px", backgroundColor: containerHighest, padding: "10px", gap: "6px" } as const;
 
-export function QuickSettingsScroll(props: { testId: string; label: string; children: NativeChild }): NativeChild {
+export function QuickSettingsScroll(props: { testId?: string | null; label: string; children: NativeChild }): NativeChild {
   return (
-    <scroll testId={props.testId} role="scrollView" ariaLabel={props.label} style={{
+    <scroll testId={props.testId ?? null} role="scrollView" ariaLabel={props.label} style={{
       width: "100%", maxHeight: `${PANEL_MAX_HEIGHTS["quick-settings"]}px`,
       overflow: "hidden auto", backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
     }}>
@@ -40,7 +40,7 @@ export function QuickSettingsScroll(props: { testId: string; label: string; chil
 }
 
 export function QuickSettingsIconButton(props: {
-  label: string; icon: ShellIconName; testId?: string; color?: string; fill?: string;
+  label: string; icon: ShellIconName; testId?: string | undefined; color?: string; fill?: string;
   size?: number; disabled?: boolean; expanded?: boolean; onClick: () => void;
 }): NativeChild {
   const px = () => `${props.size ?? 34}px`;
@@ -50,7 +50,9 @@ export function QuickSettingsIconButton(props: {
         display: "flex", width: px(), height: px(), borderRadius: "10px", flexShrink: 0,
         alignItems: "center", justifyContent: "center", backgroundColor: props.fill ?? containerHighest, opacity: props.disabled ? 0.45 : 1,
       }}>
-      <ShellIcon name={props.icon} size={16} color={props.color} />
+      <box data-press-visual="compact" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <ShellIcon name={props.icon} size={16} color={props.color} />
+      </box>
     </Button>
   );
 }
@@ -97,17 +99,17 @@ function Section(props: { title: string; children: NativeChild }): NativeChild {
   );
 }
 
-function Page(props: { page: Exclude<Subpage, "battery">; onBack: () => void; controls?: NativeChild; scanning?: boolean; children: NativeChild }): NativeChild {
+function Page(props: { page: Exclude<Subpage, "battery">; onBack: () => void; controls?: NativeChild; scanning?: boolean; outgoing?: boolean | undefined; children: NativeChild }): NativeChild {
   const scheme = useMotionScheme();
   const enter = createEnterProgress("defaultSpatial", { scheme });
   return (
-    <QuickSettingsScroll testId={`qs-page-${props.page}`} label={titles[props.page]}>
+    <QuickSettingsScroll testId={props.outgoing ? null : `qs-page-${props.page}`} label={titles[props.page]}>
       <column style={{
         width: "100%", gap: "10px",
-        ...sharedAxisXStyle(enter(), 1, scheme() === "reduced"),
+        ...(props.outgoing ? {} : sharedAxisXStyle(enter(), 1, scheme() === "reduced")),
       }}>
         <row style={row}>
-          <QuickSettingsIconButton testId="qs-back" label="Back" icon="arrowLeft" onClick={props.onBack} />
+          <QuickSettingsIconButton testId={props.outgoing ? undefined : "qs-back"} label="Back" icon="arrowLeft" onClick={props.onBack} />
           <text role="heading" style={{ ...grow, ...clipped, fontSize: "20px", fontWeight: 600 }}>{titles[props.page]}</text>
           {props.controls}
         </row>
@@ -122,14 +124,14 @@ function Page(props: { page: Exclude<Subpage, "battery">; onBack: () => void; co
   );
 }
 
-function BatterySubpage(props: { onBack: () => void }): NativeChild {
+function BatterySubpage(props: { onBack: () => void; outgoing?: boolean | undefined }): NativeChild {
   const scheme = useMotionScheme();
   const enter = createEnterProgress("defaultSpatial", { scheme });
   return (
-    <QuickSettingsScroll testId="qs-page-battery" label="Battery & power">
+    <QuickSettingsScroll testId={props.outgoing ? null : "qs-page-battery"} label="Battery & power">
       <column style={{
         width: "100%",
-        ...sharedAxisXStyle(enter(), 1, scheme() === "reduced"),
+        ...(props.outgoing ? {} : sharedAxisXStyle(enter(), 1, scheme() === "reduced")),
       }}>
         <BatteryPowerContent onBack={props.onBack} />
       </column>
@@ -138,9 +140,6 @@ function BatterySubpage(props: { onBack: () => void }): NativeChild {
 }
 
 function WifiPassword(props: { ssid: string; onCancel: () => void; onConnect: (password: string) => void }): NativeChild {
-  const scheme = useMotionScheme();
-  const reveal = createEnterProgress("fastSpatial", { scheme });
-  const fade = createOpacityEnter("fastEffects", scheme);
   const [password, setPassword] = createSignal("");
   const connect = () => {
     if (!password()) return;
@@ -148,11 +147,7 @@ function WifiPassword(props: { ssid: string; onCancel: () => void; onConnect: (p
     setPassword("");
   };
   return (
-    <column style={{
-      ...itemCard,
-      opacity: Math.max(0, Math.min(1, fade())),
-      transform: scheme() === "reduced" ? "none" : `translateY(${((1 - reveal()) * -4).toFixed(2)}px)`,
-    }}>
+    <column style={itemCard}>
       <TextField testId="wifi-password-input" secure ariaLabel={`Password for ${props.ssid}`} placeholder="Wi-Fi password"
         value={password()} onInput={event => setPassword(event.value)} style={{
           height: "36px", lineHeight: "18px", padding: "8px 10px",
@@ -166,13 +161,26 @@ function WifiPassword(props: { ssid: string; onCancel: () => void; onConnect: (p
   );
 }
 
-function WifiPage(props: { onBack: () => void }): NativeChild {
+function WifiExpandChevron(props: { readonly open: boolean }): NativeChild {
+  const scheme = useMotionScheme();
+  const deg = createM3Spring(() => (props.open ? 180 : 0), "fastSpatial", { scheme, epsilon: SPRING_EPSILON.deg });
+  return (
+    <box ariaHidden style={{
+      display: "flex", width: "16px", height: "16px", alignItems: "center", justifyContent: "center", flexShrink: 0,
+      transform: scheme() === "reduced" ? "none" : `rotate(${deg().toFixed(1)}deg)`,
+    }}>
+      <ShellIcon name="expandMore" size={16} color={muted} />
+    </box>
+  );
+}
+
+function WifiPage(props: { onBack: () => void; outgoing?: boolean | undefined }): NativeChild {
   const { network, invokePublic, invokeHost } = useShellStore();
   const wifi = () => network.data()?.wifi;
   const enabled = () => wifi()?.enabled ?? false;
   const [selectedAp, setSelectedAp] = createSignal<string>();
   return (
-    <Page page="wifi" onBack={props.onBack} scanning={wifi()?.scanning ?? false} controls={
+    <Page page="wifi" onBack={props.onBack} outgoing={props.outgoing} scanning={wifi()?.scanning ?? false} controls={
       <>
         <Toggle label="Wi-Fi" checked={enabled()} disabled={!network.data()?.available || !wifi()?.hardware_enabled}
           onClick={() => {
@@ -223,11 +231,11 @@ function WifiPage(props: { onBack: () => void }): NativeChild {
                       };
                       return (
                         <>
-                          <Button testId={`wifi-ap-${ap().ssid}`} ariaLabel={ssid()} expanded={needsPassword() ? selectedAp() === ap().id : null}
+                          <Button testId={props.outgoing ? null : `wifi-ap-${ap().ssid}`} ariaLabel={ssid()} expanded={needsPassword() ? selectedAp() === ap().id : null}
                             disabled={requiresProfile() && !savedProfile()} onClick={() => {
                               const target = { device_id: device().id, ap_id: ap().id };
                               if (needsPassword()) {
-                                setSelectedAp(target.ap_id);
+                                setSelectedAp(current => (current === target.ap_id ? undefined : target.ap_id));
                               } else {
                                 setSelectedAp(undefined);
                                 const profile = savedProfile();
@@ -247,13 +255,16 @@ function WifiPage(props: { onBack: () => void }): NativeChild {
                             }}>
                               {ap().strength}%
                             </text>
+                            <Show when={needsPassword()}>
+                              <WifiExpandChevron open={selectedAp() === ap().id} />
+                            </Show>
                           </Button>
-                          <Show when={needsPassword() && selectedAp() === ap().id}>
+                          <M3Collapsible open={needsPassword() && selectedAp() === ap().id} estimatedHeight={104}>
                             <WifiPassword ssid={ssid()} onCancel={() => setSelectedAp(undefined)} onConnect={password => {
                               void invokeHost("network.wifi.connect", { device_id: device().id, ap_id: ap().id, password });
                               setSelectedAp(undefined);
                             }} />
-                          </Show>
+                          </M3Collapsible>
                         </>
                       );
                     }}
@@ -313,7 +324,7 @@ function BluetoothDeviceRow(props: { dev: Accessor<BluetoothDevice> }): NativeCh
   );
 }
 
-function BluetoothPage(props: { onBack: () => void }): NativeChild {
+function BluetoothPage(props: { onBack: () => void; outgoing?: boolean | undefined }): NativeChild {
   const { bluetooth, invokePublic } = useShellStore();
   const adapter = () => bluetooth.data()?.adapters[0];
   const devices = () => bluetooth.data()?.devices ?? [];
@@ -321,7 +332,7 @@ function BluetoothPage(props: { onBack: () => void }): NativeChild {
   const availableDevices = createMemo(() => devices().filter(device => !device.connected && !device.paired));
 
   return (
-    <Page page="bluetooth" onBack={props.onBack} scanning={adapter()?.discovering ?? false} controls={
+    <Page page="bluetooth" onBack={props.onBack} outgoing={props.outgoing} scanning={adapter()?.discovering ?? false} controls={
       <>
         <Toggle label="Bluetooth" checked={adapter()?.powered ?? false} disabled={!adapter()} onClick={() => {
           const device = adapter();
@@ -363,7 +374,7 @@ function AudioDeviceRow(props: { device: Accessor<AudioDevice>; kind: "sink" | "
       border: props.active ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
     }}>
       <Button ariaLabel={name()} selected={props.active} onClick={() => void invokePublic("audio.set-default", target())}
-        style={{ ...row, minHeight: "30px", color: props.active ? selectedInk : onSurface }}>
+        style={{ ...row, minHeight: "30px", borderRadius: "8px", padding: "2px 6px", margin: "-2px -6px", color: props.active ? selectedInk : onSurface }}>
         <ShellIcon name={props.kind === "sink" ? "volumeHigh" : "mic"} size={16} color={props.active ? selectedInk : muted} />
         <text style={{ ...grow, ...clipped, fontWeight: props.active ? 600 : 500 }}>{name()}</text>
       </Button>
@@ -381,10 +392,10 @@ function AudioDeviceRow(props: { device: Accessor<AudioDevice>; kind: "sink" | "
   );
 }
 
-function SoundPage(props: { onBack: () => void }): NativeChild {
+function SoundPage(props: { onBack: () => void; outgoing?: boolean | undefined }): NativeChild {
   const { audio, invokePublic } = useShellStore();
   return (
-    <Page page="sound" onBack={props.onBack}>
+    <Page page="sound" onBack={props.onBack} outgoing={props.outgoing}>
       <Section title="Output Devices">
         <For each={audio.data()?.sinks} keyed={device => device.index} fallback={<text style={detail}>No output devices</text>}>
           {sink => <AudioDeviceRow device={sink} kind="sink" active={sink().name === audio.data()?.default_sink} />}
@@ -418,13 +429,13 @@ function SoundPage(props: { onBack: () => void }): NativeChild {
   );
 }
 
-export function QuickSettingsSubpage(props: { readonly page: Subpage; readonly onBack: () => void }): NativeChild {
+export function QuickSettingsSubpage(props: { readonly page: Subpage; readonly onBack: () => void; readonly outgoing?: boolean | undefined }): NativeChild {
   return (
     <Switch>
-      <Match when={props.page === "wifi"}><WifiPage onBack={props.onBack} /></Match>
-      <Match when={props.page === "bluetooth"}><BluetoothPage onBack={props.onBack} /></Match>
-      <Match when={props.page === "sound"}><SoundPage onBack={props.onBack} /></Match>
-      <Match when={props.page === "battery"}><BatterySubpage onBack={props.onBack} /></Match>
+      <Match when={props.page === "wifi"}><WifiPage onBack={props.onBack} outgoing={props.outgoing} /></Match>
+      <Match when={props.page === "bluetooth"}><BluetoothPage onBack={props.onBack} outgoing={props.outgoing} /></Match>
+      <Match when={props.page === "sound"}><SoundPage onBack={props.onBack} outgoing={props.outgoing} /></Match>
+      <Match when={props.page === "battery"}><BatterySubpage onBack={props.onBack} outgoing={props.outgoing} /></Match>
     </Switch>
   );
 }

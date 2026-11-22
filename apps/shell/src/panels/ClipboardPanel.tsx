@@ -1,8 +1,8 @@
-import { Button, For, Image, Show, TextField, createMemo, createSignal, mountStylesheet, type Accessor } from "@hewel/zgui";
+import { Button, For, Image, Show, TextField, createEffect, createMemo, createSignal, getWindowRect, mountStylesheet, type Accessor, type NativeNode } from "@hewel/zgui";
 import { M3Button, M3FilterChip } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
-import { createM3Spring, useMotionScheme } from "../motion.ts";
+import { SPRING_EPSILON, createM3Spring, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { PANEL_MAX_HEIGHTS, type ClipboardEntrySummary } from "../topics.ts";
 
@@ -32,11 +32,13 @@ const filters = [
 ] as const;
 type Filter = typeof filters[number]["key"];
 
-function ClipboardRow(props: { entry: Accessor<ClipboardEntrySummary>; selected: boolean }) {
+function ClipboardRow(props: {
+  entry: Accessor<ClipboardEntrySummary>;
+  selected: boolean;
+  onRowRef?: (node: NativeNode) => void;
+}) {
   const { hostClient, invokePublic, closePanels } = useShellStore();
   const { entry } = props;
-  const scheme = useMotionScheme();
-  const focusProgress = createM3Spring(() => (props.selected ? 1 : 0), "fastSpatial", { scheme });
   const { src } = useDaemonMedia(hostClient, () => entry().kind === "image" ? entry().media : undefined, { fetchCommand: "clipboard.fetch-blob" });
   const title = createMemo(() => {
     const current = entry();
@@ -46,14 +48,12 @@ function ClipboardRow(props: { entry: Accessor<ClipboardEntrySummary>; selected:
   });
 
   return (
-    <row testId={`clip-entry-${entry().id}`} style={{
+    <row testId={`clip-entry-${entry().id}`} {...(props.onRowRef ? { ref: props.onRowRef } : {})} style={{
+      position: "relative", zIndex: 1,
       borderRadius: "14px", padding: "10px", gap: "10px", alignItems: "center",
       backgroundColor: entry().pinned ? primaryContainer : containerHigh,
-      border: props.selected
-        ? `1px solid ${primary}`
-        : entry().pinned ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
+      border: entry().pinned ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
       color: entry().pinned ? onPrimaryContainer : onSurface,
-      transform: scheme() === "reduced" ? "none" : `translateX(${(focusProgress() * 2).toFixed(2)}px)`,
     }}>
       <Show when={src()} fallback={
         <box style={{ ...thumbnail, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: containerHighest }}>
@@ -64,6 +64,7 @@ function ClipboardRow(props: { entry: Accessor<ClipboardEntrySummary>; selected:
       </Show>
       <Button testId={`clip-copy-${entry().id}`} style={{
         display: "flex", flexGrow: 1, flexBasis: "0px", minWidth: "0px", flexDirection: "column", alignItems: "stretch", gap: "2px",
+        borderRadius: "10px", padding: "4px 6px", margin: "-4px -6px",
       }}
         onClick={() => {
           void invokePublic("clipboard.copy", { id: entry().id });
@@ -129,10 +130,31 @@ export function ClipboardPanel() {
       return search === "" || entry.preview.toLowerCase().includes(search) || entry.mime.toLowerCase().includes(search) || entry.kind.includes(search);
     });
   });
+  const scheme = useMotionScheme();
   const activeIndex = () => {
     const list = filtered();
     return list.length === 0 ? -1 : Math.max(0, Math.min(selectedIndex(), list.length - 1));
   };
+  const [listNode, setListNode] = createSignal<NativeNode | null>(null);
+  const rowNodes = new Map<number, NativeNode>();
+  const [highlightRect, setHighlightRect] = createSignal({ y: 0, height: 58 });
+  createEffect(() => [activeIndex(), filtered(), listNode()] as const, ([idx, list, containerEl]) => {
+    if (idx < 0) return;
+    const entry = list[idx];
+    const rowEl = entry ? rowNodes.get(entry.id) : undefined;
+    if (containerEl && rowEl) {
+      const cRect = getWindowRect(containerEl);
+      const rRect = getWindowRect(rowEl);
+      if (cRect && rRect && rRect.height > 1) {
+        setHighlightRect({ y: rRect.y - cRect.y, height: rRect.height });
+        return;
+      }
+    }
+    setHighlightRect({ y: idx * 64, height: 58 });
+  });
+  const highlightY = createM3Spring(() => highlightRect().y, "fastSpatial", { scheme, epsilon: SPRING_EPSILON.px });
+  const highlightH = createM3Spring(() => highlightRect().height, "fastSpatial", { scheme, epsilon: SPRING_EPSILON.px });
+  const highlightOpacity = createM3Spring(() => (activeIndex() >= 0 ? 1 : 0), "fastEffects", { scheme });
   const handleKeyDown = (event: { key: string | null; preventDefault: () => void }) => {
     const list = filtered();
     if (event.key === "Escape") {
@@ -211,11 +233,27 @@ export function ClipboardPanel() {
           </For>
         </row>
         <scroll style={{ maxHeight: "360px", width: "100%", overflow: "hidden auto" }}>
-          <column style={{ gap: "6px" }}>
+          <column ref={setListNode} style={{ position: "relative", gap: "6px" }}>
             <Show when={filtered().length > 0} fallback={<text style={{ color: muted, padding: "12px 0" }}>{entries().length ? "No matching entries" : "Clipboard is empty"}</text>}>
               <For each={filtered()} keyed={entry => entry.id}>
-                {(entry, index) => <ClipboardRow entry={entry} selected={index() === activeIndex()} />}
+                {(entry, index) => (
+                  <ClipboardRow
+                    entry={entry}
+                    selected={index() === activeIndex()}
+                    onRowRef={node => { rowNodes.set(entry().id, node); }}
+                  />
+                )}
               </For>
+              <box ariaHidden style={{
+                position: "absolute", top: "0px", left: "0px", right: "0px", zIndex: 2,
+                height: `${highlightH().toFixed(2)}px`,
+                borderRadius: "14px",
+                border: `1.5px solid ${primary}`,
+                backgroundColor: "transparent",
+                pointerEvents: "none",
+                opacity: Math.max(0, Math.min(1, highlightOpacity())),
+                transform: `translateY(${highlightY().toFixed(2)}px)`,
+              }} />
             </Show>
           </column>
         </scroll>

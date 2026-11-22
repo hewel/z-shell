@@ -1,8 +1,9 @@
 import { Button, For, Image, Show, createMemo, createSignal, onCleanup, type Accessor } from "@hewel/zgui";
+import { M3Button } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
-import { PANEL_MAX_HEIGHTS, buildMonthCalendarGrid, formatBarClock, formatFullDate, formatMonthYear, type NotificationItem } from "../topics.ts";
+import { PANEL_MAX_HEIGHTS, buildMonthCalendarGrid, formatBarClock, formatFullDate, formatMonthYear, splitNotificationActions, type NotificationItem } from "../topics.ts";
 
 const primary = "var(--color-primary)";
 const onPrimary = "var(--color-on-primary)";
@@ -17,7 +18,7 @@ const pill = {
   flexShrink: 0, alignItems: "center", justifyContent: "center", backgroundColor: containerHighest,
 } as const;
 const imageTile = { width: "32px", height: "32px", borderRadius: "8px", flexShrink: 0 } as const;
-const iconImage = { ...imageTile, objectFit: "contain" } as const;
+const iconImage = { ...imageTile, objectFit: "cover", overflow: "hidden" } as const;
 const attachmentImage = { width: "100%", height: "84px", borderRadius: "8px", objectFit: "contain" } as const;
 const gridCell = { display: "flex", flexBasis: "0px", flexGrow: 1, minWidth: "0px", height: "30px", alignItems: "center", justifyContent: "center" } as const;
 const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -31,11 +32,10 @@ function NotificationRow(props: { item: Accessor<NotificationItem> }) {
     return typeof ref === "string" ? null : ref;
   }, { fetchCommand: "notifications.fetch-blob" });
   const attachment = useDaemonMedia(hostClient, () => item().attachment, { fetchCommand: "notifications.fetch-blob" });
+  const actions = createMemo(() => splitNotificationActions(item().actions));
 
-  return (
-    <row testId={`cal-notif-${item().id}`} style={{
-      borderRadius: "14px", backgroundColor: containerHigh, padding: "10px", gap: "10px", alignItems: "flex-start",
-    }}>
+  const bodyContent = () => (
+    <row style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "10px", alignItems: "flex-start" }}>
       <Show when={icon.src()} fallback={
         <box style={{ ...imageTile, display: "flex", backgroundColor: containerHighest, alignItems: "center", justifyContent: "center" }}>
           <ShellIcon name="bell" size={16} color={primary} />
@@ -50,26 +50,51 @@ function NotificationRow(props: { item: Accessor<NotificationItem> }) {
         <Show when={attachment.src()}>
           <Image src={attachment.src()} style={attachmentImage} />
         </Show>
-        <Show when={item().actions.length > 0}>
-          <row style={{ flexWrap: "wrap", gap: "6px", paddingTop: "2px" }}>
-            <For each={item().actions} keyed={action => action.key}>
-              {action => (
-                <Button testId={`cal-notif-action-${item().id}-${action().key}`}
-                  style={{ ...pill, backgroundColor: "var(--color-secondary-container)", color: "var(--color-on-secondary-container)", fontSize: "11px" }}
-                  onClick={() => { void invokePublic("notifications.invoke-action", { id: item().id, action_key: action().key }); }}>
-                  <text>{action().label}</text>
-                </Button>
-              )}
-            </For>
-          </row>
-        </Show>
       </column>
-      <Button testId={`cal-notif-dismiss-${item().id}`} ariaLabel="Dismiss notification"
-        style={{ ...pill, width: "28px", padding: "0px" }}
-        onClick={() => { void invokePublic("notifications.dismiss", { id: item().id }); }}>
-        <ShellIcon name="close" size={14} color={muted} />
-      </Button>
     </row>
+  );
+
+  return (
+    <column testId={`cal-notif-${item().id}`} style={{
+      borderRadius: "14px", backgroundColor: containerHigh, padding: "10px", gap: "8px",
+    }}>
+      <row style={{ gap: "10px", alignItems: "flex-start" }}>
+        <Show when={actions().defaultAction} fallback={bodyContent()}>
+          {defaultAction => (
+            <Button
+              testId={`cal-notif-default-${item().id}`}
+              ariaLabel={defaultAction().label.trim() || `Open ${item().summary || item().app_name}`}
+              onClick={() => { void invokePublic("notifications.invoke-action", { id: item().id, action_key: defaultAction().key }); }}
+              style={{
+                flexGrow: 1, flexBasis: "0px", minWidth: "0px", display: "flex", flexDirection: "row",
+                alignItems: "flex-start", borderRadius: "10px", padding: "2px", margin: "-2px",
+                backgroundColor: "transparent", color: onSurface, textAlign: "left",
+              }}
+            >
+              {bodyContent()}
+            </Button>
+          )}
+        </Show>
+        <Button testId={`cal-notif-dismiss-${item().id}`} ariaLabel="Dismiss notification"
+          style={{ ...pill, width: "28px", padding: "0px" }}
+          onClick={() => { void invokePublic("notifications.dismiss", { id: item().id }); }}>
+          <ShellIcon name="close" size={14} color={muted} />
+        </Button>
+      </row>
+      <Show when={actions().buttonActions.length > 0}>
+        <row style={{ flexWrap: "wrap", gap: "6px", paddingLeft: "42px" }}>
+          <For each={actions().buttonActions} keyed={action => action.key}>
+            {action => (
+              <Button testId={`cal-notif-action-${item().id}-${action().key}`}
+                style={{ ...pill, backgroundColor: "var(--color-secondary-container)", color: "var(--color-on-secondary-container)", fontSize: "11px" }}
+                onClick={() => { void invokePublic("notifications.invoke-action", { id: item().id, action_key: action().key }); }}>
+                <text>{action().label}</text>
+              </Button>
+            )}
+          </For>
+        </row>
+      </Show>
+    </column>
   );
 }
 
@@ -103,17 +128,18 @@ export function CalendarPanel() {
   }
 
   return (
-    <scroll testId="panel-calendar" style={{
-      width: "100%", maxHeight: `${PANEL_MAX_HEIGHTS.calendar}px`, overflow: "hidden auto",
+    <column testId="panel-calendar" style={{
+      width: "100%", maxHeight: `${PANEL_MAX_HEIGHTS.calendar}px`, overflow: "hidden",
+      padding: "14px", gap: "12px", flexDirection: "column",
       backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
     }}>
-      <column style={{ padding: "14px", gap: "12px", flexDirection: "column" }}>
+      <column style={{ gap: "12px", flexShrink: 0 }}>
         <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
           <column style={{ gap: "2px" }}>
             <row style={{ alignItems: "baseline", gap: "4px" }}>
-              <text style={{
+              <text testId="cal-clock-hm" style={{
                 fontSize: "44px", fontWeight: 400, lineHeight: "50px", letterSpacing: "-0.02em",
-                fontVariantNumeric: "tabular-nums", color: onSurface,
+                fontVariantNumeric: "tabular-nums", color: primary,
               }}>
                 {`${clock().hours}:${clock().minutes}`}
               </text>
@@ -132,7 +158,7 @@ export function CalendarPanel() {
               border: dnd() ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
               color: dnd() ? "var(--color-on-primary-container)" : onSurface, fontSize: "12px", fontWeight: 500,
             }}>
-            <ShellIcon name={dnd() ? "bellOff" : "bell"} size={14} color="currentColor" />
+            <ShellIcon name="sleep" size={14} color="currentColor" />
             <text>Do Not Disturb</text>
           </Button>
         </row>
@@ -186,26 +212,35 @@ export function CalendarPanel() {
           </column>
         </column>
         <box ariaHidden style={{ width: "100%", height: "1px", backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 50%, transparent)" }} />
-        <column style={{ gap: "8px" }}>
-          <row style={{ alignItems: "center", gap: "8px" }}>
-            <text style={{ fontSize: "15px", fontWeight: 600 }}>Notifications</text>
-            <text testId="cal-notif-count" data-tabular="true" style={{
-              borderRadius: "999px", padding: "2px 8px", fontSize: "11px", fontWeight: 600,
-              fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums",
-              backgroundColor: "var(--color-secondary-container)", color: "var(--color-on-secondary-container)",
-            }}>
-              {history().length}
-            </text>
-            <Button testId="cal-clear-all" style={{ ...pill, marginLeft: "auto", fontSize: "11px", fontWeight: 500 }}
-              onClick={() => { void invokePublic("notifications.clear", {}); }}>
-              <text>Clear all</text>
-            </Button>
-          </row>
+        <row style={{ alignItems: "center", gap: "8px" }}>
+          <text style={{ fontSize: "15px", fontWeight: 600 }}>Notifications</text>
+          <text testId="cal-notif-count" data-tabular="true" style={{
+            borderRadius: "999px", padding: "2px 8px", fontSize: "11px", fontWeight: 600,
+            fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums",
+            backgroundColor: "var(--color-secondary-container)", color: "var(--color-on-secondary-container)",
+          }}>
+            {history().length}
+          </text>
+          <M3Button
+            testId="cal-clear-all"
+            variant="text"
+            size="sm"
+            style={{ marginLeft: "auto" }}
+            onClick={() => { void invokePublic("notifications.clear", {}); }}
+          >
+            <text>Clear all</text>
+          </M3Button>
+        </row>
+      </column>
+      <scroll testId="cal-notif-scroll" role="scrollView" ariaLabel="Notifications list" style={{
+        flexGrow: 1, flexShrink: 1, minHeight: "0px", width: "100%", overflow: "hidden auto",
+      }}>
+        <column style={{ gap: "8px", paddingRight: "4px", paddingBottom: "2px" }}>
           <Show when={history().length > 0} fallback={<text style={{ color: muted, padding: "6px 0", fontSize: "12px" }}>No notifications</text>}>
             <For each={history()} keyed={item => item.id}>{item => <NotificationRow item={item} />}</For>
           </Show>
         </column>
-      </column>
-    </scroll>
+      </scroll>
+    </column>
   );
 }

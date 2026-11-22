@@ -2,6 +2,7 @@ import { PopupSurface, Show, createMemo, untrack, type NativeChild, type PopupSu
 import {
   createRetainedPresence,
   panelMotionStyle,
+  popoverContentMotionStyle,
   useMotionScheme,
   type M3Spring,
 } from "../motion.ts";
@@ -82,7 +83,12 @@ function PanelContent(props: {
         reduced: scheme() === "reduced",
       }),
     }}>
-      {props.children}
+      <box style={{
+        width: "100%",
+        ...popoverContentMotionStyle(props.spatial(), props.opacity(), scheme() === "reduced"),
+      }}>
+        {props.children}
+      </box>
     </box>
   );
 }

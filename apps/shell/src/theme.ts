@@ -35,7 +35,16 @@ export const SHELL_DEFAULT_SCHEME = Object.freeze({
   on_error_container: "#FFDAD6",
 });
 
-export const THEME_SEED_SWATCHES = ["#A6C8FF", "#D0BCFF", "#7DD3FC", "#86EFAC", "#FCD34D", "#FCA5A5"] as const;
+export const THEME_SEED_SWATCHES = [
+  "#7C5CFC",
+  "#1A73E8",
+  "#00897B",
+  "#2E7D32",
+  "#B78103",
+  "#D84315",
+  "#C2185B",
+  "#6E737D",
+] as const;
 
 export type ThemeColorScheme = Readonly<Record<keyof typeof SHELL_DEFAULT_SCHEME, string>>;
 

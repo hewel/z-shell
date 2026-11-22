@@ -2,6 +2,7 @@ import {
   Button,
   For,
   Show,
+  createEffect,
   createMemo,
   createSignal,
   cx,
@@ -14,7 +15,7 @@ import {
   type NativeStyle,
 } from "@hewel/zgui";
 import { SPRING_EPSILON } from "./motion.ts";
-import { createM3Spring, useGlobalMotionScheme } from "./zgui-motion.ts";
+import { createM3Spring, createPresence, useGlobalMotionScheme } from "./zgui-motion.ts";
 import styles from "./zgui-primitives.module.css";
 
 const CHECK_ICON_PATH = "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z";
@@ -54,7 +55,7 @@ export function M3Button(props: M3ButtonProps): NativeChild {
       data-danger={props.danger ? "true" : null}
       {...(props.style !== undefined ? { style: props.style } : {})}
     >
-      {props.children}
+      <row class={styles.pressInner}>{props.children}</row>
     </Button>
   );
 }
@@ -90,7 +91,7 @@ export function M3IconButton(props: M3IconButtonProps): NativeChild {
       data-selected={props.selected ? "true" : null}
       {...(props.style !== undefined ? { style: props.style } : {})}
     >
-      {props.children}
+      <box class={styles.pressInner}>{props.children}</box>
     </Button>
   );
 }
@@ -237,6 +238,8 @@ export function M3Slider(props: M3SliderProps): NativeChild {
     <box
       testId={props.testId ?? null}
       role={props.readOnly ? "progressIndicator" : "slider"}
+      data-slider={props.readOnly ? null : "true"}
+      data-progress={props.readOnly ? "true" : null}
       tabIndex={interactive() ? 0 : -1}
       disabled={props.disabled ?? false}
       ariaLabel={props.label}
@@ -495,7 +498,9 @@ export function M3SegmentedControl<T extends string = string>(props: M3Segmented
               class={styles.segmentedItem}
               data-selected={selected() ? "true" : null}
             >
-              <text>{option().label}</text>
+              <row class={styles.pressInner}>
+                <text>{option().label}</text>
+              </row>
             </Button>
           );
         }}
@@ -513,8 +518,11 @@ export interface M3FilterChipProps {
   readonly onClick: () => void;
 }
 
-/** Material Design 3 Desktop Filter Chip (`28px`, `8px` radius, `0px` selected border + leading `14px` check). */
+/** Material Design 3 Desktop Filter Chip (`28px`, `8px` radius, `0px` selected border + spring check reveal). */
 export function M3FilterChip(props: M3FilterChipProps): NativeChild {
+  const scheme = useGlobalMotionScheme();
+  const checkPop = createM3Spring(() => (props.selected ? 1 : 0), "fastSpatial", { scheme });
+
   return (
     <Button
       testId={props.testId ?? null}
@@ -524,21 +532,90 @@ export function M3FilterChip(props: M3FilterChipProps): NativeChild {
       class={styles.filterChip}
       data-selected={props.selected ? "true" : null}
     >
-      <Show when={props.selected}>
-        <vector
-          ariaHidden
-          viewBox="0 0 24 24"
-          d={CHECK_ICON_PATH}
-          style={{ width: "14px", height: "14px", "--zgui-fill": "var(--color-on-primary-container)" }}
-        />
-      </Show>
-      <text>{props.label}</text>
-      <Show when={props.count !== undefined}>
-        <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", fontVariantNumeric: "tabular-nums" }}>
-          {props.count}
-        </text>
-      </Show>
+      <row class={styles.pressInner} style={{ gap: "5px" }}>
+        <Show when={props.selected}>
+          <vector
+            ariaHidden
+            viewBox="0 0 24 24"
+            d={CHECK_ICON_PATH}
+            style={{
+              width: "14px",
+              height: "14px",
+              "--zgui-fill": "var(--color-on-primary-container)",
+              transform: scheme() === "reduced" ? "none" : `scale(${(0.75 + Math.max(0, Math.min(1.12, checkPop())) * 0.25).toFixed(4)})`,
+            }}
+          />
+        </Show>
+        <text>{props.label}</text>
+        <Show when={props.count !== undefined}>
+          <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", fontVariantNumeric: "tabular-nums" }}>
+            {props.count}
+          </text>
+        </Show>
+      </row>
     </Button>
+  );
+}
+
+export interface M3CollapsibleProps {
+  readonly open: boolean;
+  readonly estimatedHeight?: number;
+  readonly children: NativeChild;
+}
+
+/**
+ * Clip-Height Spring Expansion primitive (`docs/design/motion.md §5.9`):
+ * animates outer clip height `0 <-> measuredHeight` via `fastSpatial` with `createPresence` exit
+ * retention, inner `-4px -> 0` glide + delayed opacity ramp, and zero displacement in `reduced` mode.
+ */
+export function M3Collapsible(props: M3CollapsibleProps): NativeChild {
+  const scheme = useGlobalMotionScheme();
+  const presence = createPresence(() => props.open, {
+    scheme,
+    enterRole: "fastSpatial",
+    enterOpacityRole: "fastEffects",
+    exitRole: "fastEffects",
+  });
+  const [innerNode, setInnerNode] = createSignal<NativeNode | null>(null);
+  const [measuredHeight, setMeasuredHeight] = createSignal(props.estimatedHeight ?? 64);
+
+  createEffect(() => [presence.mounted(), props.open, innerNode()] as const, ([mounted, _open, node]) => {
+    if (!mounted || !node) return;
+    const rect = getWindowRect(node);
+    if (rect && rect.height > 1) setMeasuredHeight(rect.height);
+  });
+
+  const clipStyle = (): NativeStyle => {
+    const p = Math.max(0, Math.min(1, presence.progress()));
+    const reduced = scheme() === "reduced";
+    const settledOpen = props.open && presence.progress.settled() && p >= 0.99;
+    return {
+      width: "100%",
+      overflow: "hidden",
+      ...(settledOpen || reduced ? {} : { height: `${(p * measuredHeight()).toFixed(2)}px` }),
+    };
+  };
+
+  const innerStyle = (): NativeStyle => {
+    const p = Math.max(0, Math.min(1.04, presence.progress()));
+    const rawOpacity = Math.max(0, Math.min(1, presence.opacity()));
+    const reduced = scheme() === "reduced";
+    const opacity = reduced ? rawOpacity : Math.max(0, Math.min(1, (rawOpacity - 0.14) / 0.86));
+    return {
+      width: "100%",
+      opacity,
+      transform: reduced ? "none" : `translateY(${((1 - p) * -4).toFixed(2)}px)`,
+    };
+  };
+
+  return (
+    <Show when={presence.mounted()} fallback={<box style={{ display: "none" }} />}>
+      <box style={clipStyle()}>
+        <box ref={setInnerNode} style={innerStyle()}>
+          {props.children}
+        </box>
+      </box>
+    </Show>
   );
 }
 

@@ -1,9 +1,9 @@
-import { Button, For, Image, LayerSurface, Show, createMemo, createSignal, onCleanup, type Accessor, type NativeChild, type NativeNode } from "@hewel/zgui";
+import { Button, For, Image, LayerSurface, Show, createEffect, createMemo, createSignal, onCleanup, type Accessor, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
-import { createEnterProgress, createOpacityEnter, createRetainedPresence, useMotionScheme, type M3Spring } from "../motion.ts";
+import { createEnterProgress, createOpacityEnter, createPresence, createRetainedPresence, useMotionScheme, type M3Spring } from "../motion.ts";
 import { useShellStore } from "../store.ts";
-import type { NotificationItem } from "../topics.ts";
+import { splitNotificationActions, type NotificationItem } from "../topics.ts";
 
 const primary = "var(--color-primary)";
 const onSurface = "var(--color-on-surface)";
@@ -27,11 +27,12 @@ function trackedRef(track: TrackNode): (node: NativeNode) => void {
   return node => { detach = track(node); };
 }
 
-function ToastCard({ toast, track, stackSpatial, stackOpacity }: {
+function ToastCard({ toast, track, stackSpatial, stackOpacity, promoted }: {
   toast: Accessor<NotificationItem>;
   track: TrackNode;
   stackSpatial: M3Spring;
   stackOpacity: M3Spring;
+  promoted: boolean;
 }): NativeChild {
   const { hostClient, invokePublic } = useShellStore();
   const icon = useDaemonMedia(hostClient, () => {
@@ -43,6 +44,33 @@ function ToastCard({ toast, track, stackSpatial, stackOpacity }: {
   const cardReflow = createEnterProgress("defaultSpatial", { scheme });
   const cardFade = createOpacityEnter("fastEffects", scheme);
   const combinedOpacity = () => Math.max(0, Math.min(1, cardFade() * stackOpacity()));
+  const flipDeltaY = propsOr(promoted, 44, 14);
+  const actions = createMemo(() => splitNotificationActions(toast().actions));
+
+  const bodyContent = () => (
+    <row style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "10px", alignItems: "flex-start" }}>
+      <Show when={icon.src()} fallback={
+        <box style={{ ...iconTile, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: containerHigh }}>
+          <ShellIcon name="bell" size={18} color={primary} />
+        </box>
+      }>
+        <box testId={`toast-icon-${toast().id}`} style={{
+          ...iconTile,
+          overflow: "hidden",
+          border: "1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent)",
+        }}>
+          <Image src={icon.src()} style={{ width: "100%", height: "100%", borderRadius: "10px", objectFit: "cover" }} />
+        </box>
+      </Show>
+      <column style={{ flexGrow: 1, minWidth: "0px", gap: "2px" }}>
+        <text style={{ ...clipped, color: muted, fontSize: "11px" }}>{toast().app_name}</text>
+        <text style={{ ...clipped, fontSize: "14px", fontWeight: 600 }}>{toast().summary}</text>
+        <Show when={toast().body}>
+          <text style={{ color: muted, fontSize: "12px", maxHeight: "56px", overflow: "hidden" }}>{toast().body}</text>
+        </Show>
+      </column>
+    </row>
+  );
 
   return (
     <column ref={trackedRef(track)} testId={`toast-card-${toast().id}`} style={{
@@ -51,26 +79,28 @@ function ToastCard({ toast, track, stackSpatial, stackOpacity }: {
       opacity: combinedOpacity(),
       transform: scheme() === "reduced"
         ? "none"
-        : `translateX(${((1 - stackSpatial()) * 24).toFixed(2)}px) translateY(${((1 - cardReflow()) * 14).toFixed(2)}px) scale(${(0.96 + stackSpatial() * 0.04).toFixed(4)})`,
+        : `translateX(${((1 - stackSpatial()) * 24).toFixed(2)}px) translateY(${((1 - cardReflow()) * flipDeltaY).toFixed(2)}px) scale(${(0.96 + stackSpatial() * 0.04).toFixed(4)})`,
       transformOrigin: "top right",
     }}>
       <row style={{ gap: "10px", alignItems: "flex-start" }}>
-        <Show when={icon.src()} fallback={
-          <box style={{ ...iconTile, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: containerHigh }}>
-            <ShellIcon name="bell" size={18} color={primary} />
-          </box>
-        }>
-          <Image src={icon.src()} style={{ ...iconTile, objectFit: "contain" }} />
+        <Show when={actions().defaultAction} fallback={bodyContent()}>
+          {defaultAction => (
+            <Button
+              testId={`toast-default-${toast().id}`}
+              ariaLabel={defaultAction().label.trim() || `Open ${toast().summary || toast().app_name}`}
+              onClick={() => { void invokePublic("notifications.invoke-action", { id: toast().id, action_key: defaultAction().key }); }}
+              style={{
+                flexGrow: 1, flexBasis: "0px", minWidth: "0px", display: "flex", flexDirection: "row",
+                alignItems: "flex-start", borderRadius: "10px", padding: "2px", margin: "-2px",
+                backgroundColor: "transparent", color: onSurface, textAlign: "left",
+              }}
+            >
+              {bodyContent()}
+            </Button>
+          )}
         </Show>
-        <column style={{ flexGrow: 1, minWidth: "0px", gap: "2px" }}>
-          <text style={{ ...clipped, color: muted, fontSize: "11px" }}>{toast().app_name}</text>
-          <text style={{ ...clipped, fontSize: "14px", fontWeight: 600 }}>{toast().summary}</text>
-          <Show when={toast().body}>
-            <text style={{ color: muted, fontSize: "12px", maxHeight: "56px", overflow: "hidden" }}>{toast().body}</text>
-          </Show>
-        </column>
         <Button ariaLabel="Dismiss notification" testId={`toast-dismiss-${toast().id}`}
-          style={{ ...pill, padding: "0", width: "28px", minHeight: "28px", backgroundColor: containerHigh, color: muted }}
+          style={{ ...pill, borderRadius: "999px", padding: "0", width: "28px", minHeight: "28px", backgroundColor: containerHigh, color: muted }}
           onClick={() => { void invokePublic("notifications.dismiss", { id: toast().id }); }}>
           <ShellIcon name="close" size={14} color={muted} />
         </Button>
@@ -79,9 +109,9 @@ function ToastCard({ toast, track, stackSpatial, stackOpacity }: {
         <Image testId={`toast-attachment-${toast().id}`} src={attachment.src()}
           style={{ width: "100%", height: "96px", borderRadius: "10px", objectFit: "contain" }} />
       </Show>
-      <Show when={toast().actions.length > 0}>
+      <Show when={actions().buttonActions.length > 0}>
         <row style={{ flexWrap: "wrap", gap: "8px" }}>
-          <For each={toast().actions} keyed={action => action.key}>
+          <For each={actions().buttonActions} keyed={action => action.key}>
             {action => (
               <Button testId={`toast-action-${toast().id}-${action().key}`}
                 style={{
@@ -99,12 +129,25 @@ function ToastCard({ toast, track, stackSpatial, stackOpacity }: {
   );
 }
 
-function ToastFooter({ count, next, track }: { count: number; next: NotificationItem; track: TrackNode }): NativeChild {
+function propsOr(cond: boolean, a: number, b: number): number {
+  return cond ? a : b;
+}
+
+function ToastFooter({ count, next, track, progress, opacity }: {
+  count: number;
+  next: NotificationItem;
+  track: TrackNode;
+  progress: M3Spring;
+  opacity: M3Spring;
+}): NativeChild {
   const { invokePublic } = useShellStore();
+  const scheme = useMotionScheme();
   return (
     <row ref={trackedRef(track)} testId="toast-more-footer" style={{
       borderRadius: "16px", backgroundColor: container, border: outline, boxShadow: "var(--shadow-level-2)",
       padding: "6px 10px", gap: "8px", alignItems: "center",
+      opacity: Math.max(0, Math.min(1, opacity())),
+      transform: scheme() === "reduced" ? "none" : `translateY(${((1 - progress()) * 10).toFixed(2)}px)`,
     }}>
       <box style={{ ...pill, minHeight: "24px", padding: "2px 8px", backgroundColor: containerHigh, color: primary, fontSize: "11px" }}>
         <text>+{count - 1} more</text>
@@ -125,7 +168,29 @@ function ToastSurface({ output, popups, spatial, opacity }: {
   opacity: M3Spring;
 }): NativeChild {
   const { settings } = useShellStore();
+  const scheme = useMotionScheme();
   const [trackedNodes, setTrackedNodes] = createSignal<readonly NativeNode[]>([]);
+  const [promoted, setPromoted] = createSignal(false);
+  let lastHeadId: number | undefined;
+  createEffect(() => popups()[0]?.id, headId => {
+    if (lastHeadId !== undefined && headId !== undefined && headId !== lastHeadId) {
+      setPromoted(true);
+    }
+    lastHeadId = headId;
+  });
+  const [retainedFooter, setRetainedFooter] = createSignal<{ readonly count: number; readonly next: NotificationItem } | null>(null);
+  createEffect(() => {
+    const list = popups();
+    return list.length > 1 && list[1] ? { count: list.length, next: list[1] } : null;
+  }, entry => {
+    if (entry) setRetainedFooter(entry);
+  });
+  const footerPresence = createPresence(() => popups().length > 1, {
+    scheme,
+    enterRole: "fastSpatial",
+    enterOpacityRole: "fastEffects",
+    exitRole: "fastEffects",
+  });
   const track: TrackNode = node => {
     setTrackedNodes(nodes => [...nodes, node]);
     return () => setTrackedNodes(nodes => nodes.filter(candidate => candidate !== node));
@@ -141,9 +206,19 @@ function ToastSurface({ output, popups, spatial, opacity }: {
       margin={{ top: Math.max(0, topMargin() - 12), right: 0 }} width={396} height={456} keyboard="none" inputRegion={trackedNodes()}>
       <column style={{ width: "100%", padding: "12px 14px 28px 22px", gap: "8px" }}>
         <Show when={popups()[0]?.id} keyed>
-          {_id => <ToastCard toast={() => popups()[0]!} track={track} stackSpatial={spatial} stackOpacity={opacity} />}
+          {_id => <ToastCard toast={() => popups()[0]!} track={track} stackSpatial={spatial} stackOpacity={opacity} promoted={promoted()} />}
         </Show>
-        <Show when={popups()[1]}>{next => <ToastFooter count={popups().length} next={next()} track={track} />}</Show>
+        <Show when={footerPresence.mounted() && retainedFooter()}>
+          {footer => (
+            <ToastFooter
+              count={footer().count}
+              next={footer().next}
+              track={track}
+              progress={footerPresence.progress}
+              opacity={footerPresence.opacity}
+            />
+          )}
+        </Show>
       </column>
     </LayerSurface>
   );

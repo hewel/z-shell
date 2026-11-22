@@ -7,6 +7,8 @@ import { formatTrackTimeUs, selectActiveMediaPlayer, type MediaPlayer } from "..
 
 const primary = "var(--color-primary)";
 const onPrimary = "var(--color-on-primary)";
+const primaryContainer = "var(--color-primary-container)";
+const onPrimaryContainer = "var(--color-on-primary-container)";
 const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
 const container = "var(--color-surface-container)";
@@ -88,13 +90,16 @@ function WavyProgressTrack(props: {
   const waveAmplitude = createM3Spring(() => props.playing && scheme() !== "reduced" ? 1 : 0, "defaultSpatial", { scheme });
   const phase = createPhaseLoop(() => props.playing, 24, scheme);
   const clamped = () => Math.max(0.03, Math.min(0.97, props.fraction));
+  const isFlat = () => !props.playing || scheme() === "reduced";
   // Track inner width is 340px (396 - 56 padding); viewBox 0..328 is centered at x=[6, 334].
   const playheadX = () => Math.round(clamped() * 340) - 6;
   const wavePath = createMemo(() => buildWavyWavePath(playheadX(), waveAmplitude(), phase()));
-  const restPct = () => `${Math.max(0, 100 - clamped() * 100 - 2.5).toFixed(2)}%`;
+  const restPct = () => `${Math.max(0, 100 - clamped() * 100 - 3.0).toFixed(2)}%`;
 
   return (
     <control testId="media-progress" role={props.canScrub ? "slider" : "progressIndicator"} ariaLabel="Track position"
+      data-slider={props.canScrub ? "true" : null}
+      data-progress={props.canScrub ? null : "true"}
       tabIndex={props.canScrub ? 0 : -1} ariaValueMin={0} ariaValueMax={props.lengthUs} ariaValueNow={props.positionUs}
       style={{ display: "flex", height: "28px", width: "100%", alignItems: "center", position: "relative" }}
       onPointerDown={event => {
@@ -116,14 +121,14 @@ function WavyProgressTrack(props: {
         position: "absolute", inset: "0px", width: "100%", height: "28px",
         "--zgui-fill": "transparent",
         "--zgui-stroke": primary,
-        "--zgui-stroke-width": "4px",
+        "--zgui-stroke-width": isFlat() ? "5px" : "4px",
         "--zgui-stroke-linecap": "round",
         "--zgui-stroke-linejoin": "round",
       }} />
       <box ariaHidden style={{
-        position: "absolute", right: "2px", height: "4px", width: restPct(),
+        position: "absolute", right: "2px", height: isFlat() ? "5px" : "4px", width: restPct(),
         display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: "1px",
-        borderRadius: "2px", backgroundColor: containerHighest,
+        borderRadius: "3px", backgroundColor: containerHighest,
       }}>
         <Show when={clamped() < 0.94}>
           <box ariaHidden data-slider-stop-dot="true" style={{
@@ -249,11 +254,14 @@ export function MediaPanel() {
                     onClick={() => { void invokePublic("media.select-player", { player_id: player().id }); }}
                     style={{
                       ...pill, maxWidth: "100%",
-                      backgroundColor: active() ? primary : containerHighest,
-                      color: active() ? onPrimary : muted,
+                      backgroundColor: active() ? primaryContainer : containerHighest,
+                      border: active()
+                        ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)"
+                        : "1px solid transparent",
+                      color: active() ? onPrimaryContainer : muted,
                       fontSize: "11px", fontWeight: active() ? 600 : 500,
                     }}>
-                    <ShellIcon name="musicNote" size={12} color={active() ? onPrimary : muted} />
+                    <ShellIcon name="musicNote" size={12} color={active() ? onPrimaryContainer : muted} />
                     <text style={truncate}>{player().identity}</text>
                   </Button>
                 );

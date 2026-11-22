@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup, type Accessor } from "@hewel/zgui";
+import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from "@hewel/zgui";
 import { registerImageBytes, type ImageHandle } from "@hewel/zgui-services";
 import type { ZShellClient } from "./client.ts";
 import type { MediaRef, TopicRemovedNotification, TopicResetNotification, TopicUpdate } from "./protocol.ts";
@@ -176,6 +176,19 @@ function isImageByteArray(bytes: unknown): bytes is number[] {
   return true;
 }
 
+let nextMediaClientId = 1;
+const mediaClientIds = new WeakMap<ZShellClient, number>();
+
+function getMediaClientId(client: ZShellClient | null | undefined): number {
+  if (client == null) return 0;
+  let id = mediaClientIds.get(client);
+  if (id === undefined) {
+    id = nextMediaClientId++;
+    mediaClientIds.set(client, id);
+  }
+  return id;
+}
+
 export function useDaemonMedia(
   hostClient: MaybeAccessor<ZShellClient | null | undefined>,
   media: MaybeAccessor<MediaRef | null | undefined>,
@@ -186,36 +199,59 @@ export function useDaemonMedia(
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal<unknown>();
 
-  createEffect(() => {
+  let latestSpec:
+    | { readonly kind: "runtime_path"; readonly path: string; readonly revision: number }
+    | { readonly kind: "blob_handle"; readonly token: string; readonly client: ZShellClient | null | undefined }
+    | undefined;
+
+  const mediaKey = createMemo(() => {
     const ref = read(media);
     if (ref?.kind === "runtime_path") {
-      return { kind: ref.kind, path: ref.path, revision: ref.revision };
+      latestSpec = { kind: "runtime_path", path: ref.path, revision: ref.revision };
+      return `runtime:${ref.revision}:${ref.path}`;
     }
     if (ref?.kind === "blob_handle") {
-      return { kind: ref.kind, token: ref.token, client: read(hostClient) };
+      const client = read(hostClient);
+      latestSpec = { kind: "blob_handle", token: ref.token, client };
+      return `blob:${getMediaClientId(client)}:${ref.token}`;
     }
-    return undefined;
-  }, (input) => {
+    latestSpec = undefined;
+    return "";
+  });
+
+  let currentHandle: ImageHandle | undefined;
+  const releaseCurrentHandle = () => {
+    currentHandle?.release();
+    currentHandle = undefined;
+  };
+  onCleanup(releaseCurrentHandle);
+
+  createEffect(mediaKey, (key) => {
+    const input = key ? latestSpec : undefined;
     setError(undefined);
     if (input?.kind === "runtime_path") {
       setSrc(encodeFileUrlPath(input.path));
+      releaseCurrentHandle();
       setLoading(false);
       return;
     }
-    setSrc(undefined);
     if (input?.client == null) {
+      setSrc(undefined);
+      releaseCurrentHandle();
       setLoading(false);
       return;
     }
     setLoading(true);
     let active = true;
-    let handle: ImageHandle | undefined;
     void input.client.invokeCommand(options.fetchCommand, [], { token: input.token }).then(({ data }) => {
       if (!active) return;
       const bytes = typeof data === "object" && data !== null && "bytes" in data ? data.bytes : undefined;
       if (!isImageByteArray(bytes)) throw new TypeError("daemon media response must contain a non-empty byte array");
-      handle = registerImageBytes(new Uint8Array(bytes));
-      setSrc(handle.src);
+      const nextHandle = registerImageBytes(new Uint8Array(bytes));
+      const prevHandle = currentHandle;
+      currentHandle = nextHandle;
+      setSrc(nextHandle.src);
+      prevHandle?.release();
       setLoading(false);
     }).catch((cause: unknown) => {
       if (!active) return;
@@ -225,7 +261,6 @@ export function useDaemonMedia(
     });
     return () => {
       active = false;
-      handle?.release();
     };
   });
 

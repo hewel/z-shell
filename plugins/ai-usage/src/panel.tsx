@@ -1,6 +1,6 @@
 import { Button, For, Show, createMemo, createSignal, type Accessor, type NativeChild } from "@hewel/zgui";
 import type { ZShellClient } from "@z-shell/sdk";
-import { M3IconButton, M3LinearProgress } from "@z-shell/sdk/primitives";
+import { M3Collapsible, M3IconButton, M3LinearProgress } from "@z-shell/sdk/primitives";
 import { SPRING_EPSILON, createM3Spring, useGlobalMotionScheme, useTopic, type MotionScheme } from "@z-shell/sdk/zgui";
 import type { AiUsageSnapshot, QuotaEntry } from "./service.ts";
 
@@ -53,7 +53,8 @@ function ProviderQuotaCard(props: {
       <Button ariaLabel={`Toggle ${props.provider} details`} expanded={expanded()}
         onClick={() => setExpanded(open => !open)} style={{
           display: "flex", flexDirection: "row", alignItems: "center", gap: "10px",
-          width: "100%", minHeight: "34px", padding: "0px", backgroundColor: "transparent", color: onSurface,
+          width: "100%", minHeight: "34px", padding: "4px 6px", margin: "-4px -6px", borderRadius: "10px",
+          backgroundColor: "transparent", color: onSurface,
         }}>
         <box ariaHidden style={{
           display: "flex", width: "34px", height: "34px", borderRadius: "10px", flexShrink: 0,
@@ -79,13 +80,13 @@ function ProviderQuotaCard(props: {
         {entry => <MetricBar quota={entry()} />}
       </Show>
 
-      <Show when={expanded() && extraEntries().length > 0}>
+      <M3Collapsible open={expanded() && extraEntries().length > 0} estimatedHeight={Math.max(54, extraEntries().length * 58)}>
         <column style={{ gap: "8px" }}>
           <For each={extraEntries()} keyed={item => `${item.provider}:${item.label}`}>
             {entry => <MetricBar quota={entry()} />}
           </For>
         </column>
-      </Show>
+      </M3Collapsible>
     </column>
   );
 }

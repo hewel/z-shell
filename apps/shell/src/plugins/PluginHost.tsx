@@ -6,6 +6,7 @@ import { type PluginSettingsProps } from "@z-shell/sdk/zgui";
 import {
   createRetainedPresence,
   panelMotionStyle,
+  popoverContentMotionStyle,
   useMotionScheme,
   type M3Spring,
 } from "../motion.ts";
@@ -61,7 +62,12 @@ function PluginPanelFrame(props: {
         reduced: scheme() === "reduced",
       }),
     }}>
-      <scroll style={{ width: "100%", maxHeight: `${PANEL_MAX_HEIGHTS.plugin}px`, overflow: "hidden auto" }}>
+      <scroll style={{
+        width: "100%",
+        maxHeight: `${PANEL_MAX_HEIGHTS.plugin}px`,
+        overflow: "hidden auto",
+        ...popoverContentMotionStyle(props.spatial(), props.opacity(), scheme() === "reduced"),
+      }}>
         {props.children}
       </scroll>
     </box>
@@ -249,7 +255,7 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
           const ownSettingsPage = () => pluginSettingsPages().find(page => page.pluginId === pluginId);
           const onOpenSettings = () => {
             const page = ownSettingsPage();
-            dismissPluginPanelInstant();
+            dismissPluginPanel();
             openSettingsWindow(page ? page.id : "appearance");
           };
           return (

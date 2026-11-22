@@ -1,15 +1,31 @@
 /* Shared Material Design 3 Desktop Component Primitives (docs/design/components.md) */
 
+.pressInner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  pointer-events: none;
+  transition-property: transform;
+  transition-duration: var(--motion-duration-short2);
+  transition-timing-function: var(--motion-easing-standard);
+}
+
 .button {
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  cursor: pointer;
   border: 1px solid transparent;
   font-family: var(--font-sans);
   transition-property: background-color, border-color, color;
   transition-duration: var(--motion-duration-short2);
   transition-timing-function: var(--motion-easing-standard);
+
+  &:not(:disabled):active > .pressInner {
+    transform: scale(0.955);
+  }
 
   &[data-size="md"] {
     min-height: 34px;
@@ -39,7 +55,7 @@
       background-color: color-mix(in srgb, var(--color-on-primary) var(--state-hover), var(--color-primary));
     }
     &:active {
-      background-color: color-mix(in srgb, var(--color-on-primary) var(--state-pressed), var(--color-primary));
+      background-color: color-mix(in srgb, var(--color-on-primary) var(--state-dragged), var(--color-primary));
     }
   }
 
@@ -52,7 +68,7 @@
       background-color: color-mix(in srgb, var(--color-on-primary-container) var(--state-hover), var(--color-primary-container));
     }
     &:active {
-      background-color: color-mix(in srgb, var(--color-on-primary-container) var(--state-pressed), var(--color-primary-container));
+      background-color: color-mix(in srgb, var(--color-on-primary-container) var(--state-dragged), var(--color-primary-container));
     }
   }
 
@@ -64,7 +80,7 @@
       background-color: color-mix(in srgb, var(--color-on-secondary-container) var(--state-hover), var(--color-secondary-container));
     }
     &:active {
-      background-color: color-mix(in srgb, var(--color-on-secondary-container) var(--state-pressed), var(--color-secondary-container));
+      background-color: color-mix(in srgb, var(--color-on-secondary-container) var(--state-dragged), var(--color-secondary-container));
     }
   }
 
@@ -77,7 +93,7 @@
       background-color: color-mix(in srgb, var(--color-primary) var(--state-hover), transparent);
     }
     &:active {
-      background-color: color-mix(in srgb, var(--color-primary) var(--state-pressed), transparent);
+      background-color: color-mix(in srgb, var(--color-primary) var(--state-dragged), transparent);
     }
 
     &[data-neutral="true"] {
@@ -89,7 +105,7 @@
         background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), var(--color-surface-container-high));
       }
       &:active {
-        background-color: color-mix(in srgb, var(--color-on-surface) var(--state-pressed), var(--color-surface-container-high));
+        background-color: color-mix(in srgb, var(--color-on-surface) var(--state-dragged), var(--color-surface-container-high));
       }
     }
   }
@@ -102,7 +118,7 @@
       background-color: color-mix(in srgb, var(--color-primary) var(--state-hover), transparent);
     }
     &:active {
-      background-color: color-mix(in srgb, var(--color-primary) var(--state-pressed), transparent);
+      background-color: color-mix(in srgb, var(--color-primary) var(--state-dragged), transparent);
     }
 
     &[data-danger="true"] {
@@ -112,7 +128,7 @@
         background-color: color-mix(in srgb, var(--color-error) var(--state-hover), transparent);
       }
       &:active {
-        background-color: color-mix(in srgb, var(--color-error) var(--state-pressed), transparent);
+        background-color: color-mix(in srgb, var(--color-error) var(--state-dragged), transparent);
       }
     }
   }
@@ -126,11 +142,12 @@
       background-color: color-mix(in srgb, var(--color-on-error-container) var(--state-hover), var(--color-error-container));
     }
     &:active {
-      background-color: color-mix(in srgb, var(--color-on-error-container) var(--state-pressed), var(--color-error-container));
+      background-color: color-mix(in srgb, var(--color-on-error-container) var(--state-dragged), var(--color-error-container));
     }
   }
 
   &:disabled {
+    cursor: default;
     background-color: color-mix(in srgb, var(--color-on-surface) var(--disabled-container), transparent);
     color: color-mix(in srgb, var(--color-on-surface) var(--disabled-ink), transparent);
     border-color: transparent;
@@ -151,11 +168,16 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  cursor: pointer;
   border-radius: var(--radius-md);
   border: 1px solid transparent;
   transition-property: background-color, border-color, color;
   transition-duration: var(--motion-duration-short2);
   transition-timing-function: var(--motion-easing-standard);
+
+  &:not(:disabled):active > .pressInner {
+    transform: scale(0.95);
+  }
 
   &[data-size="md"] {
     width: 32px;
@@ -175,7 +197,7 @@
       background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), transparent);
     }
     &:active {
-      background-color: color-mix(in srgb, var(--color-on-surface) var(--state-pressed), transparent);
+      background-color: color-mix(in srgb, var(--color-on-surface) var(--state-dragged), transparent);
     }
 
     &[data-selected="true"] {
@@ -192,7 +214,7 @@
       background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), var(--color-surface-container-highest));
     }
     &:active {
-      background-color: color-mix(in srgb, var(--color-on-surface) var(--state-pressed), var(--color-surface-container-highest));
+      background-color: color-mix(in srgb, var(--color-on-surface) var(--state-dragged), var(--color-surface-container-highest));
     }
 
     &[data-selected="true"] {
@@ -229,6 +251,7 @@
   }
 
   &:disabled {
+    cursor: default;
     background-color: color-mix(in srgb, var(--color-on-surface) var(--disabled-container), transparent);
     color: color-mix(in srgb, var(--color-on-surface) var(--disabled-ink), transparent);
     border-color: transparent;
@@ -247,6 +270,7 @@
   height: 24px;
   border-radius: var(--radius-pill);
   flex-shrink: 0;
+  cursor: pointer;
   border: 1.5px solid var(--color-outline);
   background-color: var(--color-surface-container-highest);
   transition-property: background-color, border-color;
@@ -267,6 +291,7 @@
   }
 
   &:disabled {
+    cursor: default;
     background-color: color-mix(in srgb, var(--color-on-surface) var(--disabled-container), transparent);
     border-color: color-mix(in srgb, var(--color-on-surface) var(--disabled-container), transparent);
 
@@ -344,6 +369,11 @@
   height: 24px;
   align-items: center;
   gap: 4px;
+  cursor: pointer;
+
+  &:disabled {
+    cursor: default;
+  }
 }
 
 .sliderActiveTrack {
@@ -489,6 +519,7 @@
   min-width: 0px;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
   border-radius: var(--radius-sm);
   background-color: transparent;
   color: var(--color-on-surface-variant);
@@ -503,6 +534,10 @@
     background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), transparent);
   }
 
+  &:not(:disabled):active > .pressInner {
+    transform: scale(0.96);
+  }
+
   &[data-selected="true"] {
     color: var(--color-on-primary-container);
     font-weight: 600;
@@ -513,6 +548,7 @@
   }
 
   &:disabled {
+    cursor: default;
     color: color-mix(in srgb, var(--color-on-surface) var(--disabled-ink), transparent);
   }
 }
@@ -525,6 +561,7 @@
   padding: 0 10px;
   gap: 5px;
   flex-shrink: 0;
+  cursor: pointer;
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-outline);
   background-color: transparent;
@@ -540,6 +577,14 @@
     background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), transparent);
   }
 
+  &:active {
+    background-color: color-mix(in srgb, var(--color-on-surface) var(--state-dragged), transparent);
+  }
+
+  &:not(:disabled):active > .pressInner {
+    transform: scale(0.955);
+  }
+
   &[data-selected="true"] {
     background-color: var(--color-primary-container);
     color: var(--color-on-primary-container);
@@ -549,9 +594,14 @@
     &:hover {
       background-color: color-mix(in srgb, var(--color-on-primary-container) var(--state-hover), var(--color-primary-container));
     }
+
+    &:active {
+      background-color: color-mix(in srgb, var(--color-on-primary-container) var(--state-dragged), var(--color-primary-container));
+    }
   }
 
   &:disabled {
+    cursor: default;
     border-color: color-mix(in srgb, var(--color-on-surface) var(--disabled-container), transparent);
     color: color-mix(in srgb, var(--color-on-surface) var(--disabled-ink), transparent);
   }

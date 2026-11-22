@@ -1,8 +1,13 @@
-import { Button, For, Image, Show, createSignal, type NativeChild } from "@hewel/zgui";
-import { M3SliderRow } from "@z-shell/sdk/primitives";
+import {
+  Button, For, Image, Show, createEffect, createSignal, getWindowRect, untrack,
+  type NativeChild, type NativeNode,
+} from "@hewel/zgui";
+import { M3Collapsible, M3SliderRow } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon, type ShellIconName } from "../icons.tsx";
-import { createEnterProgress, createOpacityEnter, sharedAxisXStyle, useMotionScheme } from "../motion.ts";
+import {
+  SPRING_EPSILON, createEnterProgress, createM3Spring, sharedAxisXStyle, useMotionScheme,
+} from "../motion.ts";
 import { SHELL_ROSETTE_CLIP_40, SHELL_ROSETTE_PATH } from "../shapes.ts";
 import { useShellStore } from "../store.ts";
 import { formatDurationSeconds, type BatteryState, type PowerConfirmAction } from "../topics.ts";
@@ -107,9 +112,18 @@ function QuickTile(props: {
   active?: boolean;
   toggle?: boolean;
   disabled?: boolean;
+  outgoing?: boolean | undefined;
   onClick: () => void;
   open?: () => void;
 }): NativeChild {
+  const scheme = useMotionScheme();
+  const iconPop = createM3Spring(() => 1, "fastSpatial", { scheme, overrideScheme: "expressive" });
+  let prevActive = untrack(() => Boolean(props.active));
+  createEffect(() => Boolean(props.active), next => {
+    if (next === prevActive) return;
+    prevActive = next;
+    iconPop.impulse(-8.5);
+  });
   const ink = () => props.active ? onPrimaryContainer : onSurface;
   const subInk = () => props.active ? onPrimaryContainer : muted;
   return (
@@ -118,22 +132,26 @@ function QuickTile(props: {
       backgroundColor: props.active ? primaryContainer : containerHigh,
       border: props.active ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
     }}>
-      <Button testId={`qs-tile-${props.id}`} ariaLabel={props.label} checked={props.toggle ? props.active ?? false : null}
+      <Button testId={props.outgoing ? null : `qs-tile-${props.id}`} ariaLabel={props.label} checked={props.toggle ? props.active ?? false : null}
         disabled={props.disabled ?? false} onClick={props.onClick} style={{
-          ...row, ...grow, display: "flex", flexDirection: "row", height: "100%", borderRadius: "14px",
+          ...grow, display: "flex", flexDirection: "row", alignItems: "center", height: "100%", borderRadius: "14px",
           padding: props.open ? "0 6px 0 10px" : "0 10px",
           color: ink(), opacity: props.disabled ? 0.55 : 1,
         }}>
-        <box ariaHidden style={{
-          ...iconWell,
-          backgroundColor: props.active ? "color-mix(in srgb, var(--color-primary) 18%, transparent)" : containerHighest,
-        }}>
-          <ShellIcon name={props.icon} size={16} color={props.active ? primary : muted} />
-        </box>
-        <column style={{ ...grow, gap: "1px" }}>
-          <text style={{ ...clipped, fontSize: "13px", fontWeight: 500, lineHeight: "17px" }}>{props.label}</text>
-          <text style={{ ...clipped, fontSize: "11px", lineHeight: "14px", color: subInk(), opacity: props.active ? 0.78 : 1 }}>{props.detail}</text>
-        </column>
+        <row data-press-visual="card" style={{ ...row, ...grow }}>
+          <box ariaHidden data-qs-tile-icon="true" style={{
+            ...iconWell,
+            borderRadius: "999px",
+            backgroundColor: props.active ? "color-mix(in srgb, var(--color-primary) 18%, transparent)" : containerHighest,
+            transform: scheme() === "reduced" ? "none" : `scale(${Math.max(0.8, Math.min(1.12, iconPop())).toFixed(4)})`,
+          }}>
+            <ShellIcon name={props.icon} size={16} color={props.active ? primary : muted} />
+          </box>
+          <column style={{ ...grow, gap: "1px" }}>
+            <text style={{ ...clipped, fontSize: "13px", fontWeight: 500, lineHeight: "17px" }}>{props.label}</text>
+            <text style={{ ...clipped, fontSize: "11px", lineHeight: "14px", color: subInk(), opacity: props.active ? 0.78 : 1 }}>{props.detail}</text>
+          </column>
+        </row>
       </Button>
       <Show when={props.open !== undefined} fallback={<box style={hiddenSection} />}>
         <box ariaHidden data-split-divider="true" style={{
@@ -142,7 +160,7 @@ function QuickTile(props: {
             ? "color-mix(in srgb, var(--color-on-primary-container) 22%, transparent)"
             : "var(--color-outline-variant)",
         }} />
-        <QuickSettingsIconButton testId={`qs-open-${props.id}`} label={`Open ${props.label}`} icon="chevronRight"
+        <QuickSettingsIconButton testId={props.outgoing ? undefined : `qs-open-${props.id}`} label={`Open ${props.label}`} icon="chevronRight"
           size={26} fill="transparent"
           color={props.active ? onPrimaryContainer : muted}
           onClick={() => props.open?.()} />
@@ -255,7 +273,7 @@ function PowerActionButton(props: {
   const isSafe = () => props.action === "lock" || props.action === "suspend";
   return (
     <Button ariaLabel={props.label} onClick={() => props.onSelect(props.action)} style={{
-      ...grow, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "4px",
+      ...grow, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
       padding: props.danger ? "7px 2px" : "8px 2px", borderRadius: "10px",
       backgroundColor: props.danger
         ? "color-mix(in srgb, var(--color-error-container) 38%, transparent)"
@@ -266,22 +284,18 @@ function PowerActionButton(props: {
       color: isSafe() ? color() : mutedColor(),
       fontSize: "11px", fontWeight: 500,
     }}>
-      <ShellIcon name={props.icon} size={16} color={isSafe() ? color() : mutedColor()} />
-      <text style={{ whiteSpace: "nowrap" }}>{props.label}</text>
+      <column data-press-visual="compact" style={{ alignItems: "center", justifyContent: "center", gap: "4px" }}>
+        <ShellIcon name={props.icon} size={16} color={isSafe() ? color() : mutedColor()} />
+        <text style={{ whiteSpace: "nowrap" }}>{props.label}</text>
+      </column>
     </Button>
   );
 }
 
-function PowerMenuRow(props: { onSelect: (action: PowerConfirmAction) => void }): NativeChild {
-  const scheme = useMotionScheme();
-  const reveal = createEnterProgress("fastSpatial", { scheme });
-  const fade = createOpacityEnter("fastEffects", scheme);
+function PowerMenuRow(props: { onSelect: (action: PowerConfirmAction) => void; outgoing?: boolean | undefined }): NativeChild {
   return (
-    <row testId="qs-power-menu" style={{
+    <row testId={props.outgoing ? null : "qs-power-menu"} style={{
       borderRadius: "16px", backgroundColor: containerHigh, padding: "6px", gap: "6px", alignItems: "center",
-      opacity: Math.max(0, Math.min(1, fade())),
-      transform: scheme() === "reduced" ? "none" : `translateY(${((1 - reveal()) * -6).toFixed(2)}px) scale(${(0.97 + reveal() * 0.03).toFixed(4)})`,
-      transformOrigin: "top center",
     }}>
       <For each={safePowerActions} keyed={entry => entry.action}>
         {entry => <PowerActionButton label={entry().label} icon={entry().icon} action={entry().action} onSelect={props.onSelect} />}
@@ -300,6 +314,7 @@ function MainPage(props: {
   powerMenuOpen: boolean;
   togglePowerMenu: () => void;
   closePowerMenu: () => void;
+  outgoing?: boolean | undefined;
 }): NativeChild {
   const scheme = useMotionScheme();
   const backEnter = createEnterProgress("defaultSpatial", { scheme });
@@ -308,7 +323,9 @@ function MainPage(props: {
   const avatar = useDaemonMedia(hostClient, () => user.data()?.avatar, { fetchCommand: "user.fetch-blob" });
   const name = () => user.data()?.display_name ?? user.data()?.username ?? "User";
   const wifi = () => network.data()?.wifi;
+  const ethernetConnected = () => network.data()?.ethernet.some(device => device.carrier) ?? false;
   const activeWifi = () => wifi()?.devices.find(device => device.active_ap_id !== null || device.active_connection !== null);
+  const wifiConnected = () => Boolean(wifi()?.enabled && activeWifi());
   const wifiName = () => {
     const device = activeWifi();
     return device?.access_points.find(ap => ap.id === device.active_ap_id)?.ssid || device?.active_connection?.name;
@@ -336,10 +353,10 @@ function MainPage(props: {
   };
 
   return (
-    <column testId="qs-main" ariaLabel="Quick settings" style={{
+    <column testId={props.outgoing ? null : "qs-main"} ariaLabel="Quick settings" style={{
       width: "100%", padding: "14px", gap: "10px", flexDirection: "column",
       backgroundColor: "var(--color-surface-container)", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
-      ...(props.fromSubpage ? sharedAxisXStyle(backEnter(), -1, scheme() === "reduced") : {}),
+      ...(props.fromSubpage && !props.outgoing ? sharedAxisXStyle(backEnter(), -1, scheme() === "reduced") : {}),
     }}>
       <row style={{ ...row, gap: "10px", padding: "0 2px" }}>
         <box ariaHidden style={{
@@ -349,7 +366,11 @@ function MainPage(props: {
           <vector ariaHidden d={SHELL_ROSETTE_PATH} viewBox="0 0 64 64"
             style={{ position: "absolute", inset: "0px", width: "40px", height: "40px", color: primaryContainer }} />
           <Show when={avatar.src()} fallback={
-            <ShellIcon name="person" size={18} color={onPrimaryContainer} />
+            <box testId={props.outgoing ? null : "qs-avatar-fallback"} ariaHidden style={{
+              position: "relative", zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <ShellIcon name="person" size={18} color={onPrimaryContainer} />
+            </box>
           }>
             {src => <Image ariaHidden src={src()} style={{
               position: "relative", zIndex: 1, width: "40px", height: "40px", objectFit: "cover", clipPath: SHELL_ROSETTE_CLIP_40,
@@ -361,11 +382,13 @@ function MainPage(props: {
           <text style={{ ...clipped, fontSize: "12px", color: muted, lineHeight: "16px" }}>z-shell</text>
         </column>
         <row style={{ gap: "6px", flexShrink: 0 }}>
-          <Button testId="qs-open-settings" ariaLabel="Open settings" onClick={() => openSettingsWindow("appearance")}
+          <Button testId={props.outgoing ? null : "qs-open-settings"} ariaLabel="Open settings" onClick={() => openSettingsWindow("appearance")}
             style={{ ...headerBtn, backgroundColor: containerHighest }}>
-            <ShellIcon name="settings" size={18} color={onSurface} />
+            <box data-press-visual="compact" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <ShellIcon name="settings" size={18} color={onSurface} />
+            </box>
           </Button>
-          <Button testId="qs-power-toggle" ariaLabel="Power menu" expanded={props.powerMenuOpen} onClick={props.togglePowerMenu}
+          <Button testId={props.outgoing ? null : "qs-power-toggle"} ariaLabel="Power menu" expanded={props.powerMenuOpen} onClick={props.togglePowerMenu}
             style={{
               ...headerBtn,
               backgroundColor: props.powerMenuOpen ? primaryContainer : containerHighest,
@@ -373,23 +396,28 @@ function MainPage(props: {
                 ? "1px solid color-mix(in srgb, var(--color-primary) 42%, transparent)"
                 : "1px solid transparent",
             }}>
-            <ShellIcon name="power" size={18} color={props.powerMenuOpen ? onPrimaryContainer : onSurface} />
+            <box data-press-visual="compact" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <ShellIcon name="power" size={18} color={props.powerMenuOpen ? onPrimaryContainer : onSurface} />
+            </box>
           </Button>
         </row>
       </row>
-      <Show when={props.powerMenuOpen} fallback={<box style={hiddenSection} />}>
-        <PowerMenuRow onSelect={handlePowerSelect} />
-      </Show>
+      <M3Collapsible open={props.powerMenuOpen} estimatedHeight={64}>
+        <PowerMenuRow onSelect={handlePowerSelect} outgoing={props.outgoing} />
+      </M3Collapsible>
       <column style={{ gap: "8px" }}>
         <row style={{ gap: "8px" }}>
-          <QuickTile id="wifi" label="Wi-Fi" detail={wifi()?.enabled ? wifiName() ?? "Disconnected" : "Off"}
-            icon={wifi()?.enabled ? "wifi" : "wifiOff"} active={wifi()?.enabled ?? false} toggle
+          <QuickTile id="wifi" label="Wi-Fi"
+            detail={wifi()?.enabled ? (wifiName() ?? (ethernetConnected() ? "Ethernet · Standby" : "Disconnected")) : "Off"}
+            icon={wifi()?.enabled ? "wifi" : "wifiOff"} active={wifiConnected()} toggle
             disabled={!network.data()?.available || !wifi()?.hardware_enabled}
+            outgoing={props.outgoing}
             onClick={() => void invokePublic("network.wifi.set-enabled", { enabled: !wifi()?.enabled })}
             open={() => props.navigate("wifi")} />
           <QuickTile id="bluetooth" label="Bluetooth"
             detail={adapter()?.powered ? connectedBluetooth()?.name || connectedBluetooth()?.address || "On" : "Off"}
             icon={adapter()?.powered ? "bluetooth" : "bluetoothOff"} active={adapter()?.powered ?? false} toggle disabled={!adapter()}
+            outgoing={props.outgoing}
             onClick={() => {
               const device = adapter();
               if (device) void invokePublic("bluetooth.set-power", { adapter: device.path, powered: !device.powered });
@@ -398,16 +426,18 @@ function MainPage(props: {
         <row style={{ gap: "8px" }}>
           <QuickTile id="caffeine" label="Nosleep" detail={caffeine() ? "Awake" : `${ruleCount()} ${ruleCount() === 1 ? "rule" : "rules"}`}
             icon="coffee" active={caffeine()} toggle
+            outgoing={props.outgoing}
             onClick={() => void invokePublic("idle.caffeine", { enabled: !caffeine() })}
             open={() => openSettingsWindow("idle")} />
           <QuickTile id="profile" label="Power Profile" detail={profiles()?.active_profile ?? "balanced"}
-            icon="battery" active={profiles()?.active_profile === "performance"} disabled={!profiles()?.profiles.length} onClick={cycleProfile} />
+            icon="battery" active={profiles()?.active_profile === "performance"} disabled={!profiles()?.profiles.length}
+            outgoing={props.outgoing} onClick={cycleProfile} />
         </row>
         <row style={{ gap: "8px" }}>
           <QuickTile id="wallpaper" label="Wallpaper" detail={`${wallpaper.data()?.catalog_count ?? 0} wallpapers`}
-            icon="wallpaper" onClick={() => openSettingsWindow("appearance")} />
+            icon="wallpaper" outgoing={props.outgoing} onClick={() => openSettingsWindow("appearance")} />
           <QuickTile id="clipboard" label="Clipboard" detail={`${clipboard.data()?.entry_count ?? 0} entries`}
-            icon="copy" onClick={() => togglePanel("clipboard")} />
+            icon="copy" outgoing={props.outgoing} onClick={() => togglePanel("clipboard")} />
         </row>
       </column>
       <Sliders openSound={() => props.navigate("sound")} />
@@ -416,25 +446,122 @@ function MainPage(props: {
   );
 }
 
+interface OutgoingQuickSettings {
+  readonly id: number;
+  readonly page: QuickSettingsPage;
+  readonly direction: 1 | -1;
+}
+
+function OutgoingQuickSettingsLayer(props: {
+  readonly entry: OutgoingQuickSettings;
+  readonly powerMenuOpen: boolean;
+  readonly onDone: () => void;
+}): NativeChild {
+  const scheme = useMotionScheme();
+  const fade = createM3Spring(() => 0, "fastEffects", { initial: 1, scheme });
+  createEffect(() => fade.settled() && fade() <= SPRING_EPSILON.unit, done => {
+    if (done) props.onDone();
+  });
+  const noop = () => {};
+  const progress = () => Math.max(0, Math.min(1, fade()));
+  return (
+    <box ariaHidden style={{
+      position: "absolute", top: "0px", left: "0px", right: "0px",
+      pointerEvents: "none",
+      opacity: progress(),
+      transform: scheme() === "reduced" ? "none" : `translateX(${((1 - progress()) * -14 * props.entry.direction).toFixed(2)}px)`,
+    }}>
+      <Show when={props.entry.page !== "main"} fallback={
+        <MainPage navigate={noop} fromSubpage={false} powerMenuOpen={props.powerMenuOpen} togglePowerMenu={noop} closePowerMenu={noop} outgoing />
+      }>
+        <QuickSettingsSubpage page={props.entry.page as Exclude<QuickSettingsPage, "main">} onBack={noop} outgoing />
+      </Show>
+    </box>
+  );
+}
+
 export function QuickSettingsPanel(): NativeChild {
+  const scheme = useMotionScheme();
   const [page, setPage] = createSignal<QuickSettingsPage>("main");
   const [returnedFromSubpage, setReturnedFromSubpage] = createSignal(false);
   const [powerMenuOpen, setPowerMenuOpen] = createSignal(false);
+  const [outgoing, setOutgoing] = createSignal<OutgoingQuickSettings | null>(null);
+  const [targetHeight, setTargetHeight] = createSignal<number | null>(null);
+  let activeWrapper: NativeNode | undefined;
+  let transitionSeq = 0;
+
+  const animatedHeight = createM3Spring(() => targetHeight() ?? 0, "defaultSpatial", {
+    scheme,
+    epsilon: SPRING_EPSILON.px,
+  });
+
+  createEffect(() => targetHeight() !== null && animatedHeight.settled(), settled => {
+    if (settled) setTargetHeight(null);
+  });
+
+  const transitionTo = (next: QuickSettingsPage) => {
+    const current = page();
+    if (current === next) return;
+    const isReduced = scheme() === "reduced";
+    const prevHeight = activeWrapper ? getWindowRect(activeWrapper)?.height ?? 0 : 0;
+    const direction: 1 | -1 = next === "main" ? -1 : 1;
+    if (!isReduced) {
+      setOutgoing({ id: ++transitionSeq, page: current, direction });
+      if (prevHeight > 1) {
+        animatedHeight.jump(prevHeight);
+        setTargetHeight(prevHeight);
+      }
+    } else {
+      setOutgoing(null);
+      setTargetHeight(null);
+    }
+    setReturnedFromSubpage(next === "main");
+    setPage(next);
+    if (!isReduced && prevHeight > 1) {
+      queueMicrotask(() => {
+        const nextHeight = activeWrapper ? getWindowRect(activeWrapper)?.height ?? 0 : 0;
+        if (nextHeight > 1 && Math.abs(nextHeight - prevHeight) > 1) {
+          setTargetHeight(nextHeight);
+        } else {
+          setTargetHeight(null);
+        }
+      });
+    }
+  };
+
   const subpage = () => {
     const current = page();
     return current === "main" ? undefined : current;
   };
   return (
-    <Show when={subpage()} fallback={
-      <MainPage
-        navigate={next => { setReturnedFromSubpage(false); setPage(next); }}
-        fromSubpage={returnedFromSubpage()}
-        powerMenuOpen={powerMenuOpen()}
-        togglePowerMenu={() => setPowerMenuOpen(open => !open)}
-        closePowerMenu={() => setPowerMenuOpen(false)}
-      />
-    }>
-      {current => <QuickSettingsSubpage page={current()} onBack={() => { setReturnedFromSubpage(true); setPage("main"); }} />}
-    </Show>
+    <box style={{
+      position: "relative", width: "100%", overflow: "hidden",
+      ...(targetHeight() !== null && scheme() !== "reduced" ? { height: `${Math.max(80, animatedHeight()).toFixed(2)}px` } : {}),
+    }}>
+      <box ref={node => { activeWrapper = node; }} style={{ width: "100%" }}>
+        <Show when={subpage()} fallback={
+          <MainPage
+            navigate={transitionTo}
+            fromSubpage={returnedFromSubpage()}
+            powerMenuOpen={powerMenuOpen()}
+            togglePowerMenu={() => setPowerMenuOpen(open => !open)}
+            closePowerMenu={() => setPowerMenuOpen(false)}
+          />
+        }>
+          {current => <QuickSettingsSubpage page={current()} onBack={() => transitionTo("main")} />}
+        </Show>
+      </box>
+      <Show when={outgoing()} keyed>
+        {entry => (
+          <OutgoingQuickSettingsLayer
+            entry={entry}
+            powerMenuOpen={powerMenuOpen()}
+            onDone={() => {
+              if (outgoing()?.id === entry.id) setOutgoing(null);
+            }}
+          />
+        )}
+      </Show>
+    </box>
   );
 }

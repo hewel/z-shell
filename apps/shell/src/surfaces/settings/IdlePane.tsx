@@ -1,4 +1,5 @@
 import { Button, For, Show, TextField, createEffect, createMemo, createSignal, type Accessor, type NativeChild } from "@hewel/zgui";
+import { M3Button, M3SegmentedControl, M3Switch } from "@z-shell/sdk/primitives";
 import { createOpacityEnter, useMotionScheme } from "../../motion.ts";
 import { useShellStore } from "../../store.ts";
 import type { IdleAction } from "../../topics.ts";
@@ -25,12 +26,23 @@ const IDLE_ACTIONS = {
 } as const;
 
 const IDLE_ACTION_KINDS = [
-  { id: "lock", label: "Lock" },
-  { id: "screen_off", label: "Screen off" },
-  { id: "suspend", label: "Suspend" },
-  { id: "lock_and_suspend", label: "Lock + sleep" },
-  { id: "custom_command", label: "Command" },
+  { id: "lock", label: "Lock", testId: "settings-idle-action-lock" },
+  { id: "screen_off", label: "Screen off", testId: "settings-idle-action-screen_off" },
+  { id: "suspend", label: "Suspend", testId: "settings-idle-action-suspend" },
+  { id: "lock_and_suspend", label: "Lock + sleep", testId: "settings-idle-action-lock_and_suspend" },
+  { id: "custom_command", label: "Command", testId: "settings-idle-action-custom_command" },
 ] as const;
+
+const inputField = {
+  height: "32px",
+  borderRadius: "8px",
+  padding: "6px 8px",
+  backgroundColor: container,
+  border: "1px solid color-mix(in srgb, var(--color-outline-variant) 65%, transparent)",
+  color: onSurface,
+  fontFamily: "var(--font-mono)",
+  fontSize: "12px",
+} as const;
 
 interface EditableIdleRule {
   name: string;
@@ -44,6 +56,14 @@ interface EditableIdleRule {
 
 function actionKindOf(action: IdleAction): typeof IDLE_ACTION_KINDS[number]["id"] {
   return typeof action === "string" ? action : "custom_command";
+}
+
+function formatRuleTitle(action: IdleAction, name: string): string {
+  const label = typeof action === "string" ? IDLE_ACTIONS[action] : "Custom command";
+  const normalizedName = name.trim().toLowerCase().replaceAll("-", "_");
+  const defaultSlug = typeof action === "string" ? action : "custom_command";
+  if (!normalizedName || normalizedName === defaultSlug) return label;
+  return `${label} · ${name}`;
 }
 
 function formatRuleDuration(seconds: number): string {
@@ -69,38 +89,23 @@ function RuleEditorCard(props: {
     }}>
       <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
         <text style={{ fontSize: "13px", fontWeight: 600 }}>{`Rule editor · ${props.rule().name}`}</text>
-        <Button onClick={props.onRemove} style={{
-          display: "flex", alignItems: "center", justifyContent: "center", minHeight: "26px",
-          padding: "4px 10px", borderRadius: "8px",
-          backgroundColor: "var(--color-error-container)", color: "var(--color-on-error-container)",
-          fontSize: "11px", fontWeight: 600,
-        }}>
+        <M3Button variant="text" danger size="sm" onClick={props.onRemove}>
           <text>Remove</text>
-        </Button>
+        </M3Button>
       </row>
 
-      <row style={{ gap: "4px", borderRadius: "10px", backgroundColor: container, padding: "4px" }}>
-        <For each={IDLE_ACTION_KINDS} keyed={item => item.id}>
-          {item => {
-            const active = () => actionKindOf(props.rule().action) === item().id;
-            return (
-              <Button selected={active()} onClick={() => {
-                const kind = item().id;
-                const nextAction: IdleAction = kind === "custom_command"
-                  ? (typeof props.rule().action === "object" ? props.rule().action : { custom_command: ["true"] })
-                  : kind;
-                props.onUpdate(props.rule().name, r => ({ ...r, action: nextAction }));
-              }} style={{
-                ...grow, display: "flex", height: "28px", borderRadius: "8px", alignItems: "center", justifyContent: "center",
-                backgroundColor: active() ? primaryContainer : "transparent",
-                color: active() ? onPrimaryContainer : muted, fontSize: "11px", fontWeight: active() ? 600 : 500,
-              }}>
-                <text>{item().label}</text>
-              </Button>
-            );
-          }}
-        </For>
-      </row>
+      <M3SegmentedControl
+        ariaLabel="Idle action"
+        compact
+        options={IDLE_ACTION_KINDS}
+        value={actionKindOf(props.rule().action)}
+        onChange={kind => {
+          const nextAction: IdleAction = kind === "custom_command"
+            ? (typeof props.rule().action === "object" ? props.rule().action : { custom_command: ["true"] })
+            : kind;
+          props.onUpdate(props.rule().name, r => ({ ...r, action: nextAction }));
+        }}
+      />
 
       <row style={{ gap: "8px", width: "100%" }}>
         <column style={{ ...grow, gap: "4px" }}>
@@ -111,10 +116,7 @@ function RuleEditorCard(props: {
               if (Number.isFinite(n) && n >= 0 && n <= 86400) {
                 props.onUpdate(props.rule().name, r => ({ ...r, timeout_seconds: n }));
               }
-            }} style={{
-              height: "32px", borderRadius: "8px", padding: "6px 8px",
-              backgroundColor: container, color: onSurface, fontFamily: "var(--font-mono)", fontSize: "12px",
-            }} />
+            }} style={inputField} />
         </column>
         <column style={{ ...grow, gap: "4px" }}>
           <text style={{ fontSize: "11px", color: muted }}>When locked (s)</text>
@@ -130,10 +132,7 @@ function RuleEditorCard(props: {
               if (Number.isFinite(n) && n >= 1 && n <= 86400) {
                 props.onUpdate(props.rule().name, r => ({ ...r, locked_timeout_seconds: n }));
               }
-            }} style={{
-              height: "32px", borderRadius: "8px", padding: "6px 8px",
-              backgroundColor: container, color: onSurface, fontFamily: "var(--font-mono)", fontSize: "12px",
-            }} />
+            }} style={inputField} />
         </column>
         <column style={{ ...grow, gap: "4px" }}>
           <text style={{ fontSize: "11px", color: muted }}>Warning (0–60s)</text>
@@ -143,10 +142,7 @@ function RuleEditorCard(props: {
               if (Number.isFinite(n) && n >= 0 && n <= 60) {
                 props.onUpdate(props.rule().name, r => ({ ...r, pre_action_fade_seconds: n }));
               }
-            }} style={{
-              height: "32px", borderRadius: "8px", padding: "6px 8px",
-              backgroundColor: container, color: onSurface, fontFamily: "var(--font-mono)", fontSize: "12px",
-            }} />
+            }} style={inputField} />
         </column>
       </row>
 
@@ -157,10 +153,7 @@ function RuleEditorCard(props: {
           onInput={ev => {
             const parts = ev.value.trim().split(/\s+/).filter(Boolean);
             props.onUpdate(props.rule().name, r => ({ ...r, resume_command: parts.length > 0 ? parts : null }));
-          }} style={{
-            height: "32px", borderRadius: "8px", padding: "6px 8px",
-            backgroundColor: container, color: onSurface, fontFamily: "var(--font-mono)", fontSize: "12px",
-          }} />
+          }} style={inputField} />
       </column>
 
       <Show when={props.dirty()}>
@@ -272,14 +265,17 @@ export function IdlePane(): NativeChild {
           </row>
           <text style={{ fontSize: "11px", color: muted }}>Pause automatic screen off and suspend timers</text>
         </column>
-        <Button testId="settings-idle-caffeine" onClick={() => void invokePublic("idle.caffeine", { enabled: !caffeine() })} style={{
-          display: "flex", alignItems: "center", justifyContent: "center", minHeight: "30px",
-          padding: "6px 12px", borderRadius: "10px", flexShrink: 0,
-          backgroundColor: caffeine() ? primaryContainer : containerHighest,
-          color: caffeine() ? onPrimaryContainer : onSurface, fontSize: "12px", fontWeight: 600,
-        }}>
-          <text>{caffeine() ? "Awake" : "Normal"}</text>
-        </Button>
+        <row style={{ alignItems: "center", gap: "8px", flexShrink: 0 }}>
+          <text style={{ fontSize: "12px", fontWeight: 500, color: caffeine() ? primary : muted }}>
+            {caffeine() ? "Awake" : "Normal"}
+          </text>
+          <M3Switch
+            testId="settings-idle-caffeine"
+            ariaLabel="Manual caffeine protection"
+            checked={caffeine()}
+            onToggle={() => void invokePublic("idle.caffeine", { enabled: !caffeine() })}
+          />
+        </row>
       </row>
 
       <column style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "14px", gap: "8px" }}>
@@ -296,10 +292,6 @@ export function IdlePane(): NativeChild {
         <For each={draftRules()} keyed={rule => rule.name} fallback={<text style={{ fontSize: "12px", color: muted }}>No declarative idle rules configured</text>}>
           {rule => {
             const selected = () => selectedName() === rule().name;
-            const actionLabel = () => {
-              const value = rule().action;
-              return typeof value === "string" ? IDLE_ACTIONS[value] : "Custom command";
-            };
             return (
               <row style={{
                 borderRadius: "14px", padding: "8px 10px", alignItems: "center", gap: "10px",
@@ -307,11 +299,12 @@ export function IdlePane(): NativeChild {
                 border: selected() ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
                 color: selected() ? onPrimaryContainer : onSurface,
               }}>
-                <Button onClick={() => selectRule(rule().name)} style={{
+                <Button testId={`settings-idle-rule-${rule().name}`} onClick={() => selectRule(rule().name)} style={{
                   ...grow, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "1px",
-                  minHeight: "32px", backgroundColor: "transparent", color: selected() ? onPrimaryContainer : onSurface,
+                  minHeight: "32px", borderRadius: "10px", padding: "6px 8px", margin: "-6px -8px",
+                  backgroundColor: "transparent", color: selected() ? onPrimaryContainer : onSurface,
                 }}>
-                  <text style={{ ...clipped, fontSize: "13px", fontWeight: 600 }}>{`${actionLabel()} · ${rule().name}`}</text>
+                  <text style={{ ...clipped, fontSize: "13px", fontWeight: 600 }}>{formatRuleTitle(rule().action, rule().name)}</text>
                   <text data-tabular="true" style={{
                     ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", fontVariantNumeric: "tabular-nums",
                     color: selected() ? onPrimaryContainer : muted, opacity: selected() ? 0.8 : 1,

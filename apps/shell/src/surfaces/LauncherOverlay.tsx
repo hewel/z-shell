@@ -1,7 +1,7 @@
-import { Button, For, Image, LayerSurface, Show, TextField, createEffect, createSignal, flush, focus, onCleanup, type NativeChild, type NativeKeyEvent } from "@hewel/zgui";
+import { Button, For, Image, LayerSurface, Show, TextField, createEffect, createSignal, flush, focus, onCleanup, type Accessor, type NativeChild, type NativeKeyEvent } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
-import { createRetainedPresence, dialogMotionStyle, scrimBackdrop, useMotionScheme, type M3Spring } from "../motion.ts";
+import { SPRING_EPSILON, createM3Spring, createRetainedPresence, dialogMotionStyle, scrimBackdrop, useMotionScheme, type M3Spring } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { resolveActiveMonitor, resolveMonitorLogicalSize, type LauncherItem, type LauncherQueryResponse } from "../topics.ts";
 
@@ -10,37 +10,47 @@ const iconTile = { width: "44px", height: "44px", flexShrink: 0, borderRadius: "
 const iconTints = ["primary", "secondary", "tertiary"] as const;
 const clipped = { maxWidth: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
 
-function LauncherTile(props: { item: LauncherItem; selected: boolean; activate: (item: LauncherItem) => void }): NativeChild {
+function LauncherTile(props: { item: Accessor<LauncherItem>; selected: boolean; activate: (item: LauncherItem) => void }): NativeChild {
   const { hostClient } = useShellStore();
   const { item } = props;
-  const { src } = useDaemonMedia(hostClient, () => item.icon, { fetchCommand: "launcher.fetch-blob" });
-  const letter = item.title.trim().codePointAt(0);
-  const initial = letter === undefined ? "?" : String.fromCodePoint(letter).toUpperCase();
-  const tint = iconTints[(letter ?? 0) % iconTints.length];
+  const { src } = useDaemonMedia(hostClient, () => item().icon, { fetchCommand: "launcher.fetch-blob" });
+  const letter = () => item().title.trim().codePointAt(0);
+  const initial = () => {
+    const code = letter();
+    return code === undefined ? "?" : String.fromCodePoint(code).toUpperCase();
+  };
+  const tint = () => iconTints[(letter() ?? 0) % iconTints.length];
 
   return (
-    <Button testId={`launcher-item-${item.provider_id}-${item.item_id}`} tabIndex={-1}
-      data-selected={props.selected ? "true" : null} onClick={() => props.activate(item)} style={{
+    <Button testId={`launcher-item-${item().provider_id}-${item().item_id}`} tabIndex={-1}
+      data-selected={props.selected ? "true" : null} onClick={() => props.activate(item())} style={{
+        position: "relative", zIndex: 1,
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        width: "96px", height: "94px", flexShrink: 0, borderRadius: "14px", padding: "8px", gap: "6px",
-        backgroundColor: props.selected ? "var(--color-primary-container)" : "transparent",
-        border: props.selected ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
+        width: "96px", height: "94px", flexShrink: 0, borderRadius: "14px", padding: "8px",
+        backgroundColor: "transparent",
+        border: "1px solid transparent",
         color: props.selected ? "var(--color-on-primary-container)" : "var(--color-on-surface)",
       }}>
-      <Show when={src()} fallback={
-        <box style={{
-          ...iconTile, display: "flex", alignItems: "center", justifyContent: "center",
-          backgroundColor: `var(--color-${tint}-container)`, color: `var(--color-on-${tint}-container)`,
-        }}>
-          <text style={{ fontSize: "20px", fontWeight: 600 }}>{initial}</text>
-        </box>
-      }>
-        {image => <Image src={image()} style={{ ...iconTile, objectFit: "contain" }} />}
-      </Show>
-      <text style={{ ...clipped, fontSize: "12px", lineHeight: "15px", fontWeight: props.selected ? 600 : 500 }}>{item.title}</text>
-      <Show when={item.provider_id !== "desktop"}>
-        <text style={{ ...clipped, fontSize: "10px", lineHeight: "12px", color: "var(--color-on-surface-variant)" }}>{item.provider_id}</text>
-      </Show>
+      <column data-press-visual="card" style={{ alignItems: "center", justifyContent: "center", gap: "6px", maxWidth: "100%" }}>
+        <Show when={src()} fallback={
+          <box style={{
+            ...iconTile, display: "flex", alignItems: "center", justifyContent: "center",
+            backgroundColor: props.selected ? "var(--color-surface-container-highest)" : `var(--color-${tint()}-container)`,
+            color: props.selected ? "var(--color-on-surface)" : `var(--color-on-${tint()}-container)`,
+            border: props.selected
+              ? "1px solid color-mix(in srgb, var(--color-outline-variant) 75%, transparent)"
+              : "1px solid color-mix(in srgb, var(--color-outline-variant) 28%, transparent)",
+          }}>
+            <text style={{ fontSize: "20px", fontWeight: 600 }}>{initial()}</text>
+          </box>
+        }>
+          {image => <Image src={image()} style={{ ...iconTile, objectFit: "contain" }} />}
+        </Show>
+        <text style={{ ...clipped, fontSize: "12px", lineHeight: "15px", fontWeight: props.selected ? 600 : 500 }}>{item().title}</text>
+        <Show when={item().provider_id !== "desktop"}>
+          <text style={{ ...clipped, fontSize: "10px", lineHeight: "12px", color: "var(--color-on-surface-variant)" }}>{item().provider_id}</text>
+        </Show>
+      </column>
     </Button>
   );
 }
@@ -71,8 +81,8 @@ function LauncherContent(props: {
   createEffect(() => ({ text: query(), client: publicClient() }), ({ text }) => {
     const id = props.allocateQueryId();
     latestQueryId = id;
-    // The daemon invalidates activation of the previous result as soon as it accepts this query.
-    setResults(undefined);
+    // Retain existing tiles while the next query resolves so icons do not flash on every keystroke;
+    // activateItem checks `resolvedQueryId() === latestQueryId` to preserve daemon query_id validity.
     void invokePublic("launcher.query", { query: text, query_id: id, limit: 18 }).then(result => {
       if (disposed || id !== latestQueryId) return;
       const data = result?.data as LauncherQueryResponse | undefined;
@@ -83,6 +93,7 @@ function LauncherContent(props: {
   });
 
   function activateItem(item: LauncherItem): void {
+    if (resolvedQueryId() !== latestQueryId) return;
     void invokePublic("launcher.activate", {
       query_id: resolvedQueryId(), provider_id: item.provider_id, item_id: item.item_id,
     });
@@ -114,6 +125,11 @@ function LauncherContent(props: {
   }
 
   const scheme = useMotionScheme();
+  const hasSelection = () => items().length > 0;
+  const clampedSelection = () => Math.max(0, Math.min(selectedIndex(), Math.max(0, items().length - 1)));
+  const highlightX = createM3Spring(() => (clampedSelection() % columns) * 102, "fastSpatial", { scheme, epsilon: SPRING_EPSILON.px });
+  const highlightY = createM3Spring(() => Math.floor(clampedSelection() / columns) * 100, "fastSpatial", { scheme, epsilon: SPRING_EPSILON.px });
+  const highlightOpacity = createM3Spring(() => (hasSelection() ? 1 : 0), "fastEffects", { scheme });
 
   return (
     <box testId="launcher-backdrop" onClick={dismiss} style={{
@@ -146,18 +162,30 @@ function LauncherContent(props: {
               color: "var(--color-on-surface)", fontSize: "14px",
             }} />
           <box ariaHidden style={{
-            padding: "2px 6px", borderRadius: "6px", flexShrink: 0,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            height: "22px", padding: "0 7px", borderRadius: "6px", flexShrink: 0,
             backgroundColor: "var(--color-surface-container-highest)",
           }}>
-            <text style={{ fontFamily: "var(--font-mono)", fontSize: "10px", fontWeight: 500, color: "var(--color-on-surface-variant)" }}>
+            <text style={{
+              fontFamily: "var(--font-mono)", fontSize: "10px", lineHeight: "12px", fontWeight: 500,
+              color: "var(--color-on-surface-variant)",
+            }}>
               Esc
             </text>
           </box>
         </row>
         <scroll style={{ flexGrow: 1, width: "100%", overflow: "hidden auto" }}>
-          <row style={{ width: "100%", flexWrap: "wrap", gap: "6px", justifyContent: "flex-start" }}>
-            <For each={items()} keyed={item => item}>
-              {(item, index) => <LauncherTile item={item()} selected={index() === selectedIndex()} activate={activateItem} />}
+          <row style={{ position: "relative", width: "100%", flexWrap: "wrap", gap: "6px", justifyContent: "flex-start" }}>
+            <box ariaHidden style={{
+              position: "absolute", top: "0px", left: "0px", width: "96px", height: "94px", borderRadius: "14px",
+              backgroundColor: "var(--color-primary-container)",
+              border: "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)",
+              pointerEvents: "none",
+              opacity: Math.max(0, Math.min(1, highlightOpacity())),
+              transform: `translate(${highlightX().toFixed(2)}px, ${highlightY().toFixed(2)}px)`,
+            }} />
+            <For each={items()} keyed={item => `${item.provider_id}:${item.item_id}`}>
+              {(item, index) => <LauncherTile item={item} selected={index() === selectedIndex()} activate={activateItem} />}
             </For>
           </row>
         </scroll>
