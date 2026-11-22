@@ -1,4 +1,13 @@
-import { createEffect, createSignal, type Accessor } from "@hewel/zgui";
+import {
+  createEffect,
+  createSignal,
+  untrack,
+  type Accessor,
+  type NativeAnimationEvent,
+  type NativeNode,
+  type NativeTransitionEvent,
+} from "@hewel/zgui";
+import { createRetainedPresence as createZguiRetainedPresence } from "@hewel/zgui/primitives";
 import {
   M3_DURATIONS,
   M3_EASINGS,
@@ -203,45 +212,94 @@ export function dialogMotionStyle(
 }
 
 /**
- * Keeps the last non-null value alive while a programmatic `fastEffects` (~100ms) exit animation
- * runs, swaps immediately on non-null handoffs, and retires synchronously on `dismissInstant()`.
+ * Retains the last non-nullish value across programmatic M3 `fastEffects` (~100ms) exit animations
+ * via `@hewel/zgui/primitives`'s `createRetainedPresence` (safe falsy/function payload retention,
+ * single-exit generation tracking, CSS + JS dual-gate), while adding M3 spatial/opacity springs
+ * and synchronous `dismissInstant()` / `instantExit` retirement for Wayland grab/lock rules.
  */
 export function createRetainedPresence<T>(
   source: Accessor<T | null | undefined>,
   options: PresenceOptions = {},
 ): {
-  readonly value: Accessor<T | null>;
+  readonly value: Accessor<NonNullable<T> | null>;
   readonly visible: Accessor<boolean>;
   readonly progress: M3Spring;
   readonly opacity: M3Spring;
   readonly dismissInstant: () => void;
+  readonly ref: (node: NativeNode) => void;
+  readonly onEnd: (event: NativeAnimationEvent | NativeTransitionEvent) => void;
 } {
-  const initial = source();
-  const [retained, setRetained] = createSignal<{ readonly current: T } | null>(
-    initial != null ? { current: initial } : null,
-  );
-  const visible = () => source() != null;
-  const presence = createPresence(visible, options);
+  const initialPresent = untrack(source) != null;
+  const visible = (): boolean => source() != null;
+  const enterRole = options.enterRole ?? "defaultSpatial";
+  const enterOpacityRole = options.enterOpacityRole ?? "fastEffects";
+  const exitRole = options.exitRole ?? "fastEffects";
 
-  createEffect(source, next => {
-    if (next != null) setRetained({ current: next });
+  const progress = createM3Spring(
+    () => (visible() ? 1 : 0),
+    () => (visible() ? enterRole : exitRole),
+    {
+      ...(options.scheme ? { scheme: options.scheme } : {}),
+      ...(options.overrideScheme ? { overrideScheme: options.overrideScheme } : {}),
+      initial: initialPresent ? 1 : 0,
+    },
+  );
+  const opacity = createM3Spring(
+    () => (visible() ? 1 : 0),
+    () => (visible() ? enterOpacityRole : exitRole),
+    {
+      ...(options.scheme ? { scheme: options.scheme } : {}),
+      initial: initialPresent ? 1 : 0,
+    },
+  );
+
+  const [retired, setRetired] = createSignal(false);
+  let skipNextExit = false;
+  let hasCssSurface = false;
+
+  const retained = createZguiRetainedPresence(source, {
+    settled: () => retired() || (opacity.settled() && opacity() <= SPRING_EPSILON.unit),
   });
 
-  createEffect(presence.mounted, isMounted => {
-    if (!isMounted && source() == null) setRetained(null);
+  createEffect(visible, isVisible => {
+    if (isVisible) {
+      skipNextExit = false;
+      setRetired(false);
+      return;
+    }
+    const instant = skipNextExit || Boolean(options.instantExit?.());
+    skipNextExit = false;
+    if (instant || (!hasCssSurface && untrack(opacity.settled) && untrack(opacity) <= SPRING_EPSILON.unit)) {
+      setRetired(true);
+      progress.jump(0);
+      opacity.jump(0);
+    }
   });
 
   const dismissInstant = (): void => {
-    presence.dismissInstant();
-    setRetained(null);
+    skipNextExit = true;
+    if (!untrack(visible)) {
+      setRetired(true);
+      progress.jump(0);
+      opacity.jump(0);
+    }
   };
 
   return {
-    value: () => (presence.mounted() ? (source() ?? retained()?.current ?? null) : null),
+    value: () => {
+      if (retired() || !retained.mounted()) return null;
+      const current = retained.value();
+      return current !== undefined ? current : null;
+    },
     visible,
-    progress: presence.progress,
-    opacity: presence.opacity,
+    progress,
+    opacity,
     dismissInstant,
+    ref: node => {
+      hasCssSurface = true;
+      retained.ref(node);
+    },
+    onEnd: retained.onEnd,
   };
 }
 

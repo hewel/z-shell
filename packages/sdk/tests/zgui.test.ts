@@ -15,7 +15,7 @@ import {
   type TopicResetNotification,
   type TopicUpdate,
 } from "../src/index.ts";
-import { createLinearProgress, createPresence, createZguiSocketTransport, encodeFileUrlPath, useDaemonMedia, useTopic } from "@z-shell/sdk/zgui";
+import { createLinearProgress, createM3Spring, createPresence, createZguiSocketTransport, encodeFileUrlPath, useDaemonMedia, useTopic } from "@z-shell/sdk/zgui";
 
 const solidPath = import.meta.resolve("solid-js", import.meta.resolve("@hewel/zgui"));
 if (/\/dist\/server(?:\.[^/]+)?\.js$/.test(solidPath)) {
@@ -413,15 +413,31 @@ if (/\/dist\/server(?:\.[^/]+)?\.js$/.test(solidPath)) {
     );
   });
 
-  describe("createPresence & createLinearProgress", () => {
-    test("createPresence mounts on show, animates fastEffects exit to unmount, and honors dismissInstant/instantExit", () => {
+  describe("createM3Spring, createPresence & createLinearProgress", () => {
+    function withMotionTestHost<T>(fn: (controls: {
+      stepFrames: (count: number, dtMs?: number) => void;
+      setHostReduced: (next: boolean) => void;
+    }) => T): T {
       let clock = 0;
       let nextFrameId = 1;
+      let hostReduced = false;
+      const reducedListeners = new Set<(value: boolean) => void>();
       const frames = new Map<number, (ts: number) => void>();
       const origRaf = Object.getOwnPropertyDescriptor(globalThis, "requestAnimationFrame");
       const origCancel = Object.getOwnPropertyDescriptor(globalThis, "cancelAnimationFrame");
       const origPerf = Object.getOwnPropertyDescriptor(globalThis, "performance");
+      const origZgui = Object.getOwnPropertyDescriptor(globalThis, "__zgui");
       Object.defineProperty(globalThis, "performance", { value: { now: () => clock }, configurable: true });
+      Object.defineProperty(globalThis, "__zgui", {
+        value: {
+          getReducedMotion: () => hostReduced,
+          subscribeReducedMotion: (cb: (value: boolean) => void) => {
+            reducedListeners.add(cb);
+            return () => { reducedListeners.delete(cb); };
+          },
+        },
+        configurable: true,
+      });
       Object.defineProperty(globalThis, "requestAnimationFrame", {
         value: (cb: (ts: number) => void) => {
           const id = nextFrameId++;
@@ -443,9 +459,79 @@ if (/\/dist\/server(?:\.[^/]+)?\.js$/.test(solidPath)) {
           flush();
         }
       };
-
-      let disposePresence: (() => void) | undefined;
+      const setHostReduced = (next: boolean) => {
+        hostReduced = next;
+        for (const cb of reducedListeners) cb(next);
+      };
       try {
+        return fn({ stepFrames, setHostReduced });
+      } finally {
+        if (origRaf) Object.defineProperty(globalThis, "requestAnimationFrame", origRaf);
+        else Reflect.deleteProperty(globalThis, "requestAnimationFrame");
+        if (origCancel) Object.defineProperty(globalThis, "cancelAnimationFrame", origCancel);
+        else Reflect.deleteProperty(globalThis, "cancelAnimationFrame");
+        if (origPerf) Object.defineProperty(globalThis, "performance", origPerf);
+        else Reflect.deleteProperty(globalThis, "performance");
+        if (origZgui) Object.defineProperty(globalThis, "__zgui", origZgui);
+        else Reflect.deleteProperty(globalThis, "__zgui");
+      }
+    }
+
+    test("createM3Spring delegates physics to @hewel/zgui createSpring with initial, settled, impulse, jump, and reduced-motion spatial snap", () => {
+      withMotionTestHost(({ stepFrames }) => {
+        const [target, setTarget] = createSignal(1);
+        const [scheme, setScheme] = createSignal<"standard" | "expressive" | "reduced">("standard");
+        const mountedRoot = mount(() => ({
+          spatial: createM3Spring(target, "defaultSpatial", { initial: 0, scheme }),
+          effects: createM3Spring(target, "fastEffects", { initial: 0, scheme }),
+        }));
+        try {
+          const { spatial, effects } = mountedRoot.state;
+          flush();
+          expect(spatial()).toBe(0);
+          expect(spatial.settled()).toBe(false);
+
+          stepFrames(2);
+          expect(spatial()).toBeGreaterThan(0);
+          expect(spatial()).toBeLessThan(1);
+          expect(effects()).toBeGreaterThan(0);
+          expect(effects()).toBeLessThanOrEqual(1);
+
+          stepFrames(40);
+          expect(spatial()).toBe(1);
+          expect(spatial.settled()).toBe(true);
+          expect(effects()).toBe(1);
+          expect(effects.settled()).toBe(true);
+
+          // Velocity impulse kicks away from rest then returns smoothly.
+          spatial.impulse(20);
+          flush();
+          expect(spatial.settled()).toBe(false);
+          stepFrames(2);
+          expect(spatial()).toBeGreaterThan(1.01);
+          stepFrames(40);
+          expect(spatial()).toBe(1);
+          expect(spatial.settled()).toBe(true);
+
+          // User-configured reduced motion snaps spatial roles immediately while effects roles fade.
+          flush(() => setScheme("reduced"));
+          flush(() => setTarget(0));
+          expect(spatial()).toBe(0);
+          expect(spatial.settled()).toBe(true);
+          stepFrames(1);
+          expect(effects()).toBeGreaterThan(0);
+          expect(effects()).toBeLessThan(1);
+          stepFrames(25);
+          expect(effects()).toBe(0);
+          expect(effects.settled()).toBe(true);
+        } finally {
+          mountedRoot.dispose();
+        }
+      });
+    });
+
+    test("createPresence mounts on show, animates fastEffects exit to unmount, and honors dismissInstant/instantExit", () => {
+      withMotionTestHost(({ stepFrames }) => {
         const [visible, setVisible] = createSignal(false);
         const [instant, setInstant] = createSignal(false);
         const mountedRoot = mount(() => createPresence(visible, {
@@ -454,66 +540,61 @@ if (/\/dist\/server(?:\.[^/]+)?\.js$/.test(solidPath)) {
           exitRole: "fastEffects",
           instantExit: instant,
         }));
-        disposePresence = mountedRoot.dispose;
-        const { state } = mountedRoot;
-        flush();
-        expect(state.mounted()).toBe(false);
+        try {
+          const { state } = mountedRoot;
+          flush();
+          expect(state.mounted()).toBe(false);
 
-        // Show mounts immediately and enters toward 1.
-        flush(() => setVisible(true));
-        expect(state.mounted()).toBe(true);
-        stepFrames(40);
-        expect(state.opacity()).toBe(1);
+          // Show mounts immediately and enters toward 1.
+          flush(() => setVisible(true));
+          expect(state.mounted()).toBe(true);
+          stepFrames(40);
+          expect(state.opacity()).toBe(1);
 
-        // Programmatic close stays mounted while fastEffects exit runs, then unmounts automatically.
-        flush(() => setVisible(false));
-        expect(state.mounted()).toBe(true);
-        stepFrames(2);
-        expect(state.opacity()).toBeLessThan(1);
-        expect(state.opacity()).toBeGreaterThan(0);
-        stepFrames(20);
-        expect(state.mounted()).toBe(false);
-        expect(state.opacity()).toBe(0);
+          // Programmatic close stays mounted while fastEffects exit runs, then unmounts automatically.
+          flush(() => setVisible(false));
+          expect(state.mounted()).toBe(true);
+          stepFrames(2);
+          expect(state.opacity()).toBeLessThan(1);
+          expect(state.opacity()).toBeGreaterThan(0);
+          stepFrames(20);
+          expect(state.mounted()).toBe(false);
+          expect(state.opacity()).toBe(0);
 
-        // dismissInstant retires synchronously without waiting for frames.
-        flush(() => setVisible(true));
-        stepFrames(5);
-        flush(() => setVisible(false));
-        state.dismissInstant();
-        flush();
-        expect(state.mounted()).toBe(false);
+          // dismissInstant retires synchronously without waiting for frames.
+          flush(() => setVisible(true));
+          stepFrames(5);
+          flush(() => setVisible(false));
+          state.dismissInstant();
+          flush();
+          expect(state.mounted()).toBe(false);
 
-        // instantExit bypasses exit animation (e.g. ADR-0004 session lock suppression).
-        flush(() => setVisible(true));
-        stepFrames(5);
-        flush(() => {
-          setInstant(true);
+          // instantExit bypasses exit animation (e.g. ADR-0004 session lock suppression).
+          flush(() => setVisible(true));
+          stepFrames(5);
+          flush(() => {
+            setInstant(true);
+            setVisible(false);
+          });
+          expect(state.mounted()).toBe(false);
+
+          // Same-tick dismissInstant + reopen (Wayland grab onDismiss -> adjacent bar island click)
+          // must keep the surface mounted and visible.
+          flush(() => {
+            setInstant(false);
+            setVisible(true);
+          });
+          stepFrames(10);
+          state.dismissInstant();
           setVisible(false);
-        });
-        expect(state.mounted()).toBe(false);
-
-        // Same-tick dismissInstant + reopen (Wayland grab onDismiss -> adjacent bar island click)
-        // must keep the surface mounted and visible.
-        flush(() => {
-          setInstant(false);
           setVisible(true);
-        });
-        stepFrames(10);
-        state.dismissInstant();
-        setVisible(false);
-        setVisible(true);
-        flush();
-        expect(state.mounted()).toBe(true);
-        expect(state.opacity()).toBeGreaterThan(0.5);
-      } finally {
-        disposePresence?.();
-        if (origRaf) Object.defineProperty(globalThis, "requestAnimationFrame", origRaf);
-        else Reflect.deleteProperty(globalThis, "requestAnimationFrame");
-        if (origCancel) Object.defineProperty(globalThis, "cancelAnimationFrame", origCancel);
-        else Reflect.deleteProperty(globalThis, "cancelAnimationFrame");
-        if (origPerf) Object.defineProperty(globalThis, "performance", origPerf);
-        else Reflect.deleteProperty(globalThis, "performance");
-      }
+          flush();
+          expect(state.mounted()).toBe(true);
+          expect(state.opacity()).toBeGreaterThan(0.5);
+        } finally {
+          mountedRoot.dispose();
+        }
+      });
     });
 
     test("createLinearProgress jumps to 1 immediately under reduced motion or zero duration", () => {

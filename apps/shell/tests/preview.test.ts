@@ -1354,6 +1354,7 @@ describe("apps/shell preview", () => {
             target: { surface: "power-dialog", testId: "power-dialog-confirm" }, button: "primary",
           },
           { id: "poweroff-reply", op: "clock.advance", byMs: 20 },
+          { id: "power-dialog-exit-settle", op: "clock.advance", byMs: 240 },
           { id: "power-dialog-closed", op: "monitors.set", monitors: [monitor] },
         ],
       }, null, 2));

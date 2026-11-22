@@ -1,4 +1,13 @@
-import { createEffect, createSignal, getOwner, onCleanup, untrack, type Accessor } from "@hewel/zgui";
+import {
+  createEffect,
+  createSignal,
+  createSpring,
+  getOwner,
+  getReducedMotion,
+  onCleanup,
+  untrack,
+  type Accessor,
+} from "@hewel/zgui";
 import type { ZShellClient } from "./client.ts";
 import {
   SPRING_EPSILON,
@@ -8,7 +17,6 @@ import {
   registerFrameTicker,
   resolveMotionScheme,
   resolveSpringSpec,
-  sampleSpring,
   type MotionScheme,
   type SpringRole,
 } from "./motion.ts";
@@ -29,12 +37,20 @@ export function setGlobalMotionScheme(scheme: MotionScheme | undefined): void {
   setConfiguredMotionScheme(scheme ?? "standard");
 }
 
+function readHostReducedMotion(): boolean {
+  try {
+    return getReducedMotion();
+  } catch {
+    return isHostReducedMotion();
+  }
+}
+
 /**
  * Resolves the effective M3 motion scheme shared by core shell surfaces and plugins,
  * combining the synced `settings.toml` preference with host reduced-motion accessibility.
  */
 export function useGlobalMotionScheme(): Accessor<MotionScheme> {
-  return () => resolveMotionScheme(configuredMotionScheme(), isHostReducedMotion());
+  return () => resolveMotionScheme(configuredMotionScheme(), readHostReducedMotion());
 }
 
 export interface M3SpringOptions {
@@ -82,9 +98,9 @@ function attachSpringControls(
 }
 
 /**
- * Reactive Solid 2.0 analytical Material Design 3 spring backed by the single shared frame loop.
- * Preserves live velocity on mid-flight retargeting, obeys WCAG 2.2 SC 2.3.3 reduced motion,
- * and stops ticking immediately at settle (0% idle CPU).
+ * Reactive Solid 2.0 Material Design 3 spring backed by `@hewel/zgui`'s shared `createSpring`
+ * ticker (automatic rootless-shell zero-region parking/resumption, independent `settled` signal).
+ * Preserves live velocity on mid-flight retargeting and obeys WCAG 2.2 SC 2.3.3 reduced motion.
  */
 export function createM3Spring(
   target: Accessor<number>,
@@ -94,125 +110,56 @@ export function createM3Spring(
   const epsilon = options.epsilon ?? SPRING_EPSILON.unit;
   const currentRole = (): SpringRole => (typeof role === "function" ? role() : role);
   const effectiveScheme = (): MotionScheme =>
-    resolveMotionScheme(options.scheme ? options.scheme() : configuredMotionScheme(), isHostReducedMotion());
+    resolveMotionScheme(options.scheme ? options.scheme() : configuredMotionScheme(), readHostReducedMotion());
+  const isSpatialReduced = (): boolean => effectiveScheme() === "reduced" && isSpatialRole(currentRole());
+  const activeSpec = () => resolveSpringSpec(effectiveScheme(), currentRole(), options.overrideScheme);
 
-  const initialTarget = untrack(target);
-  let from = options.initial ?? initialTarget;
-  let destination = initialTarget;
-  let velocity = 0;
-  let startTimeMs = motionNowMs();
-  let current = from;
-  let unregister: (() => void) | undefined;
-  let disposed = false;
-
-  const [value, setValue] = createSignal(current);
-  const [settled, setSettled] = createSignal(Math.abs(destination - current) <= epsilon);
-
-  const stop = () => {
-    unregister?.();
-    unregister = undefined;
-  };
-
-  const commitRest = (next: number) => {
-    stop();
-    from = next;
-    destination = next;
-    current = next;
-    velocity = 0;
-    setValue(next);
-    setSettled(true);
-  };
-
-  const snapLive = (nowMs: number) => {
-    if (unregister === undefined) return;
-    const spec = resolveSpringSpec(effectiveScheme(), currentRole(), options.overrideScheme);
-    const sample = sampleSpring(spec, from, destination, velocity, (nowMs - startTimeMs) / 1000, epsilon);
-    current = sample.value;
-    velocity = sample.velocity;
-    from = sample.value;
-    startTimeMs = nowMs;
-  };
-
-  const ensureRunning = () => {
-    if (disposed || unregister !== undefined) return;
-    setSettled(false);
-    unregister = registerFrameTicker(nowMs => {
-      if (disposed) return false;
-      const scheme = effectiveScheme();
-      const activeRole = currentRole();
-      if (scheme === "reduced" && isSpatialRole(activeRole)) {
-        commitRest(destination);
-        return false;
-      }
-      const spec = resolveSpringSpec(scheme, activeRole, options.overrideScheme);
-      const sample = sampleSpring(spec, from, destination, velocity, (nowMs - startTimeMs) / 1000, epsilon);
-      current = sample.value;
-      if (sample.settled) {
-        velocity = 0;
-        from = destination;
-        unregister = undefined;
-        setValue(destination);
-        setSettled(true);
-        return false;
-      }
-      setValue(current);
-      return true;
-    });
-  };
-
-  if (getOwner()) {
-    onCleanup(() => {
-      disposed = true;
-      stop();
-    });
-  }
-
-  createEffect(target, next => {
-    if (!Number.isFinite(next)) return;
-    const scheme = effectiveScheme();
-    if (scheme === "reduced" && isSpatialRole(currentRole())) {
-      commitRest(next);
-      return;
+  let lastFinite = 0;
+  const safeTarget = (): number => {
+    const next = target();
+    if (Number.isFinite(next)) {
+      lastFinite = next;
+      return next;
     }
-    const nowMs = motionNowMs();
-    snapLive(nowMs);
-    destination = next;
-    startTimeMs = nowMs;
-    if (Math.abs(destination - current) <= epsilon && Math.abs(velocity) <= epsilon * 10) {
-      commitRest(destination);
-      return;
-    }
-    ensureRunning();
+    return lastFinite;
+  };
+  const initialTarget = untrack(safeTarget);
+  const initialPos =
+    !untrack(isSpatialReduced) && options.initial !== undefined && Number.isFinite(options.initial)
+      ? options.initial
+      : initialTarget;
+
+  const spring = createSpring(safeTarget, {
+    stiffness: () => activeSpec().stiffness,
+    // M3 tokens specify unit-mass damping ratio ζ; zgui's createSpring takes damping c = 2ζ√k.
+    damping: () => {
+      const spec = activeSpec();
+      return 2 * spec.dampingRatio * Math.sqrt(spec.stiffness);
+    },
+    mass: 1,
+    precision: epsilon,
+    velocityPrecision: epsilon * 10,
+    initial: initialPos,
   });
 
-  // If initial differed from initialTarget, kick off the initial animation immediately.
-  if (Math.abs(destination - current) > epsilon) {
-    if (effectiveScheme() === "reduced" && isSpatialRole(currentRole())) {
-      commitRest(destination);
-    } else {
-      ensureRunning();
-    }
-  }
+  createEffect(
+    () => [isSpatialReduced(), safeTarget()] as const,
+    ([snap, next]) => {
+      if (snap) spring.jump(next);
+    },
+  );
 
   return attachSpringControls(
-    () => {
-      value();
-      return current;
-    },
-    settled,
+    () => (isSpatialReduced() ? safeTarget() : spring()),
+    () => (isSpatialReduced() ? true : spring.settled()),
     next => {
-      if (disposed || !Number.isFinite(next)) return;
-      commitRest(next);
+      if (!Number.isFinite(next)) return;
+      spring.jump(next);
     },
     deltaVelocity => {
-      if (disposed || !Number.isFinite(deltaVelocity) || deltaVelocity === 0) return;
+      if (!Number.isFinite(deltaVelocity) || deltaVelocity === 0) return;
       if (effectiveScheme() === "reduced") return;
-      const nowMs = motionNowMs();
-      snapLive(nowMs);
-      velocity += deltaVelocity;
-      from = current;
-      startTimeMs = nowMs;
-      ensureRunning();
+      spring.impulse(deltaVelocity);
     },
   );
 }
@@ -320,7 +267,7 @@ export function createLinearProgress(
 
   createEffect(() => [durationMs(), scheme ? scheme() : configuredMotionScheme()] as const, ([ms, activeScheme]) => {
     stop();
-    const resolved = resolveMotionScheme(activeScheme, isHostReducedMotion());
+    const resolved = resolveMotionScheme(activeScheme, readHostReducedMotion());
     if (resolved === "reduced" || !Number.isFinite(ms) || ms <= 0) {
       setValue(1);
       return;
@@ -369,7 +316,7 @@ export function createPhaseLoop(
     });
   }
 
-  createEffect(() => active() && resolveMotionScheme(scheme?.(), isHostReducedMotion()) !== "reduced", running => {
+  createEffect(() => active() && resolveMotionScheme(scheme?.(), readHostReducedMotion()) !== "reduced", running => {
     if (!running || disposed) {
       stop();
       return;
