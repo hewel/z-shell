@@ -1,4 +1,5 @@
 import { Button, For, Image, Show, createEffect, createMemo, createSignal, type Accessor, type NativeChild } from "@hewel/zgui";
+import { M3SegmentedControl } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../../icons.tsx";
 import { useShellStore } from "../../store.ts";
@@ -38,10 +39,10 @@ const THEME_MODES = [
   { id: "dark", label: "Dark" },
 ] as const;
 
-const MOTION_SCHEMES: readonly { readonly id: MotionScheme; readonly label: string }[] = [
-  { id: "standard", label: "Standard" },
-  { id: "expressive", label: "Expressive" },
-  { id: "reduced", label: "Reduced" },
+const MOTION_SCHEMES: readonly { readonly id: MotionScheme; readonly label: string; readonly testId: string }[] = [
+  { id: "standard", label: "Standard", testId: "settings-motion-standard" },
+  { id: "expressive", label: "Expressive", testId: "settings-motion-expressive" },
+  { id: "reduced", label: "Reduced", testId: "settings-motion-reduced" },
 ];
 
 function WallpaperCardTile(props: { item: Accessor<CatalogEntry>; active: boolean; onClick: () => void }): NativeChild {
@@ -201,24 +202,12 @@ export function AppearancePane(): NativeChild {
               }}
             </For>
           </row>
-          <row style={{ borderRadius: "10px", backgroundColor: container, padding: "4px", gap: "4px" }}>
-            <For each={THEME_MODES} keyed={item => item.id}>
-              {item => {
-                const active = () => currentMode() === item().id;
-                return (
-                  <Button selected={active()} onClick={() => patchTheme({ mode: item().id }, { mode: item().id })} style={{
-                    ...grow, display: "flex", height: "28px", borderRadius: "8px", alignItems: "center", justifyContent: "center",
-                    backgroundColor: active() ? primaryContainer : "transparent",
-                    border: active() ? "1px solid color-mix(in srgb, var(--color-primary) 35%, transparent)" : "1px solid transparent",
-                    color: active() ? onPrimaryContainer : muted,
-                    fontSize: "12px", fontWeight: active() ? 600 : 500,
-                  }}>
-                    <text>{item().label}</text>
-                  </Button>
-                );
-              }}
-            </For>
-          </row>
+          <M3SegmentedControl
+            ariaLabel="Theme mode"
+            options={THEME_MODES}
+            value={currentMode()}
+            onChange={mode => patchTheme({ mode }, { mode })}
+          />
         </column>
 
         <column style={{ ...grow, borderRadius: "16px", backgroundColor: containerHigh, padding: "14px", gap: "10px" }}>
@@ -262,25 +251,13 @@ export function AppearancePane(): NativeChild {
             M3 spring physics · Reduced honors WCAG
           </text>
         </column>
-        <row style={{ borderRadius: "10px", backgroundColor: container, padding: "4px", gap: "4px", width: "260px", flexShrink: 0 }}>
-          <For each={MOTION_SCHEMES} keyed={item => item.id}>
-            {item => {
-              const active = () => currentMotion() === item().id;
-              return (
-                <Button testId={`settings-motion-${item().id}`} selected={active()}
-                  onClick={() => patchTheme({ motion_scheme: item().id })} style={{
-                    ...grow, display: "flex", height: "28px", borderRadius: "8px", alignItems: "center", justifyContent: "center",
-                    backgroundColor: active() ? primaryContainer : "transparent",
-                    border: active() ? "1px solid color-mix(in srgb, var(--color-primary) 35%, transparent)" : "1px solid transparent",
-                    color: active() ? onPrimaryContainer : muted,
-                    fontSize: "12px", fontWeight: active() ? 600 : 500,
-                  }}>
-                  <text>{item().label}</text>
-                </Button>
-              );
-            }}
-          </For>
-        </row>
+        <M3SegmentedControl
+          ariaLabel="Motion physics scheme"
+          options={MOTION_SCHEMES}
+          value={currentMotion()}
+          onChange={motion_scheme => patchTheme({ motion_scheme })}
+          style={{ width: "260px", flexShrink: 0 }}
+        />
       </row>
 
       <row style={{

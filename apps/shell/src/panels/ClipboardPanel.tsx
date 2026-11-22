@@ -1,4 +1,5 @@
 import { Button, For, Image, Show, TextField, createMemo, createSignal, mountStylesheet, type Accessor } from "@hewel/zgui";
+import { M3Button, M3FilterChip } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
 import { createM3Spring, useMotionScheme } from "../motion.ts";
@@ -15,10 +16,6 @@ const primaryContainer = "var(--color-primary-container)";
 const onPrimaryContainer = "var(--color-on-primary-container)";
 const errorContainer = "var(--color-error-container)";
 const onErrorContainer = "var(--color-on-error-container)";
-const pill = {
-  display: "flex", minHeight: "28px", padding: "4px 10px", borderRadius: "999px",
-  alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: 500,
-} as const;
 const thumbnail = { width: "44px", height: "36px", borderRadius: "8px", flexShrink: 0 } as const;
 const thumbnailImage = { ...thumbnail, objectFit: "cover" } as const;
 const iconButton = {
@@ -176,7 +173,7 @@ export function ClipboardPanel() {
         </row>
       }>
         <row testId="clipboard-search-bar" data-composite-input="true" style={{
-          width: "100%", height: "44px", borderRadius: "14px", padding: searchFocused() ? "0 13px" : "0 14px", gap: "10px",
+          width: "100%", height: "44px", borderRadius: "14px", padding: searchFocused() ? "0 11px 0 13px" : "0 12px 0 14px", gap: "10px",
           alignItems: "center", flexShrink: 0, backgroundColor: containerHigh,
           border: searchFocused()
             ? "2px solid var(--color-primary)"
@@ -190,24 +187,25 @@ export function ClipboardPanel() {
               flexGrow: 1, flexBasis: "0px", minWidth: "0px", height: "36px", lineHeight: "18px",
               padding: "9px 0", backgroundColor: "transparent", color: onSurface,
             }} />
+          <box ariaHidden style={{
+            padding: "2px 6px", borderRadius: "6px", flexShrink: 0,
+            backgroundColor: containerHighest,
+          }}>
+            <text style={{ fontFamily: "var(--font-mono)", fontSize: "10px", fontWeight: 500, color: muted }}>Esc</text>
+          </box>
         </row>
         <row style={{ gap: "6px", flexWrap: "wrap", flexShrink: 0 }}>
           <For each={filters} keyed={false}>
             {chip => {
               const active = () => filter() === chip().key;
               return (
-                <Button testId={`clipboard-filter-${chip().key}`} data-qs-tile="true" selected={active()}
-                  onClick={() => { setFilter(chip().key); setSelectedIndex(0); }} style={{
-                    ...pill, flexDirection: "row", gap: "5px",
-                    backgroundColor: active() ? primaryContainer : containerHigh,
-                    border: active() ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
-                    color: active() ? onPrimaryContainer : onSurface,
-                  }}>
-                  <text>{chip().label}</text>
-                  <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", fontVariantNumeric: "tabular-nums" }}>
-                    {counts()[chip().key]}
-                  </text>
-                </Button>
+                <M3FilterChip
+                  testId={`clipboard-filter-${chip().key}`}
+                  label={chip().label}
+                  count={counts()[chip().key]}
+                  selected={active()}
+                  onClick={() => { setFilter(chip().key); setSelectedIndex(0); }}
+                />
               );
             }}
           </For>
@@ -230,13 +228,14 @@ export function ClipboardPanel() {
             <text testId="clipboard-count" data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: muted, fontVariantNumeric: "tabular-nums" }}>
               {`${clipboard.data()?.entry_count ?? 0} kept`}
             </text>
-            <Button testId="clipboard-clear" style={{
-              ...pill, borderRadius: "10px",
-              backgroundColor: errorContainer, color: onErrorContainer, fontSize: "11px", fontWeight: 600,
-            }}
-              onClick={() => { void invokePublic("clipboard.clear", {}); }}>
+            <M3Button
+              testId="clipboard-clear"
+              variant="destructive"
+              size="sm"
+              onClick={() => { void invokePublic("clipboard.clear", {}); }}
+            >
               <text>Clear unpinned</text>
-            </Button>
+            </M3Button>
           </row>
         </row>
       </Show>

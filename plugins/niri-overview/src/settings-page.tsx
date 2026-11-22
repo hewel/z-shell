@@ -1,4 +1,5 @@
-import { Button, For, Show, createEffect, createSignal, focus, getWindowRect, type NativeChild } from "@hewel/zgui";
+import { Button, For, Show, createEffect, createSignal, type NativeChild } from "@hewel/zgui";
+import { M3Button, M3Slider } from "@z-shell/sdk/primitives";
 import { useTopic, type PluginSettingsProps } from "@z-shell/sdk/zgui";
 import type { NiriOverviewSnapshot } from "./service.ts";
 
@@ -64,15 +65,14 @@ export default function NiriOverviewSettingsPage(props: PluginSettingsProps): Na
             <box ariaHidden style={{ width: "6px", height: "6px", borderRadius: "3px", backgroundColor: connected() ? primary : muted }} />
             <text>{statusLabel()}</text>
           </row>
-          <Button testId="niri-settings-refresh"
+          <M3Button
+            testId="niri-settings-refresh"
+            variant="neutral-tonal"
+            size="sm"
             onClick={() => void props.client()?.invokeCommand("plugin.z-shell.niri-overview.refresh").catch(() => undefined)}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center", minHeight: "28px",
-              padding: "4px 10px", borderRadius: "8px", backgroundColor: containerHighest, color: onSurface,
-              fontSize: "12px", fontWeight: 500,
-            }}>
+          >
             <text>Refresh</text>
-          </Button>
+          </M3Button>
         </row>
       </row>
 
@@ -86,38 +86,16 @@ export default function NiriOverviewSettingsPage(props: PluginSettingsProps): Na
               {`${Math.round(zoomScale() * 100)}%`}
             </text>
           </row>
-          <box role="slider" tabIndex={0} ariaLabel="Workspace zoom scale" ariaValueMin={25} ariaValueMax={100}
-            ariaValueNow={Math.round(zoomScale() * 100)} ariaValueStep={5}
-            onPointerDown={event => {
-              if (!event.primary) return;
-              const rect = getWindowRect(event.currentTarget);
-              if (!rect || rect.width <= 0) return;
-              focus(event.currentTarget);
-              const ratio = Math.max(0, Math.min(1, (event.position.x - rect.x) / rect.width));
-              const next = Math.round((0.25 + ratio * 0.75) * 20) / 20;
+          <M3Slider
+            label="Workspace zoom scale"
+            value={Math.round(((zoomScale() - 0.25) / 0.75) * 100)}
+            step={5}
+            onChange={pct => {
+              const next = Math.max(0.25, Math.min(1.0, Math.round((0.25 + (pct / 100) * 0.75) * 20) / 20));
               setZoomScale(next);
               void save({ zoom_scale: next }, `Zoom set to ${Math.round(next * 100)}%`);
             }}
-            onKeyDown={event => {
-              const step = event.key === "ArrowRight" || event.key === "ArrowUp" ? 0.05
-                : event.key === "ArrowLeft" || event.key === "ArrowDown" ? -0.05 : 0;
-              if (!step) return;
-              event.preventDefault();
-              const next = Math.max(0.25, Math.min(1.0, Math.round((zoomScale() + step) * 20) / 20));
-              setZoomScale(next);
-              void save({ zoom_scale: next }, `Zoom set to ${Math.round(next * 100)}%`);
-            }}
-            style={{ width: "100%", height: "24px", display: "flex", alignItems: "center", position: "relative" }}>
-            <box ariaHidden style={{ width: "100%", height: "6px", borderRadius: "3px", backgroundColor: containerHighest, overflow: "hidden" }}>
-              <box data-percent-fill="true" style={{
-                width: `${(((zoomScale() - 0.25) / 0.75) * 100).toFixed(1)}%`, height: "100%", borderRadius: "3px", backgroundColor: primary,
-              }} />
-            </box>
-            <box ariaHidden style={{
-              position: "absolute", left: `${Math.max(0, Math.min(94, ((zoomScale() - 0.25) / 0.75) * 100 - 3)).toFixed(1)}%`,
-              width: "14px", height: "14px", borderRadius: "999px", backgroundColor: primary, border: `2px solid ${containerHigh}`,
-            }} />
-          </box>
+          />
           <row style={{ gap: "6px" }}>
             <For each={ZOOM_PRESETS} keyed={v => v}>
               {preset => {

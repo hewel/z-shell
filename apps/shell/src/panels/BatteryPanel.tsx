@@ -1,4 +1,5 @@
 import { Button, For, Show, createMemo, type NativeChild } from "@hewel/zgui";
+import { M3IconButton, M3LinearProgress } from "@z-shell/sdk/primitives";
 import { ShellIcon, type ShellIconName } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
 import { PANEL_MAX_HEIGHTS, formatBytesGiB, formatDurationSeconds, maxThermalCelsius, type BatteryState } from "../topics.ts";
@@ -13,10 +14,6 @@ const containerHigh = "var(--color-surface-container-high)";
 const containerHighest = "var(--color-surface-container-highest)";
 const card = { borderRadius: "16px", backgroundColor: containerHigh, padding: "12px", gap: "10px" } as const;
 const metric = { flexBasis: "0px", flexGrow: 1, minWidth: "0px", borderRadius: "10px", padding: "8px", gap: "2px" } as const;
-const headerBtn = {
-  display: "flex", width: "36px", height: "36px", borderRadius: "10px",
-  alignItems: "center", justifyContent: "center", flexShrink: 0, backgroundColor: containerHighest,
-} as const;
 const hiddenSection = { display: "none" } as const;
 const clipped = { minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
 const defaultProfiles = ["performance", "balanced", "power-saver"] as const;
@@ -105,17 +102,17 @@ export function BatteryPowerContent(props: { onBack?: () => void }): NativeChild
       <row style={{ alignItems: "center", gap: "8px" }}>
         <Show when={props.onBack} fallback={<box style={hiddenSection} />}>
           {onBack => (
-            <Button testId="qs-back" ariaLabel="Back" onClick={onBack()} style={headerBtn}>
+            <M3IconButton testId="qs-back" ariaLabel="Back" variant="filled-tonal" onClick={onBack()}>
               <ShellIcon name="arrowLeft" size={16} color={onSurface} />
-            </Button>
+            </M3IconButton>
           )}
         </Show>
         <text role="heading" style={{ flexGrow: 1, flexBasis: "0px", ...clipped, fontSize: "20px", fontWeight: 600 }}>
           Battery & power
         </text>
-        <Button testId="battery-open-settings" ariaLabel="Open power settings" onClick={() => openSettingsWindow("power")} style={headerBtn}>
+        <M3IconButton testId="battery-open-settings" ariaLabel="Open power settings" variant="filled-tonal" onClick={() => openSettingsWindow("power")}>
           <ShellIcon name="settings" size={16} color={onSurface} />
-        </Button>
+        </M3IconButton>
       </row>
 
       <column style={{ ...card, padding: "14px", gap: "10px" }}>
@@ -145,9 +142,7 @@ export function BatteryPowerContent(props: { onBack?: () => void }): NativeChild
             )}
           </Show>
         </row>
-        <box ariaHidden style={{ width: "100%", height: "8px", borderRadius: "4px", backgroundColor: containerHighest, overflow: "hidden" }}>
-          <box data-percent-fill="true" style={{ width: `${pctValue()}%`, height: "100%", borderRadius: "4px", backgroundColor: primary }} />
-        </box>
+        <M3LinearProgress value={pctValue()} ariaLabel="Battery level" />
         <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
           <text style={{ ...clipped, fontSize: "12px", color: muted }}>
             {remaining() ? (charging() ? `${remaining()} until full` : `${remaining()} remaining`) : (power.data()?.on_ac ? "AC power online" : "On battery")}

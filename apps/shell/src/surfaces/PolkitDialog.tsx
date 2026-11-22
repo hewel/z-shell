@@ -1,4 +1,5 @@
 import { Button, For, LayerSurface, Show, TextField, createEffect, createMemo, createSignal, focus, onCleanup, registerDismissLayer, type Accessor, type NativeChild, type NativeKeyEvent, type NativeNode } from "@hewel/zgui";
+import { M3Button, M3DialogShell } from "@z-shell/sdk/primitives";
 import { ShellIcon } from "../icons.tsx";
 import {
   SPRING_EPSILON,
@@ -14,20 +15,14 @@ import { resolveMonitorLogicalSize, type PolkitPromptView } from "../topics.ts";
 
 // An empty native child becomes a text marker that would occupy space in the flex card.
 const hiddenSection = { display: "none" } as const;
-const container = "var(--color-surface-container)";
 const containerHigh = "var(--color-surface-container-high)";
 const containerHighest = "var(--color-surface-container-highest)";
 const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
 const primary = "var(--color-primary)";
-const onPrimary = "var(--color-on-primary)";
 const primaryContainer = "var(--color-primary-container)";
 const onPrimaryContainer = "var(--color-on-primary-container)";
 const clipped = { minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
-const footerButton = {
-  display: "flex", alignItems: "center", justifyContent: "center",
-  height: "36px", borderRadius: "999px", fontSize: "13px", fontWeight: 600,
-} as const;
 
 function PolkitContent(props: {
   active: Accessor<PolkitPromptView>;
@@ -128,23 +123,23 @@ function PolkitContent(props: {
       display: "flex", alignItems: "center", justifyContent: "center",
       backgroundColor: scrimBackdrop(55, props.opacity(), dark()),
     }}>
-      <box testId="polkit-card" role="dialog" ariaLabel="Authentication required" ariaModal
-        ref={node => { registerDismissLayer(node, cancel, { layer: "modal", dismissOnOutsidePress: false }); }} style={{
-          display: "flex", flexDirection: "column", width: "360px", borderRadius: "22px",
-          backgroundColor: container,
-          border: errorText()
-            ? "1px solid var(--color-error)"
-            : "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
-          boxShadow: "var(--shadow-level-3)",
-          padding: "18px", gap: "12px", fontFamily: "var(--font-sans)", color: onSurface,
+      <M3DialogShell
+        testId="polkit-card"
+        ariaLabel="Authentication required"
+        error={Boolean(errorText())}
+        ref={node => { registerDismissLayer(node, cancel, { layer: "modal", dismissOnOutsidePress: false }); }}
+        style={{
+          padding: "18px",
+          gap: "12px",
           ...cardMotion(),
-        }}>
+        }}
+      >
         <row style={{ alignItems: "center", gap: "12px" }}>
           <box ariaHidden style={{
-            display: "flex", width: "42px", height: "42px", flexShrink: 0, borderRadius: "14px",
+            display: "flex", width: "46px", height: "46px", flexShrink: 0, borderRadius: "14px",
             alignItems: "center", justifyContent: "center", backgroundColor: primaryContainer,
           }}>
-            <ShellIcon name="lock" size={20} color={onPrimaryContainer} />
+            <ShellIcon name="lock" size={22} color={onPrimaryContainer} />
           </box>
           <column style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "2px" }}>
             <text role="heading" style={{ fontSize: "16px", fontWeight: 600, lineHeight: "22px" }}>Authentication required</text>
@@ -197,7 +192,7 @@ function PolkitContent(props: {
                       disabled={active().authenticating}
                       onClick={() => selectIdentity(identity().uid)} style={{
                         display: "flex", flexDirection: "row", alignItems: "center", gap: "6px",
-                        minHeight: "28px", padding: "4px 10px", borderRadius: "999px",
+                        minHeight: "28px", padding: "4px 10px", borderRadius: "8px",
                         backgroundColor: selected() ? primaryContainer : containerHighest,
                         color: selected() ? onPrimaryContainer : muted,
                         fontSize: "12px", fontWeight: selected() ? 600 : 500,
@@ -247,15 +242,14 @@ function PolkitContent(props: {
         </Show>
 
         <row style={{ justifyContent: "flex-end", gap: "8px" }}>
-          <Button testId="polkit-cancel" onClick={cancel} ref={node => { cancelButton = node; }} style={{
-            ...footerButton, padding: "0px 16px", backgroundColor: containerHigh, color: onSurface,
-          }}>Cancel</Button>
-          <Button testId="polkit-submit" disabled={active().authenticating} onClick={submit} style={{
-            ...footerButton, padding: "0px 18px", opacity: active().authenticating ? 0.5 : 1,
-            backgroundColor: primary, color: onPrimary,
-          }}>Authenticate</Button>
+          <M3Button testId="polkit-cancel" variant="outlined" neutral onClick={cancel} ref={node => { cancelButton = node; }}>
+            Cancel
+          </M3Button>
+          <M3Button testId="polkit-submit" variant="filled" disabled={active().authenticating} onClick={submit}>
+            Authenticate
+          </M3Button>
         </row>
-      </box>
+      </M3DialogShell>
     </box>
   );
 }

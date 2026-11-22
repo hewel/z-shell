@@ -1,7 +1,8 @@
-import { Button, For, Image, Show, createSignal, focus, getWindowRect, type NativeChild } from "@hewel/zgui";
+import { Button, For, Image, Show, createSignal, type NativeChild } from "@hewel/zgui";
+import { M3SliderRow } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon, type ShellIconName } from "../icons.tsx";
-import { SPRING_EPSILON, createEnterProgress, createM3Spring, createOpacityEnter, sharedAxisXStyle, useMotionScheme } from "../motion.ts";
+import { createEnterProgress, createOpacityEnter, sharedAxisXStyle, useMotionScheme } from "../motion.ts";
 import { SHELL_ROSETTE_CLIP_40, SHELL_ROSETTE_PATH } from "../shapes.ts";
 import { useShellStore } from "../store.ts";
 import { formatDurationSeconds, type BatteryState, type PowerConfirmAction } from "../topics.ts";
@@ -46,8 +47,6 @@ const batteryLabels: Readonly<Record<BatteryState, string>> = {
   pending_charge: "Pending charge", pending_discharge: "Pending discharge",
 };
 
-const clampPercent = (value: number) => Math.max(0, Math.min(100, value));
-
 export function PrecisionSliderRow(props: {
   label: string;
   icon: ShellIconName;
@@ -62,121 +61,41 @@ export function PrecisionSliderRow(props: {
   showTrailingSlot?: boolean;
   valueLabel?: string;
 }): NativeChild {
-  const scheme = useMotionScheme();
-  const [dragging, setDragging] = createSignal(false);
-  const value = () => clampPercent(props.value);
-  const animatedValue = createM3Spring(value, "fastSpatial", { scheme, epsilon: SPRING_EPSILON.px });
-  const change = (next: number, direct = false) => {
-    const percent = clampPercent(Math.round(next));
-    if (direct) animatedValue.jump(percent);
-    if (percent !== Math.round(props.value)) props.onChange(percent);
-  };
-  const displayValue = () => clampPercent(animatedValue());
-  const thumbDiameter = 14;
-  const thumbRadius = thumbDiameter / 2;
-  const fillWidth = () => {
-    const pct = displayValue();
-    if (pct <= 0) return "0px";
-    const delta = thumbRadius - (pct / 100) * thumbDiameter;
-    return delta >= 0
-      ? `calc(${pct.toFixed(2)}% + ${delta.toFixed(2)}px)`
-      : `calc(${pct.toFixed(2)}% - ${Math.abs(delta).toFixed(2)}px)`;
-  };
-  const thumbLeft = () => {
-    const pct = displayValue();
-    return `calc(${pct.toFixed(2)}% - ${((pct / 100) * thumbDiameter).toFixed(2)}px)`;
-  };
-  const pointerToPercent = (clientX: number, rect: { readonly x: number; readonly width: number }): number => {
-    const travel = rect.width - thumbDiameter;
-    return travel > 0
-      ? ((clientX - rect.x - thumbRadius) * 100) / travel
-      : ((clientX - rect.x) * 100) / rect.width;
-  };
-
   return (
-    <row style={{ alignItems: "center", gap: "10px", height: "34px", flexShrink: 0 }}>
-      <Show when={props.onIconClick} fallback={
-        <box ariaHidden style={{ ...iconWell, backgroundColor: containerHighest }}>
-          <ShellIcon name={props.icon} size={16} color={onSurface} />
-        </box>
-      }>
-        <Button ariaLabel={props.iconLabel ?? props.label} disabled={props.disabled ?? false} onClick={() => props.onIconClick?.()}
-          style={{ ...iconWell, backgroundColor: containerHighest, opacity: props.disabled ? 0.45 : 1 }}>
-          <ShellIcon name={props.icon} size={16} color={onSurface} />
-        </Button>
-      </Show>
-      <box role="slider" tabIndex={props.disabled ? -1 : 0} disabled={props.disabled ?? false} ariaLabel={props.label}
-        ariaValueMin={0} ariaValueMax={100} ariaValueNow={value()} ariaValueStep={5}
-        onPointerDown={event => {
-          if (props.disabled || !event.primary || !(event.button === "primary" || (event.button === null && event.pointerKind !== "mouse"))) return;
-          const rect = getWindowRect(event.currentTarget);
-          if (!rect || rect.width <= 0) return;
-          focus(event.currentTarget);
-          setDragging(true);
-          change(pointerToPercent(event.position.x, rect), false);
-        }}
-        onPointerMove={event => {
-          if (!dragging() || props.disabled || !event.primary) return;
-          const rect = getWindowRect(event.currentTarget);
-          if (!rect || rect.width <= 0) return;
-          change(pointerToPercent(event.position.x, rect), true);
-        }}
-        onPointerUp={() => { if (dragging()) setDragging(false); }}
-        onPointerCancel={() => { if (dragging()) setDragging(false); }}
-        onWheel={event => {
-          if (props.disabled) return;
-          const delta = event.delta.y || event.delta.x;
-          if (!delta) return;
-          event.preventDefault();
-          change(value() - Math.sign(delta) * 5, false);
-        }}
-        onKeyDown={event => {
-          if (props.disabled) return;
-          switch (event.key) {
-            case "ArrowUp": case "ArrowRight": change(value() + 5, false); break;
-            case "ArrowDown": case "ArrowLeft": change(value() - 5, false); break;
-            case "Home": change(0, false); break;
-            case "End": change(100, false); break;
-            default: return;
+    <M3SliderRow
+      label={props.label}
+      value={props.value}
+      {...(props.valueLabel !== undefined ? { valueLabel: props.valueLabel } : {})}
+      {...(props.disabled !== undefined ? { disabled: props.disabled } : {})}
+      {...(props.iconLabel !== undefined ? { iconLabel: props.iconLabel } : {})}
+      {...(props.onIconClick ? { onIconClick: props.onIconClick } : {})}
+      {...(props.showTrailingSlot !== undefined ? { showTrailingSlot: props.showTrailingSlot } : {})}
+      leadingIcon={({ dragging }) => (
+        <ShellIcon
+          name={props.icon}
+          size={16}
+          color={dragging ? onPrimaryContainer : onSurface}
+        />
+      )}
+      onChange={props.onChange}
+      {...(props.onTrailingClick
+        ? {
+            trailing: (
+              <Button
+                testId={props.trailingTestId ?? null}
+                ariaLabel={props.trailingLabel ?? `Open ${props.label}`}
+                onClick={() => props.onTrailingClick?.()}
+                style={{
+                  display: "flex", width: "26px", height: "26px", borderRadius: "8px", flexShrink: 0,
+                  alignItems: "center", justifyContent: "center", backgroundColor: containerHighest,
+                }}
+              >
+                <ShellIcon name="chevronRight" size={16} color={muted} />
+              </Button>
+            ),
           }
-          event.preventDefault();
-        }}
-        style={{
-          ...grow, display: "flex", alignItems: "center", height: "24px", position: "relative",
-          opacity: props.disabled ? 0.45 : 1,
-        }}>
-        <box ariaHidden style={{ width: "100%", height: "6px", borderRadius: "3px", backgroundColor: containerHighest, overflow: "hidden" }}>
-          <box data-percent-fill="true" style={{ width: fillWidth(), height: "100%", borderRadius: "3px", backgroundColor: primary }} />
-        </box>
-        <box ariaHidden data-slider-thumb="true" style={{
-          position: "absolute", left: thumbLeft(), width: "14px", height: "14px", borderRadius: "999px",
-          backgroundColor: primary,
-          border: dragging()
-            ? "3px solid color-mix(in srgb, var(--color-primary) 35%, var(--color-surface-container-high))"
-            : `2px solid ${containerHigh}`,
-        }} />
-      </box>
-      <row style={{ width: "34px", flexShrink: 0, justifyContent: "flex-end" }}>
-        <text data-tabular="true" style={{
-          fontFamily: "var(--font-mono)", fontSize: "11px", fontWeight: 500, color: muted,
-          fontVariantNumeric: "tabular-nums",
-        }}>
-          {props.valueLabel ?? `${Math.round(props.value)}%`}
-        </text>
-      </row>
-      <Show when={props.showTrailingSlot !== false}>
-        <Show when={props.onTrailingClick} fallback={<box ariaHidden style={{ width: "26px", height: "26px", flexShrink: 0 }} />}>
-          <Button testId={props.trailingTestId ?? null} ariaLabel={props.trailingLabel ?? `Open ${props.label}`}
-            onClick={() => props.onTrailingClick?.()}
-            style={{
-              display: "flex", width: "26px", height: "26px", borderRadius: "8px", flexShrink: 0,
-              alignItems: "center", justifyContent: "center", backgroundColor: containerHighest,
-            }}>
-            <ShellIcon name="chevronRight" size={16} color={muted} />
-          </Button>
-        </Show>
-      </Show>
-    </row>
+        : {})}
+    />
   );
 }
 

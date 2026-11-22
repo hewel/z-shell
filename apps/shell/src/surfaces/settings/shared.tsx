@@ -1,4 +1,5 @@
-import { Button, Show, type NativeChild } from "@hewel/zgui";
+import { Show, type NativeChild } from "@hewel/zgui";
+import { M3Switch } from "@z-shell/sdk/primitives";
 
 export const primary = "var(--color-primary)";
 export const onPrimary = "var(--color-on-primary)";
@@ -23,19 +24,13 @@ export function ShellSwitch(props: {
   onToggle: () => void;
 }): NativeChild {
   return (
-    <Button testId={props.testId ?? null} data-switch-root="true"
-      ariaLabel={props.ariaLabel} checked={props.checked} disabled={props.disabled ?? false}
-      onClick={props.onToggle} style={{
-        display: "flex", width: "42px", height: "24px", borderRadius: "999px", padding: "3px", flexShrink: 0,
-        alignItems: "center", justifyContent: props.checked ? "flex-end" : "flex-start",
-        backgroundColor: props.checked ? primary : containerHighest,
-        opacity: props.disabled ? 0.45 : 1,
-      }}>
-      <box ariaHidden data-switch-thumb="true" style={{
-        width: "18px", height: "18px", borderRadius: "999px",
-        backgroundColor: props.checked ? onPrimary : muted,
-      }} />
-    </Button>
+    <M3Switch
+      checked={props.checked}
+      ariaLabel={props.ariaLabel}
+      {...(props.disabled !== undefined ? { disabled: props.disabled } : {})}
+      {...(props.testId !== undefined ? { testId: props.testId } : {})}
+      onToggle={props.onToggle}
+    />
   );
 }
 

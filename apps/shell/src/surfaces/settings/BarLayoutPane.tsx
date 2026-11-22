@@ -1,4 +1,5 @@
 import { Button, For, createMemo, type NativeChild } from "@hewel/zgui";
+import { M3SegmentedControl } from "@z-shell/sdk/primitives";
 import { ShellIcon } from "../../icons.tsx";
 import { PrecisionSliderRow } from "../../panels/QuickSettingsPanel.tsx";
 import { useShellStore } from "../../store.ts";
@@ -15,15 +16,15 @@ import {
   primaryContainer,
 } from "./shared.tsx";
 
-const BAR_STYLES: readonly { readonly id: BarStyle; readonly label: string }[] = [
-  { id: "floating", label: "Floating" },
-  { id: "docked", label: "Docked" },
+const BAR_STYLES: readonly { readonly id: BarStyle; readonly label: string; readonly testId: string }[] = [
+  { id: "floating", label: "Floating", testId: "settings-bar-style-floating" },
+  { id: "docked", label: "Docked", testId: "settings-bar-style-docked" },
 ];
 
-const BAR_POSITIONS: readonly { readonly id: BarPosition; readonly label: string }[] = [
-  { id: "top", label: "Top" },
-  { id: "left", label: "Left" },
-  { id: "right", label: "Right" },
+const BAR_POSITIONS: readonly { readonly id: BarPosition; readonly label: string; readonly testId: string }[] = [
+  { id: "top", label: "Top", testId: "settings-bar-pos-top" },
+  { id: "left", label: "Left", testId: "settings-bar-pos-left" },
+  { id: "right", label: "Right", testId: "settings-bar-pos-right" },
 ];
 
 const GAP_PRESETS = [0, 8, 14, 20] as const;
@@ -55,44 +56,22 @@ export function BarLayoutPane(): NativeChild {
         <row style={{ gap: "12px", width: "100%" }}>
           <column style={{ ...grow, gap: "6px" }}>
             <text style={{ fontSize: "12px", fontWeight: 600, color: muted }}>Bar style</text>
-            <row style={{ borderRadius: "10px", backgroundColor: container, padding: "4px", gap: "4px" }}>
-              <For each={BAR_STYLES} keyed={item => item.id}>
-                {item => {
-                  const active = () => style() === item().id;
-                  return (
-                    <Button testId={`settings-bar-style-${item().id}`} selected={active()}
-                      onClick={() => patchBar({ style: item().id })} style={{
-                        ...grow, display: "flex", height: "28px", borderRadius: "8px", alignItems: "center", justifyContent: "center",
-                        backgroundColor: active() ? primaryContainer : "transparent",
-                        color: active() ? onPrimaryContainer : muted, fontSize: "12px", fontWeight: active() ? 600 : 500,
-                      }}>
-                      <text>{item().label}</text>
-                    </Button>
-                  );
-                }}
-              </For>
-            </row>
+            <M3SegmentedControl
+              ariaLabel="Bar style"
+              options={BAR_STYLES}
+              value={style()}
+              onChange={next => patchBar({ style: next })}
+            />
           </column>
 
           <column style={{ ...grow, gap: "6px" }}>
             <text style={{ fontSize: "12px", fontWeight: 600, color: muted }}>Screen edge</text>
-            <row style={{ borderRadius: "10px", backgroundColor: container, padding: "4px", gap: "4px" }}>
-              <For each={BAR_POSITIONS} keyed={item => item.id}>
-                {item => {
-                  const active = () => position() === item().id;
-                  return (
-                    <Button testId={`settings-bar-pos-${item().id}`} selected={active()}
-                      onClick={() => patchBar({ position: item().id })} style={{
-                        ...grow, display: "flex", height: "28px", borderRadius: "8px", alignItems: "center", justifyContent: "center",
-                        backgroundColor: active() ? primaryContainer : "transparent",
-                        color: active() ? onPrimaryContainer : muted, fontSize: "12px", fontWeight: active() ? 600 : 500,
-                      }}>
-                      <text>{item().label}</text>
-                    </Button>
-                  );
-                }}
-              </For>
-            </row>
+            <M3SegmentedControl
+              ariaLabel="Screen edge"
+              options={BAR_POSITIONS}
+              value={position()}
+              onChange={next => patchBar({ position: next })}
+            />
           </column>
         </row>
 

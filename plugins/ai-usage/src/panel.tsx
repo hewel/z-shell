@@ -1,5 +1,6 @@
 import { Button, For, Show, createMemo, createSignal, type Accessor, type NativeChild } from "@hewel/zgui";
 import type { ZShellClient } from "@z-shell/sdk";
+import { M3IconButton, M3LinearProgress } from "@z-shell/sdk/primitives";
 import { SPRING_EPSILON, createM3Spring, useGlobalMotionScheme, useTopic, type MotionScheme } from "@z-shell/sdk/zgui";
 import type { AiUsageSnapshot, QuotaEntry } from "./service.ts";
 
@@ -12,10 +13,6 @@ const containerHighest = "var(--color-surface-container-highest)";
 const subcard = {
   flexDirection: "column", gap: "10px", padding: "12px", borderRadius: "16px",
   backgroundColor: containerHigh,
-} as const;
-const iconBtn = {
-  display: "flex", width: "36px", height: "36px", borderRadius: "10px", flexShrink: 0,
-  alignItems: "center", justifyContent: "center", backgroundColor: containerHighest,
 } as const;
 const heading = { fontWeight: 600 } as const;
 const clipped = { minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
@@ -105,10 +102,7 @@ function MetricBar(props: { readonly quota: QuotaEntry }): NativeChild {
           {formatPercent(remaining())}
         </text>
       </row>
-      <box role="progressIndicator" ariaLabel={`${props.quota.label} remaining`} ariaValueMin={0} ariaValueMax={100} ariaValueNow={remaining()}
-        style={{ height: "8px", borderRadius: "4px", overflow: "hidden", backgroundColor: containerHighest }}>
-        <box data-percent-fill="true" style={{ width: `${remaining() ?? 0}%`, height: "100%", borderRadius: "4px", backgroundColor: primary }} />
-      </box>
+      <M3LinearProgress value={remaining() ?? 0} ariaLabel={`${props.quota.label} remaining`} />
       <text style={{ color: muted, fontFamily: "var(--font-mono)", fontSize: "11px" }}>
         {props.quota.resetsAt ? `Resets: ${props.quota.resetsAt}` : "Reset time unavailable"}
       </text>
@@ -145,16 +139,19 @@ export default function Panel(props: {
           <text style={{ fontSize: "11px", color: muted }}>Remaining quota</text>
         </column>
         <row style={{ gap: "6px", flexShrink: 0 }}>
-          <Button testId="ai-usage-refresh" ariaLabel="Refresh AI usage"
+          <M3IconButton
+            testId="ai-usage-refresh"
+            ariaLabel="Refresh AI usage"
+            variant="filled-tonal"
             onClick={() => void props.client()?.invokeCommand("plugin.z-shell.ai-usage.refresh").catch(() => undefined)}
-            style={iconBtn}>
+          >
             <vector d={REFRESH_ICON} viewBox="0 0 24 24" style={{ width: "16px", height: "16px", color: onSurface }} />
-          </Button>
+          </M3IconButton>
           <Show when={props.onOpenSettings}>
             {openSettings => (
-              <Button testId="ai-usage-open-settings" ariaLabel="Open AI usage settings" onClick={openSettings()} style={iconBtn}>
+              <M3IconButton testId="ai-usage-open-settings" ariaLabel="Open AI usage settings" variant="filled-tonal" onClick={openSettings()}>
                 <vector d={SETTINGS_ICON} viewBox="0 0 24 24" style={{ width: "16px", height: "16px", color: onSurface }} />
-              </Button>
+              </M3IconButton>
             )}
           </Show>
         </row>

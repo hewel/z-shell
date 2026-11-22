@@ -603,6 +603,7 @@ describe("DESIGN.md token and surface contract sync", () => {
     const shellPanels = readFileSync(join(shellDir, "src/panels/ShellPanels.tsx"), "utf8");
     const powerDialog = readFileSync(join(shellDir, "src/surfaces/PowerDialog.tsx"), "utf8");
     const polkitDialog = readFileSync(join(shellDir, "src/surfaces/PolkitDialog.tsx"), "utf8");
+    const primitivesCss = readFileSync(join(repoRoot, "packages/sdk/src/zgui-primitives.module.css"), "utf8");
     const launcher = readFileSync(join(shellDir, "src/surfaces/LauncherOverlay.tsx"), "utf8");
     const overview = readFileSync(join(repoRoot, "plugins/niri-overview/src/layer.tsx"), "utf8");
     const builtinOverview = readFileSync(join(shellDir, "src/surfaces/OverviewOverlay.tsx"), "utf8");
@@ -612,8 +613,9 @@ describe("DESIGN.md token and surface contract sync", () => {
     expect(shellPanels).toMatch(/media:\s*\{\s*width:\s*396\b/);
     expect(shellPanels).toMatch(/battery:\s*\{\s*width:\s*396\b/);
     expect(shellPanels).toMatch(/clipboard:\s*\{\s*width:\s*560\b/);
-    expect(powerDialog).toContain(`width: "360px"`);
-    expect(polkitDialog).toContain(`width: "360px"`);
+    expect(powerDialog).toContain("<M3DialogShell");
+    expect(polkitDialog).toContain("<M3DialogShell");
+    expect(primitivesCss).toMatch(/\.dialogCard\s*\{[^}]*width:\s*360px;/s);
     expect(launcher).toContain(`width: "652px"`);
     expect(overview).toContain(`width: "684px"`);
     expect(builtinOverview).toContain(`width: "684px"`);

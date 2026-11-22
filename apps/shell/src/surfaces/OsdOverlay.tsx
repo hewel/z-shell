@@ -1,9 +1,8 @@
 import { For, LayerSurface, Show, createEffect, createMemo, createSignal, type Accessor, type Monitor, type NativeChild } from "@hewel/zgui";
+import { M3Slider } from "@z-shell/sdk/primitives";
 import { ShellIcon } from "../icons.tsx";
 import {
-  SPRING_EPSILON,
   createLinearProgress,
-  createM3Spring,
   createRetainedPresence,
   useMotionScheme,
   type M3Spring,
@@ -11,7 +10,6 @@ import {
 import { useShellStore } from "../store.ts";
 import { formatSurfaceName, resolveMonitorLogicalSize, type OsdPayload, type WarningFade } from "../topics.ts";
 
-const primary = "var(--color-primary)";
 const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
 const capsule = {
@@ -29,7 +27,6 @@ function OsdPill({ osd, spatial, opacity }: {
 }): NativeChild {
   const scheme = useMotionScheme();
   const value = () => Math.max(0, Math.min(100, osd().value ?? 0));
-  const animatedValue = createM3Spring(value, "fastSpatial", { scheme, epsilon: SPRING_EPSILON.px });
   const icon = () => {
     const { kind, muted } = osd();
     return kind === "brightness" ? "brightness" : kind === "ime" ? "terminal" : muted ? "volumeMute" : "volumeHigh";
@@ -37,7 +34,7 @@ function OsdPill({ osd, spatial, opacity }: {
 
   return (
     <row role="status" ariaLabel={osd().label} style={{
-      ...capsule, width: "280px", height: "48px", padding: "0 10px 0 8px", gap: "10px", alignItems: "center",
+      ...capsule, width: "280px", height: "48px", padding: "0 12px 0 8px", gap: "10px", alignItems: "center",
       opacity: Math.max(0, Math.min(1, opacity())),
       transform: scheme() === "reduced"
         ? "none"
@@ -45,26 +42,14 @@ function OsdPill({ osd, spatial, opacity }: {
       transformOrigin: "bottom center",
     }}>
       <box style={{
-        display: "flex", width: "32px", height: "32px", borderRadius: "999px", flexShrink: 0,
-        alignItems: "center", justifyContent: "center", backgroundColor: primary,
+        display: "flex", width: "32px", height: "32px", borderRadius: "10px", flexShrink: 0,
+        alignItems: "center", justifyContent: "center", backgroundColor: "var(--color-primary-container)",
       }}>
-        <ShellIcon name={icon()} size={18} color="var(--color-on-primary)" />
+        <ShellIcon name={icon()} size={18} color="var(--color-on-primary-container)" />
       </box>
       <Show when={osd().kind === "ime"} fallback={
         <>
-          <box style={{ flexGrow: 1, minWidth: "0px", height: "20px", display: "flex", alignItems: "center", position: "relative" }}>
-            <box style={{
-              width: "100%", height: "6px", borderRadius: "3px", overflow: "hidden",
-              backgroundColor: "var(--color-surface-container-highest)",
-            }}>
-              <box data-percent-fill="true" style={{ width: `${Math.max(0, Math.min(100, animatedValue())).toFixed(2)}%`, height: "100%", borderRadius: "3px", backgroundColor: primary }} />
-            </box>
-            <box ariaHidden style={{
-              position: "absolute", left: `${Math.max(0, Math.min(92, animatedValue() - 4)).toFixed(2)}%`,
-              width: "14px", height: "14px", borderRadius: "999px",
-              backgroundColor: primary, border: "2px solid var(--color-surface-container)",
-            }} />
-          </box>
+          <M3Slider label={osd().label} value={value()} readOnly compact />
           <row style={{ width: "36px", flexShrink: 0, justifyContent: "flex-end" }}>
             <text testId="osd-value" data-tabular="true" style={{
               fontFamily: "var(--font-mono)", fontSize: "12px", fontWeight: 600, fontVariantNumeric: "tabular-nums",

@@ -130,7 +130,7 @@ function LauncherContent(props: {
         ...dialogMotionStyle(props.spatial(), { opacity: props.opacity(), reduced: scheme() === "reduced", fromScale: 0.95, fromY: 10 }),
       }}>
         <row testId="launcher-search-bar" data-composite-input="true" style={{
-          width: "100%", height: "46px", borderRadius: "14px", padding: searchFocused() ? "0 13px" : "0 14px", gap: "10px",
+          width: "100%", height: "46px", borderRadius: "14px", padding: searchFocused() ? "0 11px 0 13px" : "0 12px 0 14px", gap: "10px",
           alignItems: "center", flexShrink: 0, backgroundColor: "var(--color-surface-container-high)",
           border: searchFocused()
             ? "2px solid var(--color-primary)"
@@ -145,6 +145,14 @@ function LauncherContent(props: {
               padding: "9px 0", lineHeight: "20px", backgroundColor: "transparent",
               color: "var(--color-on-surface)", fontSize: "14px",
             }} />
+          <box ariaHidden style={{
+            padding: "2px 6px", borderRadius: "6px", flexShrink: 0,
+            backgroundColor: "var(--color-surface-container-highest)",
+          }}>
+            <text style={{ fontFamily: "var(--font-mono)", fontSize: "10px", fontWeight: 500, color: "var(--color-on-surface-variant)" }}>
+              Esc
+            </text>
+          </box>
         </row>
         <scroll style={{ flexGrow: 1, width: "100%", overflow: "hidden auto" }}>
           <row style={{ width: "100%", flexWrap: "wrap", gap: "6px", justifyContent: "flex-start" }}>

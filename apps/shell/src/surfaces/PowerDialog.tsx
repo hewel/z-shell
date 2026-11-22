@@ -1,13 +1,9 @@
-import { Button, LayerSurface, Show, createMemo, focus, registerDismissLayer, type Accessor, type NativeChild } from "@hewel/zgui";
+import { LayerSurface, Show, createMemo, focus, registerDismissLayer, type Accessor, type NativeChild } from "@hewel/zgui";
+import { M3Button, M3DialogShell } from "@z-shell/sdk/primitives";
 import { ShellIcon } from "../icons.tsx";
 import { createRetainedPresence, dialogMotionStyle, scrimBackdrop, useMotionScheme, type M3Spring } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { POWER_DIALOG_COPY, resolveMonitorLogicalSize, type PowerConfirmAction } from "../topics.ts";
-
-const footerButton = {
-  display: "flex", alignItems: "center", justifyContent: "center",
-  height: "40px", borderRadius: "999px", fontSize: "14px", fontWeight: 600,
-} as const;
 
 function PowerDialogContent(props: {
   action: Accessor<PowerConfirmAction>;
@@ -37,37 +33,40 @@ function PowerDialogContent(props: {
       display: "flex", alignItems: "center", justifyContent: "center",
       backgroundColor: scrimBackdrop(55, props.opacity(), dark()),
     }}>
-      <box testId="power-dialog-card" role="dialog" ariaLabel={copy().title} ariaModal
+      <M3DialogShell
+        testId="power-dialog-card"
+        ariaLabel={copy().title}
+        centered
         ref={node => { registerDismissLayer(node, closePowerDialog, { layer: "modal", dismissOnOutsidePress: false }); }}
-        onClick={event => event.stopPropagation()} style={{
-          display: "flex", flexDirection: "column", alignItems: "center", width: "360px", borderRadius: "22px",
-          backgroundColor: "var(--color-surface-container)",
-          border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
-          boxShadow: "var(--shadow-level-3)",
-          padding: "24px", gap: "14px", fontFamily: "var(--font-sans)", color: "var(--color-on-surface)",
+        badge={{
+          tone: copy().destructive ? "destructive" : "accent",
+          icon: (
+            <ShellIcon
+              name={copy().icon}
+              size={22}
+              color={copy().destructive ? "var(--color-on-error-container)" : "var(--color-on-primary-container)"}
+            />
+          ),
+        }}
+        style={{
+          padding: "24px",
+          gap: "14px",
           ...dialogMotionStyle(props.spatial(), { opacity: props.opacity(), reduced: scheme() === "reduced", fromScale: 0.92, fromY: 0 }),
-        }}>
-        <box style={{
-          display: "flex", alignItems: "center", justifyContent: "center", width: "56px", height: "56px", borderRadius: "999px",
-          backgroundColor: copy().destructive ? "var(--color-error-container)" : "var(--color-primary-container)",
-        }}>
-          <ShellIcon name={copy().icon} size={26}
-            color={copy().destructive ? "var(--color-on-error-container)" : "var(--color-on-primary-container)"} />
-        </box>
-        <text testId="power-dialog-title" role="heading" style={{ fontSize: "22px", fontWeight: 700 }}>{copy().title}</text>
-        <text testId="power-dialog-desc" style="font-size: 14px; color: var(--color-on-surface-variant); text-align: center;">
+        }}
+      >
+        <text testId="power-dialog-title" role="heading" style={{ fontSize: "20px", fontWeight: 700 }}>{copy().title}</text>
+        <text testId="power-dialog-desc" style="font-size: 13px; color: var(--color-on-surface-variant); text-align: center; line-height: 18px;">
           {copy().description}
         </text>
-        <row style={{ gap: "12px", justifyContent: "flex-end", width: "100%", marginTop: "6px" }}>
-          <Button testId="power-dialog-cancel" onClick={closePowerDialog} ref={node => focus(node)}
-            style={{ ...footerButton, padding: "0px 16px", backgroundColor: "transparent", color: "var(--color-primary)" }}>Cancel</Button>
-          <Button testId="power-dialog-confirm" onClick={confirm} style={{
-            ...footerButton, padding: "0px 20px",
-            backgroundColor: copy().destructive ? "var(--color-error-container)" : "var(--color-primary)",
-            color: copy().destructive ? "var(--color-on-error-container)" : "var(--color-on-primary)",
-          }}>{copy().confirmLabel}</Button>
+        <row style={{ gap: "8px", justifyContent: "flex-end", width: "100%", marginTop: "6px" }}>
+          <M3Button testId="power-dialog-cancel" variant="outlined" neutral onClick={closePowerDialog} ref={node => focus(node)}>
+            Cancel
+          </M3Button>
+          <M3Button testId="power-dialog-confirm" variant={copy().destructive ? "destructive" : "filled"} onClick={confirm}>
+            {copy().confirmLabel}
+          </M3Button>
         </row>
-      </box>
+      </M3DialogShell>
     </box>
   );
 }

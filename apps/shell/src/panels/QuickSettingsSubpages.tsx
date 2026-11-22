@@ -1,4 +1,5 @@
 import { Button, For, Match, Show, Switch, TextField, createMemo, createSignal, type Accessor, type NativeChild } from "@hewel/zgui";
+import { M3Button, M3Switch } from "@z-shell/sdk/primitives";
 import { ShellIcon, type ShellIconName } from "../icons.tsx";
 import { createEnterProgress, createOpacityEnter, sharedAxisXStyle, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
@@ -59,33 +60,31 @@ function Action(props: {
   checked?: boolean; onClick: () => void;
 }): NativeChild {
   return (
-    <Button testId={props.testId ?? null} ariaLabel={props.ariaLabel ?? props.label} checked={props.checked ?? null} disabled={props.disabled ?? false}
-      onClick={props.onClick} style={{
-        display: "flex", minHeight: "30px", padding: "0 10px", borderRadius: "10px",
-        flexShrink: 0, alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: 500,
-        opacity: props.disabled ? 0.45 : 1,
-        backgroundColor: props.active ? selectedFill : containerHighest, color: props.active ? selectedInk : onSurface,
-      }}>
-      {props.label}
-    </Button>
+    <M3Button
+      size="sm"
+      variant={props.active ? "accent-tonal" : "neutral-tonal"}
+      {...(props.testId !== undefined ? { testId: props.testId } : {})}
+      ariaLabel={props.ariaLabel ?? props.label}
+      {...(props.active !== undefined ? { selected: props.active } : {})}
+      {...(props.disabled !== undefined ? { disabled: props.disabled } : {})}
+      onClick={props.onClick}
+    >
+      <text>{props.label}</text>
+    </M3Button>
   );
 }
 
 function Toggle(props: { label: string; checked: boolean; disabled?: boolean; onClick: () => void }): NativeChild {
   return (
-    <control role="switch" data-switch-root="true" tabIndex={props.disabled ? -1 : 0} ariaLabel={props.label} checked={props.checked}
-      disabled={props.disabled ?? false} onClick={props.onClick} style={{
-        ...row, padding: "4px 8px", borderRadius: "999px",
-        flexShrink: 0, minHeight: "30px", backgroundColor: containerHigh, opacity: props.disabled ? 0.45 : 1,
-      }}>
-      <text style={{ fontSize: "12px" }}>{props.label}</text>
-      <row ariaHidden data-switch-track="true" style={{
-        width: "32px", height: "18px", borderRadius: "999px", padding: "2px", alignItems: "center",
-        justifyContent: props.checked ? "flex-end" : "flex-start", backgroundColor: props.checked ? primary : "var(--color-outline-variant)",
-      }}>
-        <box data-switch-thumb="true" style={{ width: "14px", height: "14px", borderRadius: "999px", backgroundColor: props.checked ? "var(--color-on-primary)" : muted }} />
-      </row>
-    </control>
+    <row style={{ ...row, flexShrink: 0 }}>
+      <text style={{ fontSize: "12px", color: muted }}>{props.label}</text>
+      <M3Switch
+        checked={props.checked}
+        ariaLabel={props.label}
+        {...(props.disabled !== undefined ? { disabled: props.disabled } : {})}
+        onToggle={props.onClick}
+      />
+    </row>
   );
 }
 

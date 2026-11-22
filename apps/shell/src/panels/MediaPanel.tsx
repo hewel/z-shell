@@ -122,11 +122,18 @@ function WavyProgressTrack(props: {
       }} />
       <box ariaHidden style={{
         position: "absolute", right: "2px", height: "4px", width: restPct(),
+        display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: "1px",
         borderRadius: "2px", backgroundColor: containerHighest,
-      }} />
-      <box ariaHidden style={{
+      }}>
+        <Show when={clamped() < 0.94}>
+          <box ariaHidden data-slider-stop-dot="true" style={{
+            width: "4px", height: "4px", borderRadius: "999px", backgroundColor: primary, flexShrink: 0,
+          }} />
+        </Show>
+      </box>
+      <box ariaHidden data-slider-thumb="true" style={{
         position: "absolute", left: `${(clamped() * 100).toFixed(2)}%`,
-        width: "6px", height: "24px", borderRadius: "3px", backgroundColor: primary,
+        width: "4px", height: "20px", borderRadius: "2px", backgroundColor: primary,
       }} />
     </control>
   );

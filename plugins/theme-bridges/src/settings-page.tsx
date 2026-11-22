@@ -1,9 +1,9 @@
-import { Button, Show, TextField, createEffect, createSignal, type NativeChild } from "@hewel/zgui";
+import { Show, TextField, createEffect, createSignal, type NativeChild } from "@hewel/zgui";
+import { M3Button, M3Switch } from "@z-shell/sdk/primitives";
 import { useTopic, type PluginSettingsProps } from "@z-shell/sdk/zgui";
 import type { BridgeTargetStatus, ThemeBridgesStatus } from "./service.ts";
 
 const primary = "var(--color-primary)";
-const onPrimary = "var(--color-on-primary)";
 const primaryContainer = "var(--color-primary-container)";
 const onPrimaryContainer = "var(--color-on-primary-container)";
 const onSurface = "var(--color-on-surface)";
@@ -13,12 +13,6 @@ const containerHigh = "var(--color-surface-container-high)";
 const containerHighest = "var(--color-surface-container-highest)";
 const grow = { flexGrow: 1, flexBasis: "0px", minWidth: "0px" } as const;
 const clipped = { minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
-
-const actionStyle = {
-  display: "flex", alignItems: "center", justifyContent: "center",
-  padding: "6px 12px", borderRadius: "10px", minHeight: "30px", fontSize: "12px", fontWeight: 600,
-  backgroundColor: "var(--color-secondary-container)", color: "var(--color-on-secondary-container)",
-} as const;
 
 function BridgeTargetCard(props: {
   readonly name: string;
@@ -48,17 +42,11 @@ function BridgeTargetCard(props: {
             color: failed() ? "var(--color-on-error-container)"
               : applied() ? onPrimaryContainer : muted,
           }}>{state()}</text>
-          <Button data-switch-root="true" ariaLabel={`Enable ${props.name} bridge`} checked={props.enabled}
-            onClick={props.onToggle} style={{
-              display: "flex", width: "42px", height: "24px", borderRadius: "999px", padding: "3px", flexShrink: 0,
-              alignItems: "center", justifyContent: props.enabled ? "flex-end" : "flex-start",
-              backgroundColor: props.enabled ? primary : containerHighest,
-            }}>
-            <box ariaHidden data-switch-thumb="true" style={{
-              width: "18px", height: "18px", borderRadius: "999px",
-              backgroundColor: props.enabled ? onPrimary : muted,
-            }} />
-          </Button>
+          <M3Switch
+            ariaLabel={`Enable ${props.name} bridge`}
+            checked={props.enabled}
+            onToggle={props.onToggle}
+          />
         </row>
       </row>
       <text style={{ ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", color: muted }}>
@@ -77,12 +65,9 @@ function BridgeTargetCard(props: {
             ...grow, height: "28px", padding: "2px",
             backgroundColor: "transparent", color: onSurface, fontFamily: "var(--font-mono)", fontSize: "11px",
           }} />
-        <Button onClick={props.onPathSave} style={{
-          display: "flex", height: "26px", padding: "0 10px", borderRadius: "6px", alignItems: "center", justifyContent: "center",
-          backgroundColor: containerHighest, color: onSurface, fontSize: "11px", fontWeight: 600, flexShrink: 0,
-        }}>
+        <M3Button variant="neutral-tonal" size="sm" onClick={props.onPathSave} style={{ height: "26px" }}>
           <text>Save</text>
-        </Button>
+        </M3Button>
       </row>
       <Show when={props.status?.message} fallback={<box style={{ display: "none" }} />}>
         {message => <text style={{ fontSize: "11px", color: muted }}>{message()}</text>}
@@ -133,13 +118,14 @@ export default function ThemeBridgesSettingsPage(props: PluginSettingsProps): Na
           </text>
         </column>
         <row style={{ gap: "6px", flexShrink: 0 }}>
-          <Button testId="theme-bridges-reapply" style={{ ...actionStyle, backgroundColor: primaryContainer, color: onPrimaryContainer }}
+          <M3Button testId="theme-bridges-reapply" variant="accent-tonal" size="sm"
             disabled={!props.client()} onClick={() => void invoke("reapply")}>
             <text>Reapply all</text>
-          </Button>
-          <Button testId="theme-bridges-revert" style={actionStyle} disabled={!props.client()} onClick={() => void invoke("revert")}>
+          </M3Button>
+          <M3Button testId="theme-bridges-revert" variant="neutral-tonal" size="sm"
+            disabled={!props.client()} onClick={() => void invoke("revert")}>
             <text>Revert</text>
-          </Button>
+          </M3Button>
         </row>
       </row>
 

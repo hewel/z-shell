@@ -84,3 +84,7 @@
 .shell-composite-field:focus-visible {
   outline-color: transparent;
 }
+
+[data-highlighted="true"]:not([data-disabled="true"]) {
+  background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), transparent);
+}

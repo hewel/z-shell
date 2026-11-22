@@ -1,10 +1,10 @@
-import { Button, For, Show, type Accessor, type NativeChild } from "@hewel/zgui";
+import { For, Show, type Accessor, type NativeChild } from "@hewel/zgui";
 import type { ZShellClient } from "@z-shell/sdk";
+import { M3IconButton, M3Switch } from "@z-shell/sdk/primitives";
 import { useTopic } from "@z-shell/sdk/zgui";
 import { NOSLEEP_DEFAULTS, type NoSleepSnapshot } from "./service.ts";
 
 const primary = "var(--color-primary)";
-const onPrimary = "var(--color-on-primary)";
 const primaryContainer = "var(--color-primary-container)";
 const onPrimaryContainer = "var(--color-on-primary-container)";
 const onSurface = "var(--color-on-surface)";
@@ -47,12 +47,9 @@ export default function Panel(props: {
           </box>
           <Show when={props.onOpenSettings}>
             {openSettings => (
-              <Button testId="nosleep-open-settings" ariaLabel="Open Nosleep settings" onClick={openSettings()} style={{
-                display: "flex", width: "36px", height: "36px", borderRadius: "10px", flexShrink: 0,
-                alignItems: "center", justifyContent: "center", backgroundColor: containerHighest,
-              }}>
+              <M3IconButton testId="nosleep-open-settings" ariaLabel="Open Nosleep settings" variant="filled-tonal" onClick={openSettings()}>
                 <vector d={settingsIcon} viewBox="0 0 24 24" style={{ width: "16px", height: "16px", color: onSurface }} />
-              </Button>
+              </M3IconButton>
             )}
           </Show>
         </row>
@@ -73,18 +70,12 @@ export default function Panel(props: {
           <text style={{ fontWeight: 600, fontSize: "13px" }}>Manual protection</text>
           <text style={{ fontSize: "11px", color: muted }}>Keep screen and session awake</text>
         </column>
-        <Button testId="nosleep-toggle-btn" data-switch-root="true" checked={manual()} ariaLabel={manual() ? "Disable manual" : "Enable manual"}
-          onClick={() => void props.client()?.invokeCommand("plugin.z-shell.nosleep.toggle").catch(() => undefined)}
-          style={{
-            display: "flex", width: "44px", height: "26px", borderRadius: "999px", padding: "3px", flexShrink: 0,
-            alignItems: "center", justifyContent: manual() ? "flex-end" : "flex-start",
-            backgroundColor: manual() ? primary : containerHighest,
-          }}>
-          <box ariaHidden data-switch-thumb="true" style={{
-            width: "18px", height: "18px", borderRadius: "999px",
-            backgroundColor: manual() ? onPrimary : muted,
-          }} />
-        </Button>
+        <M3Switch
+          testId="nosleep-toggle-btn"
+          checked={manual()}
+          ariaLabel={manual() ? "Disable manual" : "Enable manual"}
+          onToggle={() => void props.client()?.invokeCommand("plugin.z-shell.nosleep.toggle").catch(() => undefined)}
+        />
       </row>
 
       <column style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "12px", gap: "8px" }}>

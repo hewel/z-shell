@@ -1,19 +1,22 @@
 import { Button, For, Show, TextField, createEffect, createSignal, type NativeChild } from "@hewel/zgui";
+import { M3Button, M3SegmentedControl, M3Switch } from "@z-shell/sdk/primitives";
 import { useTopic, type PluginSettingsProps } from "@z-shell/sdk/zgui";
 import { NOSLEEP_DEFAULTS, type NoSleepSnapshot } from "./service.ts";
 
 const primary = "var(--color-primary)";
-const onPrimary = "var(--color-on-primary)";
 const primaryContainer = "var(--color-primary-container)";
 const onPrimaryContainer = "var(--color-on-primary-container)";
 const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
 const container = "var(--color-surface-container)";
 const containerHigh = "var(--color-surface-container-high)";
-const containerHighest = "var(--color-surface-container-highest)";
 const grow = { flexGrow: 1, flexBasis: "0px", minWidth: "0px" } as const;
 
-const SCOPES = ["sleep", "idle", "lock"] as const;
+const SCOPES = [
+  { id: "sleep", label: "sleep" },
+  { id: "idle", label: "idle" },
+  { id: "lock", label: "lock" },
+] as const;
 const POLL_PRESETS = [1000, 2000, 5000, 10000] as const;
 
 export default function NosleepSettingsPage(props: PluginSettingsProps): NativeChild {
@@ -51,41 +54,26 @@ export default function NosleepSettingsPage(props: PluginSettingsProps): NativeC
               {`Current state: ${snapshot()?.active ? "Awake" : "Idle"} · Lease auto-releases on disconnect`}
             </text>
           </column>
-          <Button testId="nosleep-settings-toggle" data-switch-root="true" ariaLabel="Toggle manual nosleep" checked={manual()}
-            onClick={() => void props.client()?.invokeCommand("plugin.z-shell.nosleep.toggle").catch(() => undefined)}
-            style={{
-              display: "flex", width: "44px", height: "26px", borderRadius: "999px", padding: "3px", flexShrink: 0,
-              alignItems: "center", justifyContent: manual() ? "flex-end" : "flex-start",
-              backgroundColor: manual() ? primary : containerHighest,
-            }}>
-            <box ariaHidden data-switch-thumb="true" style={{
-              width: "18px", height: "18px", borderRadius: "999px",
-              backgroundColor: manual() ? onPrimary : muted,
-            }} />
-          </Button>
+          <M3Switch
+            testId="nosleep-settings-toggle"
+            checked={manual()}
+            ariaLabel="Toggle manual nosleep"
+            onToggle={() => void props.client()?.invokeCommand("plugin.z-shell.nosleep.toggle").catch(() => undefined)}
+          />
         </row>
 
         <box ariaHidden style={{ width: "100%", height: "1px", backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 45%, transparent)" }} />
 
         <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
           <text style={{ fontSize: "12px", fontWeight: 500 }}>Inhibit scope</text>
-          <row style={{ borderRadius: "10px", backgroundColor: container, padding: "4px", gap: "4px", width: "220px" }}>
-            <For each={SCOPES} keyed={s => s}>
-              {item => {
-                const active = () => scope() === item();
-                return (
-                  <Button selected={active()} onClick={() => { setScope(item()); void save({ inhibit_scope: item() }, `Scope set to ${item()}`); }}
-                    style={{
-                      ...grow, display: "flex", height: "26px", borderRadius: "8px", alignItems: "center", justifyContent: "center",
-                      backgroundColor: active() ? primaryContainer : "transparent",
-                      color: active() ? onPrimaryContainer : muted, fontSize: "12px", fontWeight: active() ? 600 : 500,
-                    }}>
-                    <text>{item()}</text>
-                  </Button>
-                );
-              }}
-            </For>
-          </row>
+          <M3SegmentedControl
+            ariaLabel="Inhibit scope"
+            options={SCOPES}
+            value={scope()}
+            compact
+            style={{ width: "220px" }}
+            onChange={next => { setScope(next); void save({ inhibit_scope: next }, `Scope set to ${next}`); }}
+          />
         </row>
 
         <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
@@ -131,13 +119,14 @@ export default function NosleepSettingsPage(props: PluginSettingsProps): NativeC
               ...grow, height: "30px", padding: "4px 2px",
               backgroundColor: "transparent", color: onSurface, fontFamily: "var(--font-mono)", fontSize: "12px",
             }} />
-          <Button testId="nosleep-settings-save-dir" onClick={() => void save({ agent_working_dir: agentDir().trim() }, "Saved marker directory")}
-            style={{
-              display: "flex", height: "30px", padding: "0 14px", borderRadius: "8px", alignItems: "center", justifyContent: "center",
-              backgroundColor: primary, color: onPrimary, fontSize: "12px", fontWeight: 600, flexShrink: 0,
-            }}>
+          <M3Button
+            testId="nosleep-settings-save-dir"
+            variant="filled"
+            size="sm"
+            onClick={() => void save({ agent_working_dir: agentDir().trim() }, "Saved marker directory")}
+          >
             <text>Save</text>
-          </Button>
+          </M3Button>
         </row>
         <For each={snapshot()?.activeAgents ?? []} keyed={agent => agent.id}
           fallback={<text style={{ fontSize: "12px", color: muted }}>No active agents detected</text>}>
