@@ -1,0 +1,630 @@
+/* Shared Material Design 3 Desktop Component Primitives (docs/design/components.md) */
+
+.button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  font-family: var(--font-sans);
+  transition-property: background-color, border-color, color;
+  transition-duration: var(--motion-duration-short2);
+  transition-timing-function: var(--motion-easing-standard);
+
+  &[data-size="md"] {
+    min-height: 34px;
+    padding: 0 14px;
+    gap: 6px;
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 18px;
+  }
+
+  &[data-size="sm"] {
+    min-height: 28px;
+    padding: 0 10px;
+    gap: 5px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 16px;
+  }
+
+  &[data-variant="filled"] {
+    background-color: var(--color-primary);
+    color: var(--color-on-primary);
+
+    &:hover {
+      background-color: color-mix(in srgb, var(--color-on-primary) var(--state-hover), var(--color-primary));
+    }
+    &:active {
+      background-color: color-mix(in srgb, var(--color-on-primary) var(--state-pressed), var(--color-primary));
+    }
+  }
+
+  &[data-variant="accent-tonal"] {
+    background-color: var(--color-primary-container);
+    color: var(--color-on-primary-container);
+    border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+
+    &:hover {
+      background-color: color-mix(in srgb, var(--color-on-primary-container) var(--state-hover), var(--color-primary-container));
+    }
+    &:active {
+      background-color: color-mix(in srgb, var(--color-on-primary-container) var(--state-pressed), var(--color-primary-container));
+    }
+  }
+
+  &[data-variant="neutral-tonal"] {
+    background-color: var(--color-secondary-container);
+    color: var(--color-on-secondary-container);
+
+    &:hover {
+      background-color: color-mix(in srgb, var(--color-on-secondary-container) var(--state-hover), var(--color-secondary-container));
+    }
+    &:active {
+      background-color: color-mix(in srgb, var(--color-on-secondary-container) var(--state-pressed), var(--color-secondary-container));
+    }
+  }
+
+  &[data-variant="outlined"] {
+    background-color: transparent;
+    color: var(--color-primary);
+    border-color: var(--color-outline);
+
+    &:hover {
+      background-color: color-mix(in srgb, var(--color-primary) var(--state-hover), transparent);
+    }
+    &:active {
+      background-color: color-mix(in srgb, var(--color-primary) var(--state-pressed), transparent);
+    }
+
+    &[data-neutral="true"] {
+      background-color: var(--color-surface-container-high);
+      color: var(--color-on-surface);
+      border-color: var(--color-outline-variant);
+
+      &:hover {
+        background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), var(--color-surface-container-high));
+      }
+      &:active {
+        background-color: color-mix(in srgb, var(--color-on-surface) var(--state-pressed), var(--color-surface-container-high));
+      }
+    }
+  }
+
+  &[data-variant="text"] {
+    background-color: transparent;
+    color: var(--color-primary);
+
+    &:hover {
+      background-color: color-mix(in srgb, var(--color-primary) var(--state-hover), transparent);
+    }
+    &:active {
+      background-color: color-mix(in srgb, var(--color-primary) var(--state-pressed), transparent);
+    }
+
+    &[data-danger="true"] {
+      color: var(--color-error);
+
+      &:hover {
+        background-color: color-mix(in srgb, var(--color-error) var(--state-hover), transparent);
+      }
+      &:active {
+        background-color: color-mix(in srgb, var(--color-error) var(--state-pressed), transparent);
+      }
+    }
+  }
+
+  &[data-variant="destructive"] {
+    background-color: var(--color-error-container);
+    color: var(--color-on-error-container);
+    border-color: color-mix(in srgb, var(--color-error) 35%, transparent);
+
+    &:hover {
+      background-color: color-mix(in srgb, var(--color-on-error-container) var(--state-hover), var(--color-error-container));
+    }
+    &:active {
+      background-color: color-mix(in srgb, var(--color-on-error-container) var(--state-pressed), var(--color-error-container));
+    }
+  }
+
+  &:disabled {
+    background-color: color-mix(in srgb, var(--color-on-surface) var(--disabled-container), transparent);
+    color: color-mix(in srgb, var(--color-on-surface) var(--disabled-ink), transparent);
+    border-color: transparent;
+
+    &[data-variant="text"] {
+      background-color: transparent;
+    }
+
+    &[data-variant="outlined"] {
+      background-color: transparent;
+      border-color: color-mix(in srgb, var(--color-on-surface) var(--disabled-container), transparent);
+    }
+  }
+}
+
+.iconButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  transition-property: background-color, border-color, color;
+  transition-duration: var(--motion-duration-short2);
+  transition-timing-function: var(--motion-easing-standard);
+
+  &[data-size="md"] {
+    width: 32px;
+    height: 32px;
+  }
+
+  &[data-size="sm"] {
+    width: 28px;
+    height: 28px;
+  }
+
+  &[data-variant="standard"] {
+    background-color: transparent;
+    color: var(--color-on-surface-variant);
+
+    &:hover {
+      background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), transparent);
+    }
+    &:active {
+      background-color: color-mix(in srgb, var(--color-on-surface) var(--state-pressed), transparent);
+    }
+
+    &[data-selected="true"] {
+      background-color: color-mix(in srgb, var(--color-primary) 14%, transparent);
+      color: var(--color-primary);
+    }
+  }
+
+  &[data-variant="filled-tonal"] {
+    background-color: var(--color-surface-container-highest);
+    color: var(--color-on-surface);
+
+    &:hover {
+      background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), var(--color-surface-container-highest));
+    }
+    &:active {
+      background-color: color-mix(in srgb, var(--color-on-surface) var(--state-pressed), var(--color-surface-container-highest));
+    }
+
+    &[data-selected="true"] {
+      background-color: var(--color-primary-container);
+      color: var(--color-on-primary-container);
+      border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+    }
+  }
+
+  &[data-variant="filled"] {
+    background-color: var(--color-surface-container-highest);
+    color: var(--color-on-surface);
+
+    &[data-selected="true"] {
+      background-color: var(--color-primary);
+      color: var(--color-on-primary);
+    }
+  }
+
+  &[data-variant="outlined"] {
+    background-color: transparent;
+    color: var(--color-on-surface-variant);
+    border-color: var(--color-outline);
+
+    &:hover {
+      background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), transparent);
+    }
+
+    &[data-selected="true"] {
+      background-color: var(--color-surface-container-highest);
+      color: var(--color-primary);
+      border-color: var(--color-primary);
+    }
+  }
+
+  &:disabled {
+    background-color: color-mix(in srgb, var(--color-on-surface) var(--disabled-container), transparent);
+    color: color-mix(in srgb, var(--color-on-surface) var(--disabled-ink), transparent);
+    border-color: transparent;
+
+    &[data-variant="standard"] {
+      background-color: transparent;
+    }
+  }
+}
+
+.switchTrack {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 44px;
+  height: 24px;
+  border-radius: var(--radius-pill);
+  flex-shrink: 0;
+  border: 1.5px solid var(--color-outline);
+  background-color: var(--color-surface-container-highest);
+  transition-property: background-color, border-color;
+  transition-duration: var(--motion-duration-short2);
+  transition-timing-function: var(--motion-easing-standard);
+
+  &:hover {
+    background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), var(--color-surface-container-highest));
+  }
+
+  &[data-checked="true"] {
+    background-color: var(--color-primary);
+    border-color: transparent;
+
+    &:hover {
+      background-color: color-mix(in srgb, var(--color-on-primary) var(--state-hover), var(--color-primary));
+    }
+  }
+
+  &:disabled {
+    background-color: color-mix(in srgb, var(--color-on-surface) var(--disabled-container), transparent);
+    border-color: color-mix(in srgb, var(--color-on-surface) var(--disabled-container), transparent);
+
+    &[data-checked="true"] {
+      border-width: 1px;
+      border-color: color-mix(in srgb, var(--color-outline-variant) 50%, transparent);
+    }
+  }
+}
+
+.switchThumb {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-outline);
+  transition-property: background-color, border-color;
+  transition-duration: var(--motion-duration-short2);
+  transition-timing-function: var(--motion-easing-standard);
+
+  &[data-checked="true"] {
+    background-color: var(--color-on-primary);
+  }
+
+  &[data-disabled="true"] {
+    background-color: color-mix(in srgb, var(--color-on-surface) var(--disabled-ink), transparent);
+
+    &[data-checked="true"] {
+      background-color: var(--color-surface-container);
+      border: 1px solid color-mix(in srgb, var(--color-outline-variant) 50%, transparent);
+    }
+  }
+}
+
+.sliderRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  flex-shrink: 0;
+  width: 100%;
+}
+
+.sliderIconWell {
+  display: flex;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-md);
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background-color: var(--color-surface-container-highest);
+  color: var(--color-on-surface);
+  transition-property: background-color, color;
+  transition-duration: var(--motion-duration-short2);
+  transition-timing-function: var(--motion-easing-standard);
+
+  &[data-dragging="true"] {
+    background-color: var(--color-primary-container);
+    color: var(--color-on-primary-container);
+  }
+
+  &[data-disabled="true"] {
+    background-color: color-mix(in srgb, var(--color-on-surface) var(--disabled-container), transparent);
+    color: color-mix(in srgb, var(--color-on-surface) var(--disabled-ink), transparent);
+  }
+}
+
+.sliderLane {
+  display: flex;
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  height: 24px;
+  align-items: center;
+  gap: 4px;
+}
+
+.sliderActiveTrack {
+  flex-basis: 0px;
+  min-width: 0px;
+  height: 10px;
+  border-radius: 999px 2px 2px 999px;
+  background-color: var(--color-primary);
+
+  &[data-compact="true"] {
+    height: 8px;
+  }
+
+  &[data-disabled="true"] {
+    background-color: color-mix(in srgb, var(--color-on-surface) var(--disabled-ink), transparent);
+  }
+}
+
+.sliderHandle {
+  width: 4px;
+  height: 20px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  background-color: var(--color-primary);
+  transition-property: width, height, background-color;
+  transition-duration: var(--motion-duration-short2);
+  transition-timing-function: var(--motion-easing-standard);
+
+  &[data-dragging="true"] {
+    width: 2.5px;
+    height: 22px;
+    background-color: var(--color-on-primary-container);
+  }
+
+  &[data-disabled="true"] {
+    background-color: color-mix(in srgb, var(--color-on-surface) var(--disabled-ink), transparent);
+  }
+}
+
+.sliderInactiveTrack {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-basis: 0px;
+  min-width: 0px;
+  height: 10px;
+  padding-right: 3px;
+  border-radius: 2px 999px 999px 2px;
+  background-color: var(--color-surface-container-highest);
+
+  &[data-compact="true"] {
+    height: 8px;
+  }
+
+  &[data-disabled="true"] {
+    background-color: color-mix(in srgb, var(--color-on-surface) var(--disabled-container), transparent);
+  }
+}
+
+.sliderStopDot {
+  width: 4px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  flex-shrink: 0;
+  background-color: var(--color-primary);
+
+  &[data-disabled="true"] {
+    background-color: color-mix(in srgb, var(--color-on-surface) var(--disabled-ink), transparent);
+  }
+}
+
+.sliderValue {
+  display: flex;
+  width: 36px;
+  flex-shrink: 0;
+  justify-content: flex-end;
+}
+
+.sliderValueText {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-on-surface-variant);
+  transition-property: color;
+  transition-duration: var(--motion-duration-short2);
+  transition-timing-function: var(--motion-easing-standard);
+
+  &[data-dragging="true"] {
+    color: var(--color-primary);
+    font-weight: 600;
+  }
+
+  &[data-disabled="true"] {
+    color: color-mix(in srgb, var(--color-on-surface) var(--disabled-ink), transparent);
+  }
+}
+
+.segmentedTrack {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  height: 34px;
+  padding: 3px;
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-container);
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent);
+
+  &[data-compact="true"] {
+    height: 32px;
+  }
+
+  &[data-recessed="surface"] {
+    background-color: var(--color-surface);
+  }
+}
+
+.segmentedRail {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  bottom: 3px;
+  left: 3px;
+  pointer-events: none;
+}
+
+.segmentedIndicator {
+  position: absolute;
+  top: 0px;
+  bottom: 0px;
+  left: 0px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-primary-container);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
+}
+
+.segmentedItem {
+  position: relative;
+  display: flex;
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background-color: transparent;
+  color: var(--color-on-surface-variant);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  transition-property: background-color, color;
+  transition-duration: var(--motion-duration-short2);
+  transition-timing-function: var(--motion-easing-standard);
+
+  &:hover {
+    background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), transparent);
+  }
+
+  &[data-selected="true"] {
+    color: var(--color-on-primary-container);
+    font-weight: 600;
+
+    &:hover {
+      background-color: transparent;
+    }
+  }
+
+  &:disabled {
+    color: color-mix(in srgb, var(--color-on-surface) var(--disabled-ink), transparent);
+  }
+}
+
+.filterChip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 10px;
+  gap: 5px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-outline);
+  background-color: transparent;
+  color: var(--color-on-surface-variant);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  transition-property: background-color, border-color, color;
+  transition-duration: var(--motion-duration-short2);
+  transition-timing-function: var(--motion-easing-standard);
+
+  &:hover {
+    background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), transparent);
+  }
+
+  &[data-selected="true"] {
+    background-color: var(--color-primary-container);
+    color: var(--color-on-primary-container);
+    border-width: 0px;
+    font-weight: 600;
+
+    &:hover {
+      background-color: color-mix(in srgb, var(--color-on-primary-container) var(--state-hover), var(--color-primary-container));
+    }
+  }
+
+  &:disabled {
+    border-color: color-mix(in srgb, var(--color-on-surface) var(--disabled-container), transparent);
+    color: color-mix(in srgb, var(--color-on-surface) var(--disabled-ink), transparent);
+  }
+}
+
+.linearProgress {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 6px;
+  gap: 4px;
+
+  &[data-compact="true"] {
+    height: 4px;
+  }
+}
+
+.linearProgressActive {
+  flex-basis: 0px;
+  min-width: 0px;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-primary);
+
+  &[data-tone="error"] {
+    background-color: var(--color-error);
+  }
+}
+
+.linearProgressInactive {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-basis: 0px;
+  min-width: 0px;
+  height: 100%;
+  padding-right: 1px;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-surface-container-highest);
+}
+
+.dialogCard {
+  display: flex;
+  flex-direction: column;
+  width: 360px;
+  border-radius: var(--radius-panel);
+  background-color: var(--color-surface-container);
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent);
+  box-shadow: var(--shadow-level-3);
+  padding: 20px;
+  gap: 14px;
+  font-family: var(--font-sans);
+  color: var(--color-on-surface);
+
+  &[data-error="true"] {
+    border-color: var(--color-error);
+  }
+}
+
+.dialogBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: var(--radius-tile);
+  flex-shrink: 0;
+  background-color: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+
+  &[data-tone="destructive"] {
+    background-color: color-mix(in srgb, var(--color-error-container) 38%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-error) 35%, transparent);
+    color: var(--color-error);
+  }
+}

@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./bun": "./src/bun-transport.ts",
-    "./zgui": "./src/zgui.ts"
+    "./zgui": "./src/zgui.ts",
+    "./primitives": "./src/zgui-primitives.tsx"
   },
   "peerDependencies": {
     "@hewel/zgui": "*",

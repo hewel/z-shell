@@ -9,6 +9,9 @@
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx",
+    "../../packages/sdk/src/zgui-*.ts",
+    "../../packages/sdk/src/zgui-*.tsx",
+    "../../packages/sdk/src/zgui-*.d.ts",
     "../../plugins/*/src/*.tsx",
     "../../plugins/*/src/zgui-adapter.ts"
   ]

@@ -1,0 +1,26 @@
+declare const styles: {
+  readonly button: string;
+  readonly iconButton: string;
+  readonly switchTrack: string;
+  readonly switchThumb: string;
+  readonly sliderRow: string;
+  readonly sliderIconWell: string;
+  readonly sliderLane: string;
+  readonly sliderActiveTrack: string;
+  readonly sliderHandle: string;
+  readonly sliderInactiveTrack: string;
+  readonly sliderStopDot: string;
+  readonly sliderValue: string;
+  readonly sliderValueText: string;
+  readonly segmentedTrack: string;
+  readonly segmentedRail: string;
+  readonly segmentedIndicator: string;
+  readonly segmentedItem: string;
+  readonly filterChip: string;
+  readonly linearProgress: string;
+  readonly linearProgressActive: string;
+  readonly linearProgressInactive: string;
+  readonly dialogCard: string;
+  readonly dialogBadge: string;
+};
+export default styles;
