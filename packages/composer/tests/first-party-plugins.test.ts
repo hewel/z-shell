@@ -17,7 +17,7 @@ import { ZShellClient, type InhibitorEntry } from "@z-shell/sdk";
 import { connectUnixSocket } from "@z-shell/sdk/bun";
 
 import { buildShellPreviewFixture } from "../../../apps/shell/tests/fixture-builder.ts";
-import { expectCleanPreview, nativeHost, runPreview } from "../../../apps/shell/tests/preview-harness.ts";
+import { expectCleanPreview, runPreview, zguiHost } from "../../../apps/shell/tests/preview-harness.ts";
 import { NOSLEEP_DEFAULTS, createNoSleepPlugin } from "../../../plugins/nosleep/src/service.ts";
 import {
   THEME_BRIDGES_DEFAULTS,
@@ -115,7 +115,7 @@ describe("First-party reference plugins end-to-end", () => {
     }
   });
 
-  test("end-to-end: z-shell plugin -> @z-shell/composer -> @hewel/zgui-build -> native-host preview mounts all composed plugin UIs", async () => {
+  test("end-to-end: z-shell plugin -> @z-shell/composer -> @hewel/zgui-build -> zgui-host preview mounts all composed plugin UIs", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "z-shell-first-party-preview-"));
     try {
       const { cliBin } = resolveBinaries();
@@ -444,7 +444,7 @@ describe("First-party reference plugins end-to-end", () => {
         ],
       }, null, 2));
 
-      expect(existsSync(nativeHost)).toBe(true);
+      expect(existsSync(zguiHost)).toBe(true);
       const result = runPreview(published.dist, fixture, scenario, previewOut);
       expectCleanPreview(result, 0, 7);
     } finally {

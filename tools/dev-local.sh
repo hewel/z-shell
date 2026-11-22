@@ -14,13 +14,13 @@ else
   exit 1
 fi
 
-if [[ -x "$ZGUI_ROOT/target/release/native-host" ]]; then
-  NATIVE_HOST="$ZGUI_ROOT/target/release/native-host"
-elif [[ -x "$ZGUI_ROOT/target/debug/native-host" ]]; then
-  echo "warning: using debug native-host (build release with: cargo build --release --manifest-path ../zgui-js/Cargo.toml -p native-host --offline)" >&2
-  NATIVE_HOST="$ZGUI_ROOT/target/debug/native-host"
+if [[ -x "$ZGUI_ROOT/target/release/zgui-host" ]]; then
+  ZGUI_HOST="$ZGUI_ROOT/target/release/zgui-host"
+elif [[ -x "$ZGUI_ROOT/target/debug/zgui-host" ]]; then
+  echo "warning: using debug zgui-host (build release with: cargo build --release --manifest-path ../zgui-js/Cargo.toml -p zgui-host --offline)" >&2
+  ZGUI_HOST="$ZGUI_ROOT/target/debug/zgui-host"
 else
-  echo "error: native-host binary not found; build with: cargo build --release --manifest-path ../zgui-js/Cargo.toml -p native-host --offline" >&2
+  echo "error: zgui-host binary not found; build with: cargo build --release --manifest-path ../zgui-js/Cargo.toml -p zgui-host --offline" >&2
   exit 1
 fi
 
@@ -29,7 +29,7 @@ if [[ ! -d "$REPO_ROOT/apps/shell/dist" ]]; then
 fi
 
 CONTROL_SOCK="${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}/zgui-js/dev.zshell.shell.sock"
-if [[ -S "$CONTROL_SOCK" ]] && ! pgrep -x native-host >/dev/null 2>&1; then
+if [[ -S "$CONTROL_SOCK" ]] && ! pgrep -x zgui-host >/dev/null 2>&1; then
   rm -f "$CONTROL_SOCK"
 fi
 
@@ -56,6 +56,6 @@ if [[ -n "${NIRI_SOCKET:-}" ]]; then
   HOST_ARGS+=(--bind-socket "niri=$NIRI_SOCKET")
 fi
 
-echo "Starting native-host ($NATIVE_HOST) with --watch."
-echo "Control CLI: $NATIVE_HOST msg --app-id dev.zshell.shell <command>"
-"$NATIVE_HOST" "${HOST_ARGS[@]}"
+echo "Starting zgui-host ($ZGUI_HOST) with --watch."
+echo "Control CLI: $ZGUI_HOST msg --app-id dev.zshell.shell <command>"
+"$ZGUI_HOST" "${HOST_ARGS[@]}"

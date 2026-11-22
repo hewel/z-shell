@@ -8,7 +8,7 @@ import {
   buildPublishedShell,
   createPreviewWorkspace,
   expectCleanPreview,
-  nativeHost,
+  zguiHost,
   pixel,
   previewAvailable,
   previewSessionLock,
@@ -52,7 +52,7 @@ describe("apps/shell preview", () => {
   });
 
   previewTest("multi-output Top Bar, per-output Wallpapers, live theme, SNI tray blob + DBusMenu popup, and interactions", () => {
-    expect(existsSync(nativeHost)).toBe(true);
+    expect(existsSync(zguiHost)).toBe(true);
 
     const { out, cleanup } = createPreviewWorkspace("z-shell-preview-top-");
     try {

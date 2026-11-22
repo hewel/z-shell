@@ -11,9 +11,9 @@ import type { PublishedApplication } from "@hewel/zgui-build";
 export const shellDir = resolve(import.meta.dir, "..");
 export const repoRoot = resolve(shellDir, "../..");
 export const zguiRoot = resolve(repoRoot, "../zgui-js");
-export const nativeHost = join(zguiRoot, "target/debug/native-host");
+export const zguiHost = join(zguiRoot, "target/debug/zgui-host");
 const hasNixShell = Bun.which("nix-shell") !== null;
-export const previewAvailable = existsSync(nativeHost);
+export const previewAvailable = existsSync(zguiHost);
 export const previewTest = previewAvailable ? test : test.skip;
 
 let cachedBuild: Promise<PublishedApplication> | undefined;
@@ -177,8 +177,8 @@ export function runPreview(bundleDist: string, fixture: string, scenario: string
     "--out", out,
   ];
   const [command, commandArgs] = hasNixShell
-    ? ["nix-shell", ["--run", [nativeHost, ...args].map(shellQuote).join(" ")]]
-    : [nativeHost, args];
+    ? ["nix-shell", ["--run", [zguiHost, ...args].map(shellQuote).join(" ")]]
+    : [zguiHost, args];
   const preview = spawnSync(command, commandArgs, {
     cwd: zguiRoot,
     encoding: "utf8",

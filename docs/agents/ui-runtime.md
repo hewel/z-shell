@@ -6,13 +6,13 @@ Reference for agents working on `apps/shell/`, `plugins/*/src/`, or `tools/oxlin
 
 - Local path: `../zgui-js` (linked via `package.json` `link:../zgui-js/packages/*`).
 - Native host binaries:
-  - Release (preferred for live testing): `../zgui-js/target/release/native-host`
-  - Debug (used by headless preview tests): `../zgui-js/target/debug/native-host`
+  - Release (preferred for live testing): `../zgui-js/target/release/zgui-host`
+  - Debug (used by headless preview tests): `../zgui-js/target/debug/zgui-host`
 - Key upstream locations when diagnosing rendering/style issues:
   - UA stylesheet (`:focus-visible` ring): `../zgui-js/vendor/zgui-style/src/sheets/ua.rs`
   - Outline/clip/vector paint lowering: `../zgui-js/vendor/zgui-paint/src/lower/`
-  - CLI flags & `--pure-shell` / `msg`: `../zgui-js/crates/native-host/src/main.rs`
-- Control CLI syntax: `native-host msg --app-id dev.zshell.shell <command>` (e.g., `ping`, `status`, `settings appearance`, `panel launcher`, `power poweroff`).
+  - CLI flags & `--pure-shell` / `msg`: `../zgui-js/crates/zgui-host/src/main.rs`
+- Control CLI syntax: `zgui-host msg --app-id dev.zshell.shell <command>` (e.g., `ping`, `status`, `settings appearance`, `panel launcher`, `power poweroff`).
 
 ## Fast Local Build & Visual Inspection
 

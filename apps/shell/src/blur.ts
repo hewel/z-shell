@@ -12,7 +12,7 @@ import {
   type NativeWindowRect,
 } from "@hewel/zgui";
 
-/** Protocol ceiling enforced by `zgui-js` native-host `setBlurRegion` (`<= 256` rects). */
+/** Protocol ceiling enforced by `zgui-js` zgui-host `setBlurRegion` (`<= 256` rects). */
 export const MAX_BLUR_RECTS = 256;
 
 /** Continuous superellipse exponent matching `DESIGN.md` (`--zgui-corner-shape: superellipse(2.83)`). */
