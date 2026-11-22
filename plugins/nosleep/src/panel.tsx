@@ -9,7 +9,6 @@ const primaryContainer = "var(--color-primary-container)";
 const onPrimaryContainer = "var(--color-on-primary-container)";
 const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
-const container = "var(--color-surface-container)";
 const containerHigh = "var(--color-surface-container-high)";
 const containerHighest = "var(--color-surface-container-highest)";
 const coffee = "M20 3H4v10c0 2.21 1.79 4 4 4h6c2.21 0 4-1.79 4-4v-3h2c1.11 0 2-.89 2-2V5c0-1.11-.89-2-2-2zm0 5h-2V5h2v3zM4 19h16v2H4z";
@@ -70,7 +69,7 @@ export default function Panel(props: {
   return (
     <column testId="plugin-nosleep-panel" style={{
       width: "100%", padding: "14px", gap: "10px", flexDirection: "column",
-      backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
+      backgroundColor: "transparent", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
     }}>
       <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
         <column style={{ flexGrow: 1, flexBasis: "0px", gap: "2px", minWidth: "0px" }}>

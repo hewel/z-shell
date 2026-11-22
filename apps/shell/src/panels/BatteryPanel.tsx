@@ -9,7 +9,6 @@ const primaryContainer = "var(--color-primary-container)";
 const onPrimaryContainer = "var(--color-on-primary-container)";
 const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
-const container = "var(--color-surface-container)";
 const containerHigh = "var(--color-surface-container-high)";
 const containerHighest = "var(--color-surface-container-highest)";
 const card = { borderRadius: "16px", backgroundColor: containerHigh, padding: "12px", gap: "10px" } as const;
@@ -213,7 +212,7 @@ export function BatteryPanel(): NativeChild {
   return (
     <scroll testId="panel-battery" style={{
       width: "100%", maxHeight: `${PANEL_MAX_HEIGHTS.battery}px`, overflow: "hidden auto",
-      backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
+      backgroundColor: "transparent", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
     }}>
       <column style={{ padding: "14px", flexDirection: "column" }}>
         <BatteryPowerContent />

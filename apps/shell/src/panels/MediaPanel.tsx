@@ -259,7 +259,7 @@ export function MediaPanel() {
   return (
     <column testId="panel-media" style={{
       width: "100%", padding: "14px", flexDirection: "column",
-      backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
+      backgroundColor: "transparent", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
     }}>
       <column style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "14px", gap: "14px", width: "100%" }}>
         <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", width: "100%" }}>

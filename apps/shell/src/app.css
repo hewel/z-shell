@@ -74,6 +74,13 @@
   --shadow-level-1: 0 4px 12px rgba(0, 0, 0, 0.36);
   --shadow-level-2: 0 10px 24px rgba(0, 0, 0, 0.45);
   --shadow-level-3: 0 20px 56px rgba(0, 0, 0, 0.60);
+  --surface-dock: var(--color-surface-container);
+  --border-dock: color-mix(in srgb, var(--color-outline-variant) 55%, transparent);
+  --surface-bar-floating: var(--color-surface-container);
+  --surface-bar-floating-active: var(--color-surface-container-high);
+  --border-bar-floating: color-mix(in srgb, var(--color-outline-variant) 48%, transparent);
+  --surface-popover: var(--color-surface-container);
+  --border-popover: color-mix(in srgb, var(--color-outline-variant) 55%, transparent);
   --state-hover: 8%;
   --state-focus: 12%;
   --state-pressed: 12%;
@@ -133,29 +140,29 @@ control:not(:disabled):not([data-switch-root="true"]):not([data-dock-item="true"
 /* Bar island triggers preserve their outer var(--shadow-level-1) while giving clear hover/active elevation. */
 [data-bar-segment="floating"] {
   --zgui-corner-shape: none;
-  background-color: var(--color-surface-container);
-  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 48%, transparent);
+  background-color: var(--surface-bar-floating);
+  border: 1px solid var(--border-bar-floating);
   transition-property: background-color, border-color, color;
   transition-duration: var(--motion-duration-short2);
   transition-timing-function: var(--motion-easing-standard);
 }
 
 [data-bar-segment="floating"]:not(:disabled):hover {
-  background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), var(--color-surface-container));
+  background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), var(--surface-bar-floating));
   border-color: color-mix(in srgb, var(--color-outline) 60%, transparent);
 }
 
 [data-bar-segment="floating"]:not(:disabled):active {
-  background-color: color-mix(in srgb, var(--color-on-surface) var(--state-dragged), var(--color-surface-container));
+  background-color: color-mix(in srgb, var(--color-on-surface) var(--state-dragged), var(--surface-bar-floating));
 }
 
 [data-bar-segment="floating"][data-active="true"] {
-  background-color: var(--color-surface-container-high);
+  background-color: var(--surface-bar-floating-active);
   border-color: color-mix(in srgb, var(--color-primary) 60%, transparent);
 }
 
 [data-bar-segment="floating"][data-active="true"]:not(:disabled):hover {
-  background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), var(--color-surface-container-high));
+  background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), var(--surface-bar-floating-active));
 }
 
 [data-bar-segment="docked"] {

@@ -7,7 +7,6 @@ import type { AiUsageSnapshot, QuotaEntry } from "./service.ts";
 const muted = "var(--color-on-surface-variant)";
 const primary = "var(--color-primary)";
 const onSurface = "var(--color-on-surface)";
-const container = "var(--color-surface-container)";
 const containerHigh = "var(--color-surface-container-high)";
 const containerHighest = "var(--color-surface-container-highest)";
 const subcard = {
@@ -131,7 +130,7 @@ export default function Panel(props: {
   return (
     <column testId="plugin-ai-usage-panel" style={{
       width: "100%", padding: "14px", gap: "10px", flexDirection: "column",
-      backgroundColor: container, color: onSurface,
+      backgroundColor: "transparent", color: onSurface,
       fontFamily: "var(--font-sans)", fontSize: "13px",
     }}>
       <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>

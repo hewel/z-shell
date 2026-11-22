@@ -9,8 +9,8 @@ const onSurface = "var(--color-on-surface)";
 const onSurfaceVariant = "var(--color-on-surface-variant)";
 const card = {
   padding: "10px 12px", gap: "8px", borderRadius: "16px",
-  backgroundColor: "var(--color-surface-container)",
-  border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
+  backgroundColor: "var(--surface-popover)",
+  border: "1px solid var(--border-popover)",
   color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px", overflow: "hidden",
 } satisfies NativeStyle;
 const clippedText = { minWidth: "0px", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" } as const;

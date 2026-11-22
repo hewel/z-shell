@@ -14,8 +14,8 @@ import { formatSurfaceName, resolveMonitorLogicalSize, type OsdPayload, type War
 const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
 const capsule = {
-  backgroundColor: "var(--color-surface-container)",
-  border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
+  backgroundColor: "var(--surface-popover)",
+  border: "1px solid var(--border-popover)",
   boxShadow: "var(--shadow-level-2)",
   borderRadius: "999px",
   "--zgui-corner-shape": "none",

@@ -1,4 +1,4 @@
-import { createEffect, getSessionGeneration, mountShellStylesheet, onCleanup, type Accessor } from "@hewel/zgui";
+import { createEffect, getBackgroundBlurSupported, getSessionGeneration, mountShellStylesheet, onCleanup, type Accessor } from "@hewel/zgui";
 import { SHELL_MOTION_CSS } from "./motion.ts";
 
 export const SHELL_DEFAULT_SCHEME = Object.freeze({
@@ -73,10 +73,56 @@ export const SHELL_ELEVATION_SHADOWS = Object.freeze({
   }),
 });
 
-export function buildThemeStylesheet(scheme: ThemeColorScheme, dark: boolean): string {
+export const SHELL_SURFACE_MATERIALS = Object.freeze({
+  solid: Object.freeze({
+    dock: "var(--color-surface-container)",
+    dockBorder: "color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
+    barFloating: "var(--color-surface-container)",
+    barFloatingActive: "var(--color-surface-container-high)",
+    barFloatingBorder: "color-mix(in srgb, var(--color-outline-variant) 48%, transparent)",
+    popover: "var(--color-surface-container)",
+    popoverBorder: "color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
+  }),
+  glassDark: Object.freeze({
+    dock: "color-mix(in srgb, var(--color-surface-container) 42%, transparent)",
+    dockBorder: "rgba(255, 255, 255, 0.22)",
+    barFloating: "color-mix(in srgb, var(--color-surface-container) 56%, transparent)",
+    barFloatingActive: "color-mix(in srgb, var(--color-primary-container) 62%, transparent)",
+    barFloatingBorder: "rgba(255, 255, 255, 0.18)",
+    popover: "color-mix(in srgb, var(--color-surface-container) 78%, transparent)",
+    popoverBorder: "rgba(226, 226, 233, 0.14)",
+  }),
+  glassLight: Object.freeze({
+    dock: "color-mix(in srgb, var(--color-surface) 40%, transparent)",
+    dockBorder: "rgba(255, 255, 255, 0.85)",
+    barFloating: "color-mix(in srgb, var(--color-surface-container-low) 58%, transparent)",
+    barFloatingActive: "color-mix(in srgb, var(--color-primary-container) 62%, transparent)",
+    barFloatingBorder: "rgba(255, 255, 255, 0.84)",
+    popover: "color-mix(in srgb, var(--color-surface-container-low) 78%, transparent)",
+    popoverBorder: "rgba(255, 255, 255, 0.82)",
+  }),
+});
+
+function readHostBackgroundBlurSupported(): boolean {
+  try {
+    return getBackgroundBlurSupported();
+  } catch {
+    return false;
+  }
+}
+
+export function buildThemeStylesheet(scheme: ThemeColorScheme, dark: boolean, blurSupported = false): string {
   const shadows = dark ? SHELL_ELEVATION_SHADOWS.dark : SHELL_ELEVATION_SHADOWS.light;
+  const material = !blurSupported
+    ? SHELL_SURFACE_MATERIALS.solid
+    : dark
+      ? SHELL_SURFACE_MATERIALS.glassDark
+      : SHELL_SURFACE_MATERIALS.glassLight;
   let css = `:root { color-scheme: ${dark ? "dark" : "light"}; --zgui-ring: var(--color-primary);`;
   css += ` --shadow-level-1: ${shadows.level1}; --shadow-level-2: ${shadows.level2}; --shadow-level-3: ${shadows.level3};`;
+  css += ` --surface-dock: ${material.dock}; --border-dock: ${material.dockBorder};`;
+  css += ` --surface-bar-floating: ${material.barFloating}; --surface-bar-floating-active: ${material.barFloatingActive}; --border-bar-floating: ${material.barFloatingBorder};`;
+  css += ` --surface-popover: ${material.popover}; --border-popover: ${material.popoverBorder};`;
   css += " --state-hover: 8%; --state-focus: 12%; --state-pressed: 12%; --state-dragged: 16%; --disabled-ink: 38%; --disabled-container: 12%;";
   for (const { role, property, fallback } of roles) {
     const value = scheme?.[role];
@@ -88,6 +134,7 @@ export function buildThemeStylesheet(scheme: ThemeColorScheme, dark: boolean): s
 const sessionThemes = new Map<number, {
   users: number;
   snapshot?: ThemeTopicSnapshot | undefined;
+  blurSupported?: boolean | undefined;
   css?: string;
   dispose?: () => void;
   disposeMotion?: () => void;
@@ -110,13 +157,27 @@ export function useShellTheme(theme: Accessor<ThemeTopicSnapshot | undefined>): 
     registration.dispose?.();
     registration.disposeMotion?.();
   });
-  createEffect(theme, snapshot => {
-    if (registration.css !== undefined && registration.snapshot === snapshot) return;
-    const css = buildThemeStylesheet(snapshot?.scheme ?? SHELL_DEFAULT_SCHEME, snapshot?.dark ?? true);
-    if (css !== registration.css) {
-      registration.dispose = mountShellStylesheet("z-shell-theme", css);
-      registration.css = css;
-    }
-    registration.snapshot = snapshot;
-  });
+  createEffect(
+    () => [theme(), readHostBackgroundBlurSupported()] as const,
+    ([snapshot, blurSupported]) => {
+      if (
+        registration.css !== undefined &&
+        registration.snapshot === snapshot &&
+        registration.blurSupported === blurSupported
+      ) {
+        return;
+      }
+      const css = buildThemeStylesheet(
+        snapshot?.scheme ?? SHELL_DEFAULT_SCHEME,
+        snapshot?.dark ?? true,
+        blurSupported,
+      );
+      if (css !== registration.css) {
+        registration.dispose = mountShellStylesheet("z-shell-theme", css);
+        registration.css = css;
+      }
+      registration.snapshot = snapshot;
+      registration.blurSupported = blurSupported;
+    },
+  );
 }

@@ -9,7 +9,6 @@ import { PANEL_MAX_HEIGHTS, resolveClipboardSelection, type ClipboardEntrySummar
 const primary = "var(--color-primary)";
 const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
-const container = "var(--color-surface-container)";
 const containerHigh = "var(--color-surface-container-high)";
 const containerHighest = "var(--color-surface-container-highest)";
 const primaryContainer = "var(--color-primary-container)";
@@ -217,7 +216,7 @@ export function ClipboardPanel() {
   return (
     <column ref={node => { rootNode = node; }} testId="panel-clipboard" data-active-entry={activeEntry() ? String(activeEntry()!.id) : ""} onKeyDown={handleKeyDown} style={{
       width: "100%", maxHeight: `${PANEL_MAX_HEIGHTS.clipboard}px`, padding: "16px", gap: "10px", flexDirection: "column",
-      backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
+      backgroundColor: "transparent", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
     }}>
       <Show when={!locked()} fallback={
         <row role="status" style={{ padding: "14px", borderRadius: "16px", gap: "8px", alignItems: "center", backgroundColor: errorContainer, color: onErrorContainer }}>

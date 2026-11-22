@@ -9,9 +9,9 @@ import { splitNotificationActions, type NotificationItem } from "../topics.ts";
 const primary = "var(--color-primary)";
 const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
-const container = "var(--color-surface-container)";
+const container = "var(--surface-popover)";
 const containerHigh = "var(--color-surface-container-high)";
-const outline = "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)";
+const outline = "1px solid var(--border-popover)";
 const clipped = { minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
 const pill = {
   display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,

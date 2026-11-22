@@ -15,7 +15,6 @@ const titles: Record<Exclude<Subpage, "battery">, string> = {
 const primary = "var(--color-primary)";
 const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
-const container = "var(--color-surface-container)";
 const containerHigh = "var(--color-surface-container-high)";
 const containerHighest = "var(--color-surface-container-highest)";
 const selectedFill = "var(--color-primary-container)";
@@ -32,7 +31,7 @@ export function QuickSettingsScroll(props: { testId?: string | null; label: stri
   return (
     <scroll testId={props.testId ?? null} role="scrollView" ariaLabel={props.label} style={{
       width: "100%", maxHeight: `${PANEL_MAX_HEIGHTS["quick-settings"]}px`,
-      overflow: "hidden auto", backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
+      overflow: "hidden auto", backgroundColor: "transparent", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
     }}>
       <column style={{ width: "100%", padding: "14px", gap: "10px", flexDirection: "column" }}>{props.children}</column>
     </scroll>

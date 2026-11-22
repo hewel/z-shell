@@ -25,8 +25,8 @@ const hiddenSlideOffset = dockHeight + dockBottomMargin + 18;
 const capsule = {
   height: `${dockHeight}px`, alignItems: "center", gap: `${dockGap}px`, padding: `0 ${dockPadding}px`,
   borderRadius: "22px",
-  backgroundColor: "var(--color-surface-container)",
-  border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
+  backgroundColor: "var(--surface-dock)",
+  border: "1px solid var(--border-dock)",
   boxShadow: "var(--shadow-level-2)",
   overflow: "visible",
 } satisfies NativeStyle;

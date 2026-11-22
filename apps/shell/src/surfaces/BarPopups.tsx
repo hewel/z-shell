@@ -95,8 +95,8 @@ function PopupContent(props: {
           style={{
             width: "100%",
             borderRadius: "16px",
-            backgroundColor: "var(--color-surface-container)",
-            border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
+            backgroundColor: "var(--surface-popover)",
+            border: "1px solid var(--border-popover)",
             boxShadow: "var(--shadow-level-2)",
             color: "var(--color-on-surface)",
             fontFamily: "var(--font-sans)",

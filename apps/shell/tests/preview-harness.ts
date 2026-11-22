@@ -167,11 +167,17 @@ export function createVirtualTimeline() {
   };
 }
 
-export function runPreview(bundleDist: string, fixture: string, scenario: string, out: string): PreviewResult {
+export function runPreview(
+  bundleDist: string,
+  fixture: string,
+  scenario: string,
+  out: string,
+  options?: { readonly profile?: string },
+): PreviewResult {
   const args = [
     "preview", "run",
     "--bundle", bundleDist,
-    "--profile", join(shellDir, "preview/profile.json"),
+    "--profile", options?.profile ?? join(shellDir, "preview/profile.json"),
     "--fixture", fixture,
     "--scenario", scenario,
     "--out", out,

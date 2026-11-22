@@ -900,15 +900,24 @@ describe("DESIGN.md token and surface contract sync", () => {
     expect(appCss).toContain(`--motion-duration-short2: 100ms;`);
   });
 
-  test("Dark & Light elevation shadow and material-web state-layer tokens stay synced across app.css and theme.ts", () => {
+  test("Dark & Light elevation shadow, 4-tier glass material, and material-web state-layer tokens stay synced across app.css and theme.ts", () => {
     const appCss = readFileSync(join(shellDir, "src/app.css"), "utf8");
-    const darkSheet = buildThemeStylesheet(SHELL_DEFAULT_SCHEME, true);
-    const lightSheet = buildThemeStylesheet(SHELL_DEFAULT_SCHEME, false);
+    const darkSolid = buildThemeStylesheet(SHELL_DEFAULT_SCHEME, true, false);
+    const lightSolid = buildThemeStylesheet(SHELL_DEFAULT_SCHEME, false, false);
+    const darkGlass = buildThemeStylesheet(SHELL_DEFAULT_SCHEME, true, true);
+    const lightGlass = buildThemeStylesheet(SHELL_DEFAULT_SCHEME, false, true);
 
     for (const token of [
       "--shadow-level-1:",
       "--shadow-level-2:",
       "--shadow-level-3:",
+      "--surface-dock:",
+      "--border-dock:",
+      "--surface-bar-floating:",
+      "--surface-bar-floating-active:",
+      "--border-bar-floating:",
+      "--surface-popover:",
+      "--border-popover:",
       "--state-hover: 8%;",
       "--state-focus: 12%;",
       "--state-pressed: 12%;",
@@ -917,12 +926,30 @@ describe("DESIGN.md token and surface contract sync", () => {
       "--disabled-container: 12%;",
     ]) {
       expect(appCss, `app.css ${token}`).toContain(token);
-      expect(darkSheet, `dark theme sheet ${token}`).toContain(token);
-      expect(lightSheet, `light theme sheet ${token}`).toContain(token);
+      expect(darkSolid, `dark solid theme sheet ${token}`).toContain(token);
+      expect(lightSolid, `light solid theme sheet ${token}`).toContain(token);
+      expect(darkGlass, `dark glass theme sheet ${token}`).toContain(token);
+      expect(lightGlass, `light glass theme sheet ${token}`).toContain(token);
     }
 
-    expect(darkSheet).toContain("--shadow-level-3: 0 20px 56px rgba(0, 0, 0, 0.60);");
-    expect(lightSheet).toContain("--shadow-level-3: 0 18px 48px rgba(25, 28, 32, 0.16);");
+    // Wayland Graceful Solid Fallback: blurSupported === false paints 100% solid surface-container across all tiers.
+    for (const sheet of [appCss, darkSolid, lightSolid]) {
+      expect(sheet).toContain("--surface-dock: var(--color-surface-container);");
+      expect(sheet).toContain("--surface-bar-floating: var(--color-surface-container);");
+      expect(sheet).toContain("--surface-popover: var(--color-surface-container);");
+    }
+
+    // 4-Tier Frosted Glass Ladder when ext_background_effect_v1 blur is supported:
+    // Dock (42%/40%) < Floating Bar (56%/58%) < Transient Popover (78%).
+    expect(darkGlass).toContain("--surface-dock: color-mix(in srgb, var(--color-surface-container) 42%, transparent);");
+    expect(darkGlass).toContain("--surface-bar-floating: color-mix(in srgb, var(--color-surface-container) 56%, transparent);");
+    expect(darkGlass).toContain("--surface-popover: color-mix(in srgb, var(--color-surface-container) 78%, transparent);");
+    expect(lightGlass).toContain("--surface-dock: color-mix(in srgb, var(--color-surface) 40%, transparent);");
+    expect(lightGlass).toContain("--surface-bar-floating: color-mix(in srgb, var(--color-surface-container-low) 58%, transparent);");
+    expect(lightGlass).toContain("--surface-popover: color-mix(in srgb, var(--color-surface-container-low) 78%, transparent);");
+
+    expect(darkSolid).toContain("--shadow-level-3: 0 20px 56px rgba(0, 0, 0, 0.60);");
+    expect(lightSolid).toContain("--shadow-level-3: 0 18px 48px rgba(25, 28, 32, 0.16);");
   });
 
   test("CSS Modules and stylesheets enforce DESIGN.md color, outline, font, and hover-stability invariants", () => {

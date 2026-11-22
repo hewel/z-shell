@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect } from "bun:test";
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 
 import type { PublishedApplication } from "@hewel/zgui-build";
 import { buildShellPreviewFixture, makeSolidPngBytes } from "./fixture-builder.ts";
@@ -20,6 +20,7 @@ import {
   previewTest,
   readCapture,
   runPreview,
+  shellDir,
   treeNode,
   type DeviceBounds,
 } from "./preview-harness.ts";
@@ -2212,6 +2213,237 @@ describe("apps/shell design geometry & pixel lint", () => {
       const launcherEmpty = readCapture(out, "launcher-overlay", "launcher-empty");
       expect(treeNode(launcherEmpty.tree, "launcher-empty").boundsLogical).toBeDefined();
       expect(launcherEmpty.tree.nodes.some(node => node.text === "No matching apps")).toBe(true);
+    } finally {
+      cleanup();
+    }
+  }, 30_000);
+
+  previewTest("L4 Background Blur Capability (#91): 4-tier frosted glass vs Wayland Graceful Solid Fallback (profile.backgroundBlur + live setBackgroundBlurSupported)", () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-design-blur-cap-");
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenarioLive = join(workspace, "scenario-live.json");
+      const scenarioBoot = join(workspace, "scenario-boot.json");
+      const outLive = join(out, "live");
+      const outBoot = join(out, "boot");
+      const monitor = { id: "DP-1", name: "DP-1", x: 0, y: 0, width: 1280, height: 720, scale: 1 };
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-design-blur-cap",
+        initialTopics: {
+          "wayland.outputs": {
+            capability: "connected",
+            outputs: [{
+              output_instance_id: 1, name: "DP-1", description: "Main", make: "Test", model: "1280x720",
+              x: 0, y: 0, width: 1280, height: 720, mode_width: 1280, mode_height: 720, refresh_mhz: 60000, scale: 1,
+              physical_width_mm: null, physical_height_mm: null,
+            }],
+          },
+          "wayland.workspaces": {
+            capability: "connected",
+            groups: [{ group_id: 1, output_instance_ids: [1] }],
+            workspaces: [
+              { workspace_id: 1, group_id: 1, name: "1", id_str: "1", coordinates: [1], active: true, urgent: false, hidden: false, capabilities: ["activate"] },
+              { workspace_id: 2, group_id: 1, name: "2", id_str: "2", coordinates: [2], active: false, urgent: false, hidden: false, capabilities: ["activate"] },
+            ],
+          },
+          "wayland.windows": {
+            capability: "connected",
+            windows: [{
+              window_id: 10, app_id: "org.example.editor", title: "Glass Material Ladder",
+              activated: true, minimized: false, maximized: false, fullscreen: false, output_instance_ids: [1],
+            }],
+          },
+          "desktop.apps": {
+            available: true,
+            count: 2,
+            pinned_apps: ["org.example.editor", "org.example.browser"],
+            apps: [
+              { id: "org.example.editor", title: "Editor", startup_wm_class: "org.example.editor", icon: null },
+              { id: "org.example.browser", title: "Browser", startup_wm_class: "org.example.browser", icon: null },
+            ],
+          },
+          settings: {
+            general: { offline_mode: false, log_level: "info" },
+            bar: {
+              position: "top",
+              style: "floating",
+              gaps: 14,
+              edge_overrides: { top: null, right: null, bottom: null, left: null },
+              launcher_enabled: true,
+              dock_enabled: true,
+              clock_24h: true,
+              clock_seconds: false,
+            },
+            theme: {
+              mode: "dark",
+              variant: "tonal",
+              seed_color: null,
+              motion_scheme: "standard",
+              backend: "builtin",
+              gtk_linking: false,
+            },
+            ime: { mode: "indicator_only", candidate_layout: "auto", switch_osd: true },
+            polkit: { enabled: true },
+            wallpaper: { directories: [], fit: "cover", sync_theme: true, slideshow_seconds: 300 },
+            pre_action_fade_seconds: 0,
+            configured_plugins: [],
+          },
+        },
+      }), null, 2));
+
+      const sampleSurfaceAlpha = (
+        barCap: ReturnType<typeof readCapture>,
+        dockCap: ReturnType<typeof readCapture>,
+        qsCap: ReturnType<typeof readCapture>,
+        settingsCap: ReturnType<typeof readCapture>,
+      ) => {
+        // Sample unobstructed background padding pixels on each tier:
+        // - Dock (Tier C, 42%): top interior padding of dock capsule
+        // - Floating Bar (Mid, 56%): interior fill of bar-workspaces island
+        // - Quick Settings Popover (Tier B, 78%): top padding of panel-root-quick-settings inside border
+        // - Settings Window (Level 3, 100%): top-left toplevel corner
+        const dockBox = treeNode(dockCap.tree, "dock-root-DP-1").boundsDevice!;
+        const barBox = treeNode(barCap.tree, "bar-clock").boundsDevice!;
+        const qsBox = treeNode(qsCap.tree, "panel-root-quick-settings").boundsDevice!;
+        return {
+          dockAlpha: pixel(dockCap.image, Math.round(dockBox.x + dockBox.width / 2), Math.round(dockBox.y + 4))[3]!,
+          barAlpha: pixel(barCap.image, Math.round(barBox.x + barBox.width / 2), Math.round(barBox.y + 3))[3]!,
+          qsAlpha: pixel(qsCap.image, Math.round(qsBox.x + qsBox.width / 2), Math.round(qsBox.y + 5))[3]!,
+          settingsAlpha: pixel(settingsCap.image, 10, 10)[3]!,
+        };
+      };
+
+      // 1. Default profile (backgroundBlur omitted -> false): solid -> live glass -> solid fallback.
+      const liveTimeline = createVirtualTimeline();
+      liveTimeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      liveTimeline.advance("daemon-events", 30);
+      liveTimeline.step({ id: "ready", op: "settle" });
+      liveTimeline.step({ id: "keep-dock-revealed", op: "pointer.move", target: { surface: "dock-dp-1", testId: "dock-root-DP-1" } });
+      liveTimeline.step({
+        id: "open-settings", op: "service.emit", channel: "control.message",
+        value: { args: ["settings", "bar"], reply: { text: "{\"settingsWindowOpen\":true,\"settingsWindowTab\":\"bar\"}" } },
+      });
+      liveTimeline.advance("settings-open-settle", 50);
+      liveTimeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-network" }, button: "primary" });
+      liveTimeline.advance("open-settle", 420);
+      liveTimeline.step({ id: "capture-bar-solid", op: "capture", surface: "bar-dp-1", captureId: "bar-solid" });
+      liveTimeline.step({ id: "capture-dock-solid", op: "capture", surface: "dock-dp-1", captureId: "dock-solid" });
+      liveTimeline.step({ id: "capture-qs-solid", op: "capture", surface: "panel-quick-settings", captureId: "qs-solid" });
+      liveTimeline.step({ id: "capture-settings-solid", op: "capture", surface: "settings-window", captureId: "settings-solid" });
+
+      liveTimeline.step({ id: "enable-blur", op: "setBackgroundBlurSupported", supported: true });
+      liveTimeline.advance("glass-settle", 150);
+      liveTimeline.step({ id: "capture-bar-glass", op: "capture", surface: "bar-dp-1", captureId: "bar-glass" });
+      liveTimeline.step({ id: "capture-dock-glass", op: "capture", surface: "dock-dp-1", captureId: "dock-glass" });
+      liveTimeline.step({ id: "capture-qs-glass", op: "capture", surface: "panel-quick-settings", captureId: "qs-glass" });
+      liveTimeline.step({ id: "capture-settings-glass", op: "capture", surface: "settings-window", captureId: "settings-glass" });
+
+      liveTimeline.step({ id: "disable-blur", op: "setBackgroundBlurSupported", supported: false });
+      liveTimeline.advance("fallback-settle", 150);
+      liveTimeline.step({ id: "capture-bar-fallback", op: "capture", surface: "bar-dp-1", captureId: "bar-fallback" });
+      liveTimeline.step({ id: "capture-dock-fallback", op: "capture", surface: "dock-dp-1", captureId: "dock-fallback" });
+      liveTimeline.step({ id: "capture-qs-fallback", op: "capture", surface: "panel-quick-settings", captureId: "qs-fallback" });
+
+      writeFileSync(scenarioLive, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-blur-cap-live",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: liveTimeline.steps,
+      }, null, 2));
+
+      const liveResult = runPreview(published.dist, fixture, scenarioLive, outLive);
+      expectCleanPreview(liveResult, 11, 0);
+
+      const solid = sampleSurfaceAlpha(
+        readCapture(outLive, "bar-dp-1", "bar-solid"),
+        readCapture(outLive, "dock-dp-1", "dock-solid"),
+        readCapture(outLive, "panel-quick-settings", "qs-solid"),
+        readCapture(outLive, "settings-window", "settings-solid"),
+      );
+      expect(solid.dockAlpha, "solid fallback Dock must be 100% opaque").toBe(255);
+      expect(solid.barAlpha, "solid fallback Floating Bar must be 100% opaque").toBe(255);
+      expect(solid.qsAlpha, "solid fallback Popover must be 100% opaque").toBe(255);
+      expect(solid.settingsAlpha, "Settings Window must be 100% opaque").toBe(255);
+
+      const glass = sampleSurfaceAlpha(
+        readCapture(outLive, "bar-dp-1", "bar-glass"),
+        readCapture(outLive, "dock-dp-1", "dock-glass"),
+        readCapture(outLive, "panel-quick-settings", "qs-glass"),
+        readCapture(outLive, "settings-window", "settings-glass"),
+      );
+      expect(glass.dockAlpha, "glass Dock Tier C (42%) translucent").toBeGreaterThanOrEqual(85);
+      expect(glass.dockAlpha, "glass Dock Tier C (42%) translucent").toBeLessThanOrEqual(145);
+      expect(glass.barAlpha, "glass Floating Bar (56%) translucent").toBeGreaterThanOrEqual(125);
+      expect(glass.barAlpha, "glass Floating Bar (56%) translucent").toBeLessThanOrEqual(185);
+      expect(glass.qsAlpha, "glass Popover Tier B (78%) translucent").toBeGreaterThanOrEqual(180);
+      expect(glass.qsAlpha, "glass Popover Tier B (78%) translucent").toBeLessThanOrEqual(235);
+      expect(glass.dockAlpha, "4-tier ladder: Dock glassier than Floating Bar").toBeLessThan(glass.barAlpha);
+      expect(glass.barAlpha, "4-tier ladder: Floating Bar glassier than Popover").toBeLessThan(glass.qsAlpha);
+      expect(glass.qsAlpha, "4-tier ladder: Popover glassier than Settings").toBeLessThan(glass.settingsAlpha);
+      expect(glass.settingsAlpha, "Level 3 Settings Window remains 100% solid in glass mode").toBe(255);
+
+      const fallback = sampleSurfaceAlpha(
+        readCapture(outLive, "bar-dp-1", "bar-fallback"),
+        readCapture(outLive, "dock-dp-1", "dock-fallback"),
+        readCapture(outLive, "panel-quick-settings", "qs-fallback"),
+        readCapture(outLive, "settings-window", "settings-glass"),
+      );
+      expect(fallback.dockAlpha, "withdrawn blur Dock returns to 100% solid").toBe(255);
+      expect(fallback.barAlpha, "withdrawn blur Floating Bar returns to 100% solid").toBe(255);
+      expect(fallback.qsAlpha, "withdrawn blur Popover returns to 100% solid").toBe(255);
+
+      // 2. Profile with backgroundBlur: true starts directly in 4-tier frosted glass mode.
+      const baseProfilePath = join(shellDir, "preview/profile.json");
+      const baseProfile = JSON.parse(readFileSync(baseProfilePath, "utf8")) as {
+        readonly fonts: { readonly manifest: string; readonly [k: string]: unknown };
+        readonly [k: string]: unknown;
+      };
+      const manifestAbs = resolve(dirname(baseProfilePath), baseProfile.fonts.manifest);
+      const blurProfilePath = join(workspace, "profile-blur.json");
+      writeFileSync(blurProfilePath, JSON.stringify({
+        ...baseProfile,
+        backgroundBlur: true,
+        fonts: { ...baseProfile.fonts, manifest: relative(workspace, manifestAbs) },
+      }, null, 2));
+
+      const bootTimeline = createVirtualTimeline();
+      bootTimeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      bootTimeline.advance("daemon-events", 30);
+      bootTimeline.step({ id: "ready", op: "settle" });
+      bootTimeline.step({ id: "keep-dock-revealed", op: "pointer.move", target: { surface: "dock-dp-1", testId: "dock-root-DP-1" } });
+      bootTimeline.step({
+        id: "open-settings", op: "service.emit", channel: "control.message",
+        value: { args: ["settings", "bar"], reply: { text: "{\"settingsWindowOpen\":true,\"settingsWindowTab\":\"bar\"}" } },
+      });
+      bootTimeline.advance("settings-open-settle", 50);
+      bootTimeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-network" }, button: "primary" });
+      bootTimeline.advance("open-settle", 420);
+      bootTimeline.step({ id: "capture-bar-boot", op: "capture", surface: "bar-dp-1", captureId: "bar-boot" });
+      bootTimeline.step({ id: "capture-dock-boot", op: "capture", surface: "dock-dp-1", captureId: "dock-boot" });
+      bootTimeline.step({ id: "capture-qs-boot", op: "capture", surface: "panel-quick-settings", captureId: "qs-boot" });
+      bootTimeline.step({ id: "capture-settings-boot", op: "capture", surface: "settings-window", captureId: "settings-boot" });
+
+      writeFileSync(scenarioBoot, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-blur-cap-boot",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: bootTimeline.steps,
+      }, null, 2));
+
+      const bootResult = runPreview(published.dist, fixture, scenarioBoot, outBoot, { profile: blurProfilePath });
+      expectCleanPreview(bootResult, 4, 0);
+
+      const bootGlass = sampleSurfaceAlpha(
+        readCapture(outBoot, "bar-dp-1", "bar-boot"),
+        readCapture(outBoot, "dock-dp-1", "dock-boot"),
+        readCapture(outBoot, "panel-quick-settings", "qs-boot"),
+        readCapture(outBoot, "settings-window", "settings-boot"),
+      );
+      expect(bootGlass.dockAlpha, "profile backgroundBlur=true boots Dock into glass").toBeLessThan(bootGlass.barAlpha);
+      expect(bootGlass.barAlpha, "profile backgroundBlur=true boots Bar glassier than Popover").toBeLessThan(bootGlass.qsAlpha);
+      expect(bootGlass.qsAlpha, "profile backgroundBlur=true boots Popover glassier than Settings").toBeLessThan(bootGlass.settingsAlpha);
+      expect(bootGlass.settingsAlpha, "profile backgroundBlur=true keeps Settings 100% solid").toBe(255);
     } finally {
       cleanup();
     }

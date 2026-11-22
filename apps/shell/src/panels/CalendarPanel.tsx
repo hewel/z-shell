@@ -9,7 +9,6 @@ const primary = "var(--color-primary)";
 const onPrimary = "var(--color-on-primary)";
 const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
-const container = "var(--color-surface-container)";
 const containerHigh = "var(--color-surface-container-high)";
 const containerHighest = "var(--color-surface-container-highest)";
 const card = { borderRadius: "16px", backgroundColor: containerHigh, padding: "12px", gap: "8px" } as const;
@@ -131,7 +130,7 @@ export function CalendarPanel() {
     <column testId="panel-calendar" style={{
       width: "100%", maxHeight: `${PANEL_MAX_HEIGHTS.calendar}px`, overflow: "hidden",
       padding: "14px", gap: "12px", flexDirection: "column",
-      backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
+      backgroundColor: "transparent", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
     }}>
       <column style={{ gap: "12px", flexShrink: 0 }}>
         <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>

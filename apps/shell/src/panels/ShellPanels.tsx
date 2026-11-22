@@ -37,8 +37,8 @@ export const POPOVER_BLEED_STYLE = {
 export const POPOVER_FRAME_STYLE = {
   width: "100%",
   borderRadius: "22px",
-  backgroundColor: "var(--color-surface-container)",
-  border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
+  backgroundColor: "var(--surface-popover)",
+  border: "1px solid var(--border-popover)",
   boxShadow: "var(--shadow-level-2)",
   overflow: "hidden",
   fontFamily: "var(--font-sans)",

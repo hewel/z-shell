@@ -357,7 +357,7 @@ function MainPage(props: {
   return (
     <column testId={props.outgoing ? null : "qs-main"} ariaLabel="Quick settings" style={{
       width: "100%", padding: "14px", gap: "10px", flexDirection: "column",
-      backgroundColor: "var(--color-surface-container)", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
+      backgroundColor: "transparent", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
       ...(props.fromSubpage && !props.outgoing ? sharedAxisXStyle(backEnter(), -1, scheme() === "reduced") : {}),
     }}>
       <row style={{ ...row, gap: "10px", padding: "0 2px" }}>

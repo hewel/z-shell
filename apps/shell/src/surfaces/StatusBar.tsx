@@ -20,7 +20,7 @@ const muted = "var(--color-on-surface-variant)";
 const error = "var(--color-error)";
 const primaryContainer = "var(--color-primary-container)";
 const onPrimaryContainer = "var(--color-on-primary-container)";
-const islandBorder = "1px solid color-mix(in srgb, var(--color-outline-variant) 48%, transparent)";
+const islandBorder = "1px solid var(--border-bar-floating)";
 const activeIslandBorder = "1px solid color-mix(in srgb, var(--color-primary) 60%, transparent)";
 const dockedEdgeBorder = "1px solid color-mix(in srgb, var(--color-outline-variant) 48%, transparent)";
 
@@ -73,7 +73,7 @@ function segmentChrome(vertical: boolean, docked: boolean, active = false, inter
     ...(interactive
       ? {}
       : {
-          backgroundColor: active ? "var(--color-surface-container-high)" : "var(--color-surface-container)",
+          backgroundColor: active ? "var(--surface-bar-floating-active)" : "var(--surface-bar-floating)",
           border: active ? activeIslandBorder : islandBorder,
         }),
     color: onSurface,
