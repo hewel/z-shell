@@ -169,6 +169,48 @@ pub(crate) fn icon_theme() -> String {
     "hicolor".to_owned()
 }
 
+/// Resolve a single Freedesktop icon name (or absolute path) using optional custom theme roots
+/// (such as SNI `IconThemePath`) followed by the configured XDG icon data roots and theme.
+pub(crate) fn resolve_icon(
+    name: &str,
+    data_dirs: &[PathBuf],
+    theme: &str,
+    extra_theme_dir: Option<&Path>,
+    cache_dir: &Path,
+) -> Option<MediaRef> {
+    if let Some(dir) = extra_theme_dir.filter(|path| path.is_absolute())
+        && simple_component(name)
+    {
+        let explicit = Path::new(name)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ICON_SUFFIXES.contains(&ext));
+        let filenames: Vec<_> = if explicit {
+            vec![name.to_owned()]
+        } else {
+            ICON_SUFFIXES
+                .iter()
+                .map(|ext| format!("{name}.{ext}"))
+                .collect()
+        };
+        if let Some(found) = filenames
+            .iter()
+            .find_map(|filename| cache_icon(cache_dir, &dir.join(filename)))
+        {
+            return Some(found);
+        }
+        let (extra_dirs, _) = theme_paths(&[dir.to_path_buf()], "hicolor");
+        if let Some(found) = extra_dirs.iter().find_map(|base| {
+            filenames
+                .iter()
+                .find_map(|filename| cache_icon(cache_dir, &base.join(filename)))
+        }) {
+            return Some(found);
+        }
+    }
+    Icons::new(data_dirs, theme, cache_dir).resolve(name)
+}
+
 pub(crate) fn scan(data_dirs: &[PathBuf], theme: &str, cache_dir: &Path) -> Catalog {
     let mut catalog = Catalog::new();
     let mut seen = HashSet::new();

@@ -220,7 +220,13 @@ impl DesktopServices {
     ) -> DesktopHandle {
         let notifications = notifications::Notifications::install(hub, paths.media_dir());
         let ime_refresh = Arc::new(Notify::new());
-        let tray = tray::Tray::install(hub, paths.media_dir(), Arc::clone(&ime_refresh));
+        let tray = tray::Tray::install(
+            hub,
+            paths.media_dir(),
+            options.xdg_data_dirs.clone(),
+            options.icon_theme.clone(),
+            Arc::clone(&ime_refresh),
+        );
         let ime = ime::Ime::install(hub, options.ime, ime_refresh);
         let media = media::Media::install(hub, paths.media_dir(), options.offline_policy);
         let launcher =

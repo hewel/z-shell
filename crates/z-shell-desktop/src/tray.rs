@@ -54,6 +54,8 @@ const MENU_PROPERTIES: &[&str] = &[
 pub(crate) struct Tray {
     hub: BusHub,
     media_dir: PathBuf,
+    xdg_data_dirs: Vec<PathBuf>,
+    icon_theme: String,
     ime_refresh: Arc<Notify>,
     state: Mutex<State>,
 }
@@ -223,10 +225,18 @@ struct MenuAction<'a> {
 }
 
 impl Tray {
-    pub(crate) fn install(hub: &BusHub, media_dir: PathBuf, ime_refresh: Arc<Notify>) -> Arc<Self> {
+    pub(crate) fn install(
+        hub: &BusHub,
+        media_dir: PathBuf,
+        xdg_data_dirs: Vec<PathBuf>,
+        icon_theme: String,
+        ime_refresh: Arc<Notify>,
+    ) -> Arc<Self> {
         let tray = Arc::new(Self {
             hub: hub.clone(),
             media_dir,
+            xdg_data_dirs,
+            icon_theme,
             ime_refresh,
             state: Mutex::new(State::default()),
         });
@@ -737,12 +747,16 @@ impl Monitor<'_> {
             let endpoint = item.endpoint.clone();
             let id = item.id.clone();
             let media_dir = self.tray.media_dir.clone();
+            let xdg_data_dirs = self.tray.xdg_data_dirs.clone();
+            let icon_theme = self.tray.icon_theme.clone();
             self.jobs.spawn(async move {
-                let properties =
-                    timeout(TIMEOUT, read_properties(&connection, &endpoint, media_dir))
-                        .await
-                        .ok()
-                        .flatten();
+                let properties = timeout(
+                    TIMEOUT,
+                    read_properties(&connection, &endpoint, media_dir, xdg_data_dirs, icon_theme),
+                )
+                .await
+                .ok()
+                .flatten();
                 Job::Properties(id, properties)
             })
         });
@@ -848,6 +862,8 @@ async fn read_properties(
     connection: &Connection,
     endpoint: &Endpoint,
     mut media_dir: PathBuf,
+    mut xdg_data_dirs: Vec<PathBuf>,
+    mut icon_theme: String,
 ) -> Option<Properties> {
     let first = endpoint.interface;
     let second = if first == ITEM { ITEM_FDO } else { ITEM };
@@ -868,16 +884,20 @@ async fn read_properties(
             continue;
         }
         // Cache access and image encoding must not block the watcher or other tray apps.
-        let (properties, returned_dir) = tokio::task::spawn_blocking(move || {
-            let properties = parse_properties(&message, interface, &media_dir);
-            (properties, media_dir)
-        })
-        .await
-        .ok()?;
+        let (properties, returned_dir, returned_dirs, returned_theme) =
+            tokio::task::spawn_blocking(move || {
+                let properties =
+                    parse_properties(&message, interface, &media_dir, &xdg_data_dirs, &icon_theme);
+                (properties, media_dir, xdg_data_dirs, icon_theme)
+            })
+            .await
+            .ok()?;
         if properties.is_some() {
             return properties;
         }
         media_dir = returned_dir;
+        xdg_data_dirs = returned_dirs;
+        icon_theme = returned_theme;
     }
     None
 }
@@ -886,6 +906,8 @@ fn parse_properties(
     message: &Message,
     interface: &'static str,
     media_dir: &Path,
+    xdg_data_dirs: &[PathBuf],
+    icon_theme: &str,
 ) -> Option<Properties> {
     let body = message.body();
     let fields: HashMap<&str, Value<'_>> = body.deserialize().ok()?;
@@ -895,15 +917,35 @@ fn parse_properties(
     let get = |key| fields.get(key).map(unvariant);
     let status = get("Status").and_then(as_str);
     let attention = status == Some("NeedsAttention");
+    let icon_theme_path = get("IconThemePath").and_then(as_str).and_then(local_path);
     let (icon_name, icon) = if attention {
         read_icon(
             get("AttentionIconName"),
             get("AttentionIconPixmap"),
             media_dir,
+            xdg_data_dirs,
+            icon_theme,
+            icon_theme_path.as_deref(),
         )
-        .or_else(|| read_icon(get("IconName"), get("IconPixmap"), media_dir))
+        .or_else(|| {
+            read_icon(
+                get("IconName"),
+                get("IconPixmap"),
+                media_dir,
+                xdg_data_dirs,
+                icon_theme,
+                icon_theme_path.as_deref(),
+            )
+        })
     } else {
-        read_icon(get("IconName"), get("IconPixmap"), media_dir)
+        read_icon(
+            get("IconName"),
+            get("IconPixmap"),
+            media_dir,
+            xdg_data_dirs,
+            icon_theme,
+            icon_theme_path.as_deref(),
+        )
     }
     .unwrap_or_default();
     let tooltip = get("ToolTip").and_then(|value| {
@@ -944,7 +986,11 @@ fn read_icon(
     name: Option<&Value<'_>>,
     pixmaps: Option<&Value<'_>>,
     dir: &Path,
+    xdg_data_dirs: &[PathBuf],
+    icon_theme: &str,
+    icon_theme_path: Option<&Path>,
 ) -> Option<(Option<String>, Option<Icon>)> {
+    let mut themed_name = None;
     if let Some(name) = name.and_then(as_str).filter(|name| name.len() <= 4096) {
         if let Some(path) = local_path(name) {
             if let Some(media) = cache_icon(dir, &path) {
@@ -955,18 +1001,25 @@ fn read_icon(
             && !name.contains(['/', '\\'])
             && name.chars().all(|c| !c.is_whitespace() && !c.is_control())
         {
-            return Some((Some(name.to_owned()), None));
+            if let Some(media) =
+                crate::apps::resolve_icon(name, xdg_data_dirs, icon_theme, icon_theme_path, dir)
+            {
+                return Some((Some(name.to_owned()), Some(Icon::File(media))));
+            }
+            themed_name = Some(name.to_owned());
         }
     }
-    let pixmap = pixmap(pixmaps?)?;
-    let digest = Sha256::digest(&pixmap).into();
-    Some((
-        None,
-        Some(Icon::Pixmap {
-            png: pixmap,
-            digest,
-        }),
-    ))
+    if let Some(pixmap) = pixmaps.and_then(pixmap) {
+        let digest = Sha256::digest(&pixmap).into();
+        return Some((
+            themed_name,
+            Some(Icon::Pixmap {
+                png: pixmap,
+                digest,
+            }),
+        ));
+    }
+    themed_name.map(|name| (Some(name), None))
 }
 
 fn pixmap(value: &Value<'_>) -> Option<Vec<u8>> {
