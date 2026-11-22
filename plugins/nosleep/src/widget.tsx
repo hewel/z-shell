@@ -1,4 +1,4 @@
-import { Button, Show, type Accessor, type NativeChild } from "@hewel/zgui";
+import { Button, Show, type Accessor, type NativeChild, type NativeNode } from "@hewel/zgui";
 import type { ZShellClient } from "@z-shell/sdk";
 import { useTopic } from "@z-shell/sdk/zgui";
 import type { NoSleepSnapshot } from "./service.ts";
@@ -9,7 +9,7 @@ const smartToy = "M20 9V7c0-1.1-.9-2-2-2h-3c0-1.66-1.34-3-3-3S9 3.34 9 5H6c-1.1 
 export default function Widget(props: {
   readonly client: Accessor<ZShellClient | undefined>;
   readonly vertical: boolean;
-  readonly onOpenPanel?: () => void;
+  readonly onOpenPanel?: (entryId?: string, anchor?: NativeNode) => void;
 }): NativeChild {
   const { data: snapshot } = useTopic<NoSleepSnapshot>(props.client, "plugin.z-shell.nosleep.state");
   const active = () => snapshot()?.active === true;
@@ -23,12 +23,14 @@ export default function Widget(props: {
         // Mouse right-click arrives as a secondary press; touch uses contextmenu.
         if (event.button !== "secondary" || !props.onOpenPanel) return;
         event.preventDefault();
-        props.onOpenPanel();
+        event.stopPropagation();
+        props.onOpenPanel(undefined, event.currentTarget);
       }}
       onContextMenu={event => {
         if (!props.onOpenPanel) return;
         event.preventDefault();
-        props.onOpenPanel();
+        event.stopPropagation();
+        props.onOpenPanel(undefined, event.currentTarget);
       }}
       style={{
         display: "flex", flexDirection: props.vertical ? "column" : "row",

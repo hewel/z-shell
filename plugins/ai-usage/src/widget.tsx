@@ -1,4 +1,4 @@
-import { Button, Show, createMemo, type Accessor, type NativeChild } from "@hewel/zgui";
+import { Button, Show, createMemo, type Accessor, type NativeChild, type NativeNode } from "@hewel/zgui";
 import type { ZShellClient } from "@z-shell/sdk";
 import { SPRING_EPSILON, createM3Spring, useGlobalMotionScheme, useTopic } from "@z-shell/sdk/zgui";
 import type { AiUsageSnapshot } from "./service.ts";
@@ -37,7 +37,7 @@ function buildQuotaArcSvg(percent: number | null): string {
 export default function Widget(props: {
   readonly client: Accessor<ZShellClient | undefined>;
   readonly vertical: boolean;
-  readonly onOpenPanel?: () => void;
+  readonly onOpenPanel?: (entryId?: string, anchor?: NativeNode) => void;
 }): NativeChild {
   const { data: snapshot } = useTopic<AiUsageSnapshot>(props.client, "plugin.z-shell.ai-usage.quotas");
   const summary = createMemo(() => {
@@ -56,8 +56,9 @@ export default function Widget(props: {
 
   return (
     <Button testId="plugin-ai-usage-widget" ariaLabel={`AI Usage: ${summary().horizontal}`}
-      onClick={() => {
-        if (props.onOpenPanel) props.onOpenPanel();
+      onClick={event => {
+        event.stopPropagation();
+        if (props.onOpenPanel) props.onOpenPanel(undefined, event.currentTarget);
         else void props.client()?.invokeCommand("plugin.z-shell.ai-usage.refresh").catch(() => undefined);
       }}
       style={{

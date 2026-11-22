@@ -169,6 +169,7 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
     }
 
     const layout = resolveBarLayout(settings.data()?.bar, monitor, outputs.data());
+    const targetRect = anchor ? getWindowRect(anchor) : null;
     setPluginPanelData({
       pluginId: panel.pluginId,
       entryId: panel.entryId,
@@ -176,8 +177,8 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
       outputId,
       width: panel.widthTier === "compact" ? COMPACT_PLUGIN_PANEL_WIDTH : STANDARD_PLUGIN_PANEL_WIDTH,
       anchorRect: resolveBarPopupAnchor(layout, {
-        align: anchor ? "target" : "end",
-        targetRect: anchor ? getWindowRect(anchor) : null,
+        align: targetRect ? "target" : "end",
+        targetRect,
       }),
       position: layout.position,
       style: layout.style,
@@ -235,13 +236,21 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
           if (instance.kind !== "widget") return null;
           const WidgetComponent = entryComponent<WidgetProps>(bundle, instance);
           const register = (outputId: string) => {
-            const onOpenPanel: OpenPanel = (entryId, anchor) => openPanel(instance, outputId, entryId, anchor);
+            let slotNode: NativeNode | undefined;
+            const onOpenPanel: OpenPanel = (entryId, anchor) => openPanel(instance, outputId, entryId, anchor ?? slotNode);
             let unregister: (() => void) | undefined;
             onSettled(() => {
               unregister = registerPluginBarWidget({
                 id: instance.instanceId,
                 outputId,
-                render: ({ vertical }) => <WidgetComponent client={publicClient} vertical={vertical} onOpenPanel={onOpenPanel} />,
+                render: ({ vertical }) => (
+                  <box
+                    ref={node => { slotNode = node; }}
+                    style={{ display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+                  >
+                    <WidgetComponent client={publicClient} vertical={vertical} onOpenPanel={onOpenPanel} />
+                  </box>
+                ),
               });
             });
             onCleanup(() => unregister?.());
@@ -254,8 +263,10 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
       </For>
       <Show when={mountedPanelKey()} keyed>
         {_key => {
-          const { pluginId, instanceId, outputId, width, anchorRect, position, style, Component: PanelComponent } = untrack(() => panelPresence.value()!);
-          const geometry = resolvePopoverGeometry(position, style, false);
+          const initial = untrack(() => panelPresence.value()!);
+          const current = () => panelPresence.value() ?? initial;
+          const { pluginId, instanceId, outputId, width, Component: PanelComponent } = initial;
+          const geometry = createMemo(() => resolvePopoverGeometry(current().position, current().style, false));
           const ownSettingsPage = () => pluginSettingsPages().find(page => page.pluginId === pluginId);
           const onOpenSettings = () => {
             const page = ownSettingsPage();
@@ -264,10 +275,10 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
           };
           const blur = createSingleNodeRoundedBlur(22, () => panelPresence.visible() && panelPresence.progress.settled());
           return (
-            <PopupSurface name={formatSurfaceName("plugin-panel", instanceId)} parent={formatSurfaceName("bar", outputId)} anchorRect={anchorRect}
+            <PopupSurface name={formatSurfaceName("plugin-panel", instanceId)} parent={formatSurfaceName("bar", outputId)} anchorRect={current().anchorRect}
               width={width} height="auto" minHeight={80} maxHeight={PANEL_MAX_HEIGHTS.plugin}
-              placement={geometry.placement} offset={geometry.offset} grab blurRegion={blur.region()} onDismiss={dismissPluginPanelInstant}>
-              <PluginPanelFrame theme={theme} position={position} spatial={panelPresence.progress} opacity={panelPresence.opacity} blurRef={blur.ref}>
+              placement={geometry().placement} offset={geometry().offset} grab blurRegion={blur.region()} onDismiss={dismissPluginPanelInstant}>
+              <PluginPanelFrame theme={theme} position={current().position} spatial={panelPresence.progress} opacity={panelPresence.opacity} blurRef={blur.ref}>
                 <PanelComponent client={publicClient} onClose={dismissPluginPanel} onOpenSettings={onOpenSettings} />
               </PluginPanelFrame>
             </PopupSurface>
