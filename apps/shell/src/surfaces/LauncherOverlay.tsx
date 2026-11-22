@@ -1,4 +1,5 @@
-import { Button, For, Image, LayerSurface, Show, TextField, createEffect, createSignal, flush, focus, onCleanup, type Accessor, type NativeChild, type NativeKeyEvent } from "@hewel/zgui";
+import { Button, For, Image, LayerSurface, Show, TextField, createEffect, createMemo, createSignal, flush, focus, onCleanup, scrollIntoView, type Accessor, type NativeChild, type NativeKeyEvent, type NativeNode } from "@hewel/zgui";
+import { createVirtualFocus } from "@hewel/zgui/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
 import { SPRING_EPSILON, createM3Spring, createRetainedPresence, dialogMotionStyle, scrimBackdrop, useMotionScheme, type M3Spring } from "../motion.ts";
@@ -10,7 +11,12 @@ const iconTile = { width: "44px", height: "44px", flexShrink: 0, borderRadius: "
 const iconTints = ["primary", "secondary", "tertiary"] as const;
 const clipped = { maxWidth: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
 
-function LauncherTile(props: { item: Accessor<LauncherItem>; selected: boolean; activate: (item: LauncherItem) => void }): NativeChild {
+function LauncherTile(props: {
+  item: Accessor<LauncherItem>;
+  selected: boolean;
+  registerNode: (node: NativeNode) => void;
+  activate: (item: LauncherItem) => void;
+}): NativeChild {
   const { hostClient } = useShellStore();
   const { item } = props;
   const { src } = useDaemonMedia(hostClient, () => item().icon, { fetchCommand: "launcher.fetch-blob" });
@@ -22,8 +28,8 @@ function LauncherTile(props: { item: Accessor<LauncherItem>; selected: boolean; 
   const tint = () => iconTints[(letter() ?? 0) % iconTints.length];
 
   return (
-    <Button testId={`launcher-item-${item().provider_id}-${item().item_id}`} tabIndex={-1}
-      data-selected={props.selected ? "true" : null} onClick={() => props.activate(item())} style={{
+    <Button ref={props.registerNode} testId={`launcher-item-${item().provider_id}-${item().item_id}`} tabIndex={-1}
+      selected={props.selected} data-selected={props.selected ? "true" : null} onClick={() => props.activate(item())} style={{
         position: "relative", zIndex: 1,
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
         width: "96px", height: "94px", flexShrink: 0, borderRadius: "14px", padding: "8px",
@@ -64,9 +70,9 @@ function LauncherContent(props: {
   const dark = () => theme.data()?.dark ?? true;
   const [query, setQuery] = createSignal("");
   const [results, setResults] = createSignal<LauncherQueryResponse>();
-  const [selectedIndex, setSelectedIndex] = createSignal(0);
   const [searchFocused, setSearchFocused] = createSignal(false);
   const items = () => results()?.items ?? [];
+  const itemKey = (item: LauncherItem) => `${item.provider_id}:${item.item_id}`;
   const resolvedQueryId = () => results()?.query_id;
   let latestQueryId = 0;
   let disposed = false;
@@ -76,6 +82,26 @@ function LauncherContent(props: {
     flush(() => setResults(undefined));
     closePanels();
   }
+
+  function activateItem(item: LauncherItem): void {
+    if (resolvedQueryId() !== latestQueryId) return;
+    void invokePublic("launcher.activate", {
+      query_id: resolvedQueryId(), provider_id: item.provider_id, item_id: item.item_id,
+    });
+    dismiss();
+  }
+
+  const virtualFocus = createVirtualFocus({
+    items,
+    getId: itemKey,
+    columns,
+    textValue: query,
+    onActivate: activateItem,
+    onReveal: () => {
+      const node = virtualFocus.activeNode();
+      if (node) scrollIntoView(node, { block: "nearest" });
+    },
+  });
 
   // A panel opened during bus.hello also needs its initial results once the bus is ready.
   createEffect(() => ({ text: query(), client: publicClient() }), ({ text }) => {
@@ -88,45 +114,30 @@ function LauncherContent(props: {
       const data = result?.data as LauncherQueryResponse | undefined;
       if (!data || (data.query_id !== undefined && data.query_id !== id)) return;
       setResults({ query_id: id, items: data.items });
-      setSelectedIndex(0);
+      const first = data.items[0];
+      virtualFocus.setActive(first ? itemKey(first) : null);
     });
   });
 
-  function activateItem(item: LauncherItem): void {
-    if (resolvedQueryId() !== latestQueryId) return;
-    void invokePublic("launcher.activate", {
-      query_id: resolvedQueryId(), provider_id: item.provider_id, item_id: item.item_id,
-    });
-    dismiss();
-  }
-
   function handleKeyDown(event: NativeKeyEvent): void {
-    let delta: number;
-    switch (event.key) {
-      case "Escape":
-        event.preventDefault();
-        dismiss();
-        return;
-      case "Enter": {
-        event.preventDefault();
-        const item = items()[selectedIndex()];
-        if (item) activateItem(item);
-        return;
-      }
-      case "ArrowRight": delta = 1; break;
-      case "ArrowLeft": delta = -1; break;
-      case "ArrowDown": delta = columns; break;
-      case "ArrowUp": delta = -columns; break;
-      default: return;
+    if (event.isComposing) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      dismiss();
+      return;
     }
-    event.preventDefault();
-    // Commit the selection before the next native key handler reads it.
-    flush(() => setSelectedIndex(index => Math.max(0, Math.min(index + delta, items().length - 1))));
+    flush(() => virtualFocus.onKeyDown(event));
   }
 
   const scheme = useMotionScheme();
-  const hasSelection = () => items().length > 0;
-  const clampedSelection = () => Math.max(0, Math.min(selectedIndex(), Math.max(0, items().length - 1)));
+  const activeIndex = createMemo(() => {
+    const activeId = virtualFocus.activeId();
+    if (activeId === null) return -1;
+    return items().findIndex(item => itemKey(item) === activeId);
+  });
+  const hasSelection = () => activeIndex() >= 0;
+  const clampedSelection = () => Math.max(0, activeIndex());
   const highlightX = createM3Spring(() => (clampedSelection() % columns) * 102, "fastSpatial", { scheme, epsilon: SPRING_EPSILON.px });
   const highlightY = createM3Spring(() => Math.floor(clampedSelection() / columns) * 100, "fastSpatial", { scheme, epsilon: SPRING_EPSILON.px });
   const highlightOpacity = createM3Spring(() => (hasSelection() ? 1 : 0), "fastEffects", { scheme });
@@ -154,6 +165,7 @@ function LauncherContent(props: {
         }}>
           <ShellIcon name="search" size={20} color={searchFocused() ? "var(--color-primary)" : "var(--color-on-surface-variant)"} />
           <TextField testId="launcher-search" class="shell-composite-field" placeholder="Search apps" value={query()}
+            ariaActiveDescendant={virtualFocus.activeNode()}
             onInput={event => setQuery(event.value)}
             onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)}
             onKeyDown={handleKeyDown} ref={node => focus(node)} style={{
@@ -195,8 +207,15 @@ function LauncherContent(props: {
                 opacity: Math.max(0, Math.min(1, highlightOpacity())),
                 transform: `translate(${highlightX().toFixed(2)}px, ${highlightY().toFixed(2)}px)`,
               }} />
-              <For each={items()} keyed={item => `${item.provider_id}:${item.item_id}`}>
-                {(item, index) => <LauncherTile item={item} selected={index() === selectedIndex()} activate={activateItem} />}
+              <For each={items()} keyed={itemKey}>
+                {item => (
+                  <LauncherTile
+                    item={item}
+                    selected={virtualFocus.activeId() === itemKey(item())}
+                    registerNode={node => { virtualFocus.register(itemKey(item()), node); }}
+                    activate={activateItem}
+                  />
+                )}
               </For>
             </row>
           </Show>

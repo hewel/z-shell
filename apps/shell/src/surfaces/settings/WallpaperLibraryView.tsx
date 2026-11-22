@@ -1,7 +1,8 @@
 import {
-  Button, For, Image, Show, TextField, createEffect, createMemo, createSignal,
-  type Accessor, type NativeChild,
+  Button, For, Image, Show, TextField, createEffect, createMemo, createSignal, scrollIntoView,
+  type Accessor, type NativeChild, type NativeNode,
 } from "@hewel/zgui";
+import { createVirtualFocus } from "@hewel/zgui/primitives";
 import { M3Button, M3Collapsible, M3SegmentedControl } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../../icons.tsx";
@@ -61,7 +62,9 @@ function closestSlideshowPresetId(seconds: number): string {
 function LibraryTile(props: {
   readonly item: Accessor<CatalogEntry>;
   readonly active: boolean;
+  readonly highlighted: boolean;
   readonly outputTag: string | null;
+  readonly registerNode: (node: NativeNode) => void;
   readonly onApply: () => void;
 }): NativeChild {
   const { hostClient } = useShellStore();
@@ -70,14 +73,20 @@ function LibraryTile(props: {
   return (
     <column style={{ ...grow, gap: "4px", minWidth: "0px" }}>
       <Button
+        ref={props.registerNode}
         testId={`wp-lib-item-${props.item().id}`}
         ariaLabel={`Apply wallpaper ${label()}`}
         selected={props.active}
+        data-highlighted={props.highlighted ? "true" : null}
         onClick={props.onApply}
         style={{
           display: "flex", width: "100%", height: "84px", borderRadius: "10px", position: "relative", overflow: "hidden",
           alignItems: "center", justifyContent: "center", backgroundColor: containerHighest,
-          border: props.active ? `2px solid ${primary}` : "1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent)",
+          border: props.active
+            ? `2px solid ${primary}`
+            : props.highlighted
+              ? `2px solid color-mix(in srgb, var(--color-primary) 70%, transparent)`
+              : "1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent)",
         }}
       >
         <Show when={image.src()} fallback={<ShellIcon name="image" size={20} color={muted} />}>
@@ -170,6 +179,26 @@ export function WallpaperLibraryView(props: {
       chunks.push(items.slice(i, i + 4));
     }
     return chunks;
+  });
+
+  function applyWallpaper(item: CatalogEntry): void {
+    void invokePublic("wallpaper.set", {
+      path: item.source_path,
+      output: selectedOutput(),
+      fit: currentFit(),
+    });
+  }
+
+  const virtualFocus = createVirtualFocus({
+    items: filteredItems,
+    getId: item => item.id,
+    columns: 4,
+    textValue: query,
+    onActivate: applyWallpaper,
+    onReveal: () => {
+      const node = virtualFocus.activeNode();
+      if (node) scrollIntoView(node, { block: "nearest" });
+    },
   });
 
   function patchWallpaper(patch: Record<string, unknown>): void {
@@ -271,8 +300,10 @@ export function WallpaperLibraryView(props: {
               class="shell-composite-field"
               ariaLabel="Filter wallpapers by filename"
               placeholder="Filter wallpapers by filename..."
+              ariaActiveDescendant={virtualFocus.activeNode()}
               value={query()}
               onInput={ev => setQuery(ev.value)}
+              onKeyDown={virtualFocus.onKeyDown}
               onFocus={() => setFilterFocused(true)}
               onBlur={() => setFilterFocused(false)}
               style={{
@@ -351,6 +382,7 @@ export function WallpaperLibraryView(props: {
                 value={folderDraft()}
                 onInput={ev => setFolderDraft(ev.value)}
                 onKeyDown={ev => {
+                  if (ev.isComposing) return;
                   if (ev.key === "Enter") {
                     ev.preventDefault();
                     addDirectory();
@@ -418,12 +450,13 @@ export function WallpaperLibraryView(props: {
                       <LibraryTile
                         item={item}
                         active={item().source_path === activeWallpaper()?.source_path}
+                        highlighted={filterFocused() && virtualFocus.activeId() === item().id}
                         outputTag={outputTagFor(item().source_path)}
-                        onApply={() => void invokePublic("wallpaper.set", {
-                          path: item().source_path,
-                          output: selectedOutput(),
-                          fit: currentFit(),
-                        })}
+                        registerNode={node => { virtualFocus.register(item().id, node); }}
+                        onApply={() => {
+                          virtualFocus.setActive(item().id);
+                          applyWallpaper(item());
+                        }}
                       />
                     )}
                   </For>

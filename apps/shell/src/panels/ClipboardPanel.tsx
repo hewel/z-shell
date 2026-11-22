@@ -1,4 +1,5 @@
-import { Button, For, Image, Show, TextField, createEffect, createMemo, createSignal, getWindowRect, mountStylesheet, type Accessor, type NativeKeyEvent, type NativeNode } from "@hewel/zgui";
+import { Button, For, Image, Show, TextField, createEffect, createMemo, createSignal, getWindowRect, mountStylesheet, scrollIntoView, type Accessor, type NativeKeyEvent, type NativeNode } from "@hewel/zgui";
+import { createVirtualFocus } from "@hewel/zgui/primitives";
 import { M3Button, M3FilterChip } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
@@ -105,8 +106,6 @@ export function ClipboardPanel() {
   `);
   const [query, setQuery] = createSignal("");
   const [filter, setFilter] = createSignal<Filter>("all");
-  const [selectedEntryId, setSelectedEntryId] = createSignal<number | null>(null);
-  const [fallbackIndex, setFallbackIndex] = createSignal(0);
   const [searchFocused, setSearchFocused] = createSignal(false);
   let rootNode: NativeNode | undefined;
   let searchNode: NativeNode | undefined;
@@ -133,29 +132,65 @@ export function ClipboardPanel() {
     });
   });
   const scheme = useMotionScheme();
-  const selection = createMemo(() => resolveClipboardSelection(filtered(), selectedEntryId(), fallbackIndex()));
-  const activeIndex = () => selection().index;
-  const activeEntry = () => selection().entry;
-  createEffect(selection, current => {
-    if (current.entry) {
-      if (selectedEntryId() !== current.entry.id) setSelectedEntryId(current.entry.id);
-      if (fallbackIndex() !== current.index) setFallbackIndex(current.index);
-    } else if (selectedEntryId() !== null) {
-      setSelectedEntryId(null);
-      setFallbackIndex(0);
+  const virtualFocus = createVirtualFocus({
+    items: filtered,
+    getId: entry => String(entry.id),
+    columns: 1,
+    wrap: true,
+    textValue: query,
+    onActivate: entry => {
+      void invokePublic("clipboard.copy", { id: entry.id });
+      closePanels();
+    },
+    onReveal: () => {
+      const node = virtualFocus.activeNode();
+      if (node) scrollIntoView(node, { block: "nearest" });
+    },
+  });
+  let lastSelectedId: number | null = null;
+  let lastSelectedIndex = 0;
+  const activeEntry = createMemo(() => {
+    const activeId = virtualFocus.activeId();
+    if (activeId === null) return null;
+    return filtered().find(entry => String(entry.id) === activeId) ?? null;
+  });
+  const activeIndex = createMemo(() => {
+    const activeId = virtualFocus.activeId();
+    if (activeId === null) return -1;
+    return filtered().findIndex(entry => String(entry.id) === activeId);
+  });
+  // Preserve adjacent-row fallback when the active entry is deleted while keeping stable-ID focus on prepend.
+  createEffect(() => [filtered(), virtualFocus.activeId()] as const, ([list, activeId]) => {
+    if (list.length === 0) {
+      lastSelectedId = null;
+      lastSelectedIndex = 0;
+      return;
+    }
+    if (lastSelectedId !== null && !list.some(entry => entry.id === lastSelectedId)) {
+      const fallback = resolveClipboardSelection(list, lastSelectedId, lastSelectedIndex);
+      if (fallback.entry && String(fallback.entry.id) !== activeId) {
+        virtualFocus.setActive(String(fallback.entry.id));
+        lastSelectedId = fallback.entry.id;
+        lastSelectedIndex = fallback.index;
+        return;
+      }
+    }
+    const idx = activeId !== null ? list.findIndex(entry => String(entry.id) === activeId) : -1;
+    if (idx >= 0) {
+      lastSelectedId = list[idx]!.id;
+      lastSelectedIndex = idx;
     }
   });
   const resetSelection = () => {
-    setSelectedEntryId(null);
-    setFallbackIndex(0);
+    lastSelectedId = null;
+    lastSelectedIndex = 0;
+    const first = filtered()[0];
+    virtualFocus.setActive(first ? String(first.id) : null);
   };
   const [listNode, setListNode] = createSignal<NativeNode | null>(null);
-  const rowNodes = new Map<number, NativeNode>();
   const [highlightRect, setHighlightRect] = createSignal({ y: 0, height: 58 });
-  createEffect(() => [activeIndex(), filtered(), listNode()] as const, ([idx, list, containerEl]) => {
+  createEffect(() => [activeIndex(), filtered(), listNode(), virtualFocus.activeNode()] as const, ([idx, _list, containerEl, rowEl]) => {
     if (idx < 0) return;
-    const entry = list[idx];
-    const rowEl = entry ? rowNodes.get(entry.id) : undefined;
     if (containerEl && rowEl) {
       const cRect = getWindowRect(containerEl);
       const rRect = getWindowRect(rowEl);
@@ -170,6 +205,7 @@ export function ClipboardPanel() {
   const highlightH = createM3Spring(() => highlightRect().height, "fastSpatial", { scheme, epsilon: SPRING_EPSILON.px });
   const highlightOpacity = createM3Spring(() => (activeIndex() >= 0 ? 1 : 0), "fastEffects", { scheme });
   const handleKeyDown = (event: NativeKeyEvent) => {
+    if (event.isComposing) return;
     const list = filtered();
     const inSearch = searchFocused() || (searchNode !== undefined && event.target === searchNode);
     const onRoot = rootNode !== undefined && event.target === rootNode;
@@ -180,28 +216,13 @@ export function ClipboardPanel() {
       return;
     }
     if (list.length === 0) return;
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      event.stopPropagation();
-      const currentIdx = Math.max(0, activeIndex());
-      const nextIdx = event.key === "ArrowDown"
-        ? (currentIdx + 1) % list.length
-        : (currentIdx - 1 + list.length) % list.length;
-      const nextEntry = list[nextIdx];
-      if (nextEntry) {
-        setSelectedEntryId(nextEntry.id);
-        setFallbackIndex(nextIdx);
-      }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
+      virtualFocus.onKeyDown(event);
     } else if (event.key === "Enter") {
       // Only copy the highlighted row when Enter originates in the search bar or panel root;
       // buttons (Pin, Forget, Filter chips, Clear) handle their own Enter activation.
       if (!inSearch && !onRoot) return;
-      const target = activeEntry();
-      if (!target) return;
-      event.preventDefault();
-      event.stopPropagation();
-      void invokePublic("clipboard.copy", { id: target.id });
-      closePanels();
+      virtualFocus.onKeyDown(event);
     } else if (event.key === "Delete") {
       // Never hijack Delete while editing text inside the search input.
       if (inSearch) return;
@@ -233,6 +254,7 @@ export function ClipboardPanel() {
         }}>
           <ShellIcon name="search" size={18} color={searchFocused() ? primary : muted} />
           <TextField ref={node => { searchNode = node; }} testId="clipboard-search" class="clipboard-search shell-composite-field" ariaLabel={searchPlaceholder} placeholder={searchPlaceholder} value={query()}
+            ariaActiveDescendant={virtualFocus.activeNode()}
             onInput={event => { setQuery(event.value); resetSelection(); }}
             onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)}
             style={{
@@ -271,11 +293,11 @@ export function ClipboardPanel() {
           <column ref={setListNode} style={{ position: "relative", gap: "6px" }}>
             <Show when={filtered().length > 0} fallback={<text style={{ color: muted, padding: "12px 0" }}>{entries().length ? "No matching entries" : "Clipboard is empty"}</text>}>
               <For each={filtered()} keyed={entry => entry.id}>
-                {(entry, index) => (
+                {entry => (
                   <ClipboardRow
                     entry={entry}
-                    selected={index() === activeIndex()}
-                    onRowRef={node => { rowNodes.set(entry().id, node); }}
+                    selected={virtualFocus.activeId() === String(entry().id)}
+                    onRowRef={node => { virtualFocus.register(String(entry().id), node); }}
                   />
                 )}
               </For>
