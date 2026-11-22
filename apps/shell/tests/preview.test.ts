@@ -406,9 +406,10 @@ describe("apps/shell preview", () => {
         .toEqual([0x7c, 0xd4, 0xff, 255]);
       const quickSettings = readCapture(out, "panel-quick-settings", "panel-quick-settings");
       expect(quickSettings.frame.renderer.alphaMode).toBe("PreMultiplied");
-      expect(quickSettings.image.width).toBe(396);
-      expect(quickSettings.image.height).toBeGreaterThan(200);
-      expect(quickSettings.image.height).toBeLessThanOrEqual(760);
+      expect(quickSettings.frame.windowGeometry?.width).toBe(396);
+      expect(quickSettings.image.width).toBe(396 + 56);
+      expect(quickSettings.frame.windowGeometry?.height).toBeGreaterThan(200);
+      expect(quickSettings.frame.windowGeometry?.height).toBeLessThanOrEqual(760);
       expect(pixel(quickSettings.image, 0, 0)).toEqual([0, 0, 0, 0]);
       expect(treeNode(quickSettings.tree, "qs-main").boundsDevice).toBeDefined();
       expect(treeNode(quickSettings.tree, "qs-tile-wifi").boundsDevice).toBeDefined();
