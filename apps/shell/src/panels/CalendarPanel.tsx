@@ -215,7 +215,7 @@ export function CalendarPanel() {
         <row style={{ alignItems: "center", gap: "8px" }}>
           <text style={{ fontSize: "15px", fontWeight: 600 }}>Notifications</text>
           <text testId="cal-notif-count" data-tabular="true" style={{
-            borderRadius: "999px", padding: "2px 8px", fontSize: "11px", fontWeight: 600,
+            borderRadius: "999px", "--zgui-corner-shape": "none", padding: "2px 8px", fontSize: "11px", fontWeight: 600,
             fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums",
             backgroundColor: "var(--color-secondary-container)", color: "var(--color-on-secondary-container)",
           }}>

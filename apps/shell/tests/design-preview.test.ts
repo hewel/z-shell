@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { PublishedApplication } from "@hewel/zgui-build";
 import { buildShellPreviewFixture, makeSolidPngBytes } from "./fixture-builder.ts";
 import {
+  assertRoundedBlurStrips,
   assertSameBounds,
   buildPublishedShell,
   createPreviewWorkspace,
@@ -313,7 +314,25 @@ describe("apps/shell design geometry & pixel lint", () => {
         expect(pixel(capture.image, w, 0), `${label} top-right corner transparent`).toEqual([0, 0, 0, 0]);
         expect(pixel(capture.image, 0, h), `${label} bottom-left corner transparent`).toEqual([0, 0, 0, 0]);
         expect(pixel(capture.image, w, h), `${label} bottom-right corner transparent`).toEqual([0, 0, 0, 0]);
+        // Declarative ext_background_effect_v1 blurRegion: <=45 strictly interior strips, zero corner leak.
+        assertRoundedBlurStrips(
+          capture.frame.blurRegion,
+          { x: 0, y: 0, width: capture.image.width, height: capture.image.height },
+          22,
+          `${label} blurRegion`,
+        );
       }
+
+      // Floating Bar, Floating Dock, and always-solid Settings blurRegion contracts (#86).
+      expect(Array.isArray(bar.frame.blurRegion), "floating bar publishes rounded blurRegion strips").toBe(true);
+      expect((bar.frame.blurRegion as readonly unknown[]).length, "floating bar blurRegion <= 256").toBeLessThanOrEqual(256);
+      assertRoundedBlurStrips(
+        dock.frame.blurRegion,
+        treeNode(dock.tree, "dock-root-HDMI-A-1").boundsLogical!,
+        22,
+        "floating dock blurRegion",
+      );
+      expect(settings.frame.blurRegion, "Settings Window (Level 3) remains always-solid blurRegion='none'").toBe("none");
 
       // Opaque Toplevel Edge Guard: Settings WindowSurface delegates outer corners/borders to the compositor.
       {
@@ -636,8 +655,9 @@ describe("apps/shell design geometry & pixel lint", () => {
       const mediaReduced = readCapture(out, "panel-media", "media-reduced");
       const polkit = readCapture(out, "polkit-dialog", "polkit-23");
 
-      // Docked top bar is flush 38px without floating shadow bleed.
+      // Docked top bar is flush 38px without floating shadow bleed and always solid (blurRegion="none").
       expect([barDocked.image.width, barDocked.image.height]).toEqual([1440, 38]);
+      expect(barDocked.frame.blurRegion, "Docked Top Bar (Level 1C) stays solid blurRegion='none'").toBe("none");
 
       // Reduced motion Media panel settles immediately at 396px width with transparent rounded corners
       // and renders a flat horizontal progress track (no vertical sine wave deflection above/below centerline).
@@ -867,11 +887,20 @@ describe("apps/shell design geometry & pixel lint", () => {
         expect(pixel(trayMenuLong.image, w, h), "tray-menu bottom-right transparent").toEqual([0, 0, 0, 0]);
         const lastItem = treeNode(trayMenuLong.tree, "tray-menu-item-10").boundsLogical!;
         expect(lastItem.y + lastItem.height, "last tray menu item fully inside surface").toBeLessThanOrEqual(trayMenuLong.image.height - 6);
+        assertRoundedBlurStrips(
+          trayMenuLong.frame.blurRegion,
+          { x: 0, y: 0, width: trayMenuLong.image.width, height: trayMenuLong.image.height },
+          16,
+          "tray-menu blurRegion",
+        );
       }
 
-      // Floating left bar is 76px wide (40px pill + shadow bleed) with transparent corner.
+      // Floating left bar is 76px wide (40px pill + shadow bleed) with transparent corner and rounded blurRegion.
       expect([barLeft.image.width, barLeft.image.height]).toEqual([76, 896]);
       expect(pixel(barLeft.image, 0, 0)).toEqual([0, 0, 0, 0]);
+      expect(Array.isArray(barLeft.frame.blurRegion), "floating vertical bar publishes rounded blurRegion strips").toBe(true);
+      expect((barLeft.frame.blurRegion as readonly unknown[]).length, "vertical bar blurRegion <= 256").toBeLessThanOrEqual(256);
+      expect(barLeftDockedActive.frame.blurRegion, "docked vertical bar stays solid blurRegion='none'").toBe("none");
       // Control Center opens cleanly at 396px width anchored from the bottom-left status island.
       expect(Math.round(treeNode(qsLeft.tree, "panel-root-quick-settings").boundsLogical!.width)).toBe(396);
       expect(pixel(qsLeft.image, 0, 0)).toEqual([0, 0, 0, 0]);
@@ -1755,6 +1784,12 @@ describe("apps/shell design geometry & pixel lint", () => {
         const cornerPx = pixel(toast16x9.image, cx, cy);
         expect(cornerPx[2], `16:9 toast icon ${cornerName} rounded-clipped (not pure cyan)`).toBeLessThan(150);
       }
+      assertRoundedBlurStrips(
+        toast16x9.frame.blurRegion,
+        treeNode(toast16x9.tree, "toast-card-101").boundsLogical!,
+        22,
+        "notification toast blurRegion",
+      );
     } finally {
       cleanup();
     }

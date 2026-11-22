@@ -269,6 +269,7 @@
   width: 44px;
   height: 24px;
   border-radius: var(--radius-pill);
+  --zgui-corner-shape: none;
   flex-shrink: 0;
   cursor: pointer;
   border: 1.5px solid var(--color-outline);
@@ -308,6 +309,7 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-pill);
+  --zgui-corner-shape: none;
   background-color: var(--color-outline);
   transition-property: background-color, border-color;
   transition-duration: var(--motion-duration-short2);
@@ -381,6 +383,7 @@
   min-width: 0px;
   height: 10px;
   border-radius: 999px 2px 2px 999px;
+  --zgui-corner-shape: none;
   background-color: var(--color-primary);
 
   &[data-compact="true"] {
@@ -422,6 +425,7 @@
   height: 10px;
   padding-right: 3px;
   border-radius: 2px 999px 999px 2px;
+  --zgui-corner-shape: none;
   background-color: var(--color-surface-container-highest);
 
   &[data-compact="true"] {
@@ -437,6 +441,7 @@
   width: 4px;
   height: 4px;
   border-radius: var(--radius-pill);
+  --zgui-corner-shape: none;
   flex-shrink: 0;
   background-color: var(--color-primary);
 
@@ -624,6 +629,7 @@
   min-width: 0px;
   height: 100%;
   border-radius: var(--radius-pill);
+  --zgui-corner-shape: none;
   background-color: var(--color-primary);
 
   &[data-tone="error"] {
@@ -640,6 +646,7 @@
   height: 100%;
   padding-right: 1px;
   border-radius: var(--radius-pill);
+  --zgui-corner-shape: none;
   background-color: var(--color-surface-container-highest);
 }
 

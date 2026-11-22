@@ -36,7 +36,7 @@ function BridgeTargetCard(props: {
         <text style={{ fontSize: "13px", fontWeight: 600 }}>{props.name}</text>
         <row style={{ alignItems: "center", gap: "6px", flexShrink: 0 }}>
           <text testId={props.testId} style={{
-            padding: "2px 8px", borderRadius: "999px", fontSize: "11px", fontWeight: 600,
+            padding: "2px 8px", borderRadius: "999px", "--zgui-corner-shape": "none", fontSize: "11px", fontWeight: 600,
             backgroundColor: failed() ? "var(--color-error-container)"
               : applied() ? primaryContainer : containerHighest,
             color: failed() ? "var(--color-on-error-container)"

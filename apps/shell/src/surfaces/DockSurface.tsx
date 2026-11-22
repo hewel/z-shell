@@ -1,8 +1,9 @@
 import {
   Button, For, Image, LayerSurface, Show, createEffect, createMemo, createSignal, onCleanup,
-  type Accessor, type Monitor, type NativeChild, type NativeStyle, type NativeWindowRect,
+  type Accessor, type BlurRegion, type Monitor, type NativeChild, type NativeStyle, type NativeWindowRect,
 } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
+import { SUPERELLIPSE_EXPONENT, roundedRectBlurRegion } from "../blur.ts";
 import { ShellIcon } from "../icons.tsx";
 import { SPRING_EPSILON, createM3Spring, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
@@ -40,7 +41,7 @@ const tileStack = {
   position: "relative", width: `${tileSize}px`, height: `${dockHeight}px`, flexShrink: 0,
   alignItems: "center", justifyContent: "center",
 } as const;
-const dot = { width: "4px", height: "4px", flexShrink: 0, borderRadius: "2px", backgroundColor: "color-mix(in srgb, var(--color-on-surface) 84%, transparent)" } as const;
+const dot = { width: "4px", height: "4px", flexShrink: 0, borderRadius: "2px", "--zgui-corner-shape": "none", backgroundColor: "color-mix(in srgb, var(--color-on-surface) 84%, transparent)" } as const;
 const tints = ["primary", "secondary", "tertiary"] as const;
 
 function DockApp(props: { entry: Accessor<DockEntry> }) {
@@ -185,6 +186,7 @@ function DockCapsule(props: {
             width: "16px",
             height: "3px",
             borderRadius: "2px",
+            "--zgui-corner-shape": "none",
             backgroundColor: primary,
             pointerEvents: "none",
             opacity: Math.max(0, Math.min(1, focusBarOpacity())),
@@ -254,10 +256,27 @@ function MonitorDock(props: {
     ];
   });
 
+  const blurRegion = createMemo<BlurRegion>(() => {
+    if (!revealed()) return "none";
+    const width = capsuleWidth();
+    const strips = roundedRectBlurRegion(
+      {
+        x: (layerWidth() - width) / 2,
+        y: dockLayerHeight - dockBottomMargin - dockHeight,
+        width,
+        height: dockHeight,
+      },
+      22,
+      1,
+      SUPERELLIPSE_EXPONENT,
+    );
+    return strips.length > 0 ? strips : "none";
+  });
+
   return (
     <LayerSurface name={formatSurfaceName("dock", props.monitor().id)} output={props.monitor().id} layer="top"
       anchor={["bottom", "left", "right"]} margin={{ bottom: 0 }} width={layerWidth()} height={dockLayerHeight}
-      exclusiveZone={0} keyboard="none" inputRegion={inputRegion()}>
+      exclusiveZone={0} keyboard="none" inputRegion={inputRegion()} blurRegion={blurRegion()}>
       <box testId={`dock-surface-${props.monitor().id}`} style={{
         // Fill the full LayerSurface viewport (including the bottom-edge trigger strip) instead of
         // shrinking to the content-sized :root height.

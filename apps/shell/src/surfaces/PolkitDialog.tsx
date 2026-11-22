@@ -179,7 +179,7 @@ function PolkitContent(props: {
               {identity => (
                 <row testId={`polkit-identity-${identity().uid}`} style={{ alignItems: "center", gap: "8px", padding: "2px 4px" }}>
                   <box ariaHidden style={{
-                    display: "flex", width: "24px", height: "24px", borderRadius: "999px", flexShrink: 0,
+                    display: "flex", width: "24px", height: "24px", borderRadius: "999px", "--zgui-corner-shape": "none", flexShrink: 0,
                     alignItems: "center", justifyContent: "center", backgroundColor: containerHighest,
                   }}>
                     <ShellIcon name="person" size={14} color={primary} />

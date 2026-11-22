@@ -3,6 +3,7 @@ import {
   type Accessor, type ButtonProps, type Monitor, type NativeEvent, type NativeNode, type NativeStyle, type NativeWheelEvent, type NativeWindowRect,
 } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
+import { createRoundedBlurGroup, type RoundedBlurGroup } from "../blur.ts";
 import { ShellIcon } from "../icons.tsx";
 import { SPRING_EPSILON, createEnterProgress, createM3Spring, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
@@ -33,7 +34,7 @@ const compactIconButton = { ...center, width: "26px", height: "28px", flexShrink
 const verticalCompactIconButton = { ...center, width: "32px", height: "26px", flexShrink: 0, borderRadius: "8px" } as const;
 const notificationBadge = {
   ...center, gap: "4px", height: "24px", backgroundColor: primaryContainer, color: onPrimaryContainer,
-  borderRadius: "999px", padding: "0 7px", fontSize: "11px", fontWeight: 600,
+  borderRadius: "999px", "--zgui-corner-shape": "none", padding: "0 7px", fontSize: "11px", fontWeight: 600,
 } as const;
 const outline = "color-mix(in srgb, var(--color-outline-variant) 65%, transparent)";
 const tabular = { fontVariantNumeric: "tabular-nums" } as const;
@@ -68,6 +69,7 @@ function segmentChrome(vertical: boolean, docked: boolean, active = false, inter
     flexShrink: 0,
     flexDirection: vertical ? "column" : "row",
     borderRadius: vertical ? "999px" : "16px",
+    "--zgui-corner-shape": "none",
     ...(interactive
       ? {}
       : {
@@ -155,6 +157,7 @@ function WorkspaceButton(props: {
             width: dotSize(),
             height: dotSize(),
             borderRadius: "999px",
+            "--zgui-corner-shape": "none",
             backgroundColor: dotFill(),
             opacity: props.workspace.urgent ? 1 : Math.max(0.15, (1 - activeFade()) * 0.55),
             transform: scheme() === "reduced" ? "none" : `scale(${(1 - activeFade() * 0.3).toFixed(4)})`,
@@ -255,6 +258,7 @@ function WorkspaceTrack(props: {
         width: props.vertical ? "24px" : `${Math.max(24, slideSize()).toFixed(2)}px`,
         height: props.vertical ? `${Math.max(24, slideSize()).toFixed(2)}px` : "20px",
         borderRadius: "999px",
+        "--zgui-corner-shape": "none",
         backgroundColor: pillFill(),
         opacity: Math.max(0, Math.min(1, pillOpacity())),
         transform: props.vertical
@@ -276,13 +280,14 @@ function WorkspaceTrack(props: {
   );
 }
 
-function ActiveWindowPill(props: { window: Accessor<WaylandWindow>; vertical: boolean; docked: boolean }) {
+function ActiveWindowPill(props: { window: Accessor<WaylandWindow>; vertical: boolean; docked: boolean; blur: RoundedBlurGroup }) {
   const { apps, hostClient } = useShellStore();
   const app = createMemo(() => resolveDesktopApp(apps.data()?.apps, props.window().app_id));
   const { src } = useDaemonMedia(hostClient, () => app()?.icon, { fetchCommand: "launcher.fetch-blob" });
   const base = () => segmentChrome(props.vertical, props.docked);
+  const blurRef = props.blur.useTarget();
   return (
-    <box testId="bar-active-window" ariaLabel={props.window().title} style={
+    <box ref={blurRef} testId="bar-active-window" ariaLabel={props.window().title} style={
       props.vertical
         ? { ...base(), width: props.docked ? "30px" : "40px", height: props.docked ? "30px" : "40px" }
         : {
@@ -401,13 +406,15 @@ function ClockPill(props: {
   monitorId: string;
   surfaceName: string;
   layout: ResolvedBarLayout;
+  blur: RoundedBlurGroup;
 }) {
   const { notifications, togglePanel } = useShellStore();
   const count = () => notifications.data()?.history.length ?? 0;
   const dnd = () => notifications.data()?.dnd ?? false;
   const base = () => segmentChrome(props.vertical, props.docked, props.active, true);
+  const blurRef = props.blur.useTarget();
   return (
-    <Button testId="bar-clock" ariaLabel={props.clock().horizontal}
+    <Button ref={blurRef} testId="bar-clock" ariaLabel={props.clock().horizontal}
       data-bar-segment={props.docked ? "docked" : "floating"}
       data-active={props.active ? "true" : null}
       onClick={event => {
@@ -462,9 +469,11 @@ function SystemPill(props: {
   monitorId: string;
   surfaceName: string;
   layout: ResolvedBarLayout;
+  blur: RoundedBlurGroup;
 }) {
   const { ime, privacy, network, bluetooth, audio, power, togglePanel, invokePublic, openImeMenu } = useShellStore();
   let systemNode: NativeNode | undefined;
+  const blurRef = props.blur.useTarget();
   const quickSettings = (event: NativeEvent) => {
     event.stopPropagation();
     const anchorNode = props.vertical ? (systemNode ?? event.currentTarget) : event.currentTarget;
@@ -495,7 +504,7 @@ function SystemPill(props: {
   const base = () => segmentChrome(props.vertical, props.docked, props.active);
   const verticalImeSize = () => (props.docked ? "26px" : "30px");
   return (
-    <box ref={node => { systemNode = node; }} testId="bar-system" style={props.vertical
+    <box ref={node => { systemNode = node; blurRef(node); }} testId="bar-system" style={props.vertical
       ? {
           ...base(),
           width: props.docked ? "34px" : "40px",
@@ -523,6 +532,7 @@ function SystemPill(props: {
             height: props.vertical ? verticalImeSize() : "24px",
             padding: props.vertical ? "0px" : "0 6px",
             borderRadius: "999px",
+            "--zgui-corner-shape": "none",
             backgroundColor: props.active && props.docked
               ? "color-mix(in srgb, var(--color-on-primary-container) 14%, transparent)"
               : primaryContainer,
@@ -613,10 +623,12 @@ function BarContent(props: {
   launcher: boolean;
   clock: Accessor<BarClock>;
   seconds: boolean;
+  blur: RoundedBlurGroup;
 }) {
   const store = useShellStore();
   const { activePanel, togglePanel, dismissOverlay, invokePublic } = store;
   useShellTheme(store.theme.data);
+  const workspacesRef = props.blur.useTarget();
   const vertical = createMemo(() => props.layout.isVertical);
   const docked = createMemo(() => props.layout.style === "docked");
   const surfaceName = () => formatSurfaceName("bar", props.monitor.id);
@@ -671,23 +683,28 @@ function BarContent(props: {
       style={rootStyle()}>
       <box style={vertical() ? verticalGroup : group}>
         <Show when={props.launcher}>
-          <Button testId="bar-launcher" ariaLabel="Launcher"
-            data-bar-segment={docked() ? "docked" : "floating"}
-            data-active={activePanel() === "launcher" ? "true" : null}
-            style={vertical()
-              ? { ...segmentChrome(true, docked(), activePanel() === "launcher", true), width: docked() ? "30px" : "40px", height: docked() ? "30px" : "40px" }
-              : { ...segmentChrome(false, docked(), activePanel() === "launcher", true), width: docked() ? "28px" : "32px", height: docked() ? "28px" : "32px" }}
-            onClick={event => {
-              event.stopPropagation();
-              togglePanel("launcher", { monitorId: props.monitor.id });
-            }}>
-            <box data-press-visual="compact" ariaHidden style={center}>
-              <ShellIcon name="apps" size={18} color={primary} />
-            </box>
-          </Button>
+          {() => {
+            const launcherRef = props.blur.useTarget();
+            return (
+              <Button ref={launcherRef} testId="bar-launcher" ariaLabel="Launcher"
+                data-bar-segment={docked() ? "docked" : "floating"}
+                data-active={activePanel() === "launcher" ? "true" : null}
+                style={vertical()
+                  ? { ...segmentChrome(true, docked(), activePanel() === "launcher", true), width: docked() ? "30px" : "40px", height: docked() ? "30px" : "40px" }
+                  : { ...segmentChrome(false, docked(), activePanel() === "launcher", true), width: docked() ? "28px" : "32px", height: docked() ? "28px" : "32px" }}
+                onClick={event => {
+                  event.stopPropagation();
+                  togglePanel("launcher", { monitorId: props.monitor.id });
+                }}>
+                <box data-press-visual="compact" ariaHidden style={center}>
+                  <ShellIcon name="apps" size={18} color={primary} />
+                </box>
+              </Button>
+            );
+          }}
         </Show>
         <Show when={docked() && props.launcher}><Divider vertical={vertical()} /></Show>
-        <box testId="bar-workspaces" style={vertical()
+        <box ref={workspacesRef} testId="bar-workspaces" style={vertical()
           ? { ...segmentChrome(true, docked()), width: docked() ? "32px" : "40px", gap: "2px", padding: "8px 0 10px 0" }
           : { ...segmentChrome(false, docked()), height: docked() ? "28px" : "32px", gap: "2px", padding: "0 6px" }}
           onWheel={event => {
@@ -716,73 +733,86 @@ function BarContent(props: {
         <Show when={activeWindow()}>
           {window => <>
             <Show when={docked()}><Divider vertical={vertical()} /></Show>
-            <ActiveWindowPill window={window} vertical={vertical()} docked={docked()} />
+            <ActiveWindowPill window={window} vertical={vertical()} docked={docked()} blur={props.blur} />
           </>}
         </Show>
       </box>
       <ClockPill vertical={vertical()} docked={docked()} active={activePanel() === "calendar"}
-        clock={props.clock} seconds={props.seconds} monitorId={props.monitor.id} surfaceName={surfaceName()} layout={props.layout} />
+        clock={props.clock} seconds={props.seconds} monitorId={props.monitor.id} surfaceName={surfaceName()} layout={props.layout} blur={props.blur} />
       <box style={{ ...(vertical() ? verticalGroup : group), justifyContent: "flex-end" }}>
         <Show when={slots().length > 0}>
-          <box testId="bar-plugin-slots" onClick={event => event.stopPropagation()} style={vertical()
-            ? { ...segmentChrome(true, docked()), width: docked() ? "32px" : "40px", gap: "4px", padding: "8px 0" }
-            : { ...segmentChrome(false, docked()), height: docked() ? "28px" : "32px", gap: "4px", padding: docked() ? "0 6px" : "0 2px" }}>
-            <For each={slots()}>{slot => () => slot.render({ vertical: vertical() })}</For>
-          </box>
+          {() => {
+            const slotsRef = props.blur.useTarget();
+            return (
+              <box ref={slotsRef} testId="bar-plugin-slots" onClick={event => event.stopPropagation()} style={vertical()
+                ? { ...segmentChrome(true, docked()), width: docked() ? "32px" : "40px", gap: "4px", padding: "8px 0" }
+                : { ...segmentChrome(false, docked()), height: docked() ? "28px" : "32px", gap: "4px", padding: docked() ? "0 6px" : "0 2px" }}>
+                <For each={slots()}>{slot => () => slot.render({ vertical: vertical() })}</For>
+              </box>
+            );
+          }}
         </Show>
         <Show when={player()}>
-          {active => <>
-            <Show when={docked() && slots().length > 0}><Divider vertical={vertical()} /></Show>
-            <Button testId="bar-media" ariaLabel={mediaLabel()}
-              data-bar-segment={docked() ? "docked" : "floating"}
-              data-active={activePanel() === "media" ? "true" : null}
-              style={vertical()
-                ? { ...segmentChrome(true, docked(), activePanel() === "media", true), width: docked() ? "30px" : "40px", height: docked() ? "30px" : "40px" }
-                : {
-                    ...segmentChrome(false, docked(), activePanel() === "media", true),
-                    height: docked() ? "28px" : "32px",
-                    justifyContent: "flex-start",
-                    padding: docked() ? "0 8px" : "0 12px",
-                    gap: "8px",
-                    flexShrink: 1,
-                    minWidth: "0px",
-                    overflow: "hidden",
-                  }}
-              onClick={event => {
-                event.stopPropagation();
-                togglePanel("media", {
-                  monitorId: props.monitor.id,
-                  parentSurface: surfaceName(),
-                  anchorRect: resolveBarPopupAnchor(props.layout, { align: "target", targetRect: getWindowRect(event.currentTarget) }),
-                });
-              }}
-              {...secondaryAction(() => {
-                void invokePublic("media.play-pause", { player_id: active().id });
-              })}
-              onWheel={event => {
-                const direction = wheelDirection(event);
-                if (!direction) return;
-                event.preventDefault();
-                void invokePublic(direction > 0 ? "media.next" : "media.previous", { player_id: active().id });
-              }}>
-              <ShellIcon name="mediaEq" size={16} color={primary} />
-              <Show when={!vertical()}><text testId="bar-media-text" style={clippedText}>{mediaLabel()}</text></Show>
-            </Button>
-          </>}
+          {active => {
+            const mediaRef = props.blur.useTarget();
+            return <>
+              <Show when={docked() && slots().length > 0}><Divider vertical={vertical()} /></Show>
+              <Button ref={mediaRef} testId="bar-media" ariaLabel={mediaLabel()}
+                data-bar-segment={docked() ? "docked" : "floating"}
+                data-active={activePanel() === "media" ? "true" : null}
+                style={vertical()
+                  ? { ...segmentChrome(true, docked(), activePanel() === "media", true), width: docked() ? "30px" : "40px", height: docked() ? "30px" : "40px" }
+                  : {
+                      ...segmentChrome(false, docked(), activePanel() === "media", true),
+                      height: docked() ? "28px" : "32px",
+                      justifyContent: "flex-start",
+                      padding: docked() ? "0 8px" : "0 12px",
+                      gap: "8px",
+                      flexShrink: 1,
+                      minWidth: "0px",
+                      overflow: "hidden",
+                    }}
+                onClick={event => {
+                  event.stopPropagation();
+                  togglePanel("media", {
+                    monitorId: props.monitor.id,
+                    parentSurface: surfaceName(),
+                    anchorRect: resolveBarPopupAnchor(props.layout, { align: "target", targetRect: getWindowRect(event.currentTarget) }),
+                  });
+                }}
+                {...secondaryAction(() => {
+                  void invokePublic("media.play-pause", { player_id: active().id });
+                })}
+                onWheel={event => {
+                  const direction = wheelDirection(event);
+                  if (!direction) return;
+                  event.preventDefault();
+                  void invokePublic(direction > 0 ? "media.next" : "media.previous", { player_id: active().id });
+                }}>
+                <ShellIcon name="mediaEq" size={16} color={primary} />
+                <Show when={!vertical()}><text testId="bar-media-text" style={clippedText}>{mediaLabel()}</text></Show>
+              </Button>
+            </>;
+          }}
         </Show>
         <Show when={(store.tray.data()?.items.length ?? 0) > 0}>
-          <Show when={docked()}><Divider vertical={vertical()} /></Show>
-          <box testId="bar-tray" style={vertical()
-            ? { ...segmentChrome(true, docked()), width: docked() ? "30px" : "40px", gap: "2px", padding: "8px 0" }
-            : { ...segmentChrome(false, docked()), height: docked() ? "28px" : "32px", gap: "2px", padding: "0 4px" }}>
-            <For each={store.tray.data()?.items} keyed={item => item.id}>
-              {item => <TrayButton item={item()} vertical={vertical()} monitorId={props.monitor.id} surfaceName={surfaceName()} layout={props.layout} />}
-            </For>
-          </box>
+          {() => {
+            const trayRef = props.blur.useTarget();
+            return <>
+              <Show when={docked()}><Divider vertical={vertical()} /></Show>
+              <box ref={trayRef} testId="bar-tray" style={vertical()
+                ? { ...segmentChrome(true, docked()), width: docked() ? "30px" : "40px", gap: "2px", padding: "8px 0" }
+                : { ...segmentChrome(false, docked()), height: docked() ? "28px" : "32px", gap: "2px", padding: "0 4px" }}>
+                <For each={store.tray.data()?.items} keyed={item => item.id}>
+                  {item => <TrayButton item={item()} vertical={vertical()} monitorId={props.monitor.id} surfaceName={surfaceName()} layout={props.layout} />}
+                </For>
+              </box>
+            </>;
+          }}
         </Show>
         <Show when={docked()}><Divider vertical={vertical()} /></Show>
         <SystemPill vertical={vertical()} docked={docked()} active={activePanel() === "quick-settings" || activePanel() === "battery"}
-          monitorId={props.monitor.id} surfaceName={surfaceName()} layout={props.layout} />
+          monitorId={props.monitor.id} surfaceName={surfaceName()} layout={props.layout} blur={props.blur} />
       </box>
     </box>
   );
@@ -813,11 +843,15 @@ export function StatusBar() {
     <For each={monitors()} keyed={monitor => monitor.id}>
       {monitor => {
         const layout = createMemo(() => resolveBarLayout(barSettings(), monitor(), outputs.data()));
+        const blur = createRoundedBlurGroup(
+          () => (layout().isVertical ? 20 : 16),
+          () => layout().style === "floating",
+        );
         return (
           <LayerSurface name={formatSurfaceName("bar", monitor().id)} output={monitor().id} layer="top" anchor={[...layout().anchor]}
             width={layout().width} height={layout().height} margin={layout().margin} exclusiveZone={layout().exclusiveZone}
-            inputRegion={layout().inputRegion ? [...layout().inputRegion!] : "full"} keyboard="none">
-            <BarContent monitor={monitor()} layout={layout()} launcher={barSettings().launcher_enabled !== false} clock={clock} seconds={clockSeconds()} />
+            inputRegion={layout().inputRegion ? [...layout().inputRegion!] : "full"} blurRegion={blur.region()} keyboard="none">
+            <BarContent monitor={monitor()} layout={layout()} launcher={barSettings().launcher_enabled !== false} clock={clock} seconds={clockSeconds()} blur={blur} />
           </LayerSurface>
         );
       }}

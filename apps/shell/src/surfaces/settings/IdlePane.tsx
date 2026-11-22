@@ -159,7 +159,7 @@ function RuleEditorCard(props: {
       <Show when={props.dirty()}>
         <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", paddingTop: "4px" }}>
           <row style={{ alignItems: "center", gap: "6px", minWidth: "0px" }}>
-            <box ariaHidden style={{ width: "6px", height: "6px", borderRadius: "3px", backgroundColor: primary, flexShrink: 0 }} />
+            <box ariaHidden style={{ width: "6px", height: "6px", borderRadius: "3px", "--zgui-corner-shape": "none", backgroundColor: primary, flexShrink: 0 }} />
             <text style={{ ...clipped, fontSize: "11px", color: muted }}>Unsaved changes · Apply to commit to host idle daemon</text>
           </row>
           <Button testId="settings-idle-apply" onClick={props.onApply} style={{
@@ -254,7 +254,7 @@ export function IdlePane(): NativeChild {
           <row style={{ alignItems: "center", gap: "8px" }}>
             <text style={{ fontSize: "13px", fontWeight: 600 }}>Manual Caffeine Protection</text>
             <row style={{
-              alignItems: "center", gap: "5px", padding: "2px 8px", borderRadius: "999px",
+              alignItems: "center", gap: "5px", padding: "2px 8px", borderRadius: "999px", "--zgui-corner-shape": "none",
               backgroundColor: serviceStatus() === "running" ? primaryContainer : containerHighest,
               color: serviceStatus() === "running" ? onPrimaryContainer : muted,
               fontSize: "11px", fontWeight: 600,

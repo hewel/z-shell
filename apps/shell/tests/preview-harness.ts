@@ -205,17 +205,57 @@ export function expectCleanPreview(result: PreviewResult, captureCount: number, 
   }
 }
 
+export type RecordedBlurRegion = "none" | "full" | readonly DeviceBounds[];
+
 export function readCapture(out: string, surface: string, captureId: string) {
   const capture = join(out, "captures/surfaces", surface, captureId);
   return {
     frame: JSON.parse(readFileSync(`${capture}.frame.json`, "utf8")) as {
       readonly renderer: { readonly alphaMode: string };
+      readonly blurRegion?: RecordedBlurRegion;
     },
     tree: JSON.parse(readFileSync(`${capture}.tree.json`, "utf8")) as {
       readonly nodes: readonly PreviewTreeNode[];
     },
     image: pngRgba(`${capture}.png`),
   };
+}
+
+/**
+ * Verifies that a captured surface publishes integer horizontal blur strips (`<= 256`) strictly
+ * contained within `bounds` and never covering its sharp outer corners (`radius > 0`).
+ */
+export function assertRoundedBlurStrips(
+  blurRegion: RecordedBlurRegion | undefined,
+  bounds: DeviceBounds,
+  radius: number,
+  label: string,
+): void {
+  expect(Array.isArray(blurRegion), `${label}: blurRegion is rounded strip array`).toBe(true);
+  const strips = blurRegion as readonly DeviceBounds[];
+  expect(strips.length, `${label}: non-empty blur strips`).toBeGreaterThan(0);
+  expect(strips.length, `${label}: blur strips <= 256 protocol cap`).toBeLessThanOrEqual(256);
+  const x0 = bounds.x - 1;
+  const y0 = bounds.y - 1;
+  const x1 = bounds.x + bounds.width + 1;
+  const y1 = bounds.y + bounds.height + 1;
+  for (const strip of strips) {
+    expect(Number.isInteger(strip.x), `${label}: integer strip x`).toBe(true);
+    expect(Number.isInteger(strip.y), `${label}: integer strip y`).toBe(true);
+    expect(Number.isInteger(strip.width), `${label}: integer strip width`).toBe(true);
+    expect(Number.isInteger(strip.height), `${label}: integer strip height`).toBe(true);
+    expect(strip.x, `${label}: strip left >= card left`).toBeGreaterThanOrEqual(x0);
+    expect(strip.y, `${label}: strip top >= card top`).toBeGreaterThanOrEqual(y0);
+    expect(strip.x + strip.width, `${label}: strip right <= card right`).toBeLessThanOrEqual(x1);
+    expect(strip.y + strip.height, `${label}: strip bottom <= card bottom`).toBeLessThanOrEqual(y1);
+  }
+  if (radius >= 8) {
+    // Top-left corner pixel (bounds.x, bounds.y) must NOT be covered by any blur strip (zero corner leak).
+    const coversTopLeft = strips.some(
+      s => bounds.x >= s.x && bounds.x < s.x + s.width && bounds.y >= s.y && bounds.y < s.y + s.height,
+    );
+    expect(coversTopLeft, `${label}: top-left rounded corner excluded from blurRegion`).toBe(false);
+  }
 }
 
 export interface SessionLockSnapshot {

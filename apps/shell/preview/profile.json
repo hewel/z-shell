@@ -28,6 +28,6 @@
     "maxSettleTurns": 1000,
     "maxFramesPerStep": 1000,
     "maxVirtualDurationMs": 60000,
-    "maxOutputBytes": 67108864
+    "maxOutputBytes": 134217728
   }
 }

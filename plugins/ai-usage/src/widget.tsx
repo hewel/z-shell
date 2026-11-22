@@ -62,7 +62,7 @@ export default function Widget(props: {
       }}
       style={{
         display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, gap: "6px",
-        width: props.vertical ? "28px" : "auto", height: props.vertical ? "28px" : "26px", borderRadius: "999px",
+        width: props.vertical ? "28px" : "auto", height: props.vertical ? "28px" : "26px", borderRadius: "999px", "--zgui-corner-shape": "none",
         padding: props.vertical ? "0" : "0 6px",
         backgroundColor: "transparent", color: "var(--color-on-surface)",
         opacity: snapshot()?.stale || snapshot()?.offlineBlocked ? 0.55 : 1,

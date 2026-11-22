@@ -22,11 +22,11 @@ const coverTile = { width: "72px", height: "72px", flexShrink: 0, borderRadius: 
 const coverImage = { ...coverTile, objectFit: "cover" } as const;
 const truncate = { overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" } as const;
 const skipBtn = {
-  display: "flex", width: "44px", height: "44px", borderRadius: "999px",
+  display: "flex", width: "44px", height: "44px", borderRadius: "999px", "--zgui-corner-shape": "none",
   alignItems: "center", justifyContent: "center", backgroundColor: "transparent", flexShrink: 0,
 } as const;
 const subTransportBtn = {
-  display: "flex", width: "36px", height: "36px", borderRadius: "999px",
+  display: "flex", width: "36px", height: "36px", borderRadius: "999px", "--zgui-corner-shape": "none",
   alignItems: "center", justifyContent: "center", flexShrink: 0,
 } as const;
 const tenSecondsUs = 10_000_000;
@@ -128,17 +128,17 @@ function WavyProgressTrack(props: {
       <box ariaHidden style={{
         position: "absolute", right: "2px", height: isFlat() ? "5px" : "4px", width: restPct(),
         display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: "1px",
-        borderRadius: "3px", backgroundColor: containerHighest,
+        borderRadius: "3px", "--zgui-corner-shape": "none", backgroundColor: containerHighest,
       }}>
         <Show when={clamped() < 0.94}>
           <box ariaHidden data-slider-stop-dot="true" style={{
-            width: "4px", height: "4px", borderRadius: "999px", backgroundColor: primary, flexShrink: 0,
+            width: "4px", height: "4px", borderRadius: "999px", "--zgui-corner-shape": "none", backgroundColor: primary, flexShrink: 0,
           }} />
         </Show>
       </box>
       <box ariaHidden data-slider-thumb="true" style={{
         position: "absolute", left: `${(clamped() * 100).toFixed(2)}%`,
-        width: "4px", height: "20px", borderRadius: "2px", backgroundColor: primary,
+        width: "4px", height: "20px", borderRadius: "2px", "--zgui-corner-shape": "none", backgroundColor: primary,
       }} />
     </control>
   );
@@ -211,7 +211,7 @@ function TrackControls(props: { player: Accessor<MediaPlayer> }) {
         </Button>
         <Button testId="media-play-pause" ariaLabel={playing() ? "Pause" : "Play"} disabled={!canPlayPause()}
           style={{
-            display: "flex", width: "72px", height: "56px", borderRadius: "999px", flexShrink: 0,
+            display: "flex", width: "72px", height: "56px", borderRadius: "999px", "--zgui-corner-shape": "none", flexShrink: 0,
             alignItems: "center", justifyContent: "center", backgroundColor: primary,
           }}
           onClick={() => { void invokePublic("media.play-pause", { player_id: player().id }); }}>

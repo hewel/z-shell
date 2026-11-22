@@ -336,7 +336,7 @@ function OverviewContent(props: {
           </column>
           <Button testId="overview-close" ariaLabel="Close overview" ref={node => focus(node)} onClick={closePanels} style={{
             display: "flex", alignItems: "center", justifyContent: "center",
-            width: "36px", height: "36px", borderRadius: "999px", flexShrink: 0,
+            width: "36px", height: "36px", borderRadius: "999px", "--zgui-corner-shape": "none", flexShrink: 0,
             backgroundColor: containerHigh, color: onSurface,
           }}>
             <ShellIcon name="close" size={18} color={onSurface} />

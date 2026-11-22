@@ -35,6 +35,7 @@ export default function Widget(props: {
         alignItems: "center", justifyContent: "center", flexShrink: 0, gap: "4px",
         minWidth: "26px", minHeight: "26px", padding: hasAgents() ? "2px 4px" : "0px",
         borderRadius: "999px",
+        "--zgui-corner-shape": "none",
         backgroundColor: active() ? "var(--color-primary-container)" : "transparent",
         color: active() ? "var(--color-on-primary-container)" : "var(--color-on-surface-variant)",
       }}>

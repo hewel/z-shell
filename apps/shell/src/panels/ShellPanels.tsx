@@ -1,4 +1,5 @@
-import { PopupSurface, Show, createMemo, untrack, type NativeChild, type PopupSurfacePlacement } from "@hewel/zgui";
+import { PopupSurface, Show, createMemo, untrack, type NativeChild, type NativeNode, type PopupSurfacePlacement } from "@hewel/zgui";
+import { createSingleNodeRoundedBlur } from "../blur.ts";
 import {
   createRetainedPresence,
   panelMotionStyle,
@@ -70,24 +71,27 @@ function PanelContent(props: {
   theme: ShellStore["theme"];
   spatial: M3Spring;
   opacity: M3Spring;
+  blurRef?: (node: NativeNode) => void;
   children: NativeChild;
 }) {
   useShellTheme(props.theme.data);
   const scheme = useMotionScheme();
   return (
-    <box testId={`panel-root-${props.id}`} data-theme-rev={String(props.theme.revision())} style={{
-      ...POPOVER_FRAME_STYLE,
-      maxHeight: `${props.maxHeight}px`,
-      ...panelMotionStyle(props.spatial(), props.position, props.centered, {
-        opacity: props.opacity(),
-        reduced: scheme() === "reduced",
-      }),
-    }}>
-      <box style={{
-        width: "100%",
-        ...popoverContentMotionStyle(props.spatial(), props.opacity(), scheme() === "reduced"),
+    <box ref={props.blurRef} style={{ width: "100%" }}>
+      <box testId={`panel-root-${props.id}`} data-theme-rev={String(props.theme.revision())} style={{
+        ...POPOVER_FRAME_STYLE,
+        maxHeight: `${props.maxHeight}px`,
+        ...panelMotionStyle(props.spatial(), props.position, props.centered, {
+          opacity: props.opacity(),
+          reduced: scheme() === "reduced",
+        }),
       }}>
-        {props.children}
+        <box style={{
+          width: "100%",
+          ...popoverContentMotionStyle(props.spatial(), props.opacity(), scheme() === "reduced"),
+        }}>
+          {props.children}
+        </box>
       </box>
     </box>
   );
@@ -125,12 +129,13 @@ export function ShellPanels(): NativeChild {
           presence.dismissInstant();
           closePanels();
         };
+        const blur = createSingleNodeRoundedBlur(22, () => presence.visible() && presence.progress.settled());
         return (
           <PopupSurface name={`panel-${target.id}`} parent={target.parentSurface} anchorRect={target.anchorRect}
             width={width} height="auto" minHeight={80} maxHeight={maxHeight}
-            placement={geometry().placement} offset={geometry().offset} grab onDismiss={handleDismiss}>
+            placement={geometry().placement} offset={geometry().offset} grab blurRegion={blur.region()} onDismiss={handleDismiss}>
             <PanelContent id={target.id} maxHeight={maxHeight} position={position()} centered={centered}
-              theme={theme} spatial={presence.progress} opacity={presence.opacity}>
+              theme={theme} spatial={presence.progress} opacity={presence.opacity} blurRef={blur.ref}>
               <Component />
             </PanelContent>
           </PopupSurface>

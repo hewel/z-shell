@@ -142,6 +142,7 @@ function QuickTile(props: {
           <box ariaHidden data-qs-tile-icon="true" style={{
             ...iconWell,
             borderRadius: "999px",
+            "--zgui-corner-shape": "none",
             backgroundColor: props.active ? "color-mix(in srgb, var(--color-primary) 18%, transparent)" : containerHighest,
             transform: scheme() === "reduced" ? "none" : `scale(${Math.max(0.8, Math.min(1.12, iconPop())).toFixed(4)})`,
           }}>

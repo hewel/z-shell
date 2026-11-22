@@ -58,7 +58,7 @@ export default function NiriOverviewSettingsPage(props: PluginSettingsProps): Na
         </column>
         <row style={{ alignItems: "center", gap: "6px", flexShrink: 0 }}>
           <row style={{
-            alignItems: "center", gap: "5px", padding: "4px 10px", borderRadius: "999px",
+            alignItems: "center", gap: "5px", padding: "4px 10px", borderRadius: "999px", "--zgui-corner-shape": "none",
             backgroundColor: connected() ? primaryContainer : containerHighest,
             color: connected() ? onPrimaryContainer : muted, fontSize: "11px", fontWeight: 600,
           }}>

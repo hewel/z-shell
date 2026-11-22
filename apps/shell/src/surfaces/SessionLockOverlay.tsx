@@ -126,7 +126,7 @@ function LockScreen(props: {
         return (
           <row testId={`lock-battery-${monitor().id}`} style={{
             position: "absolute", zIndex: 2, top: "28px", right: "36px", alignItems: "center", gap: "6px",
-            borderRadius: "16px", backgroundColor: "color-mix(in srgb, var(--color-on-surface) 10%, transparent)", padding: "5px 10px",
+            borderRadius: "16px", "--zgui-corner-shape": "none", backgroundColor: "color-mix(in srgb, var(--color-on-surface) 10%, transparent)", padding: "5px 10px",
           }}>
             <ShellIcon name={battery().state === "charging" ? "batteryCharging" : "battery"} size={18} color="inherit" />
             <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "14px", fontWeight: 500, fontVariantNumeric: "tabular-nums" }}>
@@ -166,6 +166,7 @@ function LockScreen(props: {
           position: "relative", width: "340px", maxWidth: "100%", height: "56px", flexShrink: 0,
           alignItems: "center", justifyContent: "space-between", gap: "8px",
           borderRadius: "999px",
+          "--zgui-corner-shape": "none",
           backgroundColor: "color-mix(in srgb, var(--color-on-surface) 14%, transparent)",
           border: controls.error()
             ? "2px solid var(--color-error)"
@@ -222,7 +223,7 @@ function LockScreen(props: {
             <Button testId="lock-submit" ariaLabel="Unlock" disabled={controls.disabled()} onClick={() => void controls.submit()}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: "0px",
-                width: "32px", height: "32px", borderRadius: "999px", border: "0px",
+                width: "32px", height: "32px", borderRadius: "999px", "--zgui-corner-shape": "none", border: "0px",
                 backgroundColor: "var(--color-primary)", opacity: controls.disabled() ? 0.45 : 1,
               }}>
               <ShellIcon name="chevronRight" color="var(--color-on-primary)" size={18} />

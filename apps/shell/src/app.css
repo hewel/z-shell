@@ -36,6 +36,7 @@
   --color-error-container: #93000A;
   --color-on-error-container: #FFDAD6;
   --zgui-ring: var(--color-primary);
+  --zgui-corner-shape: superellipse(2.83);
   --font-sans: "Roboto Flex", sans-serif;
   --font-mono: "JetBrains Mono", monospace;
   --radius-xs: 6px;
@@ -125,8 +126,13 @@ control:not(:disabled):not([data-switch-root="true"]):not([data-dock-item="true"
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 24%, transparent);
 }
 
+[data-corner-shape="round"] {
+  --zgui-corner-shape: none;
+}
+
 /* Bar island triggers preserve their outer var(--shadow-level-1) while giving clear hover/active elevation. */
 [data-bar-segment="floating"] {
+  --zgui-corner-shape: none;
   background-color: var(--color-surface-container);
   border: 1px solid color-mix(in srgb, var(--color-outline-variant) 48%, transparent);
   transition-property: background-color, border-color, color;

@@ -60,7 +60,7 @@ function WallpaperCardTile(props: { item: Accessor<CatalogEntry>; active: boolea
       </Show>
       <Show when={props.active}>
         <box ariaHidden style={{
-          position: "absolute", right: "6px", bottom: "6px", width: "18px", height: "18px", borderRadius: "999px",
+          position: "absolute", right: "6px", bottom: "6px", width: "18px", height: "18px", borderRadius: "999px", "--zgui-corner-shape": "none",
           display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: primary,
         }}>
           <ShellIcon name="check" size={11} color={onPrimary} />
@@ -195,12 +195,12 @@ export function AppearancePane(): NativeChild {
                   <Button ariaLabel={`Set seed color ${seed()}`} selected={selected()} onClick={() => patchTheme({ seed_color: seed() }, { seed: seed() })}
                     style={{
                       display: "flex", alignItems: "center", justifyContent: "center",
-                      width: "24px", height: "24px", borderRadius: "999px", flexShrink: 0, padding: "2px",
+                      width: "24px", height: "24px", borderRadius: "999px", "--zgui-corner-shape": "none", flexShrink: 0, padding: "2px",
                       backgroundColor: selected() ? containerHigh : "transparent",
                       border: selected() ? "2px solid var(--color-on-surface)" : "2px solid transparent",
                     }}>
                     <box ariaHidden style={{
-                      width: "100%", height: "100%", borderRadius: "999px",
+                      width: "100%", height: "100%", borderRadius: "999px", "--zgui-corner-shape": "none",
                       backgroundColor: seed(),
                     }} />
                   </Button>

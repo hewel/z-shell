@@ -1003,4 +1003,50 @@ describe("DESIGN.md token and surface contract sync", () => {
     );
     expect(goodSliderControl.status, goodSliderControl.output).toBe(0);
   });
+
+  test("Smooth Corner Shape Contract: superellipse(2.83) on rounded-rect containers and round inheritance blocks on pills/circles", () => {
+    const appCss = readFileSync(join(shellDir, "src/app.css"), "utf8");
+    const primitivesCss = readFileSync(join(repoRoot, "packages/sdk/src/zgui-primitives.module.css"), "utf8");
+
+    expect(appCss, "app.css declares superellipse(2.83) on :root").toMatch(
+      /:root\s*\{[^}]*--zgui-corner-shape:\s*superellipse\(2\.83\);/s,
+    );
+    expect(appCss, "app.css resets floating bar capsules to round (--zgui-corner-shape: none)").toMatch(
+      /\[data-bar-segment="floating"\]\s*\{[^}]*--zgui-corner-shape:\s*none;/s,
+    );
+    expect(appCss, "app.css provides [data-corner-shape=\"round\"] escape hatch").toMatch(
+      /\[data-corner-shape="round"\]\s*\{[^}]*--zgui-corner-shape:\s*none;/s,
+    );
+
+    // Pill/circular primitives in zgui-primitives.module.css must block superellipse inheritance.
+    for (const selector of [
+      "switchTrack",
+      "switchThumb",
+      "sliderActiveTrack",
+      "sliderInactiveTrack",
+      "sliderStopDot",
+      "linearProgressActive",
+      "linearProgressInactive",
+    ]) {
+      expect(primitivesCss, `.${selector} blocks --zgui-corner-shape inheritance`).toMatch(
+        new RegExp(`\\.${selector}\\s*\\{[^}]*--zgui-corner-shape:\\s*none;`, "s"),
+      );
+    }
+
+    // Core shell circular/pill elements must explicitly block superellipse inheritance.
+    for (const [relPath, label] of [
+      ["apps/shell/src/surfaces/StatusBar.tsx", "StatusBar floating capsules & badges"],
+      ["apps/shell/src/surfaces/DockSurface.tsx", "Dock running dots & focus pill"],
+      ["apps/shell/src/surfaces/OsdOverlay.tsx", "OSD capsule"],
+      ["apps/shell/src/surfaces/BarPopups.tsx", "Menu radio dot"],
+      ["apps/shell/src/surfaces/NotificationToasts.tsx", "Toast circular dismiss button"],
+      ["apps/shell/src/panels/QuickSettingsPanel.tsx", "QuickTile circular icon well"],
+      ["apps/shell/src/panels/MediaPanel.tsx", "Media Play/Pause pill & circular transport buttons"],
+      ["apps/shell/src/panels/CalendarPanel.tsx", "Calendar unread count pill"],
+      ["apps/shell/src/surfaces/settings/AppearancePane.tsx", "Settings circular color seed swatches"],
+    ] as const) {
+      const source = readFileSync(join(repoRoot, relPath), "utf8");
+      expect(source, `${label} declares "--zgui-corner-shape": "none"`).toContain(`"--zgui-corner-shape": "none"`);
+    }
+  });
 });

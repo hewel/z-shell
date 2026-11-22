@@ -1,5 +1,6 @@
-import { For, PopupSurface, Show, createMemo, type NativeChild } from "@hewel/zgui";
+import { For, PopupSurface, Show, createMemo, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { MenuItemPrimitive, MenuListPrimitive, MenuRootPrimitive } from "@hewel/zgui/primitives";
+import { createSingleNodeRoundedBlur } from "../blur.ts";
 import { ShellIcon } from "../icons.tsx";
 import { createRetainedPresence, panelMotionStyle, popoverContentMotionStyle, useMotionScheme, type M3Spring } from "../motion.ts";
 import { resolvePopoverGeometry } from "../panels/ShellPanels.tsx";
@@ -69,6 +70,7 @@ function PopupContent(props: {
   position: BarPosition;
   spatial: M3Spring;
   opacity: M3Spring;
+  blurRef?: (node: NativeNode) => void;
   onDismiss: () => void;
   children: NativeChild;
 }) {
@@ -77,38 +79,40 @@ function PopupContent(props: {
   const scheme = useMotionScheme();
   return (
     <MenuRootPrimitive open onDismiss={props.onDismiss}>
-      <box data-theme-rev={String(theme.revision())} style={{
-        width: "100%",
-        borderRadius: "16px",
-        backgroundColor: "var(--color-surface-container)",
-        border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
-        color: "var(--color-on-surface)",
-        fontFamily: "var(--font-sans)",
-        fontSize: "13px",
-        overflow: "hidden",
-        ...panelMotionStyle(props.spatial(), props.position, false, {
-          opacity: props.opacity(),
-          reduced: scheme() === "reduced",
-        }),
-      }}>
-        <scroll style={{
+      <box ref={props.blurRef} style={{ width: "100%" }}>
+        <box data-theme-rev={String(theme.revision())} style={{
           width: "100%",
-          maxHeight: `${MENU_MAX_HEIGHT - 2}px`,
-          overflow: "hidden auto",
-          ...popoverContentMotionStyle(props.spatial(), props.opacity(), scheme() === "reduced"),
+          borderRadius: "16px",
+          backgroundColor: "var(--color-surface-container)",
+          border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
+          color: "var(--color-on-surface)",
+          fontFamily: "var(--font-sans)",
+          fontSize: "13px",
+          overflow: "hidden",
+          ...panelMotionStyle(props.spatial(), props.position, false, {
+            opacity: props.opacity(),
+            reduced: scheme() === "reduced",
+          }),
         }}>
-          <MenuListPrimitive
-            label={props.label}
-            autoFocus
-            dismissOnEscape
-            dismissOnOutsidePress={false}
-            dismissLayer={false}
-            onDismiss={props.onDismiss}
-            style={{ display: "flex", flexDirection: "column", padding: props.padding, gap: "2px" }}
-          >
-            {props.children}
-          </MenuListPrimitive>
-        </scroll>
+          <scroll style={{
+            width: "100%",
+            maxHeight: `${MENU_MAX_HEIGHT - 2}px`,
+            overflow: "hidden auto",
+            ...popoverContentMotionStyle(props.spatial(), props.opacity(), scheme() === "reduced"),
+          }}>
+            <MenuListPrimitive
+              label={props.label}
+              autoFocus
+              dismissOnEscape
+              dismissOnOutsidePress={false}
+              dismissLayer={false}
+              onDismiss={props.onDismiss}
+              style={{ display: "flex", flexDirection: "column", padding: props.padding, gap: "2px" }}
+            >
+              {props.children}
+            </MenuListPrimitive>
+          </scroll>
+        </box>
       </box>
     </MenuRootPrimitive>
   );
@@ -146,7 +150,7 @@ function MenuButton(props: {
       <box ariaHidden style={indicator}>
         <Show when={props.checked}>
           <Show when={props.toggle === "radio"} fallback={<ShellIcon name="check" size={14} color={primary} />}>
-            <box style={{ width: "6px", height: "6px", borderRadius: "3px", backgroundColor: primary }} />
+            <box style={{ width: "6px", height: "6px", borderRadius: "3px", "--zgui-corner-shape": "none", backgroundColor: primary }} />
           </Show>
         </Show>
       </box>
@@ -199,57 +203,65 @@ export function BarPopups(): NativeChild {
   return (
     <>
       <Show when={trayPresence.value()}>
-        {item => (
-          <PopupSurface name="tray-menu" parent={item().target.parentSurface} anchorRect={item().target.anchorRect}
-            width={trayWidth()} height="auto" minHeight={48} maxHeight={MENU_MAX_HEIGHT}
-            placement={geometry().placement} offset={geometry().offset} grab onDismiss={() => { trayPresence.dismissInstant(); closeTrayMenu(); }}>
-            <PopupContent padding="8px" label={item().label} position={position()} spatial={trayPresence.progress} opacity={trayPresence.opacity}
-              onDismiss={closeTrayMenu}>
-              <For each={trayRows()} keyed={row => row.node.id}>
-                {row => (
-                  <Show when={!row().node.separator} fallback={<box ariaHidden style={separator} />}>
-                    <MenuButton testId={`tray-menu-item-${row().node.id}`} label={row().node.label ?? ""} depth={row().depth}
-                      disabled={!row().enabled} toggle={row().node.toggle_type} checked={row().node.toggle_state === 1} submenu={row().submenu}
-                      activate={() => {
-                        void invokePublic("tray.menu-item", { id: item().target.itemId, menu_id: row().node.id });
-                        closeTrayMenu();
-                      }} />
-                  </Show>
-                )}
-              </For>
-            </PopupContent>
-          </PopupSurface>
-        )}
+        {item => {
+          const blur = createSingleNodeRoundedBlur(16, () => trayPresence.visible() && trayPresence.progress.settled());
+          return (
+            <PopupSurface name="tray-menu" parent={item().target.parentSurface} anchorRect={item().target.anchorRect}
+              width={trayWidth()} height="auto" minHeight={48} maxHeight={MENU_MAX_HEIGHT}
+              placement={geometry().placement} offset={geometry().offset} grab blurRegion={blur.region()}
+              onDismiss={() => { trayPresence.dismissInstant(); closeTrayMenu(); }}>
+              <PopupContent padding="8px" label={item().label} position={position()} spatial={trayPresence.progress} opacity={trayPresence.opacity}
+                blurRef={blur.ref} onDismiss={closeTrayMenu}>
+                <For each={trayRows()} keyed={row => row.node.id}>
+                  {row => (
+                    <Show when={!row().node.separator} fallback={<box ariaHidden style={separator} />}>
+                      <MenuButton testId={`tray-menu-item-${row().node.id}`} label={row().node.label ?? ""} depth={row().depth}
+                        disabled={!row().enabled} toggle={row().node.toggle_type} checked={row().node.toggle_state === 1} submenu={row().submenu}
+                        activate={() => {
+                          void invokePublic("tray.menu-item", { id: item().target.itemId, menu_id: row().node.id });
+                          closeTrayMenu();
+                        }} />
+                    </Show>
+                  )}
+                </For>
+              </PopupContent>
+            </PopupSurface>
+          );
+        }}
       </Show>
       <Show when={imePresence.value()}>
-        {target => (
-          <PopupSurface name="ime-menu" parent={target().parentSurface} anchorRect={target().anchorRect}
-            width={imeWidth()} height="auto" minHeight={48} maxHeight={MENU_MAX_HEIGHT}
-            placement={geometry().placement} offset={geometry().offset} grab onDismiss={() => { imePresence.dismissInstant(); closeImeMenu(); }}>
-            <PopupContent padding="8px" label="Input method" position={position()} spatial={imePresence.progress} opacity={imePresence.opacity}
-              onDismiss={closeImeMenu}>
-              <For each={ime.data()?.group_ims} keyed={im => im.unique_name}>
-                {im => (
-                  <MenuButton testId={`ime-im-${im().unique_name}`} label={im().label}
-                    checked={im().unique_name === ime.data()?.active_im?.unique_name}
-                    activate={() => {
-                      void invokePublic("ime.set-im", { unique_name: im().unique_name });
-                      closeImeMenu();
-                    }} />
-                )}
-              </For>
-              <For each={ime.data()?.properties} keyed={prop => prop.key}>
-                {prop => (
-                  <MenuButton testId={`ime-prop-${prop().key}`} label={prop().label}
-                    activate={() => {
-                      void invokePublic("ime.trigger-property", { key: prop().key });
-                      closeImeMenu();
-                    }} />
-                )}
-              </For>
-            </PopupContent>
-          </PopupSurface>
-        )}
+        {target => {
+          const blur = createSingleNodeRoundedBlur(16, () => imePresence.visible() && imePresence.progress.settled());
+          return (
+            <PopupSurface name="ime-menu" parent={target().parentSurface} anchorRect={target().anchorRect}
+              width={imeWidth()} height="auto" minHeight={48} maxHeight={MENU_MAX_HEIGHT}
+              placement={geometry().placement} offset={geometry().offset} grab blurRegion={blur.region()}
+              onDismiss={() => { imePresence.dismissInstant(); closeImeMenu(); }}>
+              <PopupContent padding="8px" label="Input method" position={position()} spatial={imePresence.progress} opacity={imePresence.opacity}
+                blurRef={blur.ref} onDismiss={closeImeMenu}>
+                <For each={ime.data()?.group_ims} keyed={im => im.unique_name}>
+                  {im => (
+                    <MenuButton testId={`ime-im-${im().unique_name}`} label={im().label}
+                      checked={im().unique_name === ime.data()?.active_im?.unique_name}
+                      activate={() => {
+                        void invokePublic("ime.set-im", { unique_name: im().unique_name });
+                        closeImeMenu();
+                      }} />
+                  )}
+                </For>
+                <For each={ime.data()?.properties} keyed={prop => prop.key}>
+                  {prop => (
+                    <MenuButton testId={`ime-prop-${prop().key}`} label={prop().label}
+                      activate={() => {
+                        void invokePublic("ime.trigger-property", { key: prop().key });
+                        closeImeMenu();
+                      }} />
+                  )}
+                </For>
+              </PopupContent>
+            </PopupSurface>
+          );
+        }}
       </Show>
     </>
   );

@@ -1,5 +1,6 @@
 import { For, LayerSurface, Show, createEffect, createMemo, createSignal, type Accessor, type Monitor, type NativeChild } from "@hewel/zgui";
 import { M3Slider } from "@z-shell/sdk/primitives";
+import { createSingleNodeRoundedBlur } from "../blur.ts";
 import { ShellIcon } from "../icons.tsx";
 import {
   createLinearProgress,
@@ -17,6 +18,7 @@ const capsule = {
   border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
   boxShadow: "var(--shadow-level-2)",
   borderRadius: "999px",
+  "--zgui-corner-shape": "none",
   color: onSurface,
 } as const;
 
@@ -145,19 +147,29 @@ export function OsdOverlay(): NativeChild {
   return (
     <>
       <Show when={osdPresence.value()?.output} keyed>
-        {output => (
-          <LayerSurface name="osd-overlay" output={output} layer="overlay" anchor={["bottom"]}
-            margin={{ bottom: 52 }} width={344} height={108} keyboard="none" inputRegion="empty">
-            <box style={{
-              width: "100%", height: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center",
-              paddingBottom: "36px",
-            }}>
-              <Show when={osdPresence.value()}>
-                {entry => <OsdPill osd={() => entry().payload} spatial={osdPresence.progress} opacity={osdPresence.opacity} />}
-              </Show>
-            </box>
-          </LayerSurface>
-        )}
+        {output => {
+          const blur = createSingleNodeRoundedBlur(
+            24,
+            () => osdPresence.visible() && osdPresence.progress.settled(),
+            2,
+          );
+          return (
+            <LayerSurface name="osd-overlay" output={output} layer="overlay" anchor={["bottom"]}
+              margin={{ bottom: 52 }} width={344} height={108} keyboard="none" inputRegion="empty" blurRegion={blur.region()}>
+              <box style={{
+                position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
+                display: "flex", alignItems: "flex-end", justifyContent: "center",
+                paddingBottom: "36px",
+              }}>
+                <box ref={blur.ref}>
+                  <Show when={osdPresence.value()}>
+                    {entry => <OsdPill osd={() => entry().payload} spatial={osdPresence.progress} opacity={osdPresence.opacity} />}
+                  </Show>
+                </box>
+              </box>
+            </LayerSurface>
+          );
+        }}
       </Show>
       <Show when={idle.data()?.warning}>
         {warning => <IdleWarning warning={warning} monitors={monitors} />}

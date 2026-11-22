@@ -217,7 +217,7 @@ function OverviewCard(props: {
             <Button testId="niri-overview-refresh" ariaLabel="Refresh overview"
               onClick={() => void invoke("refresh")} style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
-                width: "36px", height: "36px", borderRadius: "999px",
+                width: "36px", height: "36px", borderRadius: "999px", "--zgui-corner-shape": "none",
                 backgroundColor: containerHigh, color: onSurface,
               }}>
               <vector ariaHidden viewBox="0 0 24 24"
@@ -227,7 +227,7 @@ function OverviewCard(props: {
             <Button testId="niri-overview-close" ariaLabel="Close overview" ref={node => focus(node)}
               onClick={close} style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
-                width: "36px", height: "36px", borderRadius: "999px",
+                width: "36px", height: "36px", borderRadius: "999px", "--zgui-corner-shape": "none",
                 backgroundColor: containerHigh, color: onSurface,
               }}>
               <vector ariaHidden viewBox="0 0 24 24"

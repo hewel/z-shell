@@ -3,6 +3,7 @@ import {
   type Component, type NativeChild, type NativeNode, type NativeWindowRect,
 } from "@hewel/zgui";
 import { type PluginSettingsProps } from "@z-shell/sdk/zgui";
+import { createSingleNodeRoundedBlur } from "../blur.ts";
 import {
   createRetainedPresence,
   panelMotionStyle,
@@ -49,27 +50,30 @@ function PluginPanelFrame(props: {
   position: BarPosition;
   spatial: M3Spring;
   opacity: M3Spring;
+  blurRef?: (node: NativeNode) => void;
   children: NativeChild;
 }): NativeChild {
   useShellTheme(props.theme.data);
   const scheme = useMotionScheme();
   return (
-    <box data-theme-rev={String(props.theme.revision())} style={{
-      ...POPOVER_FRAME_STYLE,
-      maxHeight: `${PANEL_MAX_HEIGHTS.plugin}px`,
-      ...panelMotionStyle(props.spatial(), props.position, false, {
-        opacity: props.opacity(),
-        reduced: scheme() === "reduced",
-      }),
-    }}>
-      <scroll style={{
-        width: "100%",
+    <box ref={props.blurRef} style={{ width: "100%" }}>
+      <box data-theme-rev={String(props.theme.revision())} style={{
+        ...POPOVER_FRAME_STYLE,
         maxHeight: `${PANEL_MAX_HEIGHTS.plugin}px`,
-        overflow: "hidden auto",
-        ...popoverContentMotionStyle(props.spatial(), props.opacity(), scheme() === "reduced"),
+        ...panelMotionStyle(props.spatial(), props.position, false, {
+          opacity: props.opacity(),
+          reduced: scheme() === "reduced",
+        }),
       }}>
-        {props.children}
-      </scroll>
+        <scroll style={{
+          width: "100%",
+          maxHeight: `${PANEL_MAX_HEIGHTS.plugin}px`,
+          overflow: "hidden auto",
+          ...popoverContentMotionStyle(props.spatial(), props.opacity(), scheme() === "reduced"),
+        }}>
+          {props.children}
+        </scroll>
+      </box>
     </box>
   );
 }
@@ -258,11 +262,12 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
             dismissPluginPanel();
             openSettingsWindow(page ? page.id : "appearance");
           };
+          const blur = createSingleNodeRoundedBlur(22, () => panelPresence.visible() && panelPresence.progress.settled());
           return (
             <PopupSurface name={formatSurfaceName("plugin-panel", instanceId)} parent={formatSurfaceName("bar", outputId)} anchorRect={anchorRect}
               width={width} height="auto" minHeight={80} maxHeight={PANEL_MAX_HEIGHTS.plugin}
-              placement={geometry.placement} offset={geometry.offset} grab onDismiss={dismissPluginPanelInstant}>
-              <PluginPanelFrame theme={theme} position={position} spatial={panelPresence.progress} opacity={panelPresence.opacity}>
+              placement={geometry.placement} offset={geometry.offset} grab blurRegion={blur.region()} onDismiss={dismissPluginPanelInstant}>
+              <PluginPanelFrame theme={theme} position={position} spatial={panelPresence.progress} opacity={panelPresence.opacity} blurRef={blur.ref}>
                 <PanelComponent client={publicClient} onClose={dismissPluginPanel} onOpenSettings={onOpenSettings} />
               </PluginPanelFrame>
             </PopupSurface>

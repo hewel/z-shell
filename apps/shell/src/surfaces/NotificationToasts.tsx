@@ -1,5 +1,6 @@
 import { Button, For, Image, LayerSurface, Show, createEffect, createMemo, createSignal, onCleanup, type Accessor, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
+import { SUPERELLIPSE_EXPONENT, createRoundedBlurGroup, type RoundedBlurGroup } from "../blur.ts";
 import { ShellIcon } from "../icons.tsx";
 import { createEnterProgress, createOpacityEnter, createPresence, createRetainedPresence, useMotionScheme, type M3Spring } from "../motion.ts";
 import { useShellStore } from "../store.ts";
@@ -27,9 +28,10 @@ function trackedRef(track: TrackNode): (node: NativeNode) => void {
   return node => { detach = track(node); };
 }
 
-function ToastCard({ toast, track, stackSpatial, stackOpacity, promoted }: {
+function ToastCard({ toast, track, blur, stackSpatial, stackOpacity, promoted }: {
   toast: Accessor<NotificationItem>;
   track: TrackNode;
+  blur: RoundedBlurGroup;
   stackSpatial: M3Spring;
   stackOpacity: M3Spring;
   promoted: boolean;
@@ -72,8 +74,11 @@ function ToastCard({ toast, track, stackSpatial, stackOpacity, promoted }: {
     </row>
   );
 
+  const inputRef = trackedRef(track);
+  const blurRef = blur.useTarget(22);
+
   return (
-    <column ref={trackedRef(track)} testId={`toast-card-${toast().id}`} style={{
+    <column ref={node => { inputRef(node); blurRef(node); }} testId={`toast-card-${toast().id}`} style={{
       borderRadius: "22px", backgroundColor: container, border: outline, boxShadow: "var(--shadow-level-2)",
       padding: "14px", gap: "10px", color: onSurface,
       opacity: combinedOpacity(),
@@ -100,7 +105,7 @@ function ToastCard({ toast, track, stackSpatial, stackOpacity, promoted }: {
           )}
         </Show>
         <Button ariaLabel="Dismiss notification" testId={`toast-dismiss-${toast().id}`}
-          style={{ ...pill, borderRadius: "999px", padding: "0", width: "28px", minHeight: "28px", backgroundColor: containerHigh, color: muted }}
+          style={{ ...pill, borderRadius: "999px", "--zgui-corner-shape": "none", padding: "0", width: "28px", minHeight: "28px", backgroundColor: containerHigh, color: muted }}
           onClick={() => { void invokePublic("notifications.dismiss", { id: toast().id }); }}>
           <ShellIcon name="close" size={14} color={muted} />
         </Button>
@@ -133,17 +138,20 @@ function propsOr(cond: boolean, a: number, b: number): number {
   return cond ? a : b;
 }
 
-function ToastFooter({ count, next, track, progress, opacity }: {
+function ToastFooter({ count, next, track, blur, progress, opacity }: {
   count: number;
   next: NotificationItem;
   track: TrackNode;
+  blur: RoundedBlurGroup;
   progress: M3Spring;
   opacity: M3Spring;
 }): NativeChild {
   const { invokePublic } = useShellStore();
   const scheme = useMotionScheme();
+  const inputRef = trackedRef(track);
+  const blurRef = blur.useTarget(16);
   return (
-    <row ref={trackedRef(track)} testId="toast-more-footer" style={{
+    <row ref={node => { inputRef(node); blurRef(node); }} testId="toast-more-footer" style={{
       borderRadius: "16px", backgroundColor: container, border: outline, boxShadow: "var(--shadow-level-2)",
       padding: "6px 10px", gap: "8px", alignItems: "center",
       opacity: Math.max(0, Math.min(1, opacity())),
@@ -161,9 +169,10 @@ function ToastFooter({ count, next, track, progress, opacity }: {
   );
 }
 
-function ToastSurface({ output, popups, spatial, opacity }: {
+function ToastSurface({ output, popups, visible, spatial, opacity }: {
   output: string;
   popups: Accessor<readonly NotificationItem[]>;
+  visible: Accessor<boolean>;
   spatial: M3Spring;
   opacity: M3Spring;
 }): NativeChild {
@@ -195,6 +204,7 @@ function ToastSurface({ output, popups, spatial, opacity }: {
     setTrackedNodes(nodes => [...nodes, node]);
     return () => setTrackedNodes(nodes => nodes.filter(candidate => candidate !== node));
   };
+  const blur = createRoundedBlurGroup(22, () => visible() && spatial.settled(), SUPERELLIPSE_EXPONENT);
   const topMargin = createMemo(() => {
     const bar = settings.data()?.bar;
     if (bar?.position && bar.position !== "top") return 14;
@@ -203,10 +213,11 @@ function ToastSurface({ output, popups, spatial, opacity }: {
 
   return (
     <LayerSurface name="notification-toasts" output={output} layer="overlay" anchor={["top", "right"]}
-      margin={{ top: Math.max(0, topMargin() - 12), right: 0 }} width={396} height={456} keyboard="none" inputRegion={trackedNodes()}>
+      margin={{ top: Math.max(0, topMargin() - 12), right: 0 }} width={396} height={456} keyboard="none"
+      inputRegion={trackedNodes()} blurRegion={blur.region()}>
       <column style={{ width: "100%", padding: "12px 14px 28px 22px", gap: "8px" }}>
         <Show when={popups()[0]?.id} keyed>
-          {_id => <ToastCard toast={() => popups()[0]!} track={track} stackSpatial={spatial} stackOpacity={opacity} promoted={promoted()} />}
+          {_id => <ToastCard toast={() => popups()[0]!} track={track} blur={blur} stackSpatial={spatial} stackOpacity={opacity} promoted={promoted()} />}
         </Show>
         <Show when={footerPresence.mounted() && retainedFooter()}>
           {footer => (
@@ -214,6 +225,7 @@ function ToastSurface({ output, popups, spatial, opacity }: {
               count={footer().count}
               next={footer().next}
               track={track}
+              blur={blur}
               progress={footerPresence.progress}
               opacity={footerPresence.opacity}
             />
@@ -247,6 +259,7 @@ export function NotificationToasts(): NativeChild {
         <ToastSurface
           output={output}
           popups={() => presence.value()?.popups ?? []}
+          visible={presence.visible}
           spatial={presence.progress}
           opacity={presence.opacity}
         />
