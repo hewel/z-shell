@@ -209,6 +209,26 @@ Uses **M3 Fade Through** + **Sliding Sidebar Indicator** [[M3-Transitions]](#ref
 | **Precision Sliders** (`01`, `04`, `11`, `22B`, `22H`) | Pointer drag: **0ms direct tracking** (no spring lag) + vertical handle narrowing (`4px → 2.5px`); Track click / keyboard step: `fast.spatial` fill & handle snap | Direct / `fast.spatial` | Leading icon well tints to `primary-container` and right-side tabular readout highlights in `primary` (`fast.effects`); no duplicate white floating bubble on labeled rows. |
 | **State Layers** (`Hover / Focus / Press / Drag`) | Translucent foreground overlay (`8%` / `12%` / `12%` / `16%`, per `material-web` `_md-sys-state.scss`) | `fast.effects` (`short2` `100ms` CSS) | Never animate `outline-width`; fade focus ring opacity smoothly. |
 
+### 5.9 Motion Craft & Continuity Contracts (Anti-Stiffness Standards)
+
+To prevent transitions from feeling like single-frame pops or monolithic static bitmaps, every surface and control must honor these five choreography contracts:
+
+1. **Clip-Height Spring Expansion (No Frame-0 Height Snap / No Instant Collapse)**:
+   - Inline expandable sections (`01 · Main` Power Menu bar, `02 · Wi-Fi` Password Prompt row, `16 · AI Usage` provider accordions) MUST animate outer clip height (`0 ↔ measuredHeight` via `fast.spatial`, `overflow: hidden`) paired with `createPresence` exit retention so closing smoothly collapses instead of snapping shorter on unmount.
+   - Inner content glides subtly (`translateY(-4px → 0)`) with a delayed opacity ramp, and the triggering chevron rotates `0deg ↔ 180deg` (`fast.spatial`).
+2. **Dual-Layer Overlapping Shared Axis X + Height Interpolation**:
+   - Parent ↔ sub-panel drill-down (`01 · Main ↔ 02/03/04/04B`) MUST retain the outgoing view briefly (~`90ms` `fast.effects` fade + `-12px` opposite drift) while the incoming view enters from `+20px` (`default.spatial`) and the container smoothly interpolates height between views. Never unmount the outgoing page on frame 0 with an instant height jump.
+3. **Two-Layer Shell/Content Micro-Parallax & Asymmetric Exit**:
+   - Popovers and modals separate outer shell unfold (`scale(0.95 → 1.0)` + directional `translate(-6px → 0)` from the exact triggering anchor) from inner content settle (`~20–30ms` delayed opacity ramp + `translateY(-4px → 0)`), giving crisp depth without slow per-row waterfalls.
+   - Programmatic dismisses (`Esc`, bar trigger toggle, adjacent island switch) MUST execute a fast asymmetric exit (`scale(1.0 → 0.965)`, `translate(-4px)`, `opacity(1 → 0)` over ~`120–140ms`); reserve `dismissInstant()` strictly for compositor-forced `xdg_popup` dismissal.
+4. **Continuous Sliding Shared Indicators & FLIP Reflow**:
+   - Mutually exclusive selection tracks (`09`/`09B` Workspaces active capsule, `10 · Dock` focused app bar, `M3SegmentedControl`, `SettingsWindow` sidebar, `18 · Launcher` & `19 · Clipboard` keyboard `↑↓` selection highlight) MUST use a single velocity-preserving `fast.spatial` sliding indicator tracking target `(x, y, width, height)`—physically gliding between slots instead of unmounting/remounting or teleporting highlight fills.
+   - Dynamic lists and bars (`12 · Notification Popup` stack promotions, `10 · Dock` app open/close capsule width morph) smoothly reflow via FLIP position delta / spring width interpolation instead of snapping or remounting in place.
+5. **Universal Pointer Affordance, Tactile Press & Activation Feedback**:
+   - Every enabled interactive control (`<Button>`, primitives, bar islands, Quick Tiles, list rows, chips, dock tiles) MUST set `cursor: pointer` and render a clear hover lift/tint (`short2`/`short3`, never masked by inline `backgroundColor`).
+   - Button & tile activation MUST feel visibly responsive: apply tactile press compression (`scale(0.95–0.96)` on compact buttons/icon buttons/chips; `scale(0.975)` on wide Quick Tiles/cards) and active toggle icon pop (`scale(0.86 → 1.0)` via `fast.spatial`) strictly on **inner visual children** so interactive hit-target bounds stay stationary (`zshell/no-hover-hit-target-shift`).
+   - Small spatial indicators and inline expansions may tune standard damping slightly livelier (`ζ ≈ 0.82–0.85`, yielding a subtle 1–2% settle cushion) while keeping all `*.effects` springs strictly critically damped (`ζ = 1.0`).
+
 ---
 
 ## 6. Reduced Motion & Performance Guardrails

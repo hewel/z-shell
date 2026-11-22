@@ -478,17 +478,33 @@ function pngChunk(type: string, data: Buffer): Buffer {
   return chunk;
 }
 
-export function makeTinyPngBytes(r: number, g: number, b: number): number[] {
+export function makeSolidPngBytes(width: number, height: number, r: number, g: number, b: number): number[] {
   const header = Buffer.alloc(13);
-  header.writeUInt32BE(1, 0);
-  header.writeUInt32BE(1, 4);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
   header[8] = 8;
   header[9] = 6;
-  const pixels = Buffer.from([0, r, g, b, 255]);
+  const rowBytes = 1 + width * 4;
+  const pixels = Buffer.alloc(rowBytes * height);
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * rowBytes;
+    pixels[rowStart] = 0;
+    for (let x = 0; x < width; x++) {
+      const idx = rowStart + 1 + x * 4;
+      pixels[idx] = r;
+      pixels[idx + 1] = g;
+      pixels[idx + 2] = b;
+      pixels[idx + 3] = 255;
+    }
+  }
   return Array.from(Buffer.concat([
     Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
     pngChunk("IHDR", header),
     pngChunk("IDAT", deflateSync(pixels)),
     pngChunk("IEND", Buffer.alloc(0)),
   ]));
+}
+
+export function makeTinyPngBytes(r: number, g: number, b: number): number[] {
+  return makeSolidPngBytes(1, 1, r, g, b);
 }

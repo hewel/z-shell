@@ -24,6 +24,34 @@ Reference for agents working on `apps/shell/`, `plugins/*/src/`, or `tools/oxlin
   ```
   Inspect `$PREVIEW_OUT_DIR/<prefix>/out/captures/surfaces/<surface>/<id>.png` before handing off visual UI changes.
 
+## Paper ↔ Preview Visual Parity Workflow
+
+Use `docs/design/paper-manifest.json` (which pins `paperFileId`, every Dark/Light Paper `nodeId`, its exported `refFile`, and its `previewRelPath`) together with `bun run design:compare` whenever updating UI chrome, typography, geometry, or elevation:
+
+1. **Export Paper reference screenshots** (when design artboards changed) into `/tmp/z-shell-paper-refs/<refFile>` using the Paper MCP `get_screenshot` / `export` tool and the `nodeId` entries in `docs/design/paper-manifest.json`.
+2. **Capture fresh headless previews** via L4 tests:
+   ```bash
+   PREVIEW_OUT_DIR=/tmp/z-shell-preview bun test apps/shell/tests/design-preview.test.ts
+   ```
+3. **Generate the side-by-side comparison gallery + PNG contact sheets**:
+   ```bash
+   bun run design:compare --refs-dir /tmp/z-shell-paper-refs --preview-dir /tmp/z-shell-preview --out-dir /tmp/z-shell-compare
+   ```
+   (Pass `--run-preview` to invoke `design-preview.test.ts` automatically in one step.)
+4. **Visually audit before handing off**: open `/tmp/z-shell-compare/index.html` in a browser for interactive Dark/Light/Checker inspection, or call `read_file` on `/tmp/z-shell-compare/sheets/sheet-*.png` and `/tmp/z-shell-compare/sheets/states.png` to review paired Paper vs Headless Preview surfaces and interactive/chaos states side by side.
+
+## Interactive, Motion & Dirty-Data Automated Guards
+
+Rather than brittle full-screen golden snapshots, interaction and motion regressions are locked down by property invariants across L1, L2, and L4:
+
+- **L1 `zshell/interactive-hover-radius`** (`tools/oxlint-design-plugin.mjs`): requires explicit `borderRadius` on inline-styled `<Button>` / `<control>` elements (exempting CSS Module primitives and specialized `slider` / `progressIndicator` / `switch` / `dock` / `bar-segment` controls) so universal hover layers never paint sharp rectangles.
+- **L2 CSS selector exclusions** (`apps/shell/tests/design-lint.test.ts`): asserts `apps/shell/src/app.css` universal `control:hover` / `control:active` exclude `:disabled`, `[role="slider"]`, `[role="progressIndicator"]`, `[role="progressBar"]`, `[data-switch-root="true"]`, `[data-dock-item="true"]`, and `[data-bar-segment]`.
+- **L4 hover pixel-diff invariants** (`apps/shell/tests/design-preview.test.ts`, using `diffRegionPixels` in `preview-harness.ts`):
+  - Non-interactive (`role="progressIndicator"`) and `:disabled` controls must produce `diffPixels === 0` on pointer hover.
+  - Interactive controls (`IdlePane` rule rows, `QuickSettings` tiles/sliders, `MediaPanel` Play/Pause) must produce `diffPixels > 0` on hover, zero diff on their 4 outer bounding-box corners (Anti-Sharp-Box), and identical `boundsLogical` across `rest` / `hover` / `pressed`.
+- **L4 virtual-time in-flight keyframes**: asserts mid-flight spring frames (`t ≈ 55–60ms`) differ from both `t=0ms` and settled `t=400–450ms` for the `StatusBar` sliding workspace capsule and `IdlePane` `M3SegmentedControl`, plus stable `Launcher` card geometry during search filtering.
+- **L4 dirty-data fixtures**: verifies 17+ notifications isolated scroll, empty-label `"default"` actions hidden, `28×28` / `30×30` vertical bar circular pills, Ethernet + disconnected Wi-Fi neutral state, null-avatar fallback visibility, and 16:9 screenshot toast icon `object-fit: cover` rounded clipping (rendered together in `sheets/states.png`).
+
 ## Wayland Surface Chrome Rules
 
 - **`WindowSurface` (`xdg_toplevel`, e.g. `SettingsWindow`)**: Follow `prefer-no-csd` — render opaque edge-to-edge without client-side outer `borderRadius`, outer `border`, or root `boxShadow`. The Wayland compositor owns window corners, border, and drop shadow.

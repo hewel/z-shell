@@ -508,7 +508,7 @@ describe("zshell oxlint design plugin", () => {
     expect(good.status, good.output).toBe(0);
   });
 
-  test("zshell/no-unblurred-translucent-surface enforces Wayland Graceful Solid Fallback", () => {
+  test("zshell/no-unblurred-translucent-surface enforces Wayland Graceful Solid Fallback and always-solid Settings Window", () => {
     const bad = lintSnippet(
       "DockSurface.tsx",
       `export const dock = { backgroundColor: "color-mix(in srgb, var(--color-surface-container) 42%, transparent)" };`,
@@ -516,12 +516,119 @@ describe("zshell oxlint design plugin", () => {
     );
     expect(bad.status).not.toBe(0);
 
+    const badPopover = lintSnippet(
+      "ShellPanels.tsx",
+      `export const pop = { backgroundColor: "color-mix(in srgb, var(--color-surface-container-low) 78%, transparent)" };`,
+      "zshell/no-unblurred-translucent-surface",
+    );
+    expect(badPopover.status).not.toBe(0);
+
+    const badSettingsBlur = lintSnippet(
+      "SettingsWindow.tsx",
+      `export const win = { backdropFilter: "blur(24px)", backgroundColor: "var(--color-surface-container)" };`,
+      "zshell/no-unblurred-translucent-surface",
+    );
+    expect(badSettingsBlur.status).not.toBe(0);
+
     const good = lintSnippet(
       "DockSurface.tsx",
       `export const dock = { backgroundColor: "var(--color-surface-container)" };`,
       "zshell/no-unblurred-translucent-surface",
     );
     expect(good.status, good.output).toBe(0);
+  });
+
+  test("zshell/concentric-geometry enforces Dock R=22px / 10-12px inner tiles and circular/concentric QuickTile icon wells", () => {
+    const badDockOuter = lintSnippet(
+      "DockSurface.tsx",
+      `const capsule = { borderRadius: "999px" }; export { capsule };`,
+      "zshell/concentric-geometry",
+    );
+    expect(badDockOuter.status).not.toBe(0);
+
+    const badDockTile = lintSnippet(
+      "DockSurface.tsx",
+      `export const x = <Button testId="dock-launcher" style={{ borderRadius: "14px" }} />;`,
+      "zshell/concentric-geometry",
+    );
+    expect(badDockTile.status).not.toBe(0);
+
+    const goodDock = lintSnippet(
+      "DockSurface.tsx",
+      `const capsule = { borderRadius: "22px" }; export const x = <Button testId="dock-launcher" style={{ borderRadius: "12px" }} />; export { capsule };`,
+      "zshell/concentric-geometry",
+    );
+    expect(goodDock.status, goodDock.output).toBe(0);
+
+    const badQuickTileIcon = lintSnippet(
+      "QuickSettingsPanel.tsx",
+      `export const x = <box data-qs-tile-icon="true" style={{ borderRadius: "10px" }} />;`,
+      "zshell/concentric-geometry",
+    );
+    expect(badQuickTileIcon.status).not.toBe(0);
+
+    const goodQuickTileIcon = lintSnippet(
+      "QuickSettingsPanel.tsx",
+      `export const x = <box data-qs-tile-icon="true" style={{ borderRadius: "999px" }} />;`,
+      "zshell/concentric-geometry",
+    );
+    expect(goodQuickTileIcon.status, goodQuickTileIcon.output).toBe(0);
+
+    const badBarBadge = lintSnippet(
+      "StatusBar.tsx",
+      `const primaryContainer = "var(--color-primary-container)";
+       export const x = <box testId="bar-notifications-badge" style={{ height: "24px", padding: "0 7px", backgroundColor: primaryContainer }} />;`,
+      "zshell/concentric-geometry",
+    );
+    expect(badBarBadge.status).not.toBe(0);
+
+    const goodBarBadge = lintSnippet(
+      "StatusBar.tsx",
+      `export const x = (props: { vertical: boolean; onActiveContainer: boolean }) => (
+        <box testId="bar-notifications-badge" style={{
+          ...(props.vertical ? { height: "20px", maxWidth: "28px", padding: "0 4px" } : { height: "24px", padding: "0 7px" }),
+          ...(props.onActiveContainer ? { backgroundColor: "color-mix(in srgb, var(--color-on-primary-container) 14%, transparent)" } : {}),
+        }} />
+      );`,
+      "zshell/concentric-geometry",
+    );
+    expect(goodBarBadge.status, goodBarBadge.output).toBe(0);
+  });
+
+  test("zshell/scoped-dismiss-instant restricts dismissInstant() strictly to PopupSurface onDismiss handlers", () => {
+    const badEsc = lintSnippet(
+      "BarPopups.tsx",
+      `export const x = (p: { dismissInstant: () => void }) => <PopupContent onDismiss={() => p.dismissInstant()} />;`,
+      "zshell/scoped-dismiss-instant",
+    );
+    expect(badEsc.status).not.toBe(0);
+
+    const badSharedHelper = lintSnippet(
+      "PluginHost.tsx",
+      `export const x = (p: { dismissInstant: () => void }) => {
+        const drop = () => { p.dismissInstant(); };
+        return <PopupSurface onDismiss={drop}><Button onClick={drop} /></PopupSurface>;
+      };`,
+      "zshell/scoped-dismiss-instant",
+    );
+    expect(badSharedHelper.status).not.toBe(0);
+
+    const goodInline = lintSnippet(
+      "BarPopups.tsx",
+      `export const x = (p: { dismissInstant: () => void }) => <PopupSurface onDismiss={() => p.dismissInstant()} />;`,
+      "zshell/scoped-dismiss-instant",
+    );
+    expect(goodInline.status, goodInline.output).toBe(0);
+
+    const goodDedicatedHelper = lintSnippet(
+      "ShellPanels.tsx",
+      `export const x = (p: { dismissInstant: () => void }) => {
+        const handleDismiss = () => { p.dismissInstant(); };
+        return <PopupSurface onDismiss={handleDismiss} />;
+      };`,
+      "zshell/scoped-dismiss-instant",
+    );
+    expect(goodDedicatedHelper.status, goodDedicatedHelper.output).toBe(0);
   });
 
   test("zshell/no-duplicate-primitives bans hand-rolled switches and slider thumbs outside zgui-primitives.tsx", () => {
@@ -795,7 +902,105 @@ describe("DESIGN.md token and surface contract sync", () => {
 
       if (filePath.endsWith(".module.css")) {
         expect(stripped, `${filePath} raw color literal`).not.toMatch(/#(?:[0-9a-fA-F]{3,8})\b|\b(?:rgba?|hsla?)\s*\(/i);
+        expect(stripped, `${filePath} unblurred translucent surface`).not.toMatch(
+          /background(?:-color)?\s*:\s*color-mix\(\s*in\s+srgb\s*,\s*var\(--color-surface[^)]*\)\s+\d+(?:\.\d+)?%\s*,\s*transparent\s*\)/i,
+        );
       }
     }
+  });
+
+  test("Universal Pointer Affordance & Tactile Activation contracts hold in app.css, zgui-primitives.module.css, and L1", () => {
+    const appCss = readFileSync(join(shellDir, "src/app.css"), "utf8");
+    const primitivesCss = readFileSync(join(repoRoot, "packages/sdk/src/zgui-primitives.module.css"), "utf8");
+
+    // Global cursor: pointer for enabled controls + cursor: default for disabled & non-interactive progress indicators.
+    expect(appCss).toMatch(/control:not\(:disabled\):not\(\[data-progress="true"\]\)[\s\S]*?cursor:\s*pointer;/);
+    expect(appCss).toMatch(/:disabled[\s\S]*?cursor:\s*default;/);
+    // Universal control:hover / control:active must explicitly exclude all non-inset & specialized roles (via both data-* for zgui-style and role).
+    for (const pseudo of [":hover", ":active"] as const) {
+      const ruleRegex = new RegExp(`control([^\\{]*)${pseudo}\\s*\\{[^}]*inset 0 0 0 240px`, "s");
+      const match = appCss.match(ruleRegex);
+      expect(match, `app.css universal control${pseudo} rule`).not.toBeNull();
+      const selectorTail = match?.[1] ?? "";
+      for (const excluded of [
+        ":not(:disabled)",
+        ':not([data-switch-root="true"])',
+        ':not([data-dock-item="true"])',
+        ':not([data-slider="true"])',
+        ':not([data-progress="true"])',
+        ':not([role="slider"])',
+        ':not([role="progressIndicator"])',
+        ':not([role="progressBar"])',
+        ":not([data-bar-segment])",
+      ]) {
+        expect(selectorTail, `app.css control${pseudo} excludes ${excluded}`).toContain(excluded);
+      }
+    }
+    // Universal inset hover/press state layer + bar island segment states + inner-visual press compression.
+    expect(appCss).toContain("box-shadow: inset 0 0 0 240px color-mix(in srgb, var(--color-on-surface) var(--state-hover), transparent);");
+    expect(appCss).toContain("box-shadow: inset 0 0 0 240px color-mix(in srgb, var(--color-on-surface) var(--state-dragged), transparent);");
+    expect(appCss).toContain(`[data-bar-segment="floating"]:not(:disabled):hover`);
+    expect(appCss).toContain(`[data-bar-segment="docked"]:not(:disabled):hover`);
+    expect(appCss).toMatch(/\[data-press-visual\]\s*\{[^}]*pointer-events:\s*none;/s);
+    expect(appCss).toMatch(/control:not\(:disabled\):active\s*>\s*\[data-press-visual="compact"\]/);
+    expect(appCss).toMatch(/control:not\(:disabled\):active\s*>\s*\[data-press-visual="card"\]/);
+
+    // Shared M3 primitives enforce pointer cursor, disabled default cursor, and inner press compression.
+    expect(primitivesCss).toMatch(/\.pressInner\s*\{[^}]*pointer-events:\s*none;/s);
+    expect(primitivesCss.match(/&:not\(:disabled\):active\s*>\s*\.pressInner/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
+    expect(primitivesCss.match(/cursor:\s*pointer;/g)?.length ?? 0).toBeGreaterThanOrEqual(6);
+    expect(primitivesCss.match(/cursor:\s*default;/g)?.length ?? 0).toBeGreaterThanOrEqual(6);
+
+    // L1 rejects stripping cursor: pointer on enabled <Button> or breaking [data-press-visual] pointer-events.
+    const badCursor = lintSnippet(
+      "StatusBar.tsx",
+      `export const x = <Button style={{ cursor: "default" }}>Click</Button>;`,
+      "zshell/no-hover-hit-target-shift",
+    );
+    expect(badCursor.status).not.toBe(0);
+
+    const goodDisabledCursor = lintSnippet(
+      "StatusBar.tsx",
+      `export const x = <Button disabled={true} style={{ cursor: "default" }}>Click</Button>;`,
+      "zshell/no-hover-hit-target-shift",
+    );
+    expect(goodDisabledCursor.status, goodDisabledCursor.output).toBe(0);
+
+    const badPressVisual = lintSnippet(
+      "QuickSettingsPanel.tsx",
+      `export const x = <row data-press-visual="card" style={{ pointerEvents: "auto" }} />;`,
+      "zshell/no-hover-hit-target-shift",
+    );
+    expect(badPressVisual.status).not.toBe(0);
+
+    // zshell/interactive-hover-radius rejects inline-styled Buttons/controls without borderRadius
+    // while allowing rounded buttons, rounded style spreads, and exempt slider/progress/switch controls.
+    const badSharpBtn = lintSnippet(
+      "IdlePane.tsx",
+      `export const x = <Button style={{ backgroundColor: "transparent", minHeight: "32px" }}>Rule</Button>;`,
+      "zshell/interactive-hover-radius",
+    );
+    expect(badSharpBtn.status).not.toBe(0);
+
+    const goodRoundedBtn = lintSnippet(
+      "IdlePane.tsx",
+      `export const x = <Button style={{ backgroundColor: "transparent", borderRadius: "10px", minHeight: "32px" }}>Rule</Button>;`,
+      "zshell/interactive-hover-radius",
+    );
+    expect(goodRoundedBtn.status, goodRoundedBtn.output).toBe(0);
+
+    const goodSpreadBtn = lintSnippet(
+      "CalendarPanel.tsx",
+      `const pill = { borderRadius: "10px" } as const; export const x = <Button style={{ ...pill, padding: "4px" }}>Today</Button>;`,
+      "zshell/interactive-hover-radius",
+    );
+    expect(goodSpreadBtn.status, goodSpreadBtn.output).toBe(0);
+
+    const goodSliderControl = lintSnippet(
+      "MediaPanel.tsx",
+      `export const x = <control role={canScrub ? "slider" : "progressIndicator"} style={{ height: "28px" }} />;`,
+      "zshell/interactive-hover-radius",
+    );
+    expect(goodSliderControl.status, goodSliderControl.output).toBe(0);
   });
 });

@@ -1,0 +1,204 @@
+{
+  "$schema": "https://z-shell.dev/schemas/paper-manifest.v1.json",
+  "paperFileId": "01M7J3P8QM6GW1HSHNW0M8TQSV",
+  "surfaces": [
+    {
+      "id": "01-qs",
+      "name": "01 · Main (Control Center)",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "CG-0",
+      "refFile": "01-qs.jpg",
+      "previewRelPath": "z-shell-preview-design/out/captures/surfaces/panel-quick-settings/qs.png"
+    },
+    {
+      "id": "09-bar",
+      "name": "09 · Top Bar (Floating)",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "118-0",
+      "refFile": "09-bar.jpg",
+      "previewRelPath": "z-shell-preview-design/out/captures/surfaces/bar-hdmi-a-1/bar.png"
+    },
+    {
+      "id": "09b-bar-left",
+      "name": "09B · Vertical Bar (Floating Left)",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "1LF-0",
+      "refFile": "09b-bar-left.jpg",
+      "previewRelPath": "z-shell-preview-design-vertical/out/captures/surfaces/bar-dp-1/bar-left.png"
+    },
+    {
+      "id": "09c-bar-docked",
+      "name": "09C · Docked Top Bar",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "5UO-0",
+      "refFile": "09c-bar-docked.jpg",
+      "previewRelPath": "z-shell-preview-design-docked/out/captures/surfaces/bar-dp-1/bar-docked.png"
+    },
+    {
+      "id": "09d-bar-left-docked",
+      "name": "09D · Docked Vertical Bar",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "5UP-0",
+      "refFile": "09d-bar-left-docked.jpg",
+      "previewRelPath": "z-shell-preview-design-vertical/out/captures/surfaces/bar-dp-1/bar-left-docked-active.png"
+    },
+    {
+      "id": "10-dock",
+      "name": "10 · Dock (Floating)",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "12T-0",
+      "refFile": "10-dock.jpg",
+      "previewRelPath": "z-shell-preview-design/out/captures/surfaces/dock-hdmi-a-1/dock.png"
+    },
+    {
+      "id": "11-osd",
+      "name": "11 · OSD",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "13X-0",
+      "refFile": "11-osd.jpg",
+      "previewRelPath": null
+    },
+    {
+      "id": "13-cal",
+      "name": "13 · Calendar & Notifications",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "151-0",
+      "refFile": "13-cal.jpg",
+      "previewRelPath": "z-shell-preview-design/out/captures/surfaces/panel-calendar/cal.png"
+    },
+    {
+      "id": "14-media",
+      "name": "14 · Media Player",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "185-0",
+      "refFile": "14-media.jpg",
+      "previewRelPath": "z-shell-preview-design/out/captures/surfaces/panel-media/media.png"
+    },
+    {
+      "id": "17-power",
+      "name": "17 · Power Dialog",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "1CF-0",
+      "refFile": "17-power.jpg",
+      "previewRelPath": "z-shell-preview-design/out/captures/surfaces/power-dialog/power.png"
+    },
+    {
+      "id": "18-launcher",
+      "name": "18 · Launcher",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "1CU-0",
+      "refFile": "18-launcher.jpg",
+      "previewRelPath": "z-shell-preview-design/out/captures/surfaces/launcher-overlay/launcher.png"
+    },
+    {
+      "id": "22-settings",
+      "name": "22 · Settings Window",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "33Z-0",
+      "refFile": "22-settings.jpg",
+      "previewRelPath": "z-shell-preview-design/out/captures/surfaces/settings-window/settings.png"
+    },
+    {
+      "id": "23-polkit",
+      "name": "23 · Polkit Auth Dialog",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "84W-0",
+      "refFile": "23-polkit.jpg",
+      "previewRelPath": "z-shell-preview-design-docked/out/captures/surfaces/polkit-dialog/polkit-23.png"
+    },
+    {
+      "id": "l01-qs-light",
+      "name": "L01 · Main (Light)",
+      "theme": "light",
+      "pageId": "p-5-0",
+      "nodeId": "AHL-0",
+      "refFile": "l01-qs-light.jpg",
+      "previewRelPath": "z-shell-preview-design-light/out/captures/surfaces/panel-quick-settings/qs-light.png"
+    },
+    {
+      "id": "l09-bar-light",
+      "name": "L09 · Top Bar (Light)",
+      "theme": "light",
+      "pageId": "p-5-0",
+      "nodeId": "AHP-0",
+      "refFile": "l09-bar-light.jpg",
+      "previewRelPath": "z-shell-preview-design-light/out/captures/surfaces/bar-hdmi-a-1/bar-light.png"
+    },
+    {
+      "id": "l09c-bar-docked-light",
+      "name": "L09C · Docked Top Bar (Light)",
+      "theme": "light",
+      "pageId": "p-5-0",
+      "nodeId": "AHQ-0",
+      "refFile": "l09c-bar-docked-light.jpg",
+      "previewRelPath": null
+    },
+    {
+      "id": "l10-dock-light",
+      "name": "L10 · Dock (Light)",
+      "theme": "light",
+      "pageId": "p-5-0",
+      "nodeId": "BWM-0",
+      "refFile": "l10-dock-light.jpg",
+      "previewRelPath": "z-shell-preview-design-light/out/captures/surfaces/dock-hdmi-a-1/dock-light.png"
+    },
+    {
+      "id": "l11-osd-light",
+      "name": "L11 · OSD (Light)",
+      "theme": "light",
+      "pageId": "p-5-0",
+      "nodeId": "AHR-0",
+      "refFile": "l11-osd-light.jpg",
+      "previewRelPath": null
+    },
+    {
+      "id": "l13-cal-light",
+      "name": "L13 · Calendar (Light)",
+      "theme": "light",
+      "pageId": "p-5-0",
+      "nodeId": "AHN-0",
+      "refFile": "l13-cal-light.jpg",
+      "previewRelPath": null
+    },
+    {
+      "id": "l14-media-light",
+      "name": "L14 · Media Player (Light)",
+      "theme": "light",
+      "pageId": "p-5-0",
+      "nodeId": "AHO-0",
+      "refFile": "l14-media-light.jpg",
+      "previewRelPath": "z-shell-preview-design-light/out/captures/surfaces/panel-media/media-light.png"
+    },
+    {
+      "id": "l18-launcher-light",
+      "name": "L18 · Launcher (Light)",
+      "theme": "light",
+      "pageId": "p-5-0",
+      "nodeId": "AHS-0",
+      "refFile": "l18-launcher-light.jpg",
+      "previewRelPath": null
+    },
+    {
+      "id": "l22-settings-light",
+      "name": "L22 · Settings Window (Light)",
+      "theme": "light",
+      "pageId": "p-5-0",
+      "nodeId": "AHT-0",
+      "refFile": "l22-settings-light.jpg",
+      "previewRelPath": "z-shell-preview-design-light/out/captures/surfaces/settings-window/settings-light.png"
+    }
+  ]
+}

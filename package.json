@@ -15,6 +15,7 @@
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",
     "build:shell": "bun tools/build-shell.ts",
+    "design:compare": "bun scripts/compare-design-preview.ts",
     "dev:local": "bash tools/dev-local.sh",
     "lint": "bun --bun run oxlint --deny-warnings",
     "typecheck": "bun --bun run tsrs --project tsconfig.quickjs.json && bun --bun run tsrs --project packages/composer/tsconfig.json && bun --bun run tsrs --project apps/shell/tsconfig.json",

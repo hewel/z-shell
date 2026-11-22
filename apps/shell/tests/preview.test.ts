@@ -255,13 +255,13 @@ describe("apps/shell preview", () => {
             id: 3,
             name: "network.wifi.connect",
             payload: { device_id: "wlan0", ap_id: "ap-shoji-lab", password: "shoji-secret" },
-            atMs: 45,
+            atMs: 295,
           },
           {
             id: 26,
             name: "wallpaper.list",
             payload: { offset: 0, limit: 16 },
-            atMs: 50,
+            atMs: 300,
             result: {
               data: {
                 items: [{
@@ -281,14 +281,14 @@ describe("apps/shell preview", () => {
             id: 4,
             name: "wallpaper.fetch-blob",
             payload: { token: "wallpaper-aurora-thumb" },
-            atMs: 55,
+            atMs: 305,
             result: { data: { bytes: makeTinyPngBytes(0x7c, 0xd4, 0xff) } },
           },
           {
             id: 27,
             name: "wallpaper.set",
             payload: { path: "/wallpapers/aurora.png", output: null, fit: "cover" },
-            atMs: 65,
+            atMs: 315,
           },
         ],
       }), null, 2));
@@ -327,6 +327,7 @@ describe("apps/shell preview", () => {
             target: { surface: "panel-quick-settings", testId: "wifi-ap-Shoji-Lab" },
             button: "primary",
           },
+          { id: "expand-wifi-password", op: "clock.advance", byMs: 250 },
           {
             id: "focus-wifi-password",
             op: "pointer.click",

@@ -27,6 +27,7 @@ import {
   resolveMonitorLogicalSize,
   resolveMonitorWallpaper,
   selectActiveMediaPlayer,
+  splitNotificationActions,
   type ActiveWallpaper,
   type BarPosition,
   type BarSettings,
@@ -837,5 +838,29 @@ describe("hasWindowsOnMonitor", () => {
     expect(hasWindowsOnMonitor(windows, outputs, "DP-1")).toBe(true);
     expect(hasWindowsOnMonitor(windows, outputs, "DP-2")).toBe(false);
     expect(hasWindowsOnMonitor(makeWindows(), outputs, "DP-1")).toBe(false);
+  });
+});
+
+describe("splitNotificationActions", () => {
+  test("extracts FreeDesktop default action for card click and hides empty-label action pills", () => {
+    expect(splitNotificationActions([{ key: "default", label: "" }])).toEqual({
+      defaultAction: { key: "default", label: "" },
+      buttonActions: [],
+    });
+
+    expect(
+      splitNotificationActions([
+        { key: "default", label: "Focus" },
+        { key: "open", label: "Open" },
+        { key: "blank", label: "   " },
+        { key: "copy", label: "Copy" },
+      ]),
+    ).toEqual({
+      defaultAction: { key: "default", label: "Focus" },
+      buttonActions: [
+        { key: "open", label: "Open" },
+        { key: "copy", label: "Copy" },
+      ],
+    });
   });
 });

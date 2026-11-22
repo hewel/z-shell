@@ -17,6 +17,11 @@ All interactive controls share one state-layer opacity ladder sourced directly f
 | **Disabled (Ink)** | `disabled-label-text-opacity` / `disabled-icon-opacity` | `0.38` (`38%`) | `on-surface` | None (static) |
 | **Disabled (Container / Outline)** | `disabled-container-opacity` / `disabled-outline-opacity` | `0.12` (`12%`) | `on-surface` | None (static) |
 
+### Universal Pointer Affordance & Tactile Activation Contract
+- **Pointer Cursor Everywhere**: Every enabled interactive surface (`<Button>`, `M3Button`, `M3IconButton`, `M3Switch`, `M3FilterChip`, `M3SegmentedControl` options, bar islands, dock tiles, list rows, clickable cards, sliders) MUST declare `cursor: pointer` (`cursor: default` when `:disabled`) so pointer entry immediately signals interactivity on Wayland.
+- **Universal Visible Hover**: Every interactive element—including bare `<Button>` triggers in `StatusBar`, `QuickSettingsPanel`, `ClipboardPanel`, `SettingsWindow`, `OverviewOverlay`, and dialogs—MUST expose a clear hover visual change (`≥ 8%` foreground state layer, subtle container step, or border brighten via `short2`/`short3`, never blocked by an opaque inline `style={{ backgroundColor }}` that suppresses CSS `:hover`).
+- **Perceptible Activation Animation (Press & Toggle)**: A bare `8% → 12%` background shift is imperceptible in dark mode. Every button, tile, chip, and bar trigger MUST pair pressed state-layer tinting with **inner-visual press compression** (`scale(0.95–0.96)` on buttons/icon buttons/chips, `scale(0.975)` on wide Quick Tiles/cards, strictly on an inner visual wrapper so hit targets never shift per `zshell/no-hover-hit-target-shift`), plus a spring **icon pop (`scale 0.86 → 1.0`, `fast.spatial`)** and smooth fill/border crossfade when toggling selected/active state.
+
 ### Focus Indicator Contract
 - **Desktop Focus Ring**: `outline: 2px solid var(--color-primary); outline-offset: 2px` (`--zgui-ring: var(--color-primary)`), active on `:focus-visible` (WCAG 2.2 SC 2.4.7 / 2.4.13).
 - **Composite Inputs**: Inputs embedded inside a styled shell (search bars, password pills, rule editor fields) delegate focus styling to the outer wrapper (`:focus-within` with `2px solid var(--color-primary)`) rather than drawing a clipped inner box.

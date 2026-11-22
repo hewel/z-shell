@@ -64,8 +64,8 @@ const ROLE_PAIRS = new Map([
   ["surface-container-highest", SURFACE_FOREGROUND_ROLES],
 ]);
 
-// DESIGN.md rounded tokens (6/8/10/14/16/22/999px) plus micro track/dot radii (1-4px) and 0/50%.
-const ALLOWED_RADIUS_PX = new Set([0, 1, 2, 3, 4, 6, 8, 10, 14, 16, 22, 999]);
+// DESIGN.md rounded tokens (6/8/10/12/14/16/22/999px) plus micro track/dot radii (1-4px) and 0/50%.
+const ALLOWED_RADIUS_PX = new Set([0, 1, 2, 3, 4, 6, 8, 10, 12, 14, 16, 22, 999]);
 
 const RAW_COLOR_TOKEN_RE = /#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b|\b(?:rgba?|hsla?)\s*\([^)]*\)/gi;
 const SHADOW_BLACK_RGBA_RE = /^rgba\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0?\.\d+\s*\)$/i;
@@ -482,7 +482,7 @@ const rules = {
             if (val !== null && !checkRadiusValue(val)) {
               context.report({
                 node: branch,
-                message: `Off-scale borderRadius "${val}". Use DESIGN.md shape tokens: 6px (xs), 8px (sm), 10px (md), 14px (tile), 16px (card), 22px (panel), 999px (pill), or var(--radius-*).`,
+                message: `Off-scale borderRadius "${val}". Use DESIGN.md shape tokens: 6px (xs), 8px (sm), 10px (md), 12px (concentric dock/pill), 14px (tile), 16px (card), 22px (panel), 999px (pill), or var(--radius-*).`,
               });
             }
           });
@@ -953,22 +953,51 @@ const rules = {
           }
         },
         JSXOpeningElement(node) {
-          const isVisualChild = (node.attributes ?? []).some(
-            attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === "data-dock-visual",
-          );
-          if (!isVisualChild) return;
-          const styleAttr = (node.attributes ?? []).find(
-            attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === "style",
-          );
+          const attrs = node.attributes ?? [];
+          const findAttr = name =>
+            attrs.find(attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === name);
+          const styleAttr = findAttr("style");
           const styleExpr = styleAttr?.value?.type === "JSXExpressionContainer" ? styleAttr.value.expression : null;
-          if (!styleExpr || styleExpr.type !== "ObjectExpression") return;
-          const { map } = getStyleProps(styleExpr);
-          const pe = staticString(map.get("pointerEvents") ?? map.get("pointer-events"));
-          if (pe !== "none") {
-            context.report({
-              node,
-              message: "Hover Hit-Target Stability Rule: transformed visual child [data-dock-visual] must set pointerEvents: \"none\" so it never alters hit-testing.",
-            });
+          const styleMap = styleExpr?.type === "ObjectExpression" ? getStyleProps(styleExpr).map : null;
+
+          if (findAttr("data-dock-visual") && styleMap) {
+            const pe = staticString(styleMap.get("pointerEvents") ?? styleMap.get("pointer-events"));
+            if (pe !== "none") {
+              context.report({
+                node,
+                message: "Hover Hit-Target Stability Rule: transformed visual child [data-dock-visual] must set pointerEvents: \"none\" so it never alters hit-testing.",
+              });
+            }
+          }
+
+          if (findAttr("data-press-visual") && styleMap) {
+            const peNode = styleMap.get("pointerEvents") ?? styleMap.get("pointer-events");
+            const pe = staticString(peNode);
+            if (peNode && pe !== "none") {
+              context.report({
+                node,
+                message: "Hover Hit-Target Stability Rule: [data-press-visual] must preserve pointerEvents: \"none\" so press compression never shifts hit-testing.",
+              });
+            }
+          }
+
+          if (node.name?.type === "JSXIdentifier" && node.name.name === "Button" && styleMap) {
+            const disabledAttr = findAttr("disabled");
+            const staticallyDisabled =
+              disabledAttr &&
+              (disabledAttr.value === null ||
+                (disabledAttr.value?.type === "JSXExpressionContainer" &&
+                  disabledAttr.value.expression?.type === "Literal" &&
+                  disabledAttr.value.expression.value === true));
+            if (!staticallyDisabled) {
+              const cursor = staticString(styleMap.get("cursor"));
+              if (cursor === "default" || cursor === "auto") {
+                context.report({
+                  node,
+                  message: `Universal Pointer Affordance Rule: do not override cursor to "${cursor}" on an enabled <Button>; interactive controls must preserve cursor: pointer.`,
+                });
+              }
+            }
           }
         },
       };
@@ -1330,20 +1359,36 @@ const rules = {
   "no-unblurred-translucent-surface": {
     meta: {
       type: "problem",
-      docs: { description: "Enforce Wayland Graceful Solid Fallback: disallow translucent surface-container fills without compositor backdrop blur" },
+      docs: { description: "Enforce 4-Tier Frosted Glass vs. Solid Material Ladder & Wayland Graceful Solid Fallback: disallow unblurred translucent surfaces across all glass tiers and disallow backdropFilter on always-solid Settings surfaces" },
       schema: [],
     },
     create(context) {
-      const basename = path.basename(context.filename ?? "");
+      const filename = (context.filename ?? "").replace(/\\/g, "/");
+      const basename = path.basename(filename);
       if (basename === "SessionLockOverlay.tsx") return {};
-      const TRANSLUCENT_SURFACE_RE = /color-mix\(\s*in\s+srgb\s*,\s*var\(--color-surface(?:-container(?:-(?:lowest|low|high|highest))?|-dim|-bright)?\)\s+(\d+(?:\.\d+)?)%\s*,\s*transparent\s*\)/i;
+      const isAlwaysSolidSurface =
+        basename === "SettingsWindow.tsx" ||
+        basename === "SettingsSidebar.tsx" ||
+        filename.includes("/apps/shell/src/surfaces/settings/") ||
+        filename.startsWith("apps/shell/src/surfaces/settings/");
+      const TRANSLUCENT_SURFACE_RE = /color-mix\(\s*in\s+srgb\s*,\s*var\(--color-(?:surface(?:-container(?:-(?:lowest|low|high|highest))?|-dim|-bright)?|primary-container)\)\s+(\d+(?:\.\d+)?)%\s*,\s*transparent\s*\)/i;
       return {
         ObjectExpression(node) {
           const { map } = getStyleProps(node);
+          const blurNode = map.get("backdropFilter") ?? map.get("backdrop-filter");
+          if (isAlwaysSolidSurface && blurNode) {
+            const blurVal = staticString(blurNode)?.trim().toLowerCase();
+            if (blurVal !== "none") {
+              context.report({
+                node: blurNode,
+                message:
+                  "4-Tier Material Ladder Rule: Settings Window (Level 3) must remain 100% solid opaque M3 without backdropFilter.",
+              });
+            }
+          }
           const bgNode = map.get("backgroundColor") ?? map.get("background-color") ?? map.get("background");
           if (!bgNode) return;
-          const hasBlur = map.has("backdropFilter") || map.has("backdrop-filter");
-          if (hasBlur) return;
+          if (blurNode && !isAlwaysSolidSurface) return;
           visitValueBranches(bgNode, branch => {
             const val = staticString(branch);
             if (!val) return;
@@ -1351,11 +1396,213 @@ const rules = {
             if (match && Number(match[1]) < 95) {
               context.report({
                 node: branch,
-                message:
-                  "Wayland Graceful Solid Fallback Rule: do not paint translucent surface containers without compositor backdrop blur (ext_background_effect_v1); use opaque var(--color-surface-container*).",
+                message: isAlwaysSolidSurface
+                  ? "4-Tier Material Ladder Rule: Settings Window (Level 3) must remain 100% solid opaque var(--color-surface*)."
+                  : "Wayland Graceful Solid Fallback Rule: do not paint translucent glass surfaces (Levels 1A/1B/2) without compositor backdrop blur (ext_background_effect_v1); use opaque var(--color-surface-container*).",
               });
             }
           });
+        },
+      };
+    },
+  },
+
+  "concentric-geometry": {
+    meta: {
+      type: "problem",
+      docs: { description: "Enforce Concentric Shape Scale & Geometry Contract on Floating Dock (R=22px outer, 10-12px inner tiles), Quick Tile icon wells (circular 999px or concentric <=6px), and nested bar badge/IME pills" },
+      schema: [],
+    },
+    create(context) {
+      const basename = path.basename(context.filename ?? "");
+      if (basename !== "DockSurface.tsx" && basename !== "QuickSettingsPanel.tsx" && basename !== "StatusBar.tsx") return {};
+      let aliases = new Map();
+      const getAttr = (opening, name) =>
+        (opening?.attributes ?? []).find(
+          attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === name,
+        );
+      const getStringAttr = (opening, name) => {
+        const attr = getAttr(opening, name);
+        if (!attr?.value) return null;
+        if (attr.value.type === "Literal" && typeof attr.value.value === "string") return attr.value.value;
+        if (attr.value.type === "JSXExpressionContainer") return staticString(attr.value.expression);
+        return null;
+      };
+      return {
+        Program(program) {
+          aliases = collectStringAliases(program);
+        },
+        VariableDeclarator(node) {
+          if (basename !== "DockSurface.tsx" || node.id?.type !== "Identifier" || node.id.name !== "capsule") return;
+          const init = node.init?.type === "TSSatisfiesExpression" || node.init?.type === "TSAsExpression"
+            ? node.init.expression
+            : node.init;
+          if (!init || init.type !== "ObjectExpression") return;
+          const { map } = getStyleProps(init);
+          const radiusNode = map.get("borderRadius") ?? map.get("border-radius");
+          const val = resolveStaticText(radiusNode, aliases)?.trim();
+          if (val && val !== "22px" && val !== "var(--radius-panel)") {
+            context.report({
+              node: radiusNode,
+              message: `Concentric Floating Dock Rule: Dock capsule must use R=22px (22px or var(--radius-panel)) to stay concentric with 10-12px icons at 10px inset, got "${val}".`,
+            });
+          }
+        },
+        JSXOpeningElement(node) {
+          const styleAttr = getAttr(node, "style");
+          const styleExpr = styleAttr?.value?.type === "JSXExpressionContainer" ? styleAttr.value.expression : null;
+          if (!styleExpr || styleExpr.type !== "ObjectExpression") return;
+          const { map } = getStyleProps(styleExpr);
+          const radiusNode = map.get("borderRadius") ?? map.get("border-radius");
+
+          if (basename === "DockSurface.tsx") {
+            const testId = getStringAttr(node, "testId");
+            const isDockVisual = Boolean(getAttr(node, "data-dock-visual"));
+            if ((testId === "dock-launcher" || isDockVisual) && radiusNode) {
+              const px = parsePx(radiusNode, aliases);
+              if (px !== null && (px < 10 || px > 12)) {
+                context.report({
+                  node: radiusNode,
+                  message: `Concentric Floating Dock Rule: Dock inner tiles must use 10px-12px radius (22px outer - 10px inset = 12px ±2px), got "${px}px".`,
+                });
+              }
+            }
+          }
+
+          if (basename === "QuickSettingsPanel.tsx") {
+            const isTileIconWell = Boolean(getAttr(node, "data-qs-tile-icon"));
+            if (!isTileIconWell) return;
+            const val = radiusNode ? resolveStaticText(radiusNode, aliases)?.trim() : null;
+            const px = radiusNode ? parsePx(radiusNode, aliases) : null;
+            const isValid = val === "999px" || val === "var(--radius-pill)" || (px !== null && px <= 6);
+            if (!isValid) {
+              context.report({
+                node: radiusNode ?? node,
+                message:
+                  "Concentric Quick Tile Rule: icon well inside 50px (R=14px) QuickTile must use circular borderRadius (999px / var(--radius-pill)) or concentric <=6px radius.",
+              });
+            }
+          }
+
+          if (basename === "StatusBar.tsx") {
+            const testId = getStringAttr(node, "testId");
+            if (testId === "bar-notifications-badge" || testId === "bar-ime") {
+              const text = context.sourceCode?.getText?.(styleExpr) ?? "";
+              if (!text.includes("vertical") || !text.includes("maxWidth")) {
+                context.report({
+                  node: styleExpr,
+                  message: `Concentric Bar Pill Rule: nested pill "${testId}" must bound vertical maxWidth/padding so it never overflows or overlaps the 34px/40px vertical bar capsule border.`,
+                });
+              }
+              const bgNode = map.get("backgroundColor") ?? map.get("background-color");
+              const staticBgRole = bgNode ? resolveColorRole(bgNode, aliases) : null;
+              if (staticBgRole === "primary-container" || (!bgNode && !text.includes("onActiveContainer"))) {
+                context.report({
+                  node: bgNode ?? styleExpr,
+                  message: `Concentric Bar Pill Rule: nested pill "${testId}" must separate its fill from an active primary-container parent capsule instead of painting flat primary-container on primary-container.`,
+                });
+              }
+            }
+          }
+        },
+      };
+    },
+  },
+
+  "scoped-dismiss-instant": {
+    meta: {
+      type: "problem",
+      docs: { description: "Restrict dismissInstant() strictly to compositor-forced PopupSurface onDismiss handlers so programmatic/Esc dismisses play fast asymmetric exits" },
+      schema: [],
+    },
+    create(context) {
+      const filename = (context.filename ?? "").replace(/\\/g, "/");
+      if (
+        filename.endsWith("/packages/sdk/src/zgui-motion.ts") ||
+        filename.endsWith("packages/sdk/src/zgui-motion.ts") ||
+        filename.endsWith("/apps/shell/src/motion.ts") ||
+        filename.endsWith("apps/shell/src/motion.ts")
+      ) {
+        return {};
+      }
+      const dismissCalls = [];
+      const functionRefs = new Map();
+      const popupDismissRefs = new Set();
+
+      const enclosingNamedHelper = node => {
+        let cur = node.parent;
+        while (cur) {
+          if (cur.type === "JSXAttribute") {
+            const el = cur.parent;
+            const isPopupOnDismiss =
+              cur.name?.type === "JSXIdentifier" &&
+              cur.name.name === "onDismiss" &&
+              el?.type === "JSXOpeningElement" &&
+              el.name?.type === "JSXIdentifier" &&
+              el.name.name === "PopupSurface";
+            return { inlinePopupOnDismiss: isPopupOnDismiss, helperName: null };
+          }
+          if (cur.type === "VariableDeclarator" && cur.id?.type === "Identifier") {
+            return { inlinePopupOnDismiss: false, helperName: cur.id.name };
+          }
+          if (cur.type === "FunctionDeclaration" && cur.id?.type === "Identifier") {
+            return { inlinePopupOnDismiss: false, helperName: cur.id.name };
+          }
+          cur = cur.parent;
+        }
+        return { inlinePopupOnDismiss: false, helperName: null };
+      };
+
+      return {
+        CallExpression(node) {
+          const callee = node.callee;
+          const isDismissInstant =
+            callee?.type === "MemberExpression" &&
+            !callee.computed &&
+            callee.property?.type === "Identifier" &&
+            callee.property.name === "dismissInstant";
+          if (isDismissInstant) dismissCalls.push(node);
+        },
+        Identifier(node) {
+          const parent = node.parent;
+          if (!parent) return;
+          if (parent.type === "VariableDeclarator" && parent.id === node) return;
+          if (parent.type === "FunctionDeclaration" && parent.id === node) return;
+          if (parent.type === "MemberExpression" && !parent.computed && parent.property === node) return;
+          if (parent.type === "Property" && !parent.computed && parent.key === node) return;
+
+          const count = functionRefs.get(node.name) ?? 0;
+          functionRefs.set(node.name, count + 1);
+
+          if (
+            parent.type === "JSXExpressionContainer" &&
+            parent.parent?.type === "JSXAttribute" &&
+            parent.parent.name?.type === "JSXIdentifier" &&
+            parent.parent.name.name === "onDismiss" &&
+            parent.parent.parent?.type === "JSXOpeningElement" &&
+            parent.parent.parent.name?.type === "JSXIdentifier" &&
+            parent.parent.parent.name.name === "PopupSurface"
+          ) {
+            popupDismissRefs.add(node.name);
+          }
+        },
+        "Program:exit"() {
+          for (const call of dismissCalls) {
+            const scope = enclosingNamedHelper(call);
+            if (scope.inlinePopupOnDismiss) continue;
+            if (
+              scope.helperName &&
+              popupDismissRefs.has(scope.helperName) &&
+              functionRefs.get(scope.helperName) === 1
+            ) {
+              continue;
+            }
+            context.report({
+              node: call,
+              message:
+                "Asymmetric Exit Rule (docs/design/motion.md §5.9): reserve dismissInstant() strictly for compositor-forced <PopupSurface onDismiss={...}> callbacks; programmatic, Esc, and toggle dismisses must play the fast asymmetric exit.",
+            });
+          }
         },
       };
     },
@@ -1385,6 +1632,136 @@ const rules = {
               node,
               message:
                 "Shared Primitive Rule: do not hand-roll slider tracks/thumbs; import M3Slider or M3SliderRow from @z-shell/sdk/primitives.",
+            });
+          }
+        },
+      };
+    },
+  },
+
+  "interactive-hover-radius": {
+    meta: {
+      type: "problem",
+      docs: { description: "Require explicit borderRadius on inline-styled interactive <Button>/<control> elements so universal M3 :hover/:active state layers never paint sharp-cornered rectangles" },
+      schema: [],
+    },
+    create(context) {
+      const filename = (context.filename ?? "").replace(/\\/g, "/");
+      if (filename.endsWith("packages/sdk/src/zgui-primitives.tsx")) return {};
+      const roundedStyleConsts = new Set();
+      const roundedStyleFns = new Set();
+
+      const exprDefinesRadius = expr => {
+        if (!expr) return false;
+        const unwrapped =
+          expr.type === "TSSatisfiesExpression" || expr.type === "TSAsExpression" ? expr.expression : expr;
+        if (unwrapped.type === "ObjectExpression") {
+          const { map } = getStyleProps(unwrapped);
+          if (map.has("borderRadius") || map.has("border-radius")) return true;
+          for (const prop of unwrapped.properties ?? []) {
+            if (prop.type === "SpreadElement") {
+              if (prop.argument?.type === "Identifier" && roundedStyleConsts.has(prop.argument.name)) return true;
+              if (
+                prop.argument?.type === "CallExpression" &&
+                prop.argument.callee?.type === "Identifier" &&
+                roundedStyleFns.has(prop.argument.callee.name)
+              ) {
+                return true;
+              }
+            }
+          }
+          return false;
+        }
+        if (unwrapped.type === "ConditionalExpression") {
+          return exprDefinesRadius(unwrapped.consequent) && exprDefinesRadius(unwrapped.alternate);
+        }
+        if (unwrapped.type === "Identifier") return roundedStyleConsts.has(unwrapped.name);
+        if (unwrapped.type === "CallExpression" && unwrapped.callee?.type === "Identifier") {
+          return roundedStyleFns.has(unwrapped.callee.name);
+        }
+        return false;
+      };
+
+      const checkRoleExempt = roleAttr => {
+        if (!roleAttr?.value) return false;
+        const exemptRoles = new Set(["slider", "progressIndicator", "progressBar"]);
+        const isExemptNode = expr => {
+          const val = staticString(expr);
+          if (val !== null) return exemptRoles.has(val);
+          if (expr?.type === "ConditionalExpression") {
+            return isExemptNode(expr.consequent) && isExemptNode(expr.alternate);
+          }
+          return false;
+        };
+        if (roleAttr.value.type === "Literal") return exemptRoles.has(roleAttr.value.value);
+        if (roleAttr.value.type === "JSXExpressionContainer") return isExemptNode(roleAttr.value.expression);
+        return false;
+      };
+
+      return {
+        Program(program) {
+          const scanStatements = stmts => {
+            for (const stmt of stmts ?? []) {
+              const decl = stmt.type === "ExportNamedDeclaration" ? stmt.declaration : stmt;
+              if (!decl) continue;
+              if (decl.type === "VariableDeclaration") {
+                for (const item of decl.declarations ?? []) {
+                  if (item.id?.type !== "Identifier" || !item.init) continue;
+                  const init = item.init;
+                  if (init.type === "ArrowFunctionExpression" || init.type === "FunctionExpression") {
+                    const bodyText = context.sourceCode?.getText?.(init) ?? "";
+                    if (bodyText.includes("borderRadius") || [...roundedStyleConsts].some(id => bodyText.includes(id))) {
+                      roundedStyleFns.add(item.id.name);
+                    }
+                  } else if (exprDefinesRadius(init)) {
+                    roundedStyleConsts.add(item.id.name);
+                  }
+                }
+              } else if (decl.type === "FunctionDeclaration" && decl.id?.type === "Identifier") {
+                const bodyText = context.sourceCode?.getText?.(decl) ?? "";
+                if (bodyText.includes("borderRadius") || [...roundedStyleConsts].some(id => bodyText.includes(id))) {
+                  roundedStyleFns.add(decl.id.name);
+                }
+              }
+            }
+          };
+          scanStatements(program.body);
+        },
+        VariableDeclarator(node) {
+          if (node.id?.type !== "Identifier" || !node.init) return;
+          if (node.init.type === "ArrowFunctionExpression" || node.init.type === "FunctionExpression") {
+            const bodyText = context.sourceCode?.getText?.(node.init) ?? "";
+            if (bodyText.includes("borderRadius") || [...roundedStyleConsts].some(id => bodyText.includes(id))) {
+              roundedStyleFns.add(node.id.name);
+            }
+          } else if (exprDefinesRadius(node.init)) {
+            roundedStyleConsts.add(node.id.name);
+          }
+        },
+        JSXOpeningElement(node) {
+          if (node.name?.type !== "JSXIdentifier") return;
+          const tag = node.name.name;
+          if (tag !== "Button" && tag !== "control") return;
+          const attrs = node.attributes ?? [];
+          const findAttr = name =>
+            attrs.find(attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === name);
+          // CSS Module classes and specialized non-inset interactive controls are exempt.
+          if (
+            findAttr("class") ||
+            findAttr("data-switch-root") ||
+            findAttr("data-dock-item") ||
+            findAttr("data-bar-segment") ||
+            checkRoleExempt(findAttr("role"))
+          ) {
+            return;
+          }
+          const styleAttr = findAttr("style");
+          const styleExpr = styleAttr?.value?.type === "JSXExpressionContainer" ? styleAttr.value.expression : null;
+          if (!styleExpr) return;
+          if (!exprDefinesRadius(styleExpr)) {
+            context.report({
+              node: styleAttr,
+              message: `Interactive Hover Radius Rule: inline-styled <${tag}> must declare borderRadius so universal M3 :hover/:active state layers never paint sharp-cornered rectangles.`,
             });
           }
         },

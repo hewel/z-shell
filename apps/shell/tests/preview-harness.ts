@@ -279,3 +279,50 @@ export function maxRowAlpha(image: DecodedPng, y: number): number {
   }
   return max;
 }
+
+export function pixelChannelDiff(a: readonly number[], b: readonly number[]): number {
+  return Math.max(
+    Math.abs((a[0] ?? 0) - (b[0] ?? 0)),
+    Math.abs((a[1] ?? 0) - (b[1] ?? 0)),
+    Math.abs((a[2] ?? 0) - (b[2] ?? 0)),
+    Math.abs((a[3] ?? 0) - (b[3] ?? 0)),
+  );
+}
+
+/**
+ * Counts RGBA pixels inside `bounds` whose max per-channel difference between `before` and `after`
+ * exceeds `threshold`. Used by L4 interaction & in-flight animation invariant checks.
+ */
+export function diffRegionPixels(
+  before: DecodedPng,
+  after: DecodedPng,
+  bounds: DeviceBounds,
+  threshold = 4,
+): number {
+  const x0 = Math.max(0, Math.floor(bounds.x));
+  const y0 = Math.max(0, Math.floor(bounds.y));
+  const x1 = Math.min(Math.min(before.width, after.width) - 1, Math.ceil(bounds.x + bounds.width) - 1);
+  const y1 = Math.min(Math.min(before.height, after.height) - 1, Math.ceil(bounds.y + bounds.height) - 1);
+  let diff = 0;
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const idxB = (y * before.width + x) * 4;
+      const idxA = (y * after.width + x) * 4;
+      const delta = Math.max(
+        Math.abs((before.data[idxB] ?? 0) - (after.data[idxA] ?? 0)),
+        Math.abs((before.data[idxB + 1] ?? 0) - (after.data[idxA + 1] ?? 0)),
+        Math.abs((before.data[idxB + 2] ?? 0) - (after.data[idxA + 2] ?? 0)),
+        Math.abs((before.data[idxB + 3] ?? 0) - (after.data[idxA + 3] ?? 0)),
+      );
+      if (delta > threshold) diff++;
+    }
+  }
+  return diff;
+}
+
+export function assertSameBounds(a: DeviceBounds, b: DeviceBounds, label: string): void {
+  expect(a.x, `${label} x`).toBe(b.x);
+  expect(a.y, `${label} y`).toBe(b.y);
+  expect(a.width, `${label} width`).toBe(b.width);
+  expect(a.height, `${label} height`).toBe(b.height);
+}
