@@ -653,6 +653,59 @@ describe("zshell oxlint design plugin", () => {
     );
     expect(goodMedia.status, goodMedia.output).toBe(0);
   });
+
+  test("zshell/centered-text-badge requires flex vertical centering and explicit small-text lineHeight on badge containers", () => {
+    const badBlockKeycap = lintSnippet(
+      "ClipboardPanel.tsx",
+      `export const Esc = () => (
+        <box ariaHidden style={{ padding: "2px 6px", borderRadius: "6px", backgroundColor: "var(--color-surface-container-highest)" }}>
+          <text style={{ fontFamily: "var(--font-mono)", fontSize: "10px", lineHeight: "12px" }}>Esc</text>
+        </box>
+      );`,
+      "zshell/centered-text-badge",
+    );
+    expect(badBlockKeycap.status).not.toBe(0);
+
+    const badMissingLineHeight = lintSnippet(
+      "ClipboardPanel.tsx",
+      `export const Esc = () => (
+        <box ariaHidden style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "22px", padding: "0 7px", borderRadius: "6px", backgroundColor: "var(--color-surface-container-highest)" }}>
+          <text style={{ fontFamily: "var(--font-mono)", fontSize: "10px" }}>Esc</text>
+        </box>
+      );`,
+      "zshell/centered-text-badge",
+    );
+    expect(badMissingLineHeight.status).not.toBe(0);
+
+    const badRowMissingAlign = lintSnippet(
+      "IdlePane.tsx",
+      `export const Row = () => (
+        <row style={{ borderRadius: "10px", backgroundColor: "var(--color-surface-container-highest)", padding: "8px 10px" }}>
+          <text style={{ fontSize: "12px", lineHeight: "16px" }}>Rule</text>
+        </row>
+      );`,
+      "zshell/centered-text-badge",
+    );
+    expect(badRowMissingAlign.status).not.toBe(0);
+
+    const goodKeycap = lintSnippet(
+      "ClipboardPanel.tsx",
+      `export const Esc = () => (
+        <box ariaHidden style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "22px", padding: "0 7px", borderRadius: "6px", backgroundColor: "var(--color-surface-container-highest)" }}>
+          <text style={{ fontFamily: "var(--font-mono)", fontSize: "10px", lineHeight: "12px" }}>Esc</text>
+        </box>
+      );`,
+      "zshell/centered-text-badge",
+    );
+    expect(goodKeycap.status, goodKeycap.output).toBe(0);
+
+    const goodPlainHeader = lintSnippet(
+      "SettingsWindow.tsx",
+      `export const Header = () => <box style={{ padding: "0 8px 4px 8px" }}><text style={{ fontSize: "11px" }}>SHELL</text></box>;`,
+      "zshell/centered-text-badge",
+    );
+    expect(goodPlainHeader.status, goodPlainHeader.output).toBe(0);
+  });
 });
 
 function parseCubicPoints(d: string): { x: number; y: number }[] {

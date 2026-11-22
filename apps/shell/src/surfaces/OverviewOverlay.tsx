@@ -226,7 +226,7 @@ function WorkspacePreviewCard(props: {
               backgroundColor: container, color: muted,
               border: "1px solid color-mix(in srgb, var(--color-outline-variant) 65%, transparent)",
             }}>
-              <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+              <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: "14px", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
                 {`+${overflowCount()}`}
               </text>
             </box>

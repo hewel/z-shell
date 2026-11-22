@@ -135,7 +135,7 @@ export function BatteryPowerContent(props: { onBack?: () => void }): NativeChild
                 backgroundColor: containerHighest, color: onSurface, flexShrink: 0,
               }}>
                 <ShellIcon name={charging() ? "batteryCharging" : "battery"} size={14} color={primary} />
-                <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+                <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: "14px", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
                   {w()}
                 </text>
               </row>
@@ -200,8 +200,8 @@ export function BatteryPowerContent(props: { onBack?: () => void }): NativeChild
         alignItems: "center", justifyContent: "space-between", gap: "8px",
         borderRadius: "14px", backgroundColor: containerHigh, padding: "10px 12px",
       }}>
-        <text style={{ fontSize: "12px", fontWeight: 500, color: muted }}>Battery health</text>
-        <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: onSurface, fontVariantNumeric: "tabular-nums" }}>
+        <text style={{ fontSize: "12px", lineHeight: "16px", fontWeight: 500, color: muted }}>Battery health</text>
+        <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: "14px", color: onSurface, fontVariantNumeric: "tabular-nums" }}>
           {healthSummary()}
         </text>
       </row>

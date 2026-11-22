@@ -369,11 +369,15 @@ describe("apps/shell design geometry & pixel lint", () => {
       expect(Math.abs(dockAppAfterHover.width - dockAppBefore.width), "hovered dock hit-target width stable").toBeLessThanOrEqual(0.5);
       expect(Math.abs(dockAppAfterHover.height - dockAppBefore.height), "hovered dock hit-target height stable").toBeLessThanOrEqual(0.5);
 
-      // Launcher card width (652px) and composite search bar framing.
+      // Launcher card width (652px), composite search bar framing, and centered Esc keycap.
       expect(Math.round(treeNode(launcher.tree, "launcher-card").boundsLogical!.width)).toBe(652);
       const launcherSearchBar = treeNode(launcher.tree, "launcher-search-bar").boundsLogical!;
       const launcherSearchField = treeNode(launcher.tree, "launcher-search").boundsLogical!;
+      const launcherEscBadge = treeNode(launcher.tree, "launcher-esc-badge").boundsLogical!;
+      const launcherEscText = treeNode(launcher.tree, "launcher-esc-text").boundsLogical!;
       expect(launcherSearchField.x).toBeGreaterThan(launcherSearchBar.x + 20);
+      expect(Math.abs(centerY(launcherEscBadge) - centerY(launcherSearchBar)), "launcher Esc badge centered in search bar").toBeLessThanOrEqual(1);
+      expect(Math.abs(centerY(launcherEscText) - centerY(launcherEscBadge)), "launcher Esc text centered in badge").toBeLessThanOrEqual(1);
 
       // Overview card width (684px) and interactive workspaces + windows.
       expect(Math.round(treeNode(overview.tree, "overview-card").boundsLogical!.width)).toBe(684);

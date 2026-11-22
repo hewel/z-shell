@@ -643,6 +643,13 @@ describe("apps/shell preview", () => {
       expect(clipboard.tree.nodes.some(node => node.text === "Pinned launch note")).toBe(true);
       expect(centerPixel(clipboard.image, treeNode(clipboard.tree, "clip-image-12").boundsDevice))
         .toEqual([0x22, 0xc5, 0x5e, 255]);
+      // Esc keycap badge and its text must be vertically centered inside clipboard-search-bar.
+      const clipSearchBar = treeNode(clipboard.tree, "clipboard-search-bar").boundsLogical!;
+      const clipEscBadge = treeNode(clipboard.tree, "clipboard-esc-badge").boundsLogical!;
+      const clipEscText = treeNode(clipboard.tree, "clipboard-esc-text").boundsLogical!;
+      const midY = (b: { readonly y: number; readonly height: number }) => b.y + b.height / 2;
+      expect(Math.abs(midY(clipEscBadge) - midY(clipSearchBar)), "clipboard Esc badge centered in search bar").toBeLessThanOrEqual(1);
+      expect(Math.abs(midY(clipEscText) - midY(clipEscBadge)), "clipboard Esc text centered in badge").toBeLessThanOrEqual(1);
     } finally {
       cleanup();
     }

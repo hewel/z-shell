@@ -161,12 +161,12 @@ function LauncherContent(props: {
               padding: "9px 0", lineHeight: "20px", backgroundColor: "transparent",
               color: "var(--color-on-surface)", fontSize: "14px",
             }} />
-          <box ariaHidden style={{
+          <box testId="launcher-esc-badge" ariaHidden style={{
             display: "flex", alignItems: "center", justifyContent: "center",
             height: "22px", padding: "0 7px", borderRadius: "6px", flexShrink: 0,
             backgroundColor: "var(--color-surface-container-highest)",
           }}>
-            <text style={{
+            <text testId="launcher-esc-text" style={{
               fontFamily: "var(--font-mono)", fontSize: "10px", lineHeight: "12px", fontWeight: 500,
               color: "var(--color-on-surface-variant)",
             }}>

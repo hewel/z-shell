@@ -39,7 +39,9 @@ export default function Panel(props: {
         </column>
         <row style={{ alignItems: "center", gap: "6px", flexShrink: 0 }}>
           <box style={{
-            padding: "5px 10px", borderRadius: "999px", "--zgui-corner-shape": "none", fontSize: "11px", fontWeight: 600,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            height: "24px", padding: "0 10px", borderRadius: "999px", "--zgui-corner-shape": "none",
+            fontSize: "11px", lineHeight: "14px", fontWeight: 600,
             backgroundColor: active() ? primaryContainer : containerHigh,
             color: active() ? onPrimaryContainer : muted,
           }}>

@@ -345,9 +345,9 @@ export function IdlePane(): NativeChild {
           <text style={{ fontSize: "13px", fontWeight: 600 }}>Active inhibitors</text>
           <For each={idle.data()?.active_inhibitors} keyed={item => `${item.source.source}:${item.scope}:${item.reason}`}>
             {item => (
-              <row style={{ borderRadius: "10px", backgroundColor: containerHighest, padding: "8px 10px", justifyContent: "space-between", gap: "8px" }}>
-                <text style={{ ...clipped, fontWeight: 500, fontSize: "12px" }}>{`${item().source.source} · ${item().scope}`}</text>
-                <text style={{ ...clipped, fontSize: "11px", color: muted }}>{item().reason}</text>
+              <row style={{ borderRadius: "10px", backgroundColor: containerHighest, padding: "8px 10px", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                <text style={{ ...clipped, fontWeight: 500, fontSize: "12px", lineHeight: "16px" }}>{`${item().source.source} · ${item().scope}`}</text>
+                <text style={{ ...clipped, fontSize: "11px", lineHeight: "14px", color: muted }}>{item().reason}</text>
               </row>
             )}
           </For>

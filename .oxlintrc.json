@@ -53,6 +53,7 @@
         "zshell/concentric-geometry": "error",
         "zshell/scoped-dismiss-instant": "error",
         "zshell/interactive-hover-radius": "error",
+        "zshell/centered-text-badge": "error",
         "zgui/no-direct-bridge": "error",
         "zgui/no-cleanup-in-ref": "error",
         "zgui/no-top-level-service-call": "error",

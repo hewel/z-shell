@@ -1769,6 +1769,163 @@ const rules = {
     },
   },
 
+  "centered-text-badge": {
+    meta: {
+      type: "problem",
+      docs: { description: "Require flex vertical centering and explicit small-text lineHeight on styled <box>/<row> badges wrapping <text> so keycaps and status pills never drift off-center" },
+      schema: [],
+    },
+    create(context) {
+      let aliases = new Map();
+      const styleMeta = new Map();
+
+      const unwrap = expr =>
+        expr && (expr.type === "TSSatisfiesExpression" || expr.type === "TSAsExpression") ? expr.expression : expr;
+
+      const analyzeStyleExpr = expr => {
+        const result = {
+          hasFlex: false,
+          hasAlignCenter: false,
+          hasJustifyCenter: false,
+          isColumn: false,
+          hasSurface: false,
+          hasLineHeight: false,
+        };
+        const node = unwrap(expr);
+        if (!node) return result;
+        if (node.type === "Identifier") {
+          return styleMeta.get(node.name) ?? result;
+        }
+        if (node.type !== "ObjectExpression") return result;
+
+        for (const prop of node.properties ?? []) {
+          if (prop.type === "SpreadElement") {
+            const arg = unwrap(prop.argument);
+            const spread =
+              arg?.type === "Identifier"
+                ? styleMeta.get(arg.name)
+                : arg?.type === "ObjectExpression"
+                  ? analyzeStyleExpr(arg)
+                  : null;
+            if (spread) {
+              result.hasFlex ||= spread.hasFlex;
+              result.hasAlignCenter ||= spread.hasAlignCenter;
+              result.hasJustifyCenter ||= spread.hasJustifyCenter;
+              result.isColumn ||= spread.isColumn;
+              result.hasSurface ||= spread.hasSurface;
+              result.hasLineHeight ||= spread.hasLineHeight;
+            }
+            continue;
+          }
+          const key = propertyName(prop);
+          if (!key) continue;
+          const strVal = resolveStaticText(prop.value, aliases)?.trim();
+          if (key === "display" && strVal === "flex") result.hasFlex = true;
+          if ((key === "alignItems" || key === "align-items") && strVal === "center") result.hasAlignCenter = true;
+          if ((key === "justifyContent" || key === "justify-content") && strVal === "center") result.hasJustifyCenter = true;
+          if ((key === "flexDirection" || key === "flex-direction") && strVal === "column") result.isColumn = true;
+          if (key === "lineHeight" || key === "line-height") result.hasLineHeight = true;
+          if (
+            key === "borderRadius" ||
+            key === "border-radius" ||
+            key === "backgroundColor" ||
+            key === "background-color" ||
+            key === "border"
+          ) {
+            result.hasSurface = true;
+          }
+        }
+        return result;
+      };
+
+      const recordStyleConst = item => {
+        if (item.id?.type !== "Identifier" || !item.init) return;
+        const init = unwrap(item.init);
+        if (init?.type === "ObjectExpression") {
+          styleMeta.set(item.id.name, analyzeStyleExpr(init));
+        }
+      };
+
+      const LEAF_BADGE_TAGS = new Set(["text", "ShellIcon", "vector", "Image"]);
+
+      return {
+        Program(program) {
+          aliases = collectStringAliases(program);
+          for (const stmt of program.body ?? []) {
+            const decl = stmt.type === "ExportNamedDeclaration" ? stmt.declaration : stmt;
+            if (decl?.type === "VariableDeclaration") {
+              for (const item of decl.declarations ?? []) recordStyleConst(item);
+            }
+          }
+        },
+        VariableDeclarator(node) {
+          recordStyleConst(node);
+        },
+        JSXElement(node) {
+          const opening = node.openingElement;
+          if (opening?.name?.type !== "JSXIdentifier") return;
+          const tag = opening.name.name;
+          if (tag !== "box" && tag !== "row") return;
+          const attrs = opening.attributes ?? [];
+          const findAttr = name =>
+            attrs.find(attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === name);
+          if (findAttr("class")) return;
+          const styleAttr = findAttr("style");
+          const styleExpr = styleAttr?.value?.type === "JSXExpressionContainer" ? styleAttr.value.expression : null;
+          if (!styleExpr) return;
+
+          const directElements = [];
+          for (const child of node.children ?? []) {
+            if (child.type === "JSXText" && child.value.trim() === "") continue;
+            if (child.type === "JSXExpressionContainer") {
+              if (child.expression?.type === "JSXEmptyExpression") continue;
+              // Expressions like <Show> or dynamic child arrays indicate non-leaf containers.
+              return;
+            }
+            if (child.type !== "JSXElement") return;
+            const childTag = child.openingElement?.name?.type === "JSXIdentifier" ? child.openingElement.name.name : null;
+            if (!childTag || !LEAF_BADGE_TAGS.has(childTag)) return;
+            directElements.push({ child, tag: childTag });
+          }
+          const textChildren = directElements.filter(entry => entry.tag === "text");
+          if (textChildren.length === 0) return;
+
+          const meta = analyzeStyleExpr(styleExpr);
+          if (!meta.hasSurface) return;
+
+          const hasFlex = tag === "row" || meta.hasFlex;
+          const centeredVertically = meta.isColumn ? meta.hasJustifyCenter : meta.hasAlignCenter;
+          if (!hasFlex || !centeredVertically) {
+            context.report({
+              node: styleAttr,
+              message: `Centered Text Badge Rule: styled <${tag}> badge wrapping <text> must use flex vertical centering (display: "flex", ${meta.isColumn ? 'justifyContent: "center"' : 'alignItems: "center"'}) so keycaps and pills never drift off-center.`,
+            });
+          }
+
+          for (const { child } of textChildren) {
+            const textStyleAttr = (child.openingElement?.attributes ?? []).find(
+              attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === "style",
+            );
+            const textStyleExpr = textStyleAttr?.value?.type === "JSXExpressionContainer" ? unwrap(textStyleAttr.value.expression) : null;
+            if (!textStyleExpr || textStyleExpr.type !== "ObjectExpression") continue;
+            const { map } = getStyleProps(textStyleExpr);
+            const fontSizeNode = map.get("fontSize") ?? map.get("font-size");
+            const fontSizePx = fontSizeNode ? parsePx(fontSizeNode, aliases) : null;
+            if (fontSizePx !== null && fontSizePx <= 12) {
+              const textMeta = analyzeStyleExpr(textStyleExpr);
+              if (!textMeta.hasLineHeight && !meta.hasLineHeight) {
+                context.report({
+                  node: textStyleAttr,
+                  message: `Centered Text Badge Rule: compact badge <text> (fontSize ${fontSizePx}px <= 12px) must declare an explicit lineHeight (on <text> or its badge container) so inherited body line-height never shifts the glyph off vertical center.`,
+                });
+              }
+            }
+          }
+        },
+      };
+    },
+  },
+
   "no-lint-suppression": {
     meta: {
       type: "problem",

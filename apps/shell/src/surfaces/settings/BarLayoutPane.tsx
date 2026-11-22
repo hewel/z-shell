@@ -154,8 +154,9 @@ export function BarLayoutPane(): NativeChild {
           <text style={{ ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px" }}>{monitorLabel()}</text>
         </row>
         <box style={{
-          padding: "3px 8px", borderRadius: "8px", backgroundColor: primaryContainer, color: onPrimaryContainer,
-          fontSize: "11px", fontWeight: 600, flexShrink: 0,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          height: "22px", padding: "0 8px", borderRadius: "8px", backgroundColor: primaryContainer, color: onPrimaryContainer,
+          fontSize: "11px", lineHeight: "14px", fontWeight: 600, flexShrink: 0,
         }}>
           <text>{`${monitors().length} ${monitors().length === 1 ? "display" : "displays"} · Bar visible`}</text>
         </box>

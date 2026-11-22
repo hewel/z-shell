@@ -88,7 +88,7 @@ function IdleScrim({ monitorId, warning, seconds }: {
         ...capsule, padding: "10px 16px", gap: "10px", maxWidth: "90%", alignItems: "center",
       }}>
         <text style={{ fontSize: "13px" }}>{warning().rules.join(", ")}</text>
-        <text data-tabular="true" style={{ color: muted, flexShrink: 0, fontFamily: "var(--font-mono)", fontSize: "12px", fontVariantNumeric: "tabular-nums" }}>
+        <text data-tabular="true" style={{ color: muted, flexShrink: 0, fontFamily: "var(--font-mono)", fontSize: "12px", lineHeight: "16px", fontVariantNumeric: "tabular-nums" }}>
           {seconds()}s
         </text>
       </row>

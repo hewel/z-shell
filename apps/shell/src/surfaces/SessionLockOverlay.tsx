@@ -216,7 +216,7 @@ function LockScreen(props: {
               minWidth: "36px", height: "32px", padding: "0 10px", borderRadius: "16px",
               backgroundColor: "color-mix(in srgb, var(--color-on-surface) 14%, transparent)",
             }}>
-              <text style={{ fontFamily: "var(--font-mono)", fontSize: "12px", fontWeight: 600 }}>
+              <text style={{ fontFamily: "var(--font-mono)", fontSize: "12px", lineHeight: "16px", fontWeight: 600 }}>
                 {ime.data()?.active_im?.short_label || "EN"}
               </text>
             </box>

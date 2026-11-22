@@ -209,11 +209,16 @@ export function ClipboardPanel() {
               flexGrow: 1, flexBasis: "0px", minWidth: "0px", height: "36px", lineHeight: "18px",
               padding: "9px 0", backgroundColor: "transparent", color: onSurface,
             }} />
-          <box ariaHidden style={{
-            padding: "2px 6px", borderRadius: "6px", flexShrink: 0,
+          <box testId="clipboard-esc-badge" ariaHidden style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            height: "22px", padding: "0 7px", borderRadius: "6px", flexShrink: 0,
             backgroundColor: containerHighest,
           }}>
-            <text style={{ fontFamily: "var(--font-mono)", fontSize: "10px", fontWeight: 500, color: muted }}>Esc</text>
+            <text testId="clipboard-esc-text" style={{
+              fontFamily: "var(--font-mono)", fontSize: "10px", lineHeight: "12px", fontWeight: 500, color: muted,
+            }}>
+              Esc
+            </text>
           </box>
         </row>
         <row style={{ gap: "6px", flexWrap: "wrap", flexShrink: 0 }}>
