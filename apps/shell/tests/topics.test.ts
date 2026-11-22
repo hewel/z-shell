@@ -24,6 +24,7 @@ import {
   resolveActiveMonitor,
   resolveBarLayout,
   resolveBarPopupAnchor,
+  resolveClipboardSelection,
   resolveDesktopApp,
   resolveMonitorLogicalSize,
   resolveMonitorWallpaper,
@@ -886,5 +887,24 @@ describe("isImeTrayItem", () => {
     expect(isImeTrayItem({ ...baseTray, category: "SystemServices", title: "输入法" })).toBe(true);
     expect(isImeTrayItem({ ...baseTray, app_id: "discord", title: "Discord" })).toBe(false);
     expect(isImeTrayItem({ ...baseTray, title: "Polychromatic" })).toBe(false);
+  });
+});
+
+describe("resolveClipboardSelection", () => {
+  test("preserves selection by stable entry id when new items prepend and falls back to adjacent item on delete", () => {
+    const initial = [{ id: 10 }, { id: 20 }, { id: 30 }];
+    expect(resolveClipboardSelection(initial, null, 0)).toEqual({ index: 0, entry: { id: 10 } });
+    expect(resolveClipboardSelection(initial, 20, 1)).toEqual({ index: 1, entry: { id: 20 } });
+
+    // Prepending a fresh clipboard capture keeps id=20 selected instead of drifting to index 1.
+    const prepended = [{ id: 99 }, { id: 10 }, { id: 20 }, { id: 30 }];
+    expect(resolveClipboardSelection(prepended, 20, 1)).toEqual({ index: 2, entry: { id: 20 } });
+
+    // Deleting the selected item smoothly falls back to the adjacent index (clamped when deleting the last row).
+    const deletedMiddle = [{ id: 10 }, { id: 30 }];
+    expect(resolveClipboardSelection(deletedMiddle, 20, 1)).toEqual({ index: 1, entry: { id: 30 } });
+    const deletedLast = [{ id: 10 }, { id: 20 }];
+    expect(resolveClipboardSelection(deletedLast, 30, 2)).toEqual({ index: 1, entry: { id: 20 } });
+    expect(resolveClipboardSelection([], 10, 0)).toEqual({ index: -1, entry: null });
   });
 });

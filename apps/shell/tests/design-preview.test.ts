@@ -1380,9 +1380,10 @@ describe("apps/shell design geometry & pixel lint", () => {
       expect(treeNode(calChaos.tree, "cal-notif-action-2-open").boundsLogical, "labelled action buttons preserved").toBeDefined();
 
       // 4. Control Center opened via vertical bar-network: Wi-Fi enabled+disconnected while Ethernet online stays neutral
-      //    (surface-container-high, never active primary-container), and null-avatar rosette renders fallback person visibly.
+      //    visually (surface-container-high, never active primary-container), while keeping enabled standby copy.
       const wifiTile = treeNode(qsChaos.tree, "qs-tile-wifi");
-      expect(wifiTile.state?.checked, "disconnected Wi-Fi must not report active checked state").not.toBe(true);
+      expect(wifiTile.state?.enabled, "enabled-but-disconnected Wi-Fi remains interactive").toBe(true);
+      expect(wifiTile.text, "Wi-Fi standby copy reflects enabled radio while Ethernet is active").toContain("Ethernet · Standby");
       const wifiFill = pixel(qsChaos.image, Math.round(wifiTile.boundsDevice!.x + 6), Math.round(wifiTile.boundsDevice!.y + 6));
       expect(wifiFill, "disconnected Wi-Fi tile stays neutral surface-container-high (not active primary-container)").toEqual([0x27, 0x2a, 0x2f, 255]);
       expect(treeNode(qsChaos.tree, "qs-avatar-fallback").boundsLogical).toBeDefined();

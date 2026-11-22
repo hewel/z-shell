@@ -1,10 +1,10 @@
-import { Button, For, Image, Show, TextField, createEffect, createMemo, createSignal, getWindowRect, mountStylesheet, type Accessor, type NativeNode } from "@hewel/zgui";
+import { Button, For, Image, Show, TextField, createEffect, createMemo, createSignal, getWindowRect, mountStylesheet, type Accessor, type NativeKeyEvent, type NativeNode } from "@hewel/zgui";
 import { M3Button, M3FilterChip } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
 import { SPRING_EPSILON, createM3Spring, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
-import { PANEL_MAX_HEIGHTS, type ClipboardEntrySummary } from "../topics.ts";
+import { PANEL_MAX_HEIGHTS, resolveClipboardSelection, type ClipboardEntrySummary } from "../topics.ts";
 
 const primary = "var(--color-primary)";
 const onSurface = "var(--color-on-surface)";
@@ -106,8 +106,11 @@ export function ClipboardPanel() {
   `);
   const [query, setQuery] = createSignal("");
   const [filter, setFilter] = createSignal<Filter>("all");
-  const [selectedIndex, setSelectedIndex] = createSignal(0);
+  const [selectedEntryId, setSelectedEntryId] = createSignal<number | null>(null);
+  const [fallbackIndex, setFallbackIndex] = createSignal(0);
   const [searchFocused, setSearchFocused] = createSignal(false);
+  let rootNode: NativeNode | undefined;
+  let searchNode: NativeNode | undefined;
   const locked = () => clipboard.data()?.locked === "locked";
   const entries = () => locked() ? [] : clipboard.data()?.entries ?? [];
   const counts = createMemo(() => {
@@ -131,9 +134,21 @@ export function ClipboardPanel() {
     });
   });
   const scheme = useMotionScheme();
-  const activeIndex = () => {
-    const list = filtered();
-    return list.length === 0 ? -1 : Math.max(0, Math.min(selectedIndex(), list.length - 1));
+  const selection = createMemo(() => resolveClipboardSelection(filtered(), selectedEntryId(), fallbackIndex()));
+  const activeIndex = () => selection().index;
+  const activeEntry = () => selection().entry;
+  createEffect(selection, current => {
+    if (current.entry) {
+      if (selectedEntryId() !== current.entry.id) setSelectedEntryId(current.entry.id);
+      if (fallbackIndex() !== current.index) setFallbackIndex(current.index);
+    } else if (selectedEntryId() !== null) {
+      setSelectedEntryId(null);
+      setFallbackIndex(0);
+    }
+  });
+  const resetSelection = () => {
+    setSelectedEntryId(null);
+    setFallbackIndex(0);
   };
   const [listNode, setListNode] = createSignal<NativeNode | null>(null);
   const rowNodes = new Map<number, NativeNode>();
@@ -155,36 +170,52 @@ export function ClipboardPanel() {
   const highlightY = createM3Spring(() => highlightRect().y, "fastSpatial", { scheme, epsilon: SPRING_EPSILON.px });
   const highlightH = createM3Spring(() => highlightRect().height, "fastSpatial", { scheme, epsilon: SPRING_EPSILON.px });
   const highlightOpacity = createM3Spring(() => (activeIndex() >= 0 ? 1 : 0), "fastEffects", { scheme });
-  const handleKeyDown = (event: { key: string | null; preventDefault: () => void }) => {
+  const handleKeyDown = (event: NativeKeyEvent) => {
     const list = filtered();
+    const inSearch = searchFocused() || (searchNode !== undefined && event.target === searchNode);
+    const onRoot = rootNode !== undefined && event.target === rootNode;
     if (event.key === "Escape") {
       event.preventDefault();
+      event.stopPropagation();
       closePanels();
       return;
     }
     if (list.length === 0) return;
-    if (event.key === "ArrowDown") {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      setSelectedIndex(index => (index + 1) % list.length);
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setSelectedIndex(index => (index - 1 + list.length) % list.length);
+      event.stopPropagation();
+      const currentIdx = Math.max(0, activeIndex());
+      const nextIdx = event.key === "ArrowDown"
+        ? (currentIdx + 1) % list.length
+        : (currentIdx - 1 + list.length) % list.length;
+      const nextEntry = list[nextIdx];
+      if (nextEntry) {
+        setSelectedEntryId(nextEntry.id);
+        setFallbackIndex(nextIdx);
+      }
     } else if (event.key === "Enter") {
-      const target = list[activeIndex()];
+      // Only copy the highlighted row when Enter originates in the search bar or panel root;
+      // buttons (Pin, Forget, Filter chips, Clear) handle their own Enter activation.
+      if (!inSearch && !onRoot) return;
+      const target = activeEntry();
       if (!target) return;
       event.preventDefault();
+      event.stopPropagation();
       void invokePublic("clipboard.copy", { id: target.id });
       closePanels();
     } else if (event.key === "Delete") {
-      const target = list[activeIndex()];
+      // Never hijack Delete while editing text inside the search input.
+      if (inSearch) return;
+      const target = activeEntry();
       if (!target) return;
       event.preventDefault();
+      event.stopPropagation();
       void invokePublic("clipboard.forget", { id: target.id });
     }
   };
 
   return (
-    <column testId="panel-clipboard" onKeyDown={handleKeyDown} style={{
+    <column ref={node => { rootNode = node; }} testId="panel-clipboard" data-active-entry={activeEntry() ? String(activeEntry()!.id) : ""} onKeyDown={handleKeyDown} style={{
       width: "100%", maxHeight: `${PANEL_MAX_HEIGHTS.clipboard}px`, padding: "16px", gap: "10px", flexDirection: "column",
       backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
     }}>
@@ -202,10 +233,10 @@ export function ClipboardPanel() {
             : "1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent)",
         }}>
           <ShellIcon name="search" size={18} color={searchFocused() ? primary : muted} />
-          <TextField testId="clipboard-search" class="clipboard-search shell-composite-field" ariaLabel={searchPlaceholder} placeholder={searchPlaceholder} value={query()}
-            onInput={event => { setQuery(event.value); setSelectedIndex(0); }}
+          <TextField ref={node => { searchNode = node; }} testId="clipboard-search" class="clipboard-search shell-composite-field" ariaLabel={searchPlaceholder} placeholder={searchPlaceholder} value={query()}
+            onInput={event => { setQuery(event.value); resetSelection(); }}
             onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)}
-            onKeyDown={handleKeyDown} style={{
+            style={{
               flexGrow: 1, flexBasis: "0px", minWidth: "0px", height: "36px", lineHeight: "18px",
               padding: "9px 0", backgroundColor: "transparent", color: onSurface,
             }} />
@@ -231,7 +262,7 @@ export function ClipboardPanel() {
                   label={chip().label}
                   count={counts()[chip().key]}
                   selected={active()}
-                  onClick={() => { setFilter(chip().key); setSelectedIndex(0); }}
+                  onClick={() => { setFilter(chip().key); resetSelection(); }}
                 />
               );
             }}

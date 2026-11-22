@@ -110,6 +110,7 @@ function QuickTile(props: {
   detail: string;
   icon: ShellIconName;
   active?: boolean;
+  checked?: boolean;
   toggle?: boolean;
   disabled?: boolean;
   outgoing?: boolean | undefined;
@@ -132,7 +133,7 @@ function QuickTile(props: {
       backgroundColor: props.active ? primaryContainer : containerHigh,
       border: props.active ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
     }}>
-      <Button testId={props.outgoing ? null : `qs-tile-${props.id}`} ariaLabel={props.label} checked={props.toggle ? props.active ?? false : null}
+      <Button testId={props.outgoing ? null : `qs-tile-${props.id}`} ariaLabel={props.label} checked={props.toggle ? (props.checked ?? props.active ?? false) : null}
         disabled={props.disabled ?? false} onClick={props.onClick} style={{
           ...grow, display: "flex", flexDirection: "row", alignItems: "center", height: "100%", borderRadius: "14px",
           padding: props.open ? "0 6px 0 10px" : "0 10px",
@@ -410,7 +411,7 @@ function MainPage(props: {
         <row style={{ gap: "8px" }}>
           <QuickTile id="wifi" label="Wi-Fi"
             detail={wifi()?.enabled ? (wifiName() ?? (ethernetConnected() ? "Ethernet · Standby" : "Disconnected")) : "Off"}
-            icon={wifi()?.enabled ? "wifi" : "wifiOff"} active={wifiConnected()} toggle
+            icon={wifi()?.enabled ? "wifi" : "wifiOff"} active={wifiConnected()} checked={Boolean(wifi()?.enabled)} toggle
             disabled={!network.data()?.available || !wifi()?.hardware_enabled}
             outgoing={props.outgoing}
             onClick={() => void invokePublic("network.wifi.set-enabled", { enabled: !wifi()?.enabled })}

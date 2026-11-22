@@ -1493,3 +1493,21 @@ export function maxThermalCelsius(zones: readonly ThermalZone[]): number | null 
   }
   return Math.round(maximum / 1000);
 }
+
+/**
+ * Resolves the active clipboard entry by stable `entry.id` so inserting new entries at the top
+ * does not shift selection, while deleting the active entry falls back cleanly to an adjacent row.
+ */
+export function resolveClipboardSelection<T extends { readonly id: number }>(
+  entries: readonly T[],
+  selectedId: number | null,
+  fallbackIndex: number,
+): { readonly index: number; readonly entry: T | null } {
+  if (entries.length === 0) return { index: -1, entry: null };
+  if (selectedId !== null) {
+    const found = entries.findIndex(entry => entry.id === selectedId);
+    if (found >= 0) return { index: found, entry: entries[found]! };
+  }
+  const index = Math.max(0, Math.min(fallbackIndex, entries.length - 1));
+  return { index, entry: entries[index]! };
+}

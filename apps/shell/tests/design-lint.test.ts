@@ -834,6 +834,10 @@ describe("DESIGN.md token and surface contract sync", () => {
     expect(settingsWin).toContain("width={820}");
     expect(settingsWin).toContain("height={600}");
     expect(settingsWin).toContain(`width: "216px"`);
+
+    // QuickSettings Wi-Fi tile decouples visual active fill (wifiConnected) from toggle a11y checked (wifi.enabled).
+    const qsPanel = readFileSync(join(shellDir, "src/panels/QuickSettingsPanel.tsx"), "utf8");
+    expect(qsPanel).toContain("active={wifiConnected()} checked={Boolean(wifi()?.enabled)} toggle");
   });
 
   test("surface width tiers match DESIGN.md (Compact 360, Standard 396, Clipboard 560, Launcher 652, Overview 684)", () => {
