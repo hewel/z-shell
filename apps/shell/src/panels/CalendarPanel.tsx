@@ -127,7 +127,7 @@ export function CalendarPanel() {
           </column>
           <Button testId="cal-dnd-toggle" checked={dnd()} onClick={() => { void invokePublic("notifications.set-dnd", { dnd: !dnd() }); }}
             style={{
-              ...pill, borderRadius: "999px", flexDirection: "row", gap: "6px", padding: "5px 11px",
+              ...pill, borderRadius: "10px", flexDirection: "row", gap: "6px", padding: "5px 11px",
               backgroundColor: dnd() ? "var(--color-primary-container)" : containerHigh,
               border: dnd() ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
               color: dnd() ? "var(--color-on-primary-container)" : onSurface, fontSize: "12px", fontWeight: 500,

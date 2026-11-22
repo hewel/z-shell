@@ -327,21 +327,61 @@ describe("apps/shell design geometry & pixel lint", () => {
       expect(Math.round(treeNode(overview.tree, "overview-card").boundsLogical!.width)).toBe(684);
       expect(treeNode(overview.tree, "overview-ws-2").boundsLogical).toBeDefined();
 
-      // Slider fill-to-thumb alignment on wide Settings slider (Tiling gap = 14px -> 22% on 448px track):
-      // fill must end at thumb center without poking past the thumb's right edge.
+      // M3 Expressive Slider pixel anatomy on wide Settings slider (Tiling gap = 14px -> 22%):
+      // active fill + 4px transparent gap + 4px vertical handle + 4px transparent gap + inactive track + 4x4px stop dot.
       {
         const gapSlider = settingsBar.tree.nodes.find(node => node.role === "slider" && node.name === "Tiling gap");
         expect(gapSlider?.boundsDevice, "settings-bar Tiling gap slider").toBeDefined();
         const bounds = gapSlider!.boundsDevice!;
         const midY = Math.round(bounds.y + bounds.height / 2);
-        const pct = Math.round((14 / 64) * 100) / 100;
-        const thumbCenterX = bounds.x + 7 + pct * (bounds.width - 14);
+        const bgSample = pixel(settingsBar.image, Math.round(bounds.x + 20), Math.round(bounds.y + 1));
         const filledSample = pixel(settingsBar.image, Math.round(bounds.x + 20), midY);
-        const unfilledSample = pixel(settingsBar.image, Math.round(bounds.x + bounds.width - 20), midY);
+        const unfilledSample = pixel(settingsBar.image, Math.round(bounds.x + bounds.width - 24), midY);
         expect(filledSample).not.toEqual(unfilledSample);
-        // Center of thumb is filled primary; 10px past thumb center (3px outside thumb right edge) is unfilled track.
-        expect(pixel(settingsBar.image, Math.round(thumbCenterX), midY), "thumb center filled").toEqual(filledSample);
-        expect(pixel(settingsBar.image, Math.round(thumbCenterX + 10), midY), "no fill overhang past thumb").toEqual(unfilledSample);
+        expect(filledSample).not.toEqual(bgSample);
+
+        // Scan the horizontal centerline across the slider for the active -> gap -> vertical handle -> gap -> inactive transition.
+        const sameColor = (a: readonly number[], b: readonly number[]) =>
+          Math.abs(a[0]! - b[0]!) <= 6 && Math.abs(a[1]! - b[1]!) <= 6 && Math.abs(a[2]! - b[2]!) <= 6;
+        let leftGapStart = -1;
+        let handleStart = -1;
+        let handleEnd = -1;
+        let rightGapEnd = -1;
+        for (let x = Math.round(bounds.x + 20); x < Math.round(bounds.x + bounds.width - 20); x++) {
+          const px = pixel(settingsBar.image, x, midY);
+          if (leftGapStart < 0 && sameColor(px, bgSample)) {
+            leftGapStart = x;
+          } else if (leftGapStart >= 0 && handleStart < 0 && sameColor(px, filledSample)) {
+            handleStart = x;
+          } else if (handleStart >= 0 && handleEnd < 0 && sameColor(px, bgSample)) {
+            handleEnd = x;
+          } else if (handleEnd >= 0 && rightGapEnd < 0 && sameColor(px, unfilledSample)) {
+            rightGapEnd = x;
+            break;
+          }
+        }
+        expect(leftGapStart, "expressive slider left 4px gap detected").toBeGreaterThan(bounds.x + 20);
+        expect(handleStart - leftGapStart, "expressive slider left gap width ~4px").toBeGreaterThanOrEqual(3);
+        expect(handleEnd - handleStart, "expressive slider vertical handle width ~4px").toBeGreaterThanOrEqual(3);
+        expect(handleEnd - handleStart, "expressive slider vertical handle not wide circle").toBeLessThanOrEqual(6);
+        expect(rightGapEnd - handleEnd, "expressive slider right gap width ~4px").toBeGreaterThanOrEqual(3);
+        // Trailing 4x4px primary stop dot sits inset ~3px from the right edge of the track.
+        const stopDotPixels = [3, 4, 5, 6].some(inset =>
+          sameColor(pixel(settingsBar.image, Math.round(bounds.x + bounds.width - inset), midY), filledSample),
+        );
+        expect(stopDotPixels, "expressive slider trailing 4px primary stop dot").toBe(true);
+      }
+
+      // M3Switch desktop geometry (44x24px) in Bar & layout settings, and 34px desktop M3Button height in Power Dialog.
+      {
+        const switchNodes = settingsBar.tree.nodes.filter(
+          node => node.role === "button" && node.boundsLogical && Math.round(node.boundsLogical.width) === 44 && Math.round(node.boundsLogical.height) === 24,
+        );
+        expect(switchNodes.length, "settings-bar 44x24px M3Switch controls").toBeGreaterThanOrEqual(4);
+        const cancelBounds = treeNode(power.tree, "power-dialog-cancel").boundsLogical!;
+        const confirmBounds = treeNode(power.tree, "power-dialog-confirm").boundsLogical!;
+        expect(Math.round(cancelBounds.height), "power-dialog Cancel M3Button height").toBe(34);
+        expect(Math.round(confirmBounds.height), "power-dialog Confirm M3Button height").toBe(34);
       }
       expect(launcherSearchField.y).toBeGreaterThanOrEqual(launcherSearchBar.y);
       expect(launcherSearchField.y + launcherSearchField.height).toBeLessThanOrEqual(launcherSearchBar.y + launcherSearchBar.height);
@@ -533,8 +573,10 @@ describe("apps/shell design geometry & pixel lint", () => {
         }
       }
 
-      // Polkit 23 card width (360px) and >= 24px interactive hit targets.
+      // Polkit 23 card width (360px), 34px M3Button actions, and >= 24px interactive hit targets.
       expect(Math.round(treeNode(polkit.tree, "polkit-card").boundsLogical!.width)).toBe(360);
+      expect(Math.round(treeNode(polkit.tree, "polkit-cancel").boundsLogical!.height)).toBe(34);
+      expect(Math.round(treeNode(polkit.tree, "polkit-submit").boundsLogical!.height)).toBe(34);
       expect(treeNode(polkit.tree, "polkit-input").boundsLogical).toBeDefined();
       expect(treeNode(polkit.tree, "polkit-action-id").text).toBe("org.freedesktop.systemd1.manage-units");
 
@@ -621,6 +663,263 @@ describe("apps/shell design geometry & pixel lint", () => {
       // Control Center opens cleanly at 396px width anchored from the bottom-left status island.
       expect(Math.round(treeNode(qsLeft.tree, "panel-root-quick-settings").boundsLogical!.width)).toBe(396);
       expect(pixel(qsLeft.image, 0, 0)).toEqual([0, 0, 0, 0]);
+    } finally {
+      cleanup();
+    }
+  }, 30_000);
+
+  previewTest("Light Mode Showcase (dark: false): light HCT palette, soft elevation shadows, light scrim, and geometry parity", () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-design-light-");
+    const interactiveRoles = new Set(["button", "switch", "slider", "menuItem", "menuItemCheckBox", "menuItemRadio", "tab"]);
+    const lightScheme = {
+      surface: "#F9F9FF",
+      surface_dim: "#D9DAE0",
+      surface_bright: "#F9F9FF",
+      surface_container_lowest: "#FFFFFF",
+      surface_container_low: "#F3F3FA",
+      surface_container: "#EDEDF4",
+      surface_container_high: "#E7E8EE",
+      surface_container_highest: "#E1E2E9",
+      on_surface: "#191C20",
+      on_surface_variant: "#43474E",
+      inverse_surface: "#2E3036",
+      inverse_on_surface: "#F0F0F7",
+      outline: "#74777F",
+      outline_variant: "#C3C6CF",
+      scrim: "#000000",
+      primary: "#3C6090",
+      on_primary: "#FFFFFF",
+      primary_container: "#D4E3FF",
+      on_primary_container: "#224876",
+      secondary: "#545F71",
+      on_secondary: "#FFFFFF",
+      secondary_container: "#D8E3F8",
+      on_secondary_container: "#3D4758",
+      tertiary: "#6D5677",
+      on_tertiary: "#FFFFFF",
+      tertiary_container: "#F6D9FF",
+      on_tertiary_container: "#543F5E",
+      error: "#BA1A1A",
+      on_error: "#FFFFFF",
+      error_container: "#FFDAD6",
+      on_error_container: "#93000A",
+    } as const;
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const monitor = { id: "HDMI-A-1", name: "HDMI-A-1", x: 0, y: 0, width: 1280, height: 720, scale: 1 };
+
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+      timeline.step({ id: "capture-bar-light", op: "capture", surface: "bar-hdmi-a-1", captureId: "bar-light" });
+      timeline.step({ id: "capture-dock-light", op: "capture", surface: "dock-hdmi-a-1", captureId: "dock-light" });
+
+      timeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-hdmi-a-1", testId: "bar-audio" }, button: "primary" });
+      timeline.advance("qs-settle", 450);
+      timeline.step({ id: "capture-qs-light", op: "capture", surface: "panel-quick-settings", captureId: "qs-light" });
+
+      timeline.step({ id: "open-media", op: "pointer.click", target: { surface: "bar-hdmi-a-1", testId: "bar-media" }, button: "primary" });
+      timeline.advance("media-settle", 250);
+      timeline.step({ id: "capture-media-light", op: "capture", surface: "panel-media", captureId: "media-light" });
+
+      const wallpaperListAtMs = timeline.after(20);
+      timeline.step({
+        id: "open-settings", op: "service.emit", channel: "control.message",
+        value: { args: ["settings", "appearance"], reply: { text: "{\"settingsWindowOpen\":true,\"settingsWindowTab\":\"appearance\"}" } },
+      });
+      timeline.advance("settings-settle", 250);
+      timeline.step({ id: "capture-settings-light", op: "capture", surface: "settings-window", captureId: "settings-light" });
+
+      timeline.step({
+        id: "open-power", op: "service.emit", channel: "control.message",
+        value: { args: ["power", "poweroff"], reply: { text: "{\"pendingPowerAction\":\"poweroff\"}" } },
+      });
+      timeline.advance("power-settle", 450);
+      timeline.step({ id: "capture-power-light", op: "capture", surface: "power-dialog", captureId: "power-light" });
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-design-light-mode-showcase",
+        initialTopics: {
+          theme: {
+            mode: "light",
+            variant: "tonal",
+            dark: false,
+            seed: "#1976D2",
+            scheme: lightScheme,
+          },
+          settings: {
+            general: { offline_mode: false, log_level: "info" },
+            bar: {
+              position: "top",
+              style: "floating",
+              gaps: 14,
+              edge_overrides: { top: null, right: null, bottom: null, left: null },
+              launcher_enabled: true,
+              dock_enabled: true,
+              clock_24h: true,
+              clock_seconds: false,
+            },
+            theme: {
+              mode: "light",
+              variant: "tonal",
+              seed_color: "#1976D2",
+              motion_scheme: "standard",
+              backend: "builtin",
+              gtk_linking: false,
+            },
+            ime: { mode: "indicator_only", candidate_layout: "auto", switch_osd: true },
+            polkit: { enabled: true },
+            wallpaper: { directories: [], fit: "cover", sync_theme: true, slideshow_seconds: 300 },
+            pre_action_fade_seconds: 0,
+            configured_plugins: [],
+          },
+          "wayland.outputs": {
+            capability: "connected",
+            outputs: [{
+              output_instance_id: 1, name: "HDMI-A-1", description: "Light Showcase Display", make: "Test", model: "1280x720",
+              x: 0, y: 0, width: 1280, height: 720, mode_width: 1280, mode_height: 720, refresh_mhz: 60000, scale: 1,
+              physical_width_mm: null, physical_height_mm: null,
+            }],
+          },
+          "wayland.workspaces": {
+            capability: "connected",
+            groups: [{ group_id: 1, output_instance_ids: [1] }],
+            workspaces: [
+              { workspace_id: 1, group_id: 1, name: "design", id_str: "1", coordinates: [1], active: false, urgent: false, hidden: false, capabilities: ["activate"] },
+              { workspace_id: 2, group_id: 1, name: "main", id_str: "2", coordinates: [2], active: true, urgent: false, hidden: false, capabilities: ["activate"] },
+              { workspace_id: 3, group_id: 1, name: "chat", id_str: "3", coordinates: [3], active: false, urgent: false, hidden: false, capabilities: ["activate"] },
+            ],
+          },
+          "wayland.windows": {
+            capability: "connected",
+            windows: [
+              {
+                window_id: 10, app_id: "org.example.editor", title: "z-shell — Light Mode Showcase",
+                activated: true, minimized: false, maximized: false, fullscreen: false, output_instance_ids: [1],
+              },
+              {
+                window_id: 11, app_id: "org.example.browser", title: "Paper — M3 Light Components",
+                activated: false, minimized: false, maximized: false, fullscreen: false, output_instance_ids: [1],
+              },
+            ],
+          },
+          "desktop.apps": {
+            available: true,
+            count: 2,
+            pinned_apps: ["org.example.editor", "org.example.browser"],
+            apps: [
+              { id: "org.example.editor", title: "Editor", startup_wm_class: "org.example.editor", icon: null },
+              { id: "org.example.browser", title: "Browser", startup_wm_class: "org.example.browser", icon: null },
+            ],
+          },
+          "desktop.media": {
+            available: true,
+            selected_player_id: "spotify",
+            any_playing: true,
+            cover: null,
+            players: [{
+              id: "spotify",
+              identity: "Spotify",
+              playback_status: "playing",
+              position_us: 60_000_000,
+              capabilities: { can_play: true, can_pause: true, can_go_next: true, can_go_previous: true, can_seek: true },
+              metadata: {
+                title: "Daylight Study",
+                artists: ["z-shell"],
+                album: "Light Mode Showcase",
+                length_us: 240_000_000,
+              },
+            }],
+          },
+          "system.audio": {
+            availability: "ready",
+            default_sink: "alsa_output.0",
+            default_source: null,
+            sinks: [{ index: 1, name: "alsa_output.0", description: "Speakers", volume: 0.65, muted: false, channels: 2 }],
+            sources: [],
+            sink_inputs: [],
+            source_outputs: [],
+          },
+          "system.power": {
+            available: true,
+            on_ac: false,
+            battery: {
+              percentage: 82,
+              state: "discharging",
+              time_to_empty_seconds: 19320,
+              time_to_full_seconds: null,
+              energy_rate_watts: 11.4,
+              capacity_percent: 96,
+              charge_cycles: 142,
+            },
+            profiles: { available: true, active_profile: "balanced", profiles: ["performance", "balanced", "power-saver"] },
+          },
+          "system.brightness": {
+            available: true,
+            devices: [{ id: "intel_backlight", name: "intel_backlight", current: 76, max: 100, percentage: 76 }],
+          },
+        },
+        commands: [
+          {
+            id: 26,
+            name: "wallpaper.list",
+            payload: { offset: 0, limit: 16 },
+            atMs: wallpaperListAtMs,
+            result: { total: 0, items: [] },
+          },
+        ],
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-light-mode-showcase",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(published.dist, fixture, scenario, out);
+      expectCleanPreview(result, 6, 0);
+      const barLight = readCapture(out, "bar-hdmi-a-1", "bar-light");
+      const dockLight = readCapture(out, "dock-hdmi-a-1", "dock-light");
+      const qsLight = readCapture(out, "panel-quick-settings", "qs-light");
+      const mediaLight = readCapture(out, "panel-media", "media-light");
+      const settingsLight = readCapture(out, "settings-window", "settings-light");
+      const powerLight = readCapture(out, "power-dialog", "power-light");
+
+      // Light Mode surface pixels must be genuinely high-luminance (matching #EDEDF4 / #F9F9FF).
+      const qsBg = pixel(qsLight.image, 10, 10);
+      expect(qsBg[0]! + qsBg[1]! + qsBg[2]!, "qs-light surface-container bright RGB").toBeGreaterThan(680);
+      const settingsCorner = pixel(settingsLight.image, 0, 0);
+      expect(settingsCorner[3], "settings-light opaque toplevel").toBe(255);
+      expect(settingsCorner[0]! + settingsCorner[1]! + settingsCorner[2]!, "settings-light sidebar bright RGB").toBeGreaterThan(700);
+
+      // Light Mode scrim stays airy (<= 28% alpha, ~71/255) rather than heavy dark 55% (~140/255).
+      const lightScrim = pixel(powerLight.image, 4, 4);
+      expect(lightScrim[3], "power-light airy scrim alpha <= 76").toBeLessThanOrEqual(76);
+      expect(lightScrim[3], "power-light scrim visible > 40").toBeGreaterThan(40);
+
+      // Soft light shadows still bleed cleanly to zero at LayerSurface edges; popovers keep transparent corners.
+      expect(maxRowAlpha(barLight.image, 0), "bar-light top edge shadow clipping").toBeLessThanOrEqual(8);
+      expect(maxRowAlpha(dockLight.image, 0), "dock-light top edge shadow clipping").toBeLessThanOrEqual(8);
+      expect(pixel(qsLight.image, 0, 0), "qs-light corner transparent").toEqual([0, 0, 0, 0]);
+      expect(pixel(mediaLight.image, 0, 0), "media-light corner transparent").toEqual([0, 0, 0, 0]);
+
+      for (const [label, tree] of [
+        ["bar-light", barLight.tree],
+        ["dock-light", dockLight.tree],
+        ["qs-light", qsLight.tree],
+        ["media-light", mediaLight.tree],
+        ["settings-light", settingsLight.tree],
+        ["power-light", powerLight.tree],
+      ] as const) {
+        const controls = tree.nodes.filter(node => node.role && interactiveRoles.has(node.role) && node.boundsLogical);
+        expect(controls.length, label).toBeGreaterThan(0);
+        for (const node of controls) {
+          expect(node.boundsLogical!.width, `${label} ${node.testId ?? node.role} width`).toBeGreaterThanOrEqual(24);
+          expect(node.boundsLogical!.height, `${label} ${node.testId ?? node.role} height`).toBeGreaterThanOrEqual(24);
+        }
+      }
     } finally {
       cleanup();
     }

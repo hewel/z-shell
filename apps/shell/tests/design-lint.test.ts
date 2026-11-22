@@ -469,6 +469,83 @@ describe("zshell oxlint design plugin", () => {
     );
     expect(good.status, good.output).toBe(0);
   });
+
+  test("zshell/no-pill-action-button bans 999px pill radius on rectangular text Buttons and allows switches/square icons", () => {
+    const bad = lintSnippet(
+      "PowerDialog.tsx",
+      `export const Btn = () => <Button style={{ height: "34px", padding: "0 16px", borderRadius: "999px" }}>Cancel</Button>;`,
+      "zshell/no-pill-action-button",
+    );
+    expect(bad.status).not.toBe(0);
+
+    const good = lintSnippet(
+      "PowerDialog.tsx",
+      `export const Ok = () => (
+        <>
+          <Button style={{ height: "34px", padding: "0 16px", borderRadius: "10px" }}>Cancel</Button>
+          <Button data-switch-root="true" style={{ width: "44px", height: "24px", borderRadius: "999px" }} />
+          <Button style={{ width: "36px", height: "36px", borderRadius: "999px" }}><text>X</text></Button>
+        </>
+      );`,
+      "zshell/no-pill-action-button",
+    );
+    expect(good.status, good.output).toBe(0);
+  });
+
+  test("zshell/semantic-elevation-tokens bans raw rgba() boxShadow and requires var(--shadow-level-*)", () => {
+    const bad = lintSnippet(
+      "Card.tsx",
+      `export const s = { boxShadow: "0 20px 56px rgba(0, 0, 0, 0.60)" };`,
+      "zshell/semantic-elevation-tokens",
+    );
+    expect(bad.status).not.toBe(0);
+
+    const good = lintSnippet(
+      "Card.tsx",
+      `export const a = { boxShadow: "var(--shadow-level-3)" }; export const b = { boxShadow: "none" };`,
+      "zshell/semantic-elevation-tokens",
+    );
+    expect(good.status, good.output).toBe(0);
+  });
+
+  test("zshell/no-unblurred-translucent-surface enforces Wayland Graceful Solid Fallback", () => {
+    const bad = lintSnippet(
+      "DockSurface.tsx",
+      `export const dock = { backgroundColor: "color-mix(in srgb, var(--color-surface-container) 42%, transparent)" };`,
+      "zshell/no-unblurred-translucent-surface",
+    );
+    expect(bad.status).not.toBe(0);
+
+    const good = lintSnippet(
+      "DockSurface.tsx",
+      `export const dock = { backgroundColor: "var(--color-surface-container)" };`,
+      "zshell/no-unblurred-translucent-surface",
+    );
+    expect(good.status, good.output).toBe(0);
+  });
+
+  test("zshell/no-duplicate-primitives bans hand-rolled switches and slider thumbs outside zgui-primitives.tsx", () => {
+    const badSwitch = lintSnippet(
+      "CustomPanel.tsx",
+      `export const Sw = () => <Button data-switch-root="true" />;`,
+      "zshell/no-duplicate-primitives",
+    );
+    expect(badSwitch.status).not.toBe(0);
+
+    const badSlider = lintSnippet(
+      "CustomPanel.tsx",
+      `export const Sl = () => <box data-slider-thumb="true" />;`,
+      "zshell/no-duplicate-primitives",
+    );
+    expect(badSlider.status).not.toBe(0);
+
+    const goodMedia = lintSnippet(
+      "MediaPanel.tsx",
+      `export const Scrubber = () => <box data-slider-thumb="true" />;`,
+      "zshell/no-duplicate-primitives",
+    );
+    expect(goodMedia.status, goodMedia.output).toBe(0);
+  });
 });
 
 function parseCubicPoints(d: string): { x: number; y: number }[] {
@@ -649,5 +726,76 @@ describe("DESIGN.md token and surface contract sync", () => {
     expect(appCss).toContain(`--motion-easing-emphasized-accelerate: ${M3_EASINGS.emphasizedAccelerate};`);
     expect(appCss).toContain(`--motion-easing-standard: ${M3_EASINGS.standard};`);
     expect(appCss).toContain(`--motion-duration-short2: 100ms;`);
+  });
+
+  test("Dark & Light elevation shadow and material-web state-layer tokens stay synced across app.css and theme.ts", () => {
+    const appCss = readFileSync(join(shellDir, "src/app.css"), "utf8");
+    const darkSheet = buildThemeStylesheet(SHELL_DEFAULT_SCHEME, true);
+    const lightSheet = buildThemeStylesheet(SHELL_DEFAULT_SCHEME, false);
+
+    for (const token of [
+      "--shadow-level-1:",
+      "--shadow-level-2:",
+      "--shadow-level-3:",
+      "--state-hover: 8%;",
+      "--state-focus: 12%;",
+      "--state-pressed: 12%;",
+      "--state-dragged: 16%;",
+      "--disabled-ink: 38%;",
+      "--disabled-container: 12%;",
+    ]) {
+      expect(appCss, `app.css ${token}`).toContain(token);
+      expect(darkSheet, `dark theme sheet ${token}`).toContain(token);
+      expect(lightSheet, `light theme sheet ${token}`).toContain(token);
+    }
+
+    expect(darkSheet).toContain("--shadow-level-3: 0 20px 56px rgba(0, 0, 0, 0.60);");
+    expect(lightSheet).toContain("--shadow-level-3: 0 18px 48px rgba(25, 28, 32, 0.16);");
+  });
+
+  test("CSS Modules and stylesheets enforce DESIGN.md color, outline, font, and hover-stability invariants", () => {
+    const validColorRoles = new Set([
+      "surface", "surface-dim", "surface-bright",
+      "surface-container-lowest", "surface-container-low", "surface-container",
+      "surface-container-high", "surface-container-highest",
+      "on-surface", "on-surface-variant", "inverse-surface", "inverse-on-surface",
+      "outline", "outline-variant", "scrim",
+      "primary", "on-primary", "primary-container", "on-primary-container",
+      "secondary", "on-secondary", "secondary-container", "on-secondary-container",
+      "tertiary", "on-tertiary", "tertiary-container", "on-tertiary-container",
+      "error", "on-error", "error-container", "on-error-container",
+    ]);
+
+    const cssFiles = [
+      join(repoRoot, "packages/sdk/src/zgui-primitives.module.css"),
+      join(shellDir, "src/app.css"),
+    ];
+
+    for (const filePath of cssFiles) {
+      const css = readFileSync(filePath, "utf8");
+      const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+
+      expect(stripped, `${filePath} outline: none`).not.toMatch(/\boutline\s*:\s*(?:none|0(?:px)?)\s*;/i);
+      expect(stripped, `${filePath} outline-width transition`).not.toMatch(/\btransition[^;]*\boutline-width\b/i);
+      expect(stripped, `${filePath} system-ui font`).not.toMatch(/\bfamily\s*:\s*[^;]*system-ui/i);
+
+      for (const match of stripped.matchAll(/var\(\s*--color-([a-z0-9-]+)/g)) {
+        expect(validColorRoles.has(match[1]!), `${filePath} unknown color role --color-${match[1]}`).toBe(true);
+      }
+
+      for (const rule of stripped.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const selectors = rule[1] ?? "";
+        const body = rule[2] ?? "";
+        if (!/\btransform\s*:\s*[^;]*(?:translate|scale|rotate|skew|matrix)/i.test(body)) continue;
+        for (const rawSel of selectors.split(",")) {
+          const subject = rawSel.trim().split(/[\s>+~]+/).pop() ?? "";
+          expect(subject, `${filePath} hover hit-target shift on "${rawSel.trim()}"`).not.toMatch(/:(?:hover|active)(?::[a-z-]+)*$/i);
+        }
+      }
+
+      if (filePath.endsWith(".module.css")) {
+        expect(stripped, `${filePath} raw color literal`).not.toMatch(/#(?:[0-9a-fA-F]{3,8})\b|\b(?:rgba?|hsla?)\s*\(/i);
+      }
+    }
   });
 });

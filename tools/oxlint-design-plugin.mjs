@@ -1237,6 +1237,161 @@ const rules = {
     },
   },
 
+  "no-pill-action-button": {
+    meta: {
+      type: "problem",
+      docs: { description: "Enforce desktop button radius (10px md / 8px sm): disallow 999px pill radius on rectangular text action Buttons" },
+      schema: [],
+    },
+    create(context) {
+      const basename = path.basename(context.filename ?? "");
+      if (basename === "StatusBar.tsx" || basename === "widget.tsx") return {};
+      let aliases = new Map();
+      const hasAttr = (opening, name) =>
+        (opening?.attributes ?? []).some(
+          attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === name,
+        );
+      const hasTextContent = jsxEl => {
+        for (const child of jsxEl.children ?? []) {
+          if (child.type === "JSXText" && child.value.trim().length > 0) return true;
+          if (child.type === "JSXElement") {
+            const name = child.openingElement?.name;
+            if (name?.type === "JSXIdentifier" && name.name === "text") return true;
+          }
+        }
+        return false;
+      };
+      return {
+        Program(program) {
+          aliases = collectStringAliases(program);
+        },
+        JSXElement(node) {
+          const opening = node.openingElement;
+          if (opening?.name?.type !== "JSXIdentifier" || opening.name.name !== "Button") return;
+          if (hasAttr(opening, "data-switch-root") || hasAttr(opening, "data-bar-pill")) return;
+          if (!hasTextContent(node)) return;
+          const styleAttr = (opening.attributes ?? []).find(
+            attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === "style",
+          );
+          const styleExpr = styleAttr?.value?.type === "JSXExpressionContainer" ? styleAttr.value.expression : null;
+          if (!styleExpr || styleExpr.type !== "ObjectExpression") return;
+          const { map } = getStyleProps(styleExpr);
+          const radiusNode = map.get("borderRadius") ?? map.get("border-radius");
+          if (!radiusNode) return;
+          const width = parsePx(map.get("width"), aliases);
+          const height = parsePx(map.get("height"), aliases);
+          // Square circular icon/swatch/avatar badges (e.g. 24x24, 36x36) are allowed.
+          if (width !== null && height !== null && width === height) return;
+          visitValueBranches(radiusNode, branch => {
+            const val = resolveStaticText(branch, aliases)?.trim();
+            if (val === "999px" || val === "var(--radius-pill)") {
+              context.report({
+                node: branch,
+                message:
+                  "Desktop Action Button Rule: do not use pill borderRadius (999px) on rectangular text action buttons; use M3Button (10px md / 8px sm) or M3FilterChip (8px).",
+              });
+            }
+          });
+        },
+      };
+    },
+  },
+
+  "semantic-elevation-tokens": {
+    meta: {
+      type: "problem",
+      docs: { description: "Require semantic var(--shadow-level-1/2/3) tokens for boxShadow instead of hardcoded dark-only rgba() shadows" },
+      schema: [],
+    },
+    create(context) {
+      return {
+        Property(node) {
+          const key = propertyName(node);
+          if (key !== "boxShadow" && key !== "box-shadow") return;
+          visitValueBranches(node.value, branch => {
+            const val = staticString(branch);
+            if (!val) return;
+            const trimmed = val.trim();
+            if (trimmed === "none" || /^var\(--shadow-level-[123]\)$/.test(trimmed)) return;
+            if (RAW_COLOR_TOKEN_RE.test(trimmed)) {
+              RAW_COLOR_TOKEN_RE.lastIndex = 0;
+              context.report({
+                node: branch,
+                message:
+                  "Semantic Elevation Rule: do not hardcode rgba()/hex boxShadow values (breaks Light Mode); use var(--shadow-level-1), var(--shadow-level-2), or var(--shadow-level-3).",
+              });
+            }
+          });
+        },
+      };
+    },
+  },
+
+  "no-unblurred-translucent-surface": {
+    meta: {
+      type: "problem",
+      docs: { description: "Enforce Wayland Graceful Solid Fallback: disallow translucent surface-container fills without compositor backdrop blur" },
+      schema: [],
+    },
+    create(context) {
+      const basename = path.basename(context.filename ?? "");
+      if (basename === "SessionLockOverlay.tsx") return {};
+      const TRANSLUCENT_SURFACE_RE = /color-mix\(\s*in\s+srgb\s*,\s*var\(--color-surface(?:-container(?:-(?:lowest|low|high|highest))?|-dim|-bright)?\)\s+(\d+(?:\.\d+)?)%\s*,\s*transparent\s*\)/i;
+      return {
+        ObjectExpression(node) {
+          const { map } = getStyleProps(node);
+          const bgNode = map.get("backgroundColor") ?? map.get("background-color") ?? map.get("background");
+          if (!bgNode) return;
+          const hasBlur = map.has("backdropFilter") || map.has("backdrop-filter");
+          if (hasBlur) return;
+          visitValueBranches(bgNode, branch => {
+            const val = staticString(branch);
+            if (!val) return;
+            const match = TRANSLUCENT_SURFACE_RE.exec(val);
+            if (match && Number(match[1]) < 95) {
+              context.report({
+                node: branch,
+                message:
+                  "Wayland Graceful Solid Fallback Rule: do not paint translucent surface containers without compositor backdrop blur (ext_background_effect_v1); use opaque var(--color-surface-container*).",
+              });
+            }
+          });
+        },
+      };
+    },
+  },
+
+  "no-duplicate-primitives": {
+    meta: {
+      type: "problem",
+      docs: { description: "Enforce shared M3 desktop primitives: ban hand-rolled switches and slider thumbs outside packages/sdk/src/zgui-primitives.tsx" },
+      schema: [],
+    },
+    create(context) {
+      const filename = (context.filename ?? "").replace(/\\/g, "/");
+      const basename = path.basename(filename);
+      if (basename === "zgui-primitives.tsx") return {};
+      return {
+        JSXAttribute(node) {
+          if (node.name?.type !== "JSXIdentifier") return;
+          if (node.name.name === "data-switch-root") {
+            context.report({
+              node,
+              message:
+                "Shared Primitive Rule: do not hand-roll toggle switches; import M3Switch from @z-shell/sdk/primitives.",
+            });
+          } else if (node.name.name === "data-slider-thumb" && basename !== "MediaPanel.tsx") {
+            context.report({
+              node,
+              message:
+                "Shared Primitive Rule: do not hand-roll slider tracks/thumbs; import M3Slider or M3SliderRow from @z-shell/sdk/primitives.",
+            });
+          }
+        },
+      };
+    },
+  },
+
   "no-lint-suppression": {
     meta: {
       type: "problem",

@@ -117,6 +117,13 @@ function PolkitContent(props: {
     };
   };
 
+  const [cardNode, setCardNode] = createSignal<NativeNode | null>(null);
+  createEffect(cardNode, node => {
+    if (!node) return;
+    const handle = registerDismissLayer(node, cancel, { layer: "modal", dismissOnOutsidePress: false });
+    return () => handle.dispose();
+  });
+
   return (
     <box style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
@@ -127,7 +134,7 @@ function PolkitContent(props: {
         testId="polkit-card"
         ariaLabel="Authentication required"
         error={Boolean(errorText())}
-        ref={node => { registerDismissLayer(node, cancel, { layer: "modal", dismissOnOutsidePress: false }); }}
+        ref={setCardNode}
         style={{
           padding: "18px",
           gap: "12px",

@@ -265,3 +265,32 @@ fn mono_is_grayscale_and_auto_schedule_uses_local_hour_boundaries() {
     assert!(is_dark_at(ThemeMode::Dark, 12));
     assert!(!is_dark_at(ThemeMode::Light, 23));
 }
+
+#[test]
+fn light_mode_reference_matches_design_md_hierarchy_and_contrast() {
+    let light = ColorScheme::generate(rgb("#1976D2"), ThemeVariant::Tonal, false);
+    assert_eq!(light.to_map().len(), 31);
+    assert_eq!(light.on_primary, "#ffffff");
+
+    // Light Mode surface plane steps down gently in luminance from surface -> surface-container-highest.
+    let l_surface = luminance(rgb(&light.surface));
+    let l_container = luminance(rgb(&light.surface_container));
+    let l_high = luminance(rgb(&light.surface_container_high));
+    let l_highest = luminance(rgb(&light.surface_container_highest));
+    assert!(
+        l_surface > l_container && l_container > l_high && l_high > l_highest && l_highest > 0.7,
+        "Light Mode neutral surface ramp out of order: surface={} ({l_surface:.3}), container={} ({l_container:.3}), high={} ({l_high:.3}), highest={} ({l_highest:.3})",
+        light.surface,
+        light.surface_container,
+        light.surface_container_high,
+        light.surface_container_highest
+    );
+
+    // Primary and error accents stay dark/legible against light surfaces, while containers stay calm and light.
+    assert!(contrast(&light.primary, &light.surface_container) >= 4.5);
+    assert!(contrast(&light.on_primary_container, &light.primary_container) >= 4.5);
+    assert!(contrast(&light.on_secondary_container, &light.secondary_container) >= 4.5);
+    assert!(contrast(&light.on_error_container, &light.error_container) >= 4.5);
+    assert!(luminance(rgb(&light.primary_container)) > 0.65);
+    assert!(luminance(rgb(&light.on_surface)) < 0.05);
+}

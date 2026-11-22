@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["eslint", "typescript", "oxc"],
-  "jsPlugins": ["./tools/oxlint-design-plugin.mjs"],
+  "jsPlugins": ["./tools/oxlint-design-plugin.mjs", "./node_modules/@hewel/zgui/oxlint/plugin.mjs"],
   "ignorePatterns": [
     "**/node_modules/**",
     "**/dist/**",
@@ -17,7 +17,12 @@
   },
   "overrides": [
     {
-      "files": ["apps/shell/src/**/*.tsx", "apps/shell/src/**/*.ts", "plugins/*/src/**/*.tsx"],
+      "files": [
+        "apps/shell/src/**/*.tsx",
+        "apps/shell/src/**/*.ts",
+        "plugins/*/src/**/*.tsx",
+        "packages/sdk/src/zgui-*.tsx"
+      ],
       "rules": {
         "zshell/no-raw-colors": "error",
         "zshell/valid-color-roles": "error",
@@ -40,7 +45,15 @@
         "zshell/m3-motion-tokens": "error",
         "zshell/no-direct-raf-loop": "error",
         "zshell/solid-show-keyed-callback": "error",
-        "zshell/min-hit-target-size": "error"
+        "zshell/min-hit-target-size": "error",
+        "zshell/no-pill-action-button": "error",
+        "zshell/semantic-elevation-tokens": "error",
+        "zshell/no-unblurred-translucent-surface": "error",
+        "zshell/no-duplicate-primitives": "error",
+        "zgui/no-direct-bridge": "error",
+        "zgui/no-cleanup-in-ref": "error",
+        "zgui/no-top-level-service-call": "error",
+        "zgui/no-solid-web-imports": "error"
       }
     },
     {

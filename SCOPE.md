@@ -1,6 +1,6 @@
 # Scope
 
-`z-shell` is a modular Linux Wayland desktop shell whose UI renders on `zgui-js` (Solid 2.0 TSX + StyleX on QuickJS) and whose desktop integrations live in an independent Rust **Shell daemon** (`z-shelld`). It provides universal desktop services and a bidirectional plugin **Bus**, leaving compositor window management, standalone applications, and compositor- or vendor-specific workflows to compositors, dedicated tools, and TSX **Plugins**.
+`z-shell` is a modular Linux Wayland desktop shell whose UI renders on `zgui-js` (Solid 2.0 TSX + Lightning CSS Modules on QuickJS) and whose desktop integrations live in an independent Rust **Shell daemon** (`z-shelld`). It provides universal desktop services and a bidirectional plugin **Bus**, leaving compositor window management, standalone applications, and compositor- or vendor-specific workflows to compositors, dedicated tools, and TSX **Plugins**.
 
 ## In scope
 

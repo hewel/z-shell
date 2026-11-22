@@ -116,7 +116,7 @@ components:
 
 # Design System: z-shell
 
-> **Conformance Policy**: `z-shell` follows **"100% Material 3 Color & Surface Roles + Desktop Productivity Density & Keyboard Ergonomics"**. Color role pairing, tonal elevation, contrast, and motion physics follow Material Design 3 [[M3-Color]](#references) [[M3-Motion]](#references) and WCAG 2.2 [[WCAG-2.2]](#references); touch-first sizes, oversized radii, and deep mobile sheets are deliberately adapted for Linux Wayland tiling desktops. Mechanical invariants are enforced by the 4-layer design lint suite—see [Lint-Enforced Contracts](#lint-enforced-contracts).
+> **Conformance Policy**: `z-shell` follows **"100% Material 3 Color & Surface Roles + Desktop Productivity Density & Keyboard Ergonomics"**. Color role pairing, tonal elevation, contrast, component tokens, and motion physics follow Material Design 3 [[M3-Color]](#references) [[M3-Components]](#references) [[M3-Web]](#references) [[M3-Motion]](#references) and WCAG 2.2 [[WCAG-2.2]](#references); touch-first sizes, oversized radii, and deep mobile sheets are deliberately adapted for Linux Wayland tiling desktops. Mechanical invariants are enforced by the 4-layer design lint suite—see [Lint-Enforced Contracts](#lint-enforced-contracts).
 
 ---
 
@@ -124,7 +124,7 @@ components:
 
 **Creative North Star: "Quiet Precision on Tiled Glass"**
 
-`z-shell` is a modular Linux Wayland desktop shell rendered via `zgui-js` (Solid 2.0 TSX + StyleX on QuickJS) and backed by `z-shelld` [[z-shell-SCOPE]](#references). Users spend 8–12 hours a day in terminals, editors, and tiling compositors (Niri, ShojiWM). Chrome operates in **Operate** mode: it recedes quietly during focused work, reads in under 200ms, opens without vertical scrolling on `1440×900`, and supports full keyboard-and-pointer velocity.
+`z-shell` is a modular Linux Wayland desktop shell rendered via `zgui-js` (Solid 2.0 TSX + Lightning CSS Modules on QuickJS) and backed by `z-shelld` [[z-shell-SCOPE]](#references). Users spend 8–12 hours a day in terminals, editors, and tiling compositors (Niri, ShojiWM). Chrome operates in **Operate** mode: it recedes quietly during focused work, reads in under 200ms, opens without vertical scrolling on `1440×900`, and supports full keyboard-and-pointer velocity.
 
 - **Dynamic Color First**: All 31 semantic roles are generated on the fly by `crates/z-shell-theme` (pure-Rust Material 3 HCT) from the active wallpaper or a user seed color [[z-shell-ADR-0003]](#references).
 - **Single-Owner IA**: Notifications & DND live in `13 · Calendar`; quick hardware toggles live in `01 · Control Center`; configuration & plugin `settings_page` entries live in the `820×600` Settings Window.
@@ -138,7 +138,8 @@ The palette is a **31-role semantic color scheme** computed dynamically in Mater
 
 - **Primary**: `primary` (Glacier Accent, Tone 80 dark / 40 light) for ≤10% focal indicators (active workspace numeral, today cell, slider fills, progress rings); `on-primary` strictly on `primary`; `primary-container` + `on-primary-container` (Calm Slate Blue / Ice Mist, Tone 30 dark / 90 light) for large active desktop controls (quick tiles, active sidebar items, connected device rows)—a deliberate desktop deviation from glaring mobile solid-`primary` tiles.
 - **Secondary & Error**: `secondary-container` / `on-secondary-container` for neutral tonal actions (`Today`, notification actions); `error` / `error-container` / `on-error-container` strictly for destructive or error states (`Power off`, `17 · Power Dialog`, `Clear unpinned`, auth errors).
-- **Neutral**: `surface` (Tone 6 dark, lowest plane & Settings sidebar) → `surface-container` (Tone 12, bar islands & popovers) → `surface-container-high` (Tone 17, grouped cards & inactive tiles) → `surface-container-highest` (Tone 22, icon wells, unfilled tracks, compact buttons); foregrounds `on-surface` / `on-surface-variant` and hairlines `outline` / `outline-variant`.
+- **Neutral**: `surface` (Tone 6 dark / Tone 98 light `#F9F9FF`, lowest plane & Settings sidebar) → `surface-container` (Tone 12 dark / Tone 94 light `#EDEDF4`, bar islands & popovers) → `surface-container-high` (Tone 17 dark / Tone 92 light `#E7E8EE`, grouped cards & inactive tiles) → `surface-container-highest` (Tone 22 dark / Tone 90 light `#E1E2E9`, icon wells, unfilled tracks, compact buttons); foregrounds `on-surface` (`#E2E2E9` dark / `#191C20` light) & `on-surface-variant` (`#C3C6CF` dark / `#43474E` light) and hairlines `outline` (`#8D9199` / `#74777F`) & `outline-variant` (`#43474E` / `#C3C6CF`).
+- **Light Mode Reference (`#1976D2`, `tonal`, `dark = false`)**: Generated directly by `crates/z-shell-theme`—`primary: #3C6090`, `on-primary: #FFFFFF`, `primary-container: #D4E3FF`, `on-primary-container: #224876`, `secondary-container: #D8E3F8`, `on-secondary-container: #3D4758`, `error: #BA1A1A`, `error-container: #FFDAD6`, `on-error-container: #93000A`. Light Mode uses softer ambient shadows (Level 1 `0 2px 10px rgba(25,28,32,0.08)`, Level 2 `0 10px 28px rgba(25,28,32,0.12)`, Level 3 `0 18px 48px rgba(25,28,32,0.16)` + `24%`–`28%` light scrim) paired with `1px solid outline-variant` hairlines. See the Paper **M3 Components — Light Mode** and **z-shell — Light Mode Showcase** pages [[z-shell-Paper]](#references).
 
 ---
 
@@ -183,12 +184,15 @@ Desktop placement follows a **`14px` global tiling rhythm** (`[bar].gaps = 14` i
 ## Elevation, Shapes & Motion
 
 ### Elevation Vocabulary
-Material 3 tonal layering paired with `1px` `outline-variant` hairlines prevents dark `#1D2024` popovers from blending into `#111318` terminals [[M3-Elevation]](#references). *(Note: flush Wayland `PopupSurface` / `WindowSurface` chrome constraints live in [docs/agents/ui-runtime.md](docs/agents/ui-runtime.md).)*
+Material 3 tonal layering paired with `1px` `outline-variant` hairlines prevents dark `#1D2024` popovers from blending into `#111318` terminals [[M3-Elevation]](#references). Floating peripheral chrome (`10 · Dock`, `09`/`09B` Floating Bars) uses a 3-tier **Frosted Glass vs. Solid Material Hierarchy** (see `10B · Dock Material Study` in Paper [[z-shell-Paper]](#references)); flush Wayland `PopupSurface` / `WindowSurface` chrome constraints live in [docs/agents/ui-runtime.md](docs/agents/ui-runtime.md).
 
 - **Level 0 — Recessed / Sidebar**: `surface`, no shadow (desktop canvas, Settings sidebar).
-- **Level 1 — Bar Islands**: `surface-container`, `1px solid outline-variant @ 48%`, `box-shadow: 0 4px 14px rgba(0,0,0,0.36)`; active steps to `surface-container-high` + `primary @ 60%` border.
-- **Level 2 — Popover Surfaces**: `surface-container`, `1px solid outline-variant @ 55%`, `box-shadow: 0 14px 36px rgba(0,0,0,0.50)` (layered toasts/overlays).
-- **Level 3 — Centered Modals & Settings**: `surface-container`, `1px solid outline-variant @ 55%`, `box-shadow: 0 20px 56px rgba(0,0,0,0.60)` + dimmed scrim.
+- **Level 1A — Floating Dock (`10 · Dock`, High-Translucency Glass)**: Dark `surface-container @ 42%` + `blur(26px) saturate(165%)` + `1px` specular rim (`rgba(255,255,255,0.22)`) + `0 12px 28px rgba(0,0,0,0.44)`; Light `surface @ 40%` + `blur(26px) saturate(165%)` + `1px` white rim (`rgba(255,255,255,0.85)`) + subtle outer contrast hairline (`rgba(25,28,32,0.08)`) + `0 10px 26px rgba(25,28,32,0.12)`. To keep indicators legible across wallpaper/window seams, running dots step up to `on-surface @ 85%` (dark, with subtle shadow) / `82%` (light) and the focused pill uses `primary` (with soft `primary` glow in dark).
+- **Level 1B — Floating Bar Islands (`09` / `09B`, Legibility Glass)**: Dark `surface-container @ 60%` + `blur(22px) saturate(150%)` + `1px` specular rim (`rgba(255,255,255,0.16)`) + `0 6px 18px rgba(0,0,0,0.36)`; Light `surface-container-low @ 62%` + `blur(22px) saturate(155%)` + `1px` white rim (`rgba(255,255,255,0.82)`) + subtle outer hairline + `0 4px 14px rgba(25,28,32,0.09)`—slightly higher opacity than Dock to keep `12px` bar typography crisp. Active islands step to `surface-container-high @ 72%` (dark) / `primary-container @ 85%` (light) + `primary @ 60%` border.
+- **Wayland Graceful Solid Fallback**: Never render `40%–62%` unblurred transparency over live windows. Until `zgui-platform-wayland` binds `ext_background_effect_v1` (or the user enables compositor-side `layer-rule` blur), Floating Dock and Floating Bar automatically fall back to `100%` solid `surface-container` + `1px solid outline-variant @ 48%–55%`.
+- **Level 1C — Docked Bars (`09C` / `09D`, Solid)**: `100%` opaque `surface-container` + `1px` inner `outline-variant` hairline (zero backdrop blur; guarantees stable small-text legibility at exclusive screen edges).
+- **Level 2 — Popover Surfaces (Solid)**: `100%` opaque `surface-container`, `1px solid outline-variant @ 55%`, `box-shadow: 0 14px 36px rgba(0,0,0,0.50)` dark / `0 10px 28px rgba(25,28,32,0.12)` light (zero backdrop blur so underlying code/terminals never bleed through dense UI text).
+- **Level 3 — Centered Modals & Settings (Solid)**: `100%` opaque `surface-container`, `1px solid outline-variant @ 55%`, `box-shadow: 0 20px 56px rgba(0,0,0,0.60)` dark / `0 18px 48px rgba(25,28,32,0.16)` light + dimmed scrim.
 
 ### Concentric Shape Scale
 Tightened from mobile `28px`–`30px` sheets for desktop precision [[M3-Shape]](#references):
@@ -197,7 +201,7 @@ Tightened from mobile `28px`–`30px` sheets for desktop precision [[M3-Shape]](
 ### Interaction State Layers & Motion System
 `z-shell` implements the full **Material Design 3 Motion System**—analytical unit-mass **Spring Physics** (`standard` default, `expressive`, `reduced` via `[theme].motion_scheme`) paired with M3 **Easing & Duration** tokens [[M3-Motion]](#references). Full spring equations, token tables, and per-surface choreography live in [docs/design/motion.md](docs/design/motion.md).
 
-- **State Layers**: Translucent foreground overlays—`Hover 8%`, `Focus 10%`, `Pressed 12%`, `Disabled 38%` content opacity (`fast.effects` / `100ms`) [[M3-States]](#references).
+- **State Layers**: Translucent foreground overlays—`Hover 8%`, `Focus 12%`, `Pressed 12%`, `Dragged 16%`, `Disabled 38%` ink / `12%` container (`fast.effects` / `100ms`, matching `material-web` `_md-sys-state.scss`) [[M3-States]](#references) [[M3-Web]](#references).
 - **Focus Ring**: `outline: 2px solid var(--color-primary); outline-offset: 2px` (WCAG 2.2 SC 2.4.7 / 2.4.13) [[WCAG-2.2]](#references).
 - **Patterns**: Control Center sub-panels use GPU-friendly **Shared Axis X** (`height="auto"` on `PopupSurface`); Settings tabs (`22`–`22H`) use **Fade Through** + sliding sidebar pill; Lock Screen password shapes & Media Player waveform are scoped **Expressive** hero moments; `motion_scheme = "reduced"` degrades spatial motion to `≤120ms` opacity fades (WCAG 2.2 SC 2.3.3).
 
@@ -213,47 +217,42 @@ Tightened from mobile `28px`–`30px` sheets for desktop precision [[M3-Shape]](
 | **2. M3 Expressive Shapes** | Analytically symmetric SVG (`0 0 64 64` or `0 0 24 24`) [[M3-Shape]](#references) | Strictly limited to the $D_8$ scalloped `z-shell` brand mark, user avatar badges, and Lock Screen morphing password shapes (`Cookie4`, `Clover4`, `Sunny`, `Circle`, `Cookie6`, `Flower5`). |
 | **3. Third-Party Apps** | Runtime XDG Icon Theme (`.desktop` `Icon=`) [[XDG-Icon]](#references); canonical brand SVG on canvas | `18 · Launcher`, `10 · Dock`, `Tray Island`, active window indicator—one consistent icon & backing color per app. |
 
+### Desktop M3 Component Primitives
+All reusable interactive controls (**Buttons**, **Icon Buttons**, **Switches**, **M3 Expressive Sliders**, **Linear Progress**, **Tonal Track Segmented Controls**, **Filter Chips**, **Dialog Shells**) are implemented once in `@z-shell/sdk/primitives` (`packages/sdk/src/zgui-primitives.tsx` + `zgui-primitives.module.css`) and paired with `@hewel/zgui/primitives` (`MenuRootPrimitive`, `MenuListPrimitive`, `MenuItemPrimitive`). Exact token, state-layer, and deviation contracts live in [docs/design/components.md](docs/design/components.md) and Paper **M3 Components — Desktop Spec** [[M3-Components]](#references) [[M3-Web]](#references) [[z-shell-Paper]](#references).
+
 ### Surface Anatomy
-- **Bar Modes (`09`/`09B` Floating vs `09C`/`09D` Docked)**: Floating uses `32px`/`40px` islands with `14px` margin; Docked uses a flush `38px`/`44px` strip with `1px` inner hairline, `1px × 14px` segment dividers, and `28px` `primary-container` (`8px` radius) active triggers. Active workspace always renders its number in a solid `primary` capsule (`on-primary` bold); Clock omits seconds by default and pairs with a `primary-container` unread pill (`🔔 N`); Tray renders real icons (`18px`–`20px`), never blank placeholders.
-- **Quick Control Tiles (`01 · Main`)**: 2-column grid, `50px` tall, `14px` radius. Active: `primary-container` + `primary @ 30%` border + `30×30px` icon well (`primary @ 18%`). Inactive: `surface-container-high` + `surface-container-highest` well. Split tiles (`Wi-Fi`, `Bluetooth`, `Nosleep`) separate toggle from `>` chevron with a `1px × 22px` vertical hairline.
-- **Precision Sliders (`01` / `04` / `11`)**: Straight `5px`–`6px` tracks (`surface-container-highest` trough, `primary` fill) with `12px`–`14px` thumb (`2px` container-matched ring). Repeated rows align via `flex-shrink: 0` fixed slots (`30px` icon, `32px`–`36px` right-aligned tabular readout, `26px` trailing action/spacer).
-- **Power Menu & Dialog (`01` / `17`)**: Separates safe actions (`Lock`, `Suspend`) from session-ending actions (`Log out`, `Reboot`, `Power off`) with a `1px × 28px` divider; `Power off` uses `error-container @ 38%` + `error @ 35%` border and confirms via `17 · Power Dialog` (`360px`).
-- **Device Lists (`02` / `03` / `04`)**: Connected rows use `primary-container` (`16px` radius, `52px` min-height) with a safe `Disconnect` action (never destructive `Remove/Forget` on a connected row).
-- **Keyboard-First Modals (`18` / `19` / `20`)**: Top composite search bar + counted filter chips + structured list/grid + compact bottom keyboard hint bar (`↑↓ Move · Enter Copy · Del Forget · Esc Close`).
-- **Settings Window (`22`–`22H`)**: `820×600px` compositor-framed window (`216px` `surface` left rail with `SHELL` & `PLUGINS` groups + `settings.toml · Live` footer; `604px` right pane for multi-column controls and plugin `settings_page` entries).
+- **Bar Modes (`09`/`09B` Floating vs `09C`/`09D` Docked)**: Floating uses `32px`/`40px` islands with `14px` margin; Docked uses a flush `100%` solid `38px`/`44px` strip with `1px` inner hairline and `28px` `primary-container` (`8px` radius) active triggers. Active workspace always renders its number in a solid `primary` capsule (`on-primary` bold); Clock omits seconds by default and pairs with a `primary-container` unread pill; Tray renders real icons (`18px`–`20px`).
+- **Floating Dock (`10 · Dock`)**: Auto-hiding `60px` pill capsule (`exclusiveZone = 0`, `10px–14px` bottom margin) hosting a Launcher well (`apps`), pinned apps, a `1px × 30px` hairline divider, running-only apps, contrast-boosted running dots, and a `primary` focused pill.
+- **Quick Control Tiles (`01 · Main`)**: 2-column grid, `50px` tall (`14px` radius), `primary-container` active / `surface-container-high` inactive; split tiles (`Wi-Fi`, `Bluetooth`, `Nosleep`) separate toggle from `>` chevron with a `1px × 22px` vertical hairline.
+- **Power Menu & Device Lists (`01` / `02` / `03` / `04` / `17`)**: Power menu separates safe actions (`Lock`, `Suspend`) from session-ending actions (`Log out`, `Reboot`, `Power off`) with a `1px × 28px` divider and confirms via `17 · Power Dialog` (`360px`). Connected device rows (`52px` min-height, `16px` radius) offer safe `Disconnect` rather than destructive `Remove`.
+- **Keyboard-First Modals (`18` / `19` / `20`) & Settings Window (`22`–`22H`)**: Centered modals pair a top composite search bar (with `Esc` hint) + `M3FilterChip` / list / grid + compact bottom keyboard hint bar; `820×600px` Settings Window hosts a `216px` `surface` left rail (`SHELL` & `PLUGINS`) and `604px` right pane.
 
 ---
 
 ## Lint-Enforced Contracts
 
 Mechanical rules are enforced automatically across 4 layers (do not duplicate them in review docs):
-- **L1 (`oxlint`)**: `tools/oxlint-design-plugin.mjs` (`bun run lint`)
-- **L2 (Contract Sync)**: `apps/shell/tests/design-lint.test.ts` (`bun test`)
-- **L3 (Rust WCAG)**: `crates/z-shell-theme/tests/hct_palette.rs` (`cargo test`)
-- **L4 (Preview Pixel/Geometry)**: `apps/shell/tests/design-preview.test.ts`
+- **L1 (`oxlint`)**: `tools/oxlint-design-plugin.mjs` (`zshell/*`) + `@hewel/zgui/oxlint` (`zgui/*`) via `bun run lint`
+- **L2 (Contract & CSS Module Sync)**: `apps/shell/tests/design-lint.test.ts` (`bun test`)
+- **L3 (Rust WCAG & Light Mode Reference)**: `crates/z-shell-theme/tests/hct_palette.rs` (`cargo test`)
+- **L4 (Preview Pixel/Geometry & Light Mode Showcase)**: `apps/shell/tests/design-preview.test.ts`
 
 | Domain | Mechanical Invariant | Layer & Enforcer | Status |
 |---|---|---|---|
-| **Color** | No raw `#hex`/`rgb`/`rgba`/`hsl` in UI code (shadow black excepted) | L1 `zshell/no-raw-colors` | Active |
-| **Color** | Valid 31 M3 roles & strict `on-*` foreground/container pairing (incl. `<ShellIcon>`) | L1 `zshell/valid-color-roles` | Active |
+| **Color** | No raw `#hex`/`rgb`/`rgba`/`hsl` in TSX or `*.module.css` (shadow black excepted in `no-raw-colors`) | L1 `zshell/no-raw-colors` + L2 CSS Module lint | Active |
+| **Color** | Valid 31 M3 roles & strict `on-*` foreground/container pairing (incl. `<ShellIcon>` and CSS Modules) | L1 `zshell/valid-color-roles` + L2 CSS Module lint | Active |
 | **Color** | Calm Active Surface: no solid `primary` fill on large containers/tiles | L1 `zshell/calm-active-surface` | Active |
-| **Color** | WCAG 2.2 SC 1.4.3 (≥4.5:1 text) & SC 1.4.11 (≥3:1 UI) across 10 seeds × 6 variants × dark/light | L3 `hct_palette.rs` | Active |
-| **Color / Tokens** | Frontmatter ↔ `app.css` ↔ `theme.ts` ↔ `topics.ts` ↔ bundled fonts sync | L2 `design-lint.test.ts` | Active |
-| **Typography** | Semantic font tokens only (`var(--font-sans)` / `var(--font-mono)`) | L1 `zshell/no-system-ui-font` | Active |
-| **Typography** | Live monospace numeric slots require `fontVariantNumeric: "tabular-nums"` | L1 `zshell/tabular-readout` | Active |
-| **Typography** | Persistent bars omit 1Hz seconds by default (`clock_seconds === false`) | L2 `design-lint.test.ts` | Active |
-| **Shapes** | Desktop corner radius scale (`6/8/10/14/16/22/999px` or `--radius-*`) | L1 `zshell/valid-radius-scale` | Active |
-| **Shapes** | Expressive-Budget: wavy only in `MediaPanel.tsx`; rosette only in brand mark & avatars | L1 `zshell/expressive-budget` | Active |
-| **Shapes** | Exact-Geometry: no hand-authored Bezier expressive literals; $D_n$ symmetry verified | L1 `zshell/no-hand-authored-expressive-paths` + L2 | Active |
-| **Icons** | Material 24×24 grid (`viewBox="0 0 24 24"`), no inline ad-hoc `<vector d>` in shell UI | L1 `zshell/material-icon-grid` + L2 | Active |
-| **IA & Safety** | Single-Owner IA (no Notifications/DND in QuickSettings; no Telemetry in Calendar) | L1 `zshell/single-owner-ia` | Active |
-| **IA & Safety** | Split-Action `1px` divider on split QuickTiles; no unguarded `Remove` on connected BT rows | L1 `zshell/split-action-divider`, `bluetooth-safe-action` | Active |
-| **Copy & A11y** | Desktop copy (`Click`, never `Tap to`/`Long press`); never `outline: none/0`; composite input focus delegation; ≥24×24px hit targets | L1 `zshell/no-mobile-copy`, `no-outline-none`, `composite-input-focus` + L4 | Active |
-| **Layout & Chrome** | Width tiers (`360/396/560/652/684/820×600`), bar struts (`32/40/38/44`), zero-scroll (`overflowY: false`), 1280px anti-collision, slider lane alignment, shadow bleed α≤8, transparent popup corners, opaque toplevel edges, no flush root `boxShadow`, hover hit-target stability | L1 `zshell/no-flush-surface-shadow`, `no-hover-hit-target-shift` + L2 + L4 | Active |
-| **Governance** | No core hardcoded plugin IDs (ADR-0005); no inline `oxlint-disable` directives | L1 `zshell/no-core-plugin-id-branching`, `no-lint-suppression` | Active |
-| **Motion** | M3 spring/easing tokens only (no ad-hoc `{ stiffness, damping }` outside `motion.ts`, no non-M3 CSS curves, never transition `outline-width`) | L1 `zshell/m3-motion-tokens` | Active |
-| **Motion** | Single shared frame loop (no direct `requestAnimationFrame` outside `packages/sdk/src/motion.ts`) | L1 `zshell/no-direct-raf-loop` | Active |
-| **Motion** | `.impeccable/design.json` ↔ `motion.ts` ↔ `app.css` token sync; analytical `k=3800` 60Hz stability; effects `ζ=1.0` zero overshoot; velocity retargeting; zero-idle-CPU settle; `reduced` scheme zero spatial displacement & static media wave | L2 `motion.test.ts` / `design-lint.test.ts` + L4 | Active |
+| **Color** | WCAG 2.2 SC 1.4.3 (≥4.5:1 text) & SC 1.4.11 (≥3:1 UI) across 10 seeds × 6 variants × dark/light + Light Mode `#1976D2` luminance ladder | L3 `hct_palette.rs` | Active |
+| **Tokens** | Frontmatter ↔ `app.css` ↔ `theme.ts` (Dark & Light `--shadow-level-1/2/3`, `--state-*`, `--disabled-*`) ↔ `topics.ts` ↔ bundled fonts sync | L2 `design-lint.test.ts` | Active |
+| **Elevation** | Semantic `var(--shadow-level-1/2/3)` only (no dark-only `rgba()` `boxShadow`); no unblurred translucent `surface-container*` (Graceful Solid Fallback); no flush root `boxShadow` | L1 `zshell/semantic-elevation-tokens`, `no-unblurred-translucent-surface`, `no-flush-surface-shadow` | Active |
+| **Components** | Shared `@z-shell/sdk/primitives` only (no hand-rolled switches/sliders); desktop action buttons use `10px`/`8px` (never `999px` pill); Expressive Slider `4px` gaps + `4px` stop dot, `44×24px` Switch, `34px` Dialog actions verified in pixels | L1 `zshell/no-duplicate-primitives`, `no-pill-action-button` + L4 | Active |
+| **Typography** | Semantic font tokens only (`var(--font-sans)` / `var(--font-mono)`); tabular readouts require `tabular-nums`; persistent bars omit 1Hz seconds by default | L1 `zshell/no-system-ui-font`, `tabular-readout` + L2 | Active |
+| **Shapes & Icons** | Desktop radius scale (`6/8/10/14/16/22/999px`); Expressive-Budget (wavy only in `MediaPanel.tsx`; rosette only in brand mark & avatars); exact $D_n$ symmetry; Material `24×24` icon grid | L1 `zshell/valid-radius-scale`, `expressive-budget`, `no-hand-authored-expressive-paths`, `material-icon-grid` + L2 | Active |
+| **IA & Safety** | Single-Owner IA; Split-Action `1px` divider on split QuickTiles; no unguarded `Remove` on connected BT rows | L1 `zshell/single-owner-ia`, `split-action-divider`, `bluetooth-safe-action` | Active |
+| **Copy & A11y** | Desktop copy (`Click`, never `Tap to`/`Long press`); never `outline: none/0`; composite input focus delegation; ≥24×24px hit targets | L1 `zshell/no-mobile-copy`, `no-outline-none`, `composite-input-focus`, `min-hit-target-size` + L2 + L4 | Active |
+| **Layout & Light Mode** | Width tiers (`360/396/560/652/684/820×600`), bar struts (`32/40/38/44`), zero-scroll (`overflowY: false`), 1280px anti-collision, slider lane alignment, shadow bleed α≤8, transparent popup corners, opaque toplevel edges, hover hit-target stability, full **Light Mode (`dark: false`)** preview suite | L1 `zshell/no-hover-hit-target-shift` + L2 + L4 | Active |
+| **Runtime & Governance** | No core hardcoded plugin IDs (ADR-0005); no inline `oxlint-disable`; Solid 2 `<Show keyed>` callback param; no direct `__zgui` bridge, ref cleanups, top-level service calls, or `solid-js/web` imports | L1 `zshell/no-core-plugin-id-branching`, `no-lint-suppression`, `solid-show-keyed-callback` + `zgui/no-direct-bridge`, `no-cleanup-in-ref`, `no-top-level-service-call`, `no-solid-web-imports` | Active |
+| **Motion** | M3 spring/easing tokens only; no `outline-width` transitions; single shared frame loop (`motion.ts`); `.impeccable/design.json` ↔ `motion.ts` ↔ `app.css` sync; `k=3800` stability & zero-overshoot effects; `reduced` scheme zero displacement & static media wave | L1 `zshell/m3-motion-tokens`, `no-direct-raf-loop` + L2 `motion.test.ts` / `design-lint.test.ts` + L4 | Active |
 
 ---
 
@@ -278,9 +277,11 @@ Non-mechanical rules requiring human/agent judgement during design and code revi
 5. **[M3-Typography]** Google Material Design 3 — *Typography Scale*: https://m3.material.io/styles/typography/overview
 6. **[M3-Motion]** Google Material Design 3 — *Motion Physics System, Spring Tokens, Easing & Transitions*: https://m3.material.io/styles/motion/overview · https://m3.material.io/styles/motion/overview/specs · https://m3.material.io/styles/motion/easing-and-duration/tokens-specs · [docs/design/motion.md](docs/design/motion.md)
 7. **[M3-Icons]** Google Material Design 3 — *Icons Overview & Material Symbols / Icons*: https://m3.material.io/styles/icons/overview · https://fonts.google.com/icons
-8. **[XDG-Icon]** freedesktop.org — *XDG Icon Theme Specification* (runtime Linux desktop application icon lookup): https://specifications.freedesktop.org/icon-theme-spec/latest/
-9. **[WCAG-2.2]** W3C — *Web Content Accessibility Guidelines (WCAG) 2.2* (SC 1.4.3 Contrast Minimum, SC 1.4.11 Non-text Contrast, SC 2.3.3 Animation from Interactions, SC 2.4.7 Focus Visible, SC 2.4.11 Focus Not Obscured, SC 2.4.13 Focus Appearance, SC 2.5.8 Target Size Minimum): https://www.w3.org/TR/WCAG22/
-10. **[Wayland-Layer]** Wayland Protocols — *Session Lock (`ext-session-lock-v1`) & Layer Shell Surfaces*: https://wayland.app/protocols/ext-session-lock-v1
-11. **[z-shell-Paper]** `z-shell` Paper Design Canvas (*z-shell — All Surfaces & Panels* & *Desktop Placement*): https://app.paper.design/file/01M7J3P8QM6GW1HSHNW0M8TQSV/p-2-0
-12. **[z-shell-ADR-0003]** Internal Architecture Decision Record — [docs/adr/0003-pure-rust-audio-and-theme-engines.md](docs/adr/0003-pure-rust-audio-and-theme-engines.md) & [crates/z-shell-theme/src/palette.rs](crates/z-shell-theme/src/palette.rs)
-13. **[z-shell-SCOPE]** Internal Product Scope & Domain Glossary — [SCOPE.md](SCOPE.md) & [GLOSSARY.md](GLOSSARY.md)
+8. **[M3-Components]** Google Material Design 3 — *Components Overview & Expressive Specs*: https://m3.material.io/components · [docs/design/components.md](docs/design/components.md)
+9. **[M3-Web]** Google `material-components/material-web` — *Official M3 Component & State Tokens (`tokens/versions/v0_192/`)*: https://github.com/material-components/material-web/tree/main/tokens/versions/v0_192
+10. **[XDG-Icon]** freedesktop.org — *XDG Icon Theme Specification* (runtime Linux desktop application icon lookup): https://specifications.freedesktop.org/icon-theme-spec/latest/
+11. **[WCAG-2.2]** W3C — *Web Content Accessibility Guidelines (WCAG) 2.2* (SC 1.4.3 Contrast Minimum, SC 1.4.11 Non-text Contrast, SC 2.3.3 Animation from Interactions, SC 2.4.7 Focus Visible, SC 2.4.11 Focus Not Obscured, SC 2.4.13 Focus Appearance, SC 2.5.8 Target Size Minimum): https://www.w3.org/TR/WCAG22/
+12. **[Wayland-Layer]** Wayland Protocols — *Session Lock (`ext-session-lock-v1`) & Layer Shell Surfaces*: https://wayland.app/protocols/ext-session-lock-v1
+13. **[z-shell-Paper]** `z-shell` Paper Design Canvas (*M3 Components — Desktop Spec* (Dark & Light), *All Surfaces & Panels*, *Light Mode Showcase*, & *Desktop Placement*): https://app.paper.design/file/01M7J3P8QM6GW1HSHNW0M8TQSV/p-4-0
+14. **[z-shell-ADR-0003]** Internal Architecture Decision Record — [docs/adr/0003-pure-rust-audio-and-theme-engines.md](docs/adr/0003-pure-rust-audio-and-theme-engines.md) & [crates/z-shell-theme/src/palette.rs](crates/z-shell-theme/src/palette.rs)
+15. **[z-shell-SCOPE]** Internal Product Scope & Domain Glossary — [SCOPE.md](SCOPE.md) & [GLOSSARY.md](GLOSSARY.md)

@@ -1,6 +1,6 @@
 # z-shell
 
-A modular Linux Wayland desktop shell built around a single **Rust Shell daemon** (`z-shelld`), a thin **CLI** (`z-shell`), a QuickJS-safe **TypeScript SDK & Plugin API**, and a static **Plugin composer** designed to pair with [`zgui-js`](https://github.com/hewel/zgui-js) (Solid 2.0 TSX + StyleX on QuickJS).
+A modular Linux Wayland desktop shell built around a single **Rust Shell daemon** (`z-shelld`), a thin **CLI** (`z-shell`), a QuickJS-safe **TypeScript SDK & Plugin API**, and a static **Plugin composer** designed to pair with [`zgui-js`](https://github.com/hewel/zgui-js) (Solid 2.0 TSX + Lightning CSS Modules on QuickJS).
 
 > **Current status:** All UI-independent backend services, security boundaries, protocol daemons, plugin tooling, and first-party reference plugins are implemented and verified. The `zgui-js` UI shell layer is the next milestone.
 

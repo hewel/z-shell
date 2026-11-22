@@ -1,4 +1,4 @@
-import { LayerSurface, Show, createMemo, focus, registerDismissLayer, type Accessor, type NativeChild } from "@hewel/zgui";
+import { LayerSurface, Show, createEffect, createMemo, createSignal, focus, registerDismissLayer, type Accessor, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { M3Button, M3DialogShell } from "@z-shell/sdk/primitives";
 import { ShellIcon } from "../icons.tsx";
 import { createRetainedPresence, dialogMotionStyle, scrimBackdrop, useMotionScheme, type M3Spring } from "../motion.ts";
@@ -26,6 +26,12 @@ function PowerDialogContent(props: {
   }
 
   const scheme = useMotionScheme();
+  const [cardNode, setCardNode] = createSignal<NativeNode | null>(null);
+  createEffect(cardNode, node => {
+    if (!node) return;
+    const handle = registerDismissLayer(node, closePowerDialog, { layer: "modal", dismissOnOutsidePress: false });
+    return () => handle.dispose();
+  });
 
   return (
     <box testId="power-dialog-backdrop" onClick={closePowerDialog} style={{
@@ -37,7 +43,7 @@ function PowerDialogContent(props: {
         testId="power-dialog-card"
         ariaLabel={copy().title}
         centered
-        ref={node => { registerDismissLayer(node, closePowerDialog, { layer: "modal", dismissOnOutsidePress: false }); }}
+        ref={setCardNode}
         badge={{
           tone: copy().destructive ? "destructive" : "accent",
           icon: (

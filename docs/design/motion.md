@@ -1,6 +1,6 @@
 # Motion System Specification: z-shell (Material Design 3)
 
-> **Conformance Goal**: Faithfully replicate the **Material Design 3 Motion System**—both the modern **M3 Expressive Spring Physics engine** (`md.sys.motion.spring.*`) [[M3-Motion-Physics]](#references) and the **M3 Easing & Duration token ladder** (`md.sys.motion.easing.*`, `md.sys.motion.duration.*`) [[M3-Motion-Easing]](#references)—on `zgui-js` (Solid 2.0 TSX + StyleX on QuickJS) for high-refresh Linux Wayland desktops (`60Hz`–`240Hz`).
+> **Conformance Goal**: Faithfully replicate the **Material Design 3 Motion System**—both the modern **M3 Expressive Spring Physics engine** (`md.sys.motion.spring.*`) [[M3-Motion-Physics]](#references) and the **M3 Easing & Duration token ladder** (`md.sys.motion.easing.*`, `md.sys.motion.duration.*`) [[M3-Motion-Easing]](#references)—on `zgui-js` (Solid 2.0 TSX + Lightning CSS Modules on QuickJS) for high-refresh Linux Wayland desktops (`60Hz`–`240Hz`).
 
 Static Paper artboards capture layout, tonal hierarchy, and resting/active states, but cannot express velocity, spring retargeting, or choreography. This document is the authoritative engineering specification for implementing M3 motion across every `z-shell` surface.
 
@@ -60,7 +60,7 @@ All M3 spring tokens assume unit mass $m = 1.0$ and are parameterized by **stiff
 
 ## 3. Official Material Design 3 Easing & Duration Tokens
 
-Used for StyleX / CSS transitions where a JS spring loop is unnecessary (such as simple hover state layers, static timed crossfades, and idle pre-action screen dim) [[M3-Motion-Easing]](#references).
+Used for Lightning CSS Modules / CSS transitions where a JS spring loop is unnecessary (such as simple hover state layers, static timed crossfades, and idle pre-action screen dim) [[M3-Motion-Easing]](#references).
 
 ### 3.1 Easing Tokens
 
@@ -74,7 +74,7 @@ Used for StyleX / CSS transitions where a JS spring loop is unnecessary (such as
 | `md.sys.motion.easing.standard-accelerate` | `cubic-bezier(0.3, 0.0, 1.0, 1.0)` | Utilitarian exits and opacity fade-outs |
 | `md.sys.motion.easing.linear` | `cubic-bezier(0.0, 0.0, 1.0, 1.0)` | Continuous playback waves, `idle.pre_action_fade_seconds` dim |
 
-Exact CSS `linear()` representation of M3 `emphasized` (`FastOutExtraSlowIn`) for StyleX stylesheets that support CSS Easing Level 2 [[M3-Motion-Easing]](#references):
+Exact CSS `linear()` representation of M3 `emphasized` (`FastOutExtraSlowIn`) for CSS stylesheets that support CSS Easing Level 2 [[M3-Motion-Easing]](#references):
 
 ```css
 --motion-easing-emphasized: linear(
@@ -203,10 +203,11 @@ Uses **M3 Fade Through** + **Sliding Sidebar Indicator** [[M3-Transitions]](#ref
 
 | Control | Property | Token | Notes |
 |---|---|---|---|
-| **M3 Switch** | Thumb translation + press stretch (`18px → 22px` width on pointerdown) + track fill | `fast.spatial` (geometry), `fast.effects` (fill) | Replicates Android/M3 tactile thumb squash-and-stretch. |
+| **M3 Switch** | Thumb translation + press stretch (`18px → 20px` width on pointerdown) + track fill | `fast.spatial` (geometry), `fast.effects` (fill) | Subtle tactile stretch kept cleanly inside the `3px` track inset. |
+| **Tonal Track Segmented Control** | Sliding `primary-container` indicator pill translates along `10px` recessed track + label color crossfade | `fast.spatial` (slide), `fast.effects` (color) | Smooth continuous retargeting with zero neighbor displacement (`22`, `22B`, `22D`, `22G`, `04B`). |
 | **Quick Control Tile** (`01 · Main`) | Press feedback (`scale 1.0 → 0.985`), active container fill (`surface-container-high ↔ primary-container`), icon well tint | `fast.spatial` (scale), `fast.effects` (color) | Keep scale subtle so 2-column grid stays crisp. |
-| **Precision Sliders** (`01`, `04`, `11`, `22B`, `22H`) | Pointer drag: **0ms direct tracking** (no spring lag); Track click / keyboard step: `fast.spatial` fill & thumb snap | Direct / `fast.spatial` | Thumb halo expands subtly on focus/drag (`fast.effects`). |
-| **State Layers** (`Hover / Focus / Press`) | Translucent foreground overlay (`8%` / `10%` / `12%`) | `fast.effects` (`short2` `100ms` CSS) | Never animate `outline-width`; fade focus ring opacity smoothly. |
+| **Precision Sliders** (`01`, `04`, `11`, `22B`, `22H`) | Pointer drag: **0ms direct tracking** (no spring lag) + vertical handle narrowing (`4px → 2.5px`); Track click / keyboard step: `fast.spatial` fill & handle snap | Direct / `fast.spatial` | Leading icon well tints to `primary-container` and right-side tabular readout highlights in `primary` (`fast.effects`); no duplicate white floating bubble on labeled rows. |
+| **State Layers** (`Hover / Focus / Press / Drag`) | Translucent foreground overlay (`8%` / `12%` / `12%` / `16%`, per `material-web` `_md-sys-state.scss`) | `fast.effects` (`short2` `100ms` CSS) | Never animate `outline-width`; fade focus ring opacity smoothly. |
 
 ---
 
