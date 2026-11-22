@@ -21,6 +21,8 @@ export interface AgentMarker {
 export interface NoSleepSnapshot {
   readonly active: boolean;
   readonly manualActive: boolean;
+  readonly manualExpiresAtMs: number | null;
+  readonly manualDurationSeconds: number | null;
   readonly activeAgents: readonly AgentMarker[];
   readonly scope: InhibitorScope;
   readonly cookieHeld: boolean;
@@ -104,25 +106,44 @@ function agentsEqual(a: readonly AgentMarker[], b: readonly AgentMarker[]): bool
   return true;
 }
 
+interface ParsedToggleRequest {
+  readonly enabled: boolean;
+  readonly durationSeconds?: number | null;
+}
+
 function parseToggleCommand(
   args: readonly string[],
   payload: unknown,
   current: boolean,
-): boolean {
+): ParsedToggleRequest {
   if (typeof payload === "object" && payload !== null && !Array.isArray(payload)) {
     const record = payload as Record<string, unknown>;
+    const rawDuration = record.duration_seconds;
+    const hasDuration = "duration_seconds" in record;
+    const durationSeconds =
+      typeof rawDuration === "number" && Number.isFinite(rawDuration) && rawDuration > 0
+        ? Math.trunc(rawDuration)
+        : rawDuration === null
+          ? null
+          : undefined;
     if (typeof record.enabled === "boolean") {
-      return record.enabled;
+      return {
+        enabled: record.enabled,
+        ...(hasDuration && durationSeconds !== undefined ? { durationSeconds } : {}),
+      };
+    }
+    if (hasDuration && durationSeconds !== undefined) {
+      return { enabled: true, durationSeconds };
     }
   }
   const first = args[0]?.trim().toLowerCase();
   if (first === "on" || first === "true" || first === "enable" || first === "1") {
-    return true;
+    return { enabled: true };
   }
   if (first === "off" || first === "false" || first === "disable" || first === "0") {
-    return false;
+    return { enabled: false };
   }
-  return !current;
+  return { enabled: !current };
 }
 
 function errorMessage(err: unknown): string {
@@ -169,18 +190,47 @@ export function createNoSleepPlugin(runtime: NoSleepRuntime = {}): PluginDefinit
       const now = runtime.now ?? (() => Date.now());
 
       let manualActive = false;
+      let manualExpiresAtMs: number | null = null;
+      let manualDurationSeconds: number | null = null;
       let activeAgents: AgentMarker[] = [];
       let heldCookie: number | null = null;
       let lastCheckedAtMs: number | null = null;
       let lastError: string | null = null;
       let closed = false;
       let cancelTimer: CancelTimer | null = null;
+      let cancelManualTimer: CancelTimer | null = null;
       let queue: Promise<void> = Promise.resolve();
+
+      function clearManualExpiry(): void {
+        cancelManualTimer?.();
+        cancelManualTimer = null;
+        manualExpiresAtMs = null;
+        manualDurationSeconds = null;
+      }
+
+      function armManualExpiry(durationSeconds: number): void {
+        clearManualExpiry();
+        manualDurationSeconds = durationSeconds;
+        manualExpiresAtMs = now() + durationSeconds * 1000;
+        if (runtime.schedule !== undefined && !closed) {
+          cancelManualTimer = runtime.schedule(durationSeconds * 1000, () => {
+            cancelManualTimer = null;
+            void enqueue(async () => {
+              manualActive = false;
+              manualExpiresAtMs = null;
+              manualDurationSeconds = null;
+              return reconcileAndPublish(true);
+            });
+          });
+        }
+      }
 
       function buildSnapshot(): NoSleepSnapshot {
         return {
           active: manualActive || activeAgents.length > 0,
           manualActive,
+          manualExpiresAtMs,
+          manualDurationSeconds,
           activeAgents: activeAgents.slice(),
           scope,
           cookieHeld: heldCookie !== null,
@@ -309,7 +359,14 @@ export function createNoSleepPlugin(runtime: NoSleepRuntime = {}): PluginDefinit
         "Toggle manual sleep inhibition on or off",
         async ({ args, payload }): Promise<CommandInvokeResult> => {
           const snapshot = await enqueue(async () => {
-            manualActive = parseToggleCommand(args, payload, manualActive);
+            const parsed = parseToggleCommand(args, payload, manualActive);
+            manualActive = parsed.enabled;
+            if (!manualActive) {
+              clearManualExpiry();
+            } else if (parsed.durationSeconds !== undefined) {
+              if (parsed.durationSeconds === null) clearManualExpiry();
+              else armManualExpiry(parsed.durationSeconds);
+            }
             return reconcileAndPublish(true);
           });
           return {
@@ -340,6 +397,7 @@ export function createNoSleepPlugin(runtime: NoSleepRuntime = {}): PluginDefinit
         closed = true;
         cancelTimer?.();
         cancelTimer = null;
+        clearManualExpiry();
         await queue;
         if (heldCookie !== null) {
           const cookie = heldCookie;

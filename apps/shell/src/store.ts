@@ -158,6 +158,9 @@ export interface ShellStore extends ShellTopics {
   readonly activePanel: Accessor<PanelId | null>;
   readonly activePanelTarget: Accessor<PanelTarget | null>;
   togglePanel(id: PanelId, target?: PanelAnchor): void;
+  readonly pendingQuickSettingsSubpage: Accessor<"wifi" | "bluetooth" | "sound" | "battery" | null>;
+  openQuickSettingsSubpage(page: "wifi" | "bluetooth" | "sound" | "battery"): void;
+  consumeQuickSettingsSubpage(): "wifi" | "bluetooth" | "sound" | "battery" | null;
   closePanels(): void;
   dismissOverlay(): void;
   readonly activePluginPanelId: Accessor<string | null>;
@@ -192,6 +195,7 @@ export function createShellStore(): ShellStore {
   const [powerDialogMonitorId, setPowerDialogMonitorId] = createSignal<string | null>(null);
   let disposed = false;
   const [overlay, setOverlay] = createSignal<BarOverlay | null>(null);
+  const [pendingQuickSettingsSubpage, setPendingQuickSettingsSubpage] = createSignal<"wifi" | "bluetooth" | "sound" | "battery" | null>(null);
   const recordActiveMonitor = (monitorId: string) => {
     if (monitorId.length > 0) setLastMonitorId(monitorId);
   };
@@ -565,6 +569,20 @@ export function createShellStore(): ShellStore {
     activePanel,
     activePanelTarget,
     togglePanel,
+    pendingQuickSettingsSubpage,
+    openQuickSettingsSubpage: page => {
+      setPendingQuickSettingsSubpage(page);
+      const currentOutputs = monitors();
+      const active = overlay();
+      const activeMonitorId = overlayMonitorId(active, currentOutputs);
+      const resolved = defaultPanelAnchor("quick-settings", currentOutputs, activeMonitorId);
+      setOverlay({ kind: "panel", target: { ...resolved, id: "quick-settings" } });
+    },
+    consumeQuickSettingsSubpage: () => {
+      const next = pendingQuickSettingsSubpage();
+      if (next !== null) setPendingQuickSettingsSubpage(null);
+      return next;
+    },
     closePanels: () => setOverlay(active => active?.kind === "panel" || active?.kind === "plugin" ? null : active),
     dismissOverlay: () => setOverlay(null),
     activePluginPanelId,

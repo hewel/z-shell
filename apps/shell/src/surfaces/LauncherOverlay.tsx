@@ -175,19 +175,31 @@ function LauncherContent(props: {
           </box>
         </row>
         <scroll style={{ flexGrow: 1, width: "100%", overflow: "hidden auto" }}>
-          <row style={{ position: "relative", width: "100%", flexWrap: "wrap", gap: "6px", justifyContent: "flex-start" }}>
-            <box ariaHidden style={{
-              position: "absolute", top: "0px", left: "0px", width: "96px", height: "94px", borderRadius: "14px",
-              backgroundColor: "var(--color-primary-container)",
-              border: "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)",
-              pointerEvents: "none",
-              opacity: Math.max(0, Math.min(1, highlightOpacity())),
-              transform: `translate(${highlightX().toFixed(2)}px, ${highlightY().toFixed(2)}px)`,
-            }} />
-            <For each={items()} keyed={item => `${item.provider_id}:${item.item_id}`}>
-              {(item, index) => <LauncherTile item={item} selected={index() === selectedIndex()} activate={activateItem} />}
-            </For>
-          </row>
+          <Show when={items().length > 0 || results() === undefined} fallback={
+            <column testId="launcher-empty" style={{
+              width: "100%", minHeight: "220px", borderRadius: "16px",
+              backgroundColor: "var(--color-surface-container-high)",
+              padding: "24px 16px", alignItems: "center", justifyContent: "center", gap: "6px",
+            }}>
+              <ShellIcon name="search" size={22} color="var(--color-on-surface-variant)" />
+              <text style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-on-surface)" }}>No matching apps</text>
+              <text style={{ fontSize: "12px", color: "var(--color-on-surface-variant)" }}>Press Esc to clear search</text>
+            </column>
+          }>
+            <row style={{ position: "relative", width: "100%", flexWrap: "wrap", gap: "6px", justifyContent: "flex-start" }}>
+              <box ariaHidden style={{
+                position: "absolute", top: "0px", left: "0px", width: "96px", height: "94px", borderRadius: "14px",
+                backgroundColor: "var(--color-primary-container)",
+                border: "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)",
+                pointerEvents: "none",
+                opacity: Math.max(0, Math.min(1, highlightOpacity())),
+                transform: `translate(${highlightX().toFixed(2)}px, ${highlightY().toFixed(2)}px)`,
+              }} />
+              <For each={items()} keyed={item => `${item.provider_id}:${item.item_id}`}>
+                {(item, index) => <LauncherTile item={item} selected={index() === selectedIndex()} activate={activateItem} />}
+              </For>
+            </row>
+          </Show>
         </scroll>
         <row style={{ justifyContent: "space-between", alignItems: "center", paddingTop: "2px", flexShrink: 0 }}>
           <text style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--color-on-surface-variant)" }}>

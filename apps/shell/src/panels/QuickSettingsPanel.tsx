@@ -482,14 +482,21 @@ function OutgoingQuickSettingsLayer(props: {
 }
 
 export function QuickSettingsPanel(): NativeChild {
+  const { pendingQuickSettingsSubpage, consumeQuickSettingsSubpage } = useShellStore();
   const scheme = useMotionScheme();
-  const [page, setPage] = createSignal<QuickSettingsPage>("main");
+  const [page, setPage] = createSignal<QuickSettingsPage>(consumeQuickSettingsSubpage() ?? "main");
   const [returnedFromSubpage, setReturnedFromSubpage] = createSignal(false);
   const [powerMenuOpen, setPowerMenuOpen] = createSignal(false);
   const [outgoing, setOutgoing] = createSignal<OutgoingQuickSettings | null>(null);
   const [targetHeight, setTargetHeight] = createSignal<number | null>(null);
   let activeWrapper: NativeNode | undefined;
   let transitionSeq = 0;
+
+  createEffect(pendingQuickSettingsSubpage, requested => {
+    if (!requested) return;
+    const consumed = consumeQuickSettingsSubpage();
+    if (consumed) setPage(consumed);
+  });
 
   const animatedHeight = createM3Spring(() => targetHeight() ?? 0, "defaultSpatial", {
     scheme,

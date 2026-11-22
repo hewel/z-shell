@@ -48,6 +48,15 @@
       "previewRelPath": "z-shell-preview-design-vertical/out/captures/surfaces/bar-dp-1/bar-left-docked-active.png"
     },
     {
+      "id": "09e-bar-popups",
+      "name": "09E · Bar Popups (Tray, IME & Kimpanel)",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "D3X-0",
+      "refFile": "09e-bar-popups.jpg",
+      "previewRelPath": "z-shell-preview-design-new-states/out/captures/surfaces/kimpanel-popup/kimpanel-09e.png"
+    },
+    {
       "id": "10-dock",
       "name": "10 · Dock (Floating)",
       "theme": "dark",
@@ -84,6 +93,15 @@
       "previewRelPath": "z-shell-preview-design/out/captures/surfaces/panel-media/media.png"
     },
     {
+      "id": "14b-media-sink",
+      "name": "14B · Media Player (Output Sink Picker & Idle)",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "D3W-0",
+      "refFile": "14b-media-sink.jpg",
+      "previewRelPath": "z-shell-preview-design-new-states/out/captures/surfaces/panel-media/media-sink-expanded.png"
+    },
+    {
       "id": "17-power",
       "name": "17 · Power Dialog",
       "theme": "dark",
@@ -111,6 +129,15 @@
       "previewRelPath": "z-shell-preview-design/out/captures/surfaces/settings-window/settings.png"
     },
     {
+      "id": "22a-wallpaper-library",
+      "name": "22A · Settings — Wallpaper Library",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "CZF-0",
+      "refFile": "22a-wallpaper-library.jpg",
+      "previewRelPath": "z-shell-preview-design-new-states/out/captures/surfaces/settings-window/wallpaper-library.png"
+    },
+    {
       "id": "23-polkit",
       "name": "23 · Polkit Auth Dialog",
       "theme": "dark",
@@ -118,6 +145,15 @@
       "nodeId": "84W-0",
       "refFile": "23-polkit.jpg",
       "previewRelPath": "z-shell-preview-design-docked/out/captures/surfaces/polkit-dialog/polkit-23.png"
+    },
+    {
+      "id": "24-interactive-states",
+      "name": "24 · Missing Interactive States",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "D3Y-0",
+      "refFile": "24-interactive-states.jpg",
+      "previewRelPath": "z-shell-preview-design-interactive/out/captures/surfaces/settings-window/idle-command-editor.png"
     },
     {
       "id": "l01-qs-light",

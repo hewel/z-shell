@@ -1461,6 +1461,9 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.step({ id: "capture-idle-seg-t55", op: "capture", surface: "settings-window", captureId: "idle-seg-t55" });
       timeline.advance("idle-seg-settle", 360);
       timeline.step({ id: "capture-idle-seg-t400", op: "capture", surface: "settings-window", captureId: "idle-seg-t400" });
+      timeline.step({ id: "click-idle-action-command", op: "pointer.click", target: { surface: "settings-window", testId: "settings-idle-action-custom_command" }, button: "primary" });
+      timeline.advance("idle-command-settle", 250);
+      timeline.step({ id: "capture-idle-command-editor", op: "capture", surface: "settings-window", captureId: "idle-command-editor" });
 
       // --- 5. Launcher search filter layout stability ---
       const launcherInitialAtMs = timeline.after(15);
@@ -1659,7 +1662,7 @@ describe("apps/shell design geometry & pixel lint", () => {
       }, null, 2));
 
       const result = runPreview(published.dist, fixture, scenario, out);
-      expectCleanPreview(result, 19, 0);
+      expectCleanPreview(result, 20, 0);
 
       const assertAntiSharpBoxCorners = (
         beforeImg: ReturnType<typeof readCapture>["image"],
@@ -1761,6 +1764,11 @@ describe("apps/shell design geometry & pixel lint", () => {
       };
       expect(diffRegionPixels(idleSegT0.image, idleSegT55.image, segTrackBounds), "M3SegmentedControl spring moved by t=55ms").toBeGreaterThan(20);
       expect(diffRegionPixels(idleSegT55.image, idleSegT400.image, segTrackBounds), "M3SegmentedControl spring still moving between t=55ms and t=400ms").toBeGreaterThan(20);
+      const idleCommandEditor = readCapture(out, "settings-window", "idle-command-editor");
+      expect(
+        treeNode(idleCommandEditor.tree, "settings-idle-custom-command").boundsLogical,
+        "24 · Idle Command mode mounts Action command TextField",
+      ).toBeDefined();
 
       // --- Verify 6: Launcher search filter stability ---
       const launcherBefore = readCapture(out, "launcher-overlay", "launcher-before-filter");
@@ -1794,6 +1802,380 @@ describe("apps/shell design geometry & pixel lint", () => {
         22,
         "notification toast blurRegion",
       );
+    } finally {
+      cleanup();
+    }
+  }, 30_000);
+
+  previewTest("L4 New Interactive States: 22A Wallpaper Library, 14B Media Sink & Idle, 09E Bar Popups, 13B/18B Empty States", () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-design-new-states-");
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const monitor = { id: "DP-1", name: "DP-1", x: 0, y: 0, width: 1280, height: 720, scale: 1 };
+      const catalogNames = [
+        "glacier-studio.png", "alpine-fog.png", "desert-noon.png", "pine-moon.png",
+        "dusk-horizon.png", "canyon-sun.png", "fjord-wave.png", "minimal-tower.jpg",
+        "slate-ridge.png", "aurora-north.png", "terracotta.jpg", "indigo-mist.png",
+      ];
+      const catalogItems = catalogNames.map((file, idx) => ({
+        id: `wp-${idx + 1}`,
+        name: file,
+        source_path: `/home/hewel/Pictures/Wallpapers/${file}`,
+        width: 2560,
+        height: 1440,
+        thumbnail: null,
+      }));
+
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+
+      // 1. 22A · Settings — Wallpaper Library drill-down + filename filter
+      const appearanceListAtMs = timeline.after(20);
+      timeline.step({
+        id: "open-settings", op: "service.emit", channel: "control.message",
+        value: { args: ["settings", "appearance"], reply: { text: "{\"settingsWindowOpen\":true,\"settingsWindowTab\":\"appearance\"}" } },
+      });
+      timeline.advance("settings-open-settle", 250);
+      const libraryListAtMs = timeline.after(20);
+      timeline.step({ id: "open-wp-library", op: "pointer.click", target: { surface: "settings-window", testId: "settings-wp-browse" }, button: "primary" });
+      timeline.advance("wp-library-settle", 400);
+      timeline.step({ id: "capture-wp-library", op: "capture", surface: "settings-window", captureId: "wallpaper-library" });
+      timeline.step({ id: "focus-wp-filter", op: "pointer.click", target: { surface: "settings-window", testId: "wp-library-filter" }, button: "primary" });
+      timeline.step({ id: "type-wp-filter", op: "text.commit", surface: "settings-window", text: "glacier" });
+      timeline.advance("wp-filter-settle", 100);
+      timeline.step({ id: "capture-wp-filtered", op: "capture", surface: "settings-window", captureId: "wallpaper-library-filtered" });
+      timeline.step({
+        id: "close-settings", op: "service.emit", channel: "control.message",
+        value: { args: ["settings", "close"], reply: { text: "{\"settingsWindowOpen\":false}" } },
+      });
+      timeline.advance("settings-close-settle", 100);
+
+      // 2. 14B · Media Player — Output Sink Picker Expanded & Idle State
+      timeline.step({ id: "open-media", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-media" }, button: "primary" });
+      timeline.advance("media-open-settle", 400);
+      timeline.step({ id: "expand-media-sinks", op: "pointer.click", target: { surface: "panel-media", testId: "media-sink-toggle" }, button: "primary" });
+      timeline.advance("media-sinks-settle", 400);
+      timeline.step({ id: "capture-media-sink", op: "capture", surface: "panel-media", captureId: "media-sink-expanded" });
+      timeline.step({ id: "collapse-media-sinks", op: "pointer.click", target: { surface: "panel-media", testId: "media-sink-toggle" }, button: "primary" });
+      const mediaIdleAtMs = timeline.after(20);
+      timeline.advance("media-idle-settle", 400);
+      timeline.step({ id: "capture-media-idle", op: "capture", surface: "panel-media", captureId: "media-idle" });
+
+      // 3. 13B · Calendar Empty Notifications
+      timeline.step({ id: "open-cal-empty", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-clock" }, button: "primary" });
+      timeline.advance("cal-empty-settle", 400);
+      timeline.step({ id: "capture-cal-empty", op: "capture", surface: "panel-calendar", captureId: "cal-empty" });
+
+      // 4. 09E · Bar Popups (IME Switcher & Kimpanel)
+      timeline.step({ id: "open-ime-menu", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-ime" }, button: "secondary" });
+      timeline.advance("ime-menu-settle", 400);
+      timeline.step({ id: "capture-ime-menu", op: "capture", surface: "ime-menu", captureId: "ime-menu-09e" });
+      timeline.step({ id: "dismiss-ime-menu", op: "key.press", surface: "ime-menu", key: "Escape" });
+      const kimpanelShowAtMs = timeline.after(20);
+      timeline.advance("kimpanel-settle", 250);
+      timeline.step({ id: "capture-kimpanel", op: "capture", surface: "kimpanel-popup", captureId: "kimpanel-09e" });
+      const kimpanelHideAtMs = timeline.after(10);
+      timeline.advance("kimpanel-hide-settle", 100);
+
+      // 5. 18B · Launcher Empty Search State
+      const launcherInitialAtMs = timeline.after(20);
+      timeline.step({
+        id: "open-launcher", op: "service.emit", channel: "control.message",
+        value: { args: ["panel", "launcher"], reply: { text: "{\"activePanel\":\"launcher\"}" } },
+      });
+      timeline.advance("launcher-open-settle", 350);
+      const launcherEmptyAtMs = timeline.after(15);
+      timeline.step({ id: "type-launcher-miss", op: "text.commit", surface: "launcher-overlay", text: "photoshp" });
+      timeline.advance("launcher-empty-settle", 200);
+      timeline.step({ id: "capture-launcher-empty", op: "capture", surface: "launcher-overlay", captureId: "launcher-empty" });
+      // 6. Clipboard keyboard single-step ArrowDown + Delete safe in search + Enter copies active entry
+      timeline.step({
+        id: "open-clipboard-kbd", op: "service.emit", channel: "control.message",
+        value: { args: ["panel", "clipboard"], reply: { text: "{\"activePanel\":\"clipboard\"}" } },
+      });
+      timeline.advance("clipboard-kbd-open", 300);
+      timeline.step({ id: "focus-clip-search", op: "pointer.click", target: { surface: "panel-clipboard", testId: "clipboard-search" }, button: "primary" });
+      timeline.step({ id: "clip-arrow-down-once", op: "key.press", surface: "panel-clipboard", key: "ArrowDown" });
+      timeline.step({ id: "clip-delete-in-search", op: "key.press", surface: "panel-clipboard", key: "Delete" });
+      const clipCopyAtMs = timeline.after(20);
+      timeline.step({ id: "clip-enter-copy", op: "key.press", surface: "panel-clipboard", key: "Enter" });
+      timeline.advance("clipboard-kbd-settle", 100);
+      timeline.step({ id: "finish", op: "settle" });
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-design-new-states",
+        initialTopics: {
+          "wayland.outputs": {
+            capability: "connected",
+            outputs: [{
+              output_instance_id: 1, name: "DP-1", description: "DisplayPort 1", make: "LG", model: "27GN950",
+              x: 0, y: 0, width: 1280, height: 720, mode_width: 1280, mode_height: 720, refresh_mhz: 60000, scale: 1,
+              physical_width_mm: 597, physical_height_mm: 336,
+            }],
+          },
+          "desktop.notifications": { available: true, dnd: false, popups: [], history: [] },
+          clipboard: {
+            persistence: { mode: "encrypted" },
+            transport: { status: "ready" },
+            locked: "unlocked",
+            entry_count: 3,
+            entries: [
+              { id: 101, kind: "text", mime: "text/plain", preview: "First entry", pinned: false, byte_len: 11, dimensions: null, media: null },
+              { id: 102, kind: "text", mime: "text/plain", preview: "Second entry", pinned: false, byte_len: 12, dimensions: null, media: null },
+              { id: 103, kind: "text", mime: "text/plain", preview: "Third entry", pinned: false, byte_len: 11, dimensions: null, media: null },
+            ],
+          },
+          "desktop.media": {
+            available: true,
+            selected_player_id: "spotify",
+            any_playing: true,
+            cover: null,
+            players: [
+              {
+                id: "spotify",
+                identity: "Spotify",
+                playback_status: "playing",
+                position_us: 112_000_000,
+                metadata: { title: "Feather", album: "Modal Soul", artists: ["Nujabes", "Cise Starr & Akin"], track_id: "t1", length_us: 175_000_000 },
+                capabilities: { can_control: true, can_play: true, can_pause: true, can_go_next: true, can_go_previous: true, can_seek: true },
+              },
+              {
+                id: "zen",
+                identity: "Zen",
+                playback_status: "paused",
+                position_us: 0,
+                metadata: { title: "Ambient", album: null, artists: ["Stream"], track_id: "t2", length_us: 0 },
+                capabilities: { can_control: true, can_play: true, can_pause: true, can_go_next: false, can_go_previous: false, can_seek: false },
+              },
+            ],
+          },
+          "system.audio": {
+            available: true,
+            default_sink: "bluez.wh1000xm5",
+            default_source: null,
+            sinks: [
+              { index: 10, name: "bluez.wh1000xm5", description: "WH-1000XM5 (LDAC)", volume: 0.68, muted: false, channels: 2 },
+              { index: 11, name: "alsa.speakers", description: "Ryzen HD Audio Speakers", volume: 0.42, muted: false, channels: 2 },
+              { index: 12, name: "alsa.hdmi", description: "HDMI / DisplayPort Audio", volume: 1.0, muted: false, channels: 2 },
+            ],
+            sources: [],
+            sink_inputs: [],
+          },
+          "desktop.ime": {
+            available: true,
+            mode: "kimpanel",
+            candidate_layout: "horizontal",
+            switch_osd: false,
+            active_im: { unique_name: "pinyin", label: "Pinyin · 拼音", short_label: "拼", icon_name: null },
+            group_ims: [
+              { unique_name: "pinyin", label: "Pinyin · 拼音", short_label: "拼", icon_name: null },
+              { unique_name: "keyboard-us", label: "Keyboard - English (US)", short_label: "EN", icon_name: null },
+            ],
+            properties: [
+              { key: "chttrans", label: "Simplified Chinese", icon_name: null, tip: null },
+              { key: "fullwidth", label: "Full-width punctuation", icon_name: null, tip: null },
+            ],
+          },
+          "desktop.ime.panel": {
+            visible: false,
+            aux: "",
+            preedit: "",
+            caret: 0,
+            lookup_table: { labels: [], texts: [], attrs: [], has_prev: false, has_next: false, cursor: 0, layout: "horizontal" },
+            spot_rect: null,
+          },
+          wallpaper: {
+            available: true,
+            fit: "cover",
+            sync_theme: true,
+            slideshow_seconds: 0,
+            catalog_count: catalogItems.length,
+            current: {
+              source_path: catalogItems[0]!.source_path,
+              media: null,
+              width: 2560,
+              height: 1440,
+              fit: "cover",
+            },
+            per_output: {
+              "DP-1": {
+                source_path: catalogItems[0]!.source_path,
+                media: null,
+                width: 2560,
+                height: 1440,
+                fit: "cover",
+              },
+            },
+            last_error: null,
+          },
+          settings: {
+            general: { offline_mode: false, log_level: "info" },
+            bar: {
+              position: "top",
+              style: "floating",
+              gaps: 14,
+              edge_overrides: { top: null, right: null, bottom: null, left: null },
+              launcher_enabled: true,
+              dock_enabled: false,
+              clock_24h: true,
+              clock_seconds: false,
+            },
+            theme: {
+              mode: "dark",
+              variant: "tonal",
+              seed_color: null,
+              motion_scheme: "standard",
+              backend: "builtin",
+              gtk_linking: false,
+            },
+            ime: { mode: "kimpanel", candidate_layout: "horizontal", switch_osd: false },
+            polkit: { enabled: true },
+            wallpaper: {
+              directories: ["~/Pictures/Wallpapers", "~/Sync/Walls"],
+              fit: "cover",
+              sync_theme: true,
+              slideshow_seconds: 0,
+            },
+            pre_action_fade_seconds: 0,
+            configured_plugins: [],
+          },
+        },
+        topicUpdates: [
+          {
+            atMs: mediaIdleAtMs,
+            topic: "desktop.media",
+            revision: 2,
+            data: { available: true, selected_player_id: null, any_playing: false, cover: null, players: [] },
+          },
+          {
+            atMs: kimpanelShowAtMs,
+            topic: "desktop.ime.panel",
+            revision: 2,
+            data: {
+              visible: true,
+              aux: "",
+              preedit: "zhong'wen",
+              caret: 9,
+              lookup_table: {
+                labels: ["1", "2", "3", "4"],
+                texts: ["中文", "钟文", "重文", "众文"],
+                attrs: ["", "", "", ""],
+                has_prev: false,
+                has_next: true,
+                cursor: 0,
+                layout: "horizontal",
+              },
+              spot_rect: { x: 240, y: 180, w: 12, h: 20, relative: false, scale: 1 },
+            },
+          },
+          {
+            atMs: kimpanelHideAtMs,
+            topic: "desktop.ime.panel",
+            revision: 3,
+            data: {
+              visible: false,
+              aux: "",
+              preedit: "",
+              caret: 0,
+              lookup_table: { labels: [], texts: [], attrs: [], has_prev: false, has_next: false, cursor: 0, layout: "horizontal" },
+              spot_rect: null,
+            },
+          },
+        ],
+        commands: [
+          {
+            id: 26,
+            name: "wallpaper.list",
+            payload: { offset: 0, limit: 16 },
+            atMs: appearanceListAtMs,
+            result: { data: { total: catalogItems.length, items: catalogItems } },
+          },
+          {
+            id: 27,
+            name: "wallpaper.list",
+            payload: {},
+            atMs: libraryListAtMs,
+            result: { data: { total: catalogItems.length, items: catalogItems } },
+          },
+          {
+            id: 28,
+            name: "launcher.query",
+            payload: { query: "", query_id: 1, limit: 18 },
+            atMs: launcherInitialAtMs,
+            result: {
+              data: {
+                query_id: 1,
+                items: [{ provider_id: "desktop", item_id: "editor", title: "Editor", subtitle: "Code", icon: null }],
+              },
+            },
+          },
+          {
+            id: 29,
+            name: "launcher.query",
+            payload: { query: "photoshp", query_id: 2, limit: 18 },
+            atMs: launcherEmptyAtMs,
+            result: { data: { query_id: 2, items: [] } },
+          },
+          {
+            id: 30,
+            name: "clipboard.copy",
+            payload: { id: 102 },
+            atMs: clipCopyAtMs,
+            result: { data: { copied: 102 } },
+          },
+        ],
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-new-states",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(published.dist, fixture, scenario, out);
+      expectCleanPreview(result, 8, 0);
+
+      // Verify 22A · Wallpaper Library
+      const wpLib = readCapture(out, "settings-window", "wallpaper-library");
+      expect(treeNode(wpLib.tree, "settings-wallpaper-library").boundsLogical).toBeDefined();
+      expect(treeNode(wpLib.tree, "wp-lib-item-wp-1").boundsLogical).toBeDefined();
+      expect(treeNode(wpLib.tree, "wp-lib-item-wp-12").boundsLogical).toBeDefined();
+      expect(treeNode(wpLib.tree, "wp-library-clear").boundsLogical).toBeDefined();
+      expect(wpLib.tree.nodes.some(node => node.text === "DP-1")).toBe(true);
+      const wpFiltered = readCapture(out, "settings-window", "wallpaper-library-filtered");
+      expect(treeNode(wpFiltered.tree, "wp-lib-item-wp-1").boundsLogical).toBeDefined();
+      expect(wpFiltered.tree.nodes.some(node => node.testId === "wp-lib-item-wp-2")).toBe(false);
+
+      // Verify 14B · Media Sink Picker & Idle State
+      const mediaSink = readCapture(out, "panel-media", "media-sink-expanded");
+      expect(treeNode(mediaSink.tree, "media-sink-drawer").boundsLogical).toBeDefined();
+      expect(treeNode(mediaSink.tree, "media-sink-10").boundsLogical).toBeDefined();
+      expect(treeNode(mediaSink.tree, "media-sink-11").boundsLogical).toBeDefined();
+      expect(treeNode(mediaSink.tree, "media-sound-settings").boundsLogical).toBeDefined();
+      const mediaIdle = readCapture(out, "panel-media", "media-idle");
+      expect(treeNode(mediaIdle.tree, "media-idle-empty").boundsLogical).toBeDefined();
+      expect(treeNode(mediaIdle.tree, "media-sink-toggle").boundsLogical).toBeDefined();
+
+      // Verify 13B · Calendar Empty Notifications
+      const calEmpty = readCapture(out, "panel-calendar", "cal-empty");
+      expect(treeNode(calEmpty.tree, "cal-notif-empty").boundsLogical).toBeDefined();
+      expect(calEmpty.tree.nodes.some(node => node.text === "All caught up")).toBe(true);
+
+      // Verify 09E · IME Switcher & Kimpanel
+      const imeMenu = readCapture(out, "ime-menu", "ime-menu-09e");
+      expect(imeMenu.tree.nodes.some(node => node.text === "INPUT METHOD")).toBe(true);
+      expect(treeNode(imeMenu.tree, "ime-im-pinyin").boundsLogical).toBeDefined();
+      const kimpanel09e = readCapture(out, "kimpanel-popup", "kimpanel-09e");
+      expect(treeNode(kimpanel09e.tree, "kimpanel-root").boundsLogical).toBeDefined();
+      expect(treeNode(kimpanel09e.tree, "kimpanel-cand-0").boundsLogical).toBeDefined();
+
+      // Verify 18B · Launcher Empty Search
+      const launcherEmpty = readCapture(out, "launcher-overlay", "launcher-empty");
+      expect(treeNode(launcherEmpty.tree, "launcher-empty").boundsLogical).toBeDefined();
+      expect(launcherEmpty.tree.nodes.some(node => node.text === "No matching apps")).toBe(true);
     } finally {
       cleanup();
     }

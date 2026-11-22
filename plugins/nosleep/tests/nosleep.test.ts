@@ -237,4 +237,47 @@ describe("z-shell/nosleep plugin", () => {
     expect(harness.inhibitors.size).toBe(0);
     expect(harness.counts().releaseCount).toBe(1);
   });
+
+  test("timed stay-awake acquires inhibitor and auto-releases when countdown expires", async () => {
+    const harness = createBusHarness();
+    const client = await ZShellClient.connect(harness.transport);
+
+    let expiryDelayMs: number | null = null;
+    let expiryCb: (() => void) | null = null;
+    const plugin = createNoSleepPlugin({
+      now: () => 1_700_000_000_000,
+      schedule: (delayMs, cb) => {
+        expiryDelayMs = delayMs;
+        expiryCb = cb;
+        return () => {
+          expiryCb = null;
+        };
+      },
+    });
+    const ctx = createPluginContext("z-shell/nosleep", client, NOSLEEP_DEFAULTS);
+    const cleanup = await plugin.setup(ctx);
+
+    const timedReply = await harness.dispatchCommand("plugin.z-shell.nosleep.toggle", [], {
+      enabled: true,
+      duration_seconds: 3600,
+    });
+    const timedState = timedReply.data as NoSleepSnapshot;
+    expect(timedState.manualActive).toBe(true);
+    expect(timedState.manualDurationSeconds).toBe(3600);
+    expect(timedState.manualExpiresAtMs).toBe(1_700_000_000_000 + 3_600_000);
+    expect(expiryDelayMs).toBe(3_600_000);
+    expect(harness.inhibitors.size).toBe(1);
+
+    // Fire countdown expiration -> manual protection turns off and releases cookie.
+    expiryCb?.();
+    const afterExpiry = (await harness.dispatchCommand("plugin.z-shell.nosleep.status"))
+      .data as NoSleepSnapshot;
+    expect(afterExpiry.manualActive).toBe(false);
+    expect(afterExpiry.manualExpiresAtMs).toBeNull();
+    expect(afterExpiry.manualDurationSeconds).toBeNull();
+    expect(afterExpiry.cookieHeld).toBe(false);
+    expect(harness.inhibitors.size).toBe(0);
+
+    await cleanup?.();
+  });
 });

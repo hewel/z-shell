@@ -236,7 +236,16 @@ export function CalendarPanel() {
         flexGrow: 1, flexShrink: 1, minHeight: "0px", width: "100%", overflow: "hidden auto",
       }}>
         <column style={{ gap: "8px", paddingRight: "4px", paddingBottom: "2px" }}>
-          <Show when={history().length > 0} fallback={<text style={{ color: muted, padding: "6px 0", fontSize: "12px" }}>No notifications</text>}>
+          <Show when={history().length > 0} fallback={
+            <column testId="cal-notif-empty" style={{
+              width: "100%", borderRadius: "14px", backgroundColor: containerHigh,
+              padding: "24px 16px", alignItems: "center", justifyContent: "center", gap: "6px",
+            }}>
+              <ShellIcon name="bell" size={22} color={muted} />
+              <text style={{ fontSize: "13px", fontWeight: 600, color: onSurface }}>All caught up</text>
+              <text style={{ fontSize: "12px", color: muted }}>No unread notifications</text>
+            </column>
+          }>
             <For each={history()} keyed={item => item.id}>{item => <NotificationRow item={item} />}</For>
           </Show>
         </column>

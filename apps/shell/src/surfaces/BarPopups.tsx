@@ -12,6 +12,8 @@ const MENU_MIN_WIDTH = 220;
 const MENU_MAX_WIDTH = 360;
 const MENU_MAX_HEIGHT = 520;
 const primary = "var(--color-primary)";
+const primaryContainer = "var(--color-primary-container)";
+const onPrimaryContainer = "var(--color-on-primary-container)";
 const onSurfaceVariant = "var(--color-on-surface-variant)";
 const separator = { height: "1px", margin: "5px 4px", flexShrink: 0, backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 55%, transparent)" } as const;
 const indicator = { display: "flex", width: "14px", height: "14px", flexShrink: 0, alignItems: "center", justifyContent: "center" } as const;
@@ -67,6 +69,7 @@ function resolveMenuWidth(rows: readonly { readonly label: string; readonly dept
 function PopupContent(props: {
   padding: string;
   label: string;
+  header?: string;
   position: BarPosition;
   spatial: M3Spring;
   opacity: M3Spring;
@@ -109,6 +112,18 @@ function PopupContent(props: {
               onDismiss={props.onDismiss}
               style={{ display: "flex", flexDirection: "column", padding: props.padding, gap: "2px" }}
             >
+              <Show when={props.header}>
+                {title => (
+                  <box ariaHidden style={{ padding: "4px 10px 6px 10px", flexShrink: 0 }}>
+                    <text style={{
+                      fontSize: "10px", lineHeight: "14px", fontWeight: 600, letterSpacing: "0.06em",
+                      color: onSurfaceVariant, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis",
+                    }}>
+                      {title().toUpperCase()}
+                    </text>
+                  </box>
+                )}
+              </Show>
               {props.children}
             </MenuListPrimitive>
           </scroll>
@@ -125,6 +140,7 @@ function MenuButton(props: {
   depth?: number;
   toggle?: "checkmark" | "radio" | null;
   checked?: boolean;
+  active?: boolean;
   submenu?: boolean;
   activate: () => void;
 }) {
@@ -141,21 +157,30 @@ function MenuButton(props: {
         alignItems: "center",
         gap: "8px",
         height: "36px",
-        borderRadius: "8px",
+        borderRadius: "10px",
         flexShrink: 0,
-        padding: `0 8px 0 ${8 + Math.min(props.depth ?? 0, 6) * 12}px`,
+        padding: `0 10px 0 ${10 + Math.min(props.depth ?? 0, 6) * 12}px`,
+        backgroundColor: props.active ? primaryContainer : "transparent",
+        border: props.active
+          ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)"
+          : "1px solid transparent",
+        color: props.active ? onPrimaryContainer : "var(--color-on-surface)",
+        fontWeight: props.active ? 600 : 400,
         opacity: props.disabled ? 0.38 : 1,
       }}
     >
       <box ariaHidden style={indicator}>
         <Show when={props.checked}>
-          <Show when={props.toggle === "radio"} fallback={<ShellIcon name="check" size={14} color={primary} />}>
-            <box style={{ width: "6px", height: "6px", borderRadius: "3px", "--zgui-corner-shape": "none", backgroundColor: primary }} />
+          <Show when={props.toggle === "radio" || props.active} fallback={<ShellIcon name="check" size={14} color={props.active ? onPrimaryContainer : primary} />}>
+            <box style={{
+              width: "6px", height: "6px", borderRadius: "3px", "--zgui-corner-shape": "none",
+              backgroundColor: props.active ? onPrimaryContainer : primary,
+            }} />
           </Show>
         </Show>
       </box>
       <text style={{ flexGrow: 1, minWidth: "0px", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{props.label}</text>
-      <Show when={props.submenu}><ShellIcon name="chevronRight" size={12} color={onSurfaceVariant} /></Show>
+      <Show when={props.submenu}><ShellIcon name="chevronRight" size={12} color={props.active ? onPrimaryContainer : onSurfaceVariant} /></Show>
     </MenuItemPrimitive>
   );
 }
@@ -210,7 +235,7 @@ export function BarPopups(): NativeChild {
               width={trayWidth()} height="auto" minHeight={48} maxHeight={MENU_MAX_HEIGHT}
               placement={geometry().placement} offset={geometry().offset} grab blurRegion={blur.region()}
               onDismiss={() => { trayPresence.dismissInstant(); closeTrayMenu(); }}>
-              <PopupContent padding="8px" label={item().label} position={position()} spatial={trayPresence.progress} opacity={trayPresence.opacity}
+              <PopupContent padding="8px" label={item().label} header={item().label} position={position()} spatial={trayPresence.progress} opacity={trayPresence.opacity}
                 blurRef={blur.ref} onDismiss={closeTrayMenu}>
                 <For each={trayRows()} keyed={row => row.node.id}>
                   {row => (
@@ -237,18 +262,24 @@ export function BarPopups(): NativeChild {
               width={imeWidth()} height="auto" minHeight={48} maxHeight={MENU_MAX_HEIGHT}
               placement={geometry().placement} offset={geometry().offset} grab blurRegion={blur.region()}
               onDismiss={() => { imePresence.dismissInstant(); closeImeMenu(); }}>
-              <PopupContent padding="8px" label="Input method" position={position()} spatial={imePresence.progress} opacity={imePresence.opacity}
+              <PopupContent padding="8px" label="Input method" header="Input method" position={position()} spatial={imePresence.progress} opacity={imePresence.opacity}
                 blurRef={blur.ref} onDismiss={closeImeMenu}>
                 <For each={ime.data()?.group_ims} keyed={im => im.unique_name}>
-                  {im => (
-                    <MenuButton testId={`ime-im-${im().unique_name}`} label={im().label}
-                      checked={im().unique_name === ime.data()?.active_im?.unique_name}
-                      activate={() => {
-                        void invokePublic("ime.set-im", { unique_name: im().unique_name });
-                        closeImeMenu();
-                      }} />
-                  )}
+                  {im => {
+                    const isActive = () => im().unique_name === ime.data()?.active_im?.unique_name;
+                    return (
+                      <MenuButton testId={`ime-im-${im().unique_name}`} label={im().label}
+                        toggle="radio" checked={isActive()} active={isActive()}
+                        activate={() => {
+                          void invokePublic("ime.set-im", { unique_name: im().unique_name });
+                          closeImeMenu();
+                        }} />
+                    );
+                  }}
                 </For>
+                <Show when={(ime.data()?.group_ims.length ?? 0) > 0 && (ime.data()?.properties.length ?? 0) > 0}>
+                  <box ariaHidden style={separator} />
+                </Show>
                 <For each={ime.data()?.properties} keyed={prop => prop.key}>
                   {prop => (
                     <MenuButton testId={`ime-prop-${prop().key}`} label={prop().label}

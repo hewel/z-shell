@@ -9,6 +9,7 @@ import {
   createEnterProgress,
   createM3Spring,
   createOpacityEnter,
+  sharedAxisXStyle,
   useMotionScheme,
 } from "../motion.ts";
 import { useShellStore } from "../store.ts";
@@ -17,6 +18,7 @@ import { AppearancePane } from "./settings/AppearancePane.tsx";
 import { BarLayoutPane } from "./settings/BarLayoutPane.tsx";
 import { IdlePane } from "./settings/IdlePane.tsx";
 import { PowerPane } from "./settings/PowerPane.tsx";
+import { WallpaperLibraryView } from "./settings/WallpaperLibraryView.tsx";
 import {
   clipped,
   container,
@@ -63,6 +65,23 @@ function FadeThroughPane(props: { readonly animate: boolean; readonly children: 
   );
 }
 
+/** M3 Shared Axis X wrapper for Settings sub-page drill-down (`Appearance <-> Wallpaper library`). */
+function SharedAxisXPane(props: { readonly direction: 1 | -1; readonly children: NativeChild }): NativeChild {
+  const scheme = useMotionScheme();
+  const progress = createEnterProgress("defaultSpatial", { scheme });
+  return (
+    <column style={{
+      ...grow,
+      width: "100%",
+      height: "100%",
+      minHeight: "0px",
+      ...sharedAxisXStyle(progress(), props.direction, scheme() === "reduced"),
+    }}>
+      {props.children}
+    </column>
+  );
+}
+
 function SlidingNavPill(props: { readonly activeIndex: () => number }): NativeChild {
   const scheme = useMotionScheme();
   const pillY = createM3Spring(() => Math.max(0, props.activeIndex()) * NAV_ITEM_PITCH, "fastSpatial", {
@@ -87,6 +106,8 @@ function SettingsWindowContent(): NativeChild {
   useShellTheme(theme.data);
   const activeTab = () => settingsWindowTab();
   const [animatePane, setAnimatePane] = createSignal(false);
+  const [appearanceSubpage, setAppearanceSubpage] = createSignal<"main" | "wallpaper-library">("main");
+  const [returnedFromLibrary, setReturnedFromLibrary] = createSignal(false);
   let seenInitialTab = false;
   createEffect(activeTab, () => {
     if (!seenInitialTab) {
@@ -94,7 +115,19 @@ function SettingsWindowContent(): NativeChild {
       return;
     }
     setAnimatePane(true);
+    setAppearanceSubpage("main");
+    setReturnedFromLibrary(false);
   });
+
+  const openWallpaperLibrary = () => {
+    setReturnedFromLibrary(false);
+    setAppearanceSubpage("wallpaper-library");
+  };
+  const closeWallpaperLibrary = () => {
+    setReturnedFromLibrary(true);
+    setAppearanceSubpage("main");
+  };
+  const showingWallpaperLibrary = () => activeTab() === "appearance" && appearanceSubpage() === "wallpaper-library";
 
   const activeShellIndex = () => SHELL_NAV_TABS.findIndex(tab => tab.id === activeTab());
   const activePluginIndex = () => pluginSettingsPages().findIndex(page => page.id === activeTab() || page.pluginId === activeTab());
@@ -139,7 +172,12 @@ function SettingsWindowContent(): NativeChild {
                 {tab => {
                   const active = () => activeTab() === tab().id;
                   return (
-                    <Button testId={`settings-nav-${tab().id}`} data-qs-tile="true" selected={active()} onClick={() => openSettingsWindow(tab().id)} style={{
+                    <Button testId={`settings-nav-${tab().id}`} data-qs-tile="true" selected={active()} onClick={() => {
+                      if (tab().id === "appearance" && appearanceSubpage() === "wallpaper-library") {
+                        closeWallpaperLibrary();
+                      }
+                      openSettingsWindow(tab().id);
+                    }} style={{
                       position: "relative", zIndex: 1,
                       display: "flex", flexDirection: "row", alignItems: "center", gap: "9px", height: "34px",
                       padding: "0 10px", borderRadius: "10px", flexShrink: 0,
@@ -196,33 +234,43 @@ function SettingsWindowContent(): NativeChild {
       </column>
 
       <column testId="settings-content-pane" style={{
-        ...grow, height: "100%", padding: "18px 22px", gap: "14px",
+        ...grow, height: "100%", padding: "18px 22px", gap: "14px", overflow: "hidden",
       }}>
-        <row style={{ alignItems: "center", justifyContent: "space-between", width: "100%", flexShrink: 0 }}>
-          <column style={{ ...grow, gap: "2px" }}>
-            <text role="heading" style={{ fontSize: "18px", fontWeight: 600, letterSpacing: "-0.015em", lineHeight: "24px" }}>
-              {heading()}
-            </text>
-            <text style={{ ...clipped, fontSize: "12px", color: muted, lineHeight: "16px" }}>{subtitle()}</text>
-          </column>
-          <Button testId="settings-window-close" ariaLabel="Close settings" onClick={closeSettingsWindow} style={{
-            display: "flex", width: "30px", height: "30px", borderRadius: "10px", flexShrink: 0,
-            alignItems: "center", justifyContent: "center", backgroundColor: containerHigh,
-          }}>
-            <ShellIcon name="close" size={15} color={muted} />
-          </Button>
-        </row>
-        <scroll style={{ ...grow, minHeight: "0px", width: "100%", overflow: "hidden auto" }}>
-          <Switch fallback={<FadeThroughPane animate={animatePane()}><AppearancePane /></FadeThroughPane>}>
-            <Match when={activeTab() === "appearance"}><FadeThroughPane animate={animatePane()}><AppearancePane /></FadeThroughPane></Match>
-            <Match when={activeTab() === "bar"}><FadeThroughPane animate={animatePane()}><BarLayoutPane /></FadeThroughPane></Match>
-            <Match when={activeTab() === "idle"}><FadeThroughPane animate={animatePane()}><IdlePane /></FadeThroughPane></Match>
-            <Match when={activeTab() === "power"}><FadeThroughPane animate={animatePane()}><PowerPane /></FadeThroughPane></Match>
-            <Match when={activePluginPage()}>
-              {page => () => <FadeThroughPane animate={animatePane()}>{page().render()}</FadeThroughPane>}
-            </Match>
-          </Switch>
-        </scroll>
+        <Show when={!showingWallpaperLibrary()} fallback={
+          <SharedAxisXPane direction={1}>
+            <WallpaperLibraryView onBack={closeWallpaperLibrary} onCloseSettings={closeSettingsWindow} />
+          </SharedAxisXPane>
+        }>
+          <row style={{ alignItems: "center", justifyContent: "space-between", width: "100%", flexShrink: 0 }}>
+            <column style={{ ...grow, gap: "2px" }}>
+              <text role="heading" style={{ fontSize: "18px", fontWeight: 600, letterSpacing: "-0.015em", lineHeight: "24px" }}>
+                {heading()}
+              </text>
+              <text style={{ ...clipped, fontSize: "12px", color: muted, lineHeight: "16px" }}>{subtitle()}</text>
+            </column>
+            <Button testId="settings-window-close" ariaLabel="Close settings" onClick={closeSettingsWindow} style={{
+              display: "flex", width: "30px", height: "30px", borderRadius: "10px", flexShrink: 0,
+              alignItems: "center", justifyContent: "center", backgroundColor: containerHigh,
+            }}>
+              <ShellIcon name="close" size={15} color={muted} />
+            </Button>
+          </row>
+          <scroll style={{ ...grow, minHeight: "0px", width: "100%", overflow: "hidden auto" }}>
+            <Switch fallback={<FadeThroughPane animate={animatePane()}><AppearancePane onOpenLibrary={openWallpaperLibrary} /></FadeThroughPane>}>
+              <Match when={activeTab() === "appearance"}>
+                <Show when={returnedFromLibrary()} fallback={<FadeThroughPane animate={animatePane()}><AppearancePane onOpenLibrary={openWallpaperLibrary} /></FadeThroughPane>}>
+                  <SharedAxisXPane direction={-1}><AppearancePane onOpenLibrary={openWallpaperLibrary} /></SharedAxisXPane>
+                </Show>
+              </Match>
+              <Match when={activeTab() === "bar"}><FadeThroughPane animate={animatePane()}><BarLayoutPane /></FadeThroughPane></Match>
+              <Match when={activeTab() === "idle"}><FadeThroughPane animate={animatePane()}><IdlePane /></FadeThroughPane></Match>
+              <Match when={activeTab() === "power"}><FadeThroughPane animate={animatePane()}><PowerPane /></FadeThroughPane></Match>
+              <Match when={activePluginPage()}>
+                {page => () => <FadeThroughPane animate={animatePane()}>{page().render()}</FadeThroughPane>}
+              </Match>
+            </Switch>
+          </scroll>
+        </Show>
       </column>
     </row>
   );

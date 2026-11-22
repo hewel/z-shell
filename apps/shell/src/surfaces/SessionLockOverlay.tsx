@@ -25,6 +25,7 @@ type LockControls = {
   readonly username: Accessor<string>;
   readonly password: Accessor<string>;
   readonly setPassword: (value: string) => void;
+  readonly authenticating: Accessor<boolean>;
   readonly disabled: Accessor<boolean>;
   readonly sleepHold: Accessor<boolean>;
   readonly error: Accessor<string | null>;
@@ -44,7 +45,7 @@ const MORPH_SEQUENCE = [
 ] as const;
 const MAX_VISIBLE_DOTS = 14;
 
-function MorphPasswordDot(props: { readonly d: string; readonly viewBox: string; readonly visible: Accessor<boolean> }): NativeChild {
+function MorphPasswordDot(props: { readonly d: string; readonly viewBox: string; readonly visible: Accessor<boolean>; readonly error?: Accessor<boolean> }): NativeChild {
   const scheme = useMotionScheme();
   const presence = createPresence(props.visible, {
     scheme,
@@ -58,7 +59,8 @@ function MorphPasswordDot(props: { readonly d: string; readonly viewBox: string;
   return (
     <Show when={presence.mounted()}>
       <vector ariaHidden d={props.d} viewBox={props.viewBox} style={{
-        width: "14px", height: "14px", flexShrink: 0, color: "var(--color-on-surface)",
+        width: "14px", height: "14px", flexShrink: 0,
+        color: props.error?.() ? "var(--color-error)" : "var(--color-on-surface)",
         opacity: Math.max(0, Math.min(1, presence.opacity())),
         transform: scheme() === "reduced"
           ? "none"
@@ -162,12 +164,14 @@ function LockScreen(props: {
         <text testId={`lock-user-${monitor().id}`} style={{ fontSize: "22px", fontWeight: 500, lineHeight: "28px" }}>
           {controls.username()}
         </text>
-        <row data-composite-input="true" style={{
+        <row testId="lock-password-capsule" data-composite-input="true" data-error={controls.error() ? "true" : null} style={{
           position: "relative", width: "340px", maxWidth: "100%", height: "56px", flexShrink: 0,
           alignItems: "center", justifyContent: "space-between", gap: "8px",
           borderRadius: "999px",
           "--zgui-corner-shape": "none",
-          backgroundColor: "color-mix(in srgb, var(--color-on-surface) 14%, transparent)",
+          backgroundColor: controls.error()
+            ? "color-mix(in srgb, var(--color-error-container) 72%, transparent)"
+            : "color-mix(in srgb, var(--color-on-surface) 14%, transparent)",
           border: controls.error()
             ? "2px solid var(--color-error)"
             : passwordFocused()
@@ -192,6 +196,7 @@ function LockScreen(props: {
                     d={slot().shape.d}
                     viewBox={slot().shape.viewBox}
                     visible={() => slot().index < dotCount()}
+                    error={() => controls.error() !== null}
                   />
                 )}
               </For>
@@ -231,7 +236,23 @@ function LockScreen(props: {
           </row>
         </row>
         <Show when={controls.sleepHold()}><text testId="lock-sleep-hold">Preparing for sleep…</text></Show>
-        <Show when={controls.error()}><text testId="lock-error" role="alert" style={{ color: "var(--color-error)" }}>{controls.error()}</text></Show>
+        <Show when={controls.authenticating()}>
+          <row testId="lock-verifying" role="status" style={{
+            height: "36px", padding: "0 16px", gap: "8px", alignItems: "center", justifyContent: "center",
+            borderRadius: "999px", "--zgui-corner-shape": "none",
+            backgroundColor: "color-mix(in srgb, var(--color-primary-container) 55%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--color-primary) 45%, transparent)",
+            color: "var(--color-on-primary-container)",
+          }}>
+            <box ariaHidden style={{ width: "8px", height: "8px", borderRadius: "4px", "--zgui-corner-shape": "none", backgroundColor: "var(--color-primary)", flexShrink: 0 }} />
+            <text style={{ fontSize: "12px", lineHeight: "16px", fontWeight: 500 }}>Verifying PAM credentials...</text>
+          </row>
+        </Show>
+        <Show when={controls.error()}>
+          <text testId="lock-error" role="alert" style={{ color: "var(--color-error)", fontSize: "13px", fontWeight: 500 }}>
+            {controls.error()}
+          </text>
+        </Show>
         <Show when={playing()}>{player => (
           <row style={{ gap: "6px", alignItems: "center", maxWidth: "320px", opacity: 0.8 }}>
             <ShellIcon name="play" size={14} color="inherit" />
@@ -397,7 +418,7 @@ export function SessionLockOverlay(): NativeChild {
       flush();
       if (!isCurrent()) return;
       if (!authRes.ok) {
-        setError(authRes.error || "Authentication failed");
+        setError(authRes.error || "Incorrect password · Try again");
         return;
       }
       const approval = authRes.result.data as UnlockApproval;
@@ -426,7 +447,7 @@ export function SessionLockOverlay(): NativeChild {
   }
 
   const controls: LockControls = {
-    username, password, disabled, sleepHold, error, submit,
+    username, password, authenticating, disabled, sleepHold, error, submit,
     setPassword: value => { if (!disabled()) setPassword(value); },
   };
   const visible = () => {

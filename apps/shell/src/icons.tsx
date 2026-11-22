@@ -261,6 +261,14 @@ export const SHELL_ICON_PATHS = {
     viewBox: "0 0 24 24",
     d: "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z",
   },
+  folder: {
+    viewBox: "0 0 24 24",
+    d: "M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z",
+  },
+  timer: {
+    viewBox: "0 0 24 24",
+    d: "M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42A8.962 8.962 0 0012 4c-4.97 0-9 4.03-9 9s4.02 9 9 9a8.994 8.994 0 007.03-14.61zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z",
+  },
 } as const;
 
 export type ShellIconName = keyof typeof SHELL_ICON_PATHS;

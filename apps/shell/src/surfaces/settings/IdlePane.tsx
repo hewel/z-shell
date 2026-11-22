@@ -58,6 +58,10 @@ function actionKindOf(action: IdleAction): typeof IDLE_ACTION_KINDS[number]["id"
   return typeof action === "string" ? action : "custom_command";
 }
 
+function customCommandOf(action: IdleAction): readonly string[] | null {
+  return typeof action === "object" ? action.custom_command : null;
+}
+
 function formatRuleTitle(action: IdleAction, name: string): string {
   const label = typeof action === "string" ? IDLE_ACTIONS[action] : "Custom command";
   const normalizedName = name.trim().toLowerCase().replaceAll("-", "_");
@@ -101,11 +105,35 @@ function RuleEditorCard(props: {
         value={actionKindOf(props.rule().action)}
         onChange={kind => {
           const nextAction: IdleAction = kind === "custom_command"
-            ? (typeof props.rule().action === "object" ? props.rule().action : { custom_command: ["true"] })
+            ? (typeof props.rule().action === "object" ? props.rule().action : { custom_command: [] })
             : kind;
           props.onUpdate(props.rule().name, r => ({ ...r, action: nextAction }));
         }}
       />
+
+      <Show when={actionKindOf(props.rule().action) === "custom_command"}>
+        <column style={{ gap: "4px", width: "100%" }}>
+          <text style={{ fontSize: "11px", fontWeight: 500, color: primary }}>
+            Action command (required argv, space-separated)
+          </text>
+          <TextField
+            testId="settings-idle-custom-command"
+            ariaLabel="Action command"
+            placeholder="e.g. brightnessctl -d *::kbd_backlight set 0"
+            value={(customCommandOf(props.rule().action) ?? []).join(" ")}
+            onInput={ev => {
+              const parts = ev.value.trim().split(/\s+/).filter(Boolean);
+              props.onUpdate(props.rule().name, r => ({ ...r, action: { custom_command: parts } }));
+            }}
+            style={{
+              ...inputField,
+              border: (customCommandOf(props.rule().action)?.length ?? 0) === 0
+                ? "1px solid var(--color-error)"
+                : "1px solid color-mix(in srgb, var(--color-primary) 55%, transparent)",
+            }}
+          />
+        </column>
+      </Show>
 
       <row style={{ gap: "8px", width: "100%" }}>
         <column style={{ ...grow, gap: "4px" }}>
@@ -157,19 +185,37 @@ function RuleEditorCard(props: {
       </column>
 
       <Show when={props.dirty()}>
-        <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", paddingTop: "4px" }}>
-          <row style={{ alignItems: "center", gap: "6px", minWidth: "0px" }}>
-            <box ariaHidden style={{ width: "6px", height: "6px", borderRadius: "3px", "--zgui-corner-shape": "none", backgroundColor: primary, flexShrink: 0 }} />
-            <text style={{ ...clipped, fontSize: "11px", color: muted }}>Unsaved changes · Apply to commit to host idle daemon</text>
-          </row>
-          <Button testId="settings-idle-apply" onClick={props.onApply} style={{
-            display: "flex", alignItems: "center", justifyContent: "center", height: "30px",
-            padding: "0 14px", borderRadius: "10px", backgroundColor: primary, color: onPrimary,
-            fontSize: "12px", fontWeight: 600, flexShrink: 0,
-          }}>
-            <text>Apply</text>
-          </Button>
-        </row>
+        {() => {
+          const missingCommand = () => {
+            const cmd = customCommandOf(props.rule().action);
+            return cmd !== null && cmd.length === 0;
+          };
+          return (
+            <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", paddingTop: "4px" }}>
+              <row style={{ alignItems: "center", gap: "6px", minWidth: "0px" }}>
+                <box ariaHidden style={{ width: "6px", height: "6px", borderRadius: "3px", "--zgui-corner-shape": "none", backgroundColor: primary, flexShrink: 0 }} />
+                <text style={{ ...clipped, fontSize: "11px", color: muted }}>
+                  {missingCommand()
+                    ? "Enter an action command before applying"
+                    : "Unsaved changes · Apply to commit to host idle daemon"}
+                </text>
+              </row>
+              <Button
+                testId="settings-idle-apply"
+                disabled={missingCommand()}
+                onClick={props.onApply}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center", height: "30px",
+                  padding: "0 14px", borderRadius: "10px", backgroundColor: primary, color: onPrimary,
+                  fontSize: "12px", fontWeight: 600, flexShrink: 0,
+                  opacity: missingCommand() ? 0.45 : 1,
+                }}
+              >
+                <text>Apply</text>
+              </Button>
+            </row>
+          );
+        }}
       </Show>
     </column>
   );

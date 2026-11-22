@@ -81,6 +81,30 @@ const INTERACTIVE_STATE_SPECS: readonly StateCaptureSpec[] = [
     description: "Neutral Wi-Fi tile + visible avatar fallback",
     previewRelPath: "z-shell-preview-design-chaos/out/captures/surfaces/panel-quick-settings/qs-chaos.png",
   },
+  {
+    id: "media-idle",
+    name: "14B · Media Idle State",
+    description: "Nothing playing card with accessible output sink chip",
+    previewRelPath: "z-shell-preview-design-new-states/out/captures/surfaces/panel-media/media-idle.png",
+  },
+  {
+    id: "ime-menu-09e",
+    name: "09E · IME Switcher Popup",
+    description: "INPUT METHOD header + active primary-container IM row",
+    previewRelPath: "z-shell-preview-design-new-states/out/captures/surfaces/ime-menu/ime-menu-09e.png",
+  },
+  {
+    id: "cal-empty",
+    name: "13B · Calendar Empty Notifications",
+    description: "Centered All caught up card",
+    previewRelPath: "z-shell-preview-design-new-states/out/captures/surfaces/panel-calendar/cal-empty.png",
+  },
+  {
+    id: "launcher-empty",
+    name: "18B · Launcher Empty Search",
+    description: "Centered No matching apps card",
+    previewRelPath: "z-shell-preview-design-new-states/out/captures/surfaces/launcher-overlay/launcher-empty.png",
+  },
 ];
 
 function parseArgs(argv: readonly string[]): {

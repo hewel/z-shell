@@ -764,7 +764,7 @@ export const DOCKED_VERTICAL_BAR_WIDTH = 44;
 export const PANEL_MAX_HEIGHTS = {
   "quick-settings": 760,
   calendar: 760,
-  media: 420,
+  media: 560,
   battery: 520,
   clipboard: 620,
   plugin: 760,

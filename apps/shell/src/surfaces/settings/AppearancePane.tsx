@@ -70,7 +70,7 @@ function WallpaperCardTile(props: { item: Accessor<CatalogEntry>; active: boolea
   );
 }
 
-export function AppearancePane(): NativeChild {
+export function AppearancePane(props?: { readonly onOpenLibrary?: () => void }): NativeChild {
   const { publicClient, hostClient, monitors, wallpaper, theme, settings, invokePublic, invokeHost } = useShellStore();
   const [catalog, setCatalog] = createSignal<WallpaperListResponse>();
   const [scanRevision, setScanRevision] = createSignal(0);
@@ -144,7 +144,16 @@ export function AppearancePane(): NativeChild {
         </row>
         <row style={{ gap: "10px", width: "100%" }}>
           <For each={visibleItems().slice(0, 4)} keyed={item => item.id} fallback={
-            <text style={{ fontSize: "12px", color: muted }}>No wallpapers indexed</text>
+            <row style={{ alignItems: "center", justifyContent: "space-between", gap: "10px", width: "100%" }}>
+              <text style={{ fontSize: "12px", color: muted }}>No wallpapers indexed</text>
+              <Button testId="settings-wp-browse" onClick={() => props?.onOpenLibrary?.()} style={{
+                display: "flex", alignItems: "center", justifyContent: "center", minHeight: "26px",
+                padding: "4px 10px", borderRadius: "8px", backgroundColor: containerHighest,
+                border: "1px dashed var(--color-outline-variant)", color: onSurface, fontSize: "11px", fontWeight: 500,
+              }}>
+                <text>Browse folder</text>
+              </Button>
+            </row>
           }>
             {item => (
               <WallpaperCardTile item={item} active={item().source_path === activeWallpaper()?.source_path}
@@ -152,7 +161,7 @@ export function AppearancePane(): NativeChild {
             )}
           </For>
         </row>
-        <Show when={visibleItems().length > 4 || remainingCount() > 0}>
+        <Show when={visibleItems().length > 0}>
           <row style={{ gap: "10px", width: "100%" }}>
             <For each={visibleItems().slice(4, 7)} keyed={item => item.id}>
               {item => (
@@ -160,13 +169,13 @@ export function AppearancePane(): NativeChild {
                   onClick={() => void invokePublic("wallpaper.set", { path: item().source_path, output: selectedOutput(), fit: wallpaper.data()?.fit ?? "cover" })} />
               )}
             </For>
-            <Button onClick={() => void invokePublic("wallpaper.random", { output: selectedOutput() })} style={{
+            <Button testId="settings-wp-browse" onClick={() => props?.onOpenLibrary?.()} style={{
               ...grow, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "4px",
               height: "82px", borderRadius: "10px", backgroundColor: containerHighest,
               border: "1px dashed var(--color-outline-variant)", color: onSurface,
             }}>
-              <text style={{ fontSize: "12px", fontWeight: 600 }}>{remainingCount() > 0 ? `+${remainingCount()} more` : "Random"}</text>
-              <text style={{ fontSize: "11px", color: muted }}>Pick wallpaper</text>
+              <text style={{ fontSize: "12px", fontWeight: 600 }}>{remainingCount() > 0 ? `+${remainingCount()} more` : "Browse folder"}</text>
+              <text style={{ fontSize: "11px", color: muted }}>{remainingCount() > 0 ? "Browse folder" : "Wallpaper library"}</text>
             </Button>
           </row>
         </Show>

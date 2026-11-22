@@ -1,7 +1,8 @@
-import { Button, For, Image, Show, createMemo, getWindowRect, type Accessor } from "@hewel/zgui";
+import { Button, For, Image, Show, createMemo, createSignal, getWindowRect, type Accessor } from "@hewel/zgui";
+import { M3Collapsible } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
-import { createM3Spring, createPhaseLoop, useMotionScheme } from "../motion.ts";
+import { SPRING_EPSILON, createM3Spring, createPhaseLoop, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { formatTrackTimeUs, selectActiveMediaPlayer, type MediaPlayer } from "../topics.ts";
 
@@ -230,9 +231,26 @@ function TrackControls(props: { player: Accessor<MediaPlayer> }) {
   );
 }
 
+function SinkChevron(props: { readonly open: boolean; readonly color: string }) {
+  const scheme = useMotionScheme();
+  const deg = createM3Spring(() => (props.open ? 180 : 0), "fastSpatial", { scheme, epsilon: SPRING_EPSILON.deg });
+  return (
+    <box ariaHidden style={{
+      display: "flex", width: "14px", height: "14px", alignItems: "center", justifyContent: "center", flexShrink: 0,
+      transform: scheme() === "reduced" ? "none" : `rotate(${deg().toFixed(1)}deg)`,
+    }}>
+      <ShellIcon name="expandMore" size={14} color={props.color} />
+    </box>
+  );
+}
+
 export function MediaPanel() {
-  const { media, audio, invokePublic } = useShellStore();
+  const { media, audio, invokePublic, openQuickSettingsSubpage } = useShellStore();
+  const [sinkPickerOpen, setSinkPickerOpen] = createSignal(false);
   const activePlayer = createMemo(() => selectActiveMediaPlayer(media.data()));
+  const players = () => media.data()?.players ?? [];
+  const sinks = () => audio.data()?.sinks ?? [];
+  const defaultSinkName = () => audio.data()?.default_sink ?? null;
   const sink = createMemo(() => {
     const snapshot = audio.data();
     return snapshot?.sinks.find(device => device.name === snapshot.default_sink)?.description ?? "Audio";
@@ -245,38 +263,136 @@ export function MediaPanel() {
     }}>
       <column style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "14px", gap: "14px", width: "100%" }}>
         <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", width: "100%" }}>
-          <row style={{ flexWrap: "wrap", gap: "6px", flexGrow: 1, flexBasis: "0px", minWidth: "0px" }}>
-            <For each={media.data()?.players ?? []} keyed={player => player.id}>
-              {player => {
-                const active = () => player().id === activePlayer()?.id;
-                return (
-                  <Button testId={`media-player-${player().id}`} selected={active()}
-                    onClick={() => { void invokePublic("media.select-player", { player_id: player().id }); }}
-                    style={{
-                      ...pill, maxWidth: "100%",
-                      backgroundColor: active() ? primaryContainer : containerHighest,
-                      border: active()
-                        ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)"
-                        : "1px solid transparent",
-                      color: active() ? onPrimaryContainer : muted,
-                      fontSize: "11px", fontWeight: active() ? 600 : 500,
-                    }}>
-                    <ShellIcon name="musicNote" size={12} color={active() ? onPrimaryContainer : muted} />
-                    <text style={truncate}>{player().identity}</text>
-                  </Button>
-                );
-              }}
-            </For>
-          </row>
-          <row style={{ ...pill, maxWidth: "48%", backgroundColor: containerHighest, color: onSurface, fontSize: "11px", fontWeight: 500 }}>
-            <ShellIcon name="headphones" size={14} color={primary} />
+          <Show when={players().length > 0} fallback={
+            <text style={{ fontSize: "14px", fontWeight: 600, color: onSurface }}>Media</text>
+          }>
+            <row style={{ flexWrap: "wrap", gap: "6px", flexGrow: 1, flexBasis: "0px", minWidth: "0px" }}>
+              <For each={players()} keyed={player => player.id}>
+                {player => {
+                  const active = () => player().id === activePlayer()?.id;
+                  return (
+                    <Button testId={`media-player-${player().id}`} selected={active()}
+                      onClick={() => { void invokePublic("media.select-player", { player_id: player().id }); }}
+                      style={{
+                        ...pill, maxWidth: "100%",
+                        backgroundColor: active() ? primaryContainer : containerHighest,
+                        border: active()
+                          ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)"
+                          : "1px solid transparent",
+                        color: active() ? onPrimaryContainer : muted,
+                        fontSize: "11px", fontWeight: active() ? 600 : 500,
+                      }}>
+                      <ShellIcon name="musicNote" size={12} color={active() ? onPrimaryContainer : muted} />
+                      <text style={truncate}>{player().identity}</text>
+                    </Button>
+                  );
+                }}
+              </For>
+            </row>
+          </Show>
+          <Button
+            testId="media-sink-toggle"
+            ariaLabel={`Audio output: ${sink()}`}
+            expanded={sinkPickerOpen()}
+            selected={sinkPickerOpen()}
+            onClick={() => setSinkPickerOpen(open => !open)}
+            style={{
+              ...pill, maxWidth: "52%",
+              backgroundColor: sinkPickerOpen() ? primaryContainer : containerHighest,
+              border: sinkPickerOpen()
+                ? "1px solid color-mix(in srgb, var(--color-primary) 35%, transparent)"
+                : "1px solid transparent",
+              color: sinkPickerOpen() ? onPrimaryContainer : onSurface,
+              fontSize: "11px", fontWeight: 500,
+            }}
+          >
+            <ShellIcon name="headphones" size={14} color={sinkPickerOpen() ? onPrimaryContainer : primary} />
             <text style={{ ...truncate, minWidth: "0px" }}>{sink()}</text>
-          </row>
+            <SinkChevron open={sinkPickerOpen()} color={sinkPickerOpen() ? onPrimaryContainer : muted} />
+          </Button>
         </row>
+
+        <M3Collapsible open={sinkPickerOpen()} estimatedHeight={156}>
+          <column testId="media-sink-drawer" style={{
+            width: "100%", borderRadius: "14px", backgroundColor: container, padding: "10px", gap: "6px",
+            border: "1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent)",
+          }}>
+            <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", padding: "0 2px" }}>
+              <text style={{ fontSize: "10px", lineHeight: "14px", fontWeight: 600, letterSpacing: "0.05em", color: muted }}>
+                AUDIO OUTPUT
+              </text>
+              <Button
+                testId="media-sound-settings"
+                onClick={() => openQuickSettingsSubpage("sound")}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  height: "24px", padding: "0 6px", borderRadius: "6px",
+                  backgroundColor: "transparent", color: primary, fontSize: "11px", fontWeight: 500,
+                }}
+              >
+                <text>Sound settings →</text>
+              </Button>
+            </row>
+            <scroll style={{ width: "100%", maxHeight: "180px", overflow: "hidden auto" }}>
+              <column style={{ gap: "4px", width: "100%" }}>
+                <For each={sinks()} keyed={device => device.index} fallback={
+                  <text style={{ fontSize: "12px", color: muted, padding: "6px 4px" }}>No audio output devices</text>
+                }>
+                  {device => {
+                    const isDefault = () => device().name === defaultSinkName();
+                    const label = () => device().description || device().name;
+                    return (
+                      <Button
+                        testId={`media-sink-${device().index}`}
+                        selected={isDefault()}
+                        ariaLabel={`Use audio output ${label()}`}
+                        onClick={() => { void invokePublic("audio.set-default", { kind: "sink", index: device().index }); }}
+                        style={{
+                          display: "flex", flexDirection: "row", alignItems: "center", gap: "8px", width: "100%",
+                          minHeight: "34px", padding: "6px 10px", borderRadius: "10px",
+                          backgroundColor: isDefault() ? primaryContainer : "transparent",
+                          border: isDefault()
+                            ? "1px solid color-mix(in srgb, var(--color-primary) 35%, transparent)"
+                            : "1px solid transparent",
+                          color: isDefault() ? onPrimaryContainer : onSurface,
+                        }}
+                      >
+                        <ShellIcon name={isDefault() ? "check" : "volumeHigh"} size={14} color={isDefault() ? onPrimaryContainer : muted} />
+                        <text style={{
+                          ...truncate, flexGrow: 1, flexBasis: "0px", minWidth: "0px",
+                          fontSize: "12px", fontWeight: isDefault() ? 600 : 500, textAlign: "left",
+                        }}>
+                          {label()}
+                        </text>
+                        <text data-tabular="true" style={{
+                          fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: "14px",
+                          fontVariantNumeric: "tabular-nums", flexShrink: 0,
+                          color: isDefault() ? onPrimaryContainer : muted,
+                        }}>
+                          {`${Math.round(device().volume * 100)}%`}
+                        </text>
+                      </Button>
+                    );
+                  }}
+                </For>
+              </column>
+            </scroll>
+          </column>
+        </M3Collapsible>
+
         <Show when={activePlayer()} fallback={
-          <column style={{ padding: "24px 0", alignItems: "center", justifyContent: "center", gap: "8px", color: muted }}>
-            <ShellIcon name="mediaEq" size={28} color={primary} />
-            <text>Nothing playing</text>
+          <column testId="media-idle-empty" style={{
+            width: "100%", borderRadius: "14px", backgroundColor: container,
+            padding: "28px 16px", alignItems: "center", justifyContent: "center", gap: "8px",
+          }}>
+            <box ariaHidden style={{
+              display: "flex", width: "40px", height: "40px", borderRadius: "999px", "--zgui-corner-shape": "none",
+              alignItems: "center", justifyContent: "center", backgroundColor: containerHigh,
+            }}>
+              <ShellIcon name="musicNote" size={20} color={primary} />
+            </box>
+            <text style={{ fontSize: "14px", fontWeight: 600, color: onSurface }}>Nothing playing</text>
+            <text style={{ fontSize: "12px", color: muted }}>Start music or video in any MPRIS app</text>
           </column>
         }>
           {player => <TrackControls player={player} />}
