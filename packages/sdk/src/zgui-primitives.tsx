@@ -10,10 +10,10 @@ import {
   getWindowRect,
   type NativeChild,
   type NativeEvent,
-  type NativeKeyEvent,
   type NativeNode,
   type NativeStyle,
 } from "@hewel/zgui";
+import { RadioGroupPrimitive, RadioItemPrimitive } from "@hewel/zgui/primitives";
 import { SPRING_EPSILON } from "./motion.ts";
 import { createM3Spring, createPresence, useGlobalMotionScheme } from "./zgui-motion.ts";
 import styles from "./zgui-primitives.module.css";
@@ -408,7 +408,8 @@ export interface M3SegmentedControlProps<T extends string = string> {
 
 /**
  * Tonal Track Segmented Control (`docs/design/components.md §2.7`):
- * recessed `10px` track + `fast.spatial` sliding `8px` `primary-container` pill + keyboard arrow navigation.
+ * recessed `10px` track + `fast.spatial` sliding `8px` `primary-container` pill backed by
+ * headless `RadioGroupPrimitive` / `RadioItemPrimitive` roving tabindex navigation.
  */
 export function M3SegmentedControl<T extends string = string>(props: M3SegmentedControlProps<T>): NativeChild {
   const scheme = useGlobalMotionScheme();
@@ -418,57 +419,13 @@ export function M3SegmentedControl<T extends string = string>(props: M3Segmented
   });
   const animatedIndex = createM3Spring(activeIndex, "fastSpatial", { scheme, epsilon: 0.005 });
   const segmentWidthPct = () => (props.options.length > 0 ? 100 / props.options.length : 100);
-  const buttonNodes = new Map<T, NativeNode>();
-
-  function moveBy(delta: number): void {
-    const enabled = props.options.filter(opt => !opt.disabled);
-    if (enabled.length === 0) return;
-    const currentIdx = enabled.findIndex(opt => opt.id === props.value);
-    const next = enabled[(Math.max(0, currentIdx) + delta + enabled.length) % enabled.length];
-    if (!next) return;
-    props.onChange(next.id);
-    const targetNode = buttonNodes.get(next.id);
-    if (targetNode) focus(targetNode);
-  }
-
-  function handleKeyDown(event: NativeKeyEvent): void {
-    switch (event.key) {
-      case "ArrowRight": case "ArrowDown":
-        event.preventDefault();
-        moveBy(1);
-        break;
-      case "ArrowLeft": case "ArrowUp":
-        event.preventDefault();
-        moveBy(-1);
-        break;
-      case "Home": {
-        const first = props.options.find(opt => !opt.disabled);
-        if (first) {
-          event.preventDefault();
-          props.onChange(first.id);
-          const node = buttonNodes.get(first.id);
-          if (node) focus(node);
-        }
-        break;
-      }
-      case "End": {
-        const last = [...props.options].reverse().find(opt => !opt.disabled);
-        if (last) {
-          event.preventDefault();
-          props.onChange(last.id);
-          const node = buttonNodes.get(last.id);
-          if (node) focus(node);
-        }
-        break;
-      }
-    }
-  }
 
   return (
-    <row
-      role="radioGroup"
+    <RadioGroupPrimitive
+      orientation="horizontal"
+      value={props.value}
+      onValueChange={next => props.onChange(next as T)}
       ariaLabel={props.ariaLabel}
-      onKeyDown={handleKeyDown}
       class={cx(styles.segmentedTrack, props.class)}
       data-compact={props.compact ? "true" : null}
       data-recessed={props.recessed ?? "container"}
@@ -488,24 +445,21 @@ export function M3SegmentedControl<T extends string = string>(props: M3Segmented
         {option => {
           const selected = () => option().id === props.value;
           return (
-            <Button
+            <RadioItemPrimitive
+              value={option().id}
               testId={option().testId ?? null}
-              selected={selected()}
               disabled={option().disabled ?? false}
-              tabIndex={selected() ? 0 : -1}
-              ref={node => { buttonNodes.set(option().id, node); }}
-              onClick={() => { if (!option().disabled) props.onChange(option().id); }}
               class={styles.segmentedItem}
               data-selected={selected() ? "true" : null}
             >
               <row class={styles.pressInner}>
                 <text>{option().label}</text>
               </row>
-            </Button>
+            </RadioItemPrimitive>
           );
         }}
       </For>
-    </row>
+    </RadioGroupPrimitive>
   );
 }
 
