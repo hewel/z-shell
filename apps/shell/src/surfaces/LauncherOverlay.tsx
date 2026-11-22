@@ -63,6 +63,7 @@ function LauncherTile(props: {
 
 function LauncherContent(props: {
   allocateQueryId: () => number;
+  inert: boolean;
   spatial: M3Spring;
   opacity: M3Spring;
 }): NativeChild {
@@ -143,7 +144,7 @@ function LauncherContent(props: {
   const highlightOpacity = createM3Spring(() => (hasSelection() ? 1 : 0), "fastEffects", { scheme });
 
   return (
-    <box testId="launcher-backdrop" onClick={dismiss} style={{
+    <box testId="launcher-backdrop" inert={props.inert} onClick={dismiss} style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center",
       backgroundColor: scrimBackdrop(45, props.opacity(), dark()),
@@ -267,7 +268,7 @@ export function LauncherOverlay(): NativeChild {
           <LayerSurface name="launcher-overlay" output={output} layer="overlay"
             anchor={["top", "bottom", "left", "right"]} width={size().width} height={size().height}
             exclusiveZone={-1} keyboard="exclusive">
-            <LauncherContent allocateQueryId={allocateQueryId} spatial={presence.progress} opacity={presence.opacity} />
+            <LauncherContent allocateQueryId={allocateQueryId} inert={!presence.present()} spatial={presence.progress} opacity={presence.opacity} />
           </LayerSurface>
         );
       }}

@@ -239,6 +239,7 @@ function WorkspacePreviewCard(props: {
 
 function OverviewContent(props: {
   readonly monitor: Accessor<Monitor | undefined>;
+  readonly inert: boolean;
   readonly spatial: M3Spring;
   readonly opacity: M3Spring;
 }): NativeChild {
@@ -302,7 +303,7 @@ function OverviewContent(props: {
   const wsCount = () => monitorWorkspaces().length;
 
   return (
-    <box testId="overview-backdrop" onClick={closePanels} style={{
+    <box testId="overview-backdrop" inert={props.inert} onClick={closePanels} style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center", padding: "14px",
       backgroundColor: scrimBackdrop(48, props.opacity(), dark()),
@@ -417,7 +418,7 @@ export function OverviewOverlay(): NativeChild {
           <LayerSurface name="overview-overlay" output={output} layer="overlay"
             anchor={["top", "bottom", "left", "right"]} width={size().width} height={size().height}
             exclusiveZone={-1} keyboard="exclusive">
-            <OverviewContent monitor={monitor} spatial={presence.progress} opacity={presence.opacity} />
+            <OverviewContent monitor={monitor} inert={!presence.present()} spatial={presence.progress} opacity={presence.opacity} />
           </LayerSurface>
         );
       }}

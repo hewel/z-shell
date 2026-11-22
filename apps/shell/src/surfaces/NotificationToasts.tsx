@@ -138,11 +138,12 @@ function propsOr(cond: boolean, a: number, b: number): number {
   return cond ? a : b;
 }
 
-function ToastFooter({ count, next, track, blur, progress, opacity }: {
+function ToastFooter({ count, next, track, blur, inert, progress, opacity }: {
   count: number;
   next: NotificationItem;
   track: TrackNode;
   blur: RoundedBlurGroup;
+  inert: boolean;
   progress: M3Spring;
   opacity: M3Spring;
 }): NativeChild {
@@ -151,7 +152,7 @@ function ToastFooter({ count, next, track, blur, progress, opacity }: {
   const inputRef = trackedRef(track);
   const blurRef = blur.useTarget(16);
   return (
-    <row ref={node => { inputRef(node); blurRef(node); }} testId="toast-more-footer" style={{
+    <row ref={node => { inputRef(node); blurRef(node); }} testId="toast-more-footer" inert={inert} style={{
       borderRadius: "16px", backgroundColor: container, border: outline, boxShadow: "var(--shadow-level-2)",
       padding: "6px 10px", gap: "8px", alignItems: "center",
       opacity: Math.max(0, Math.min(1, opacity())),
@@ -215,7 +216,7 @@ function ToastSurface({ output, popups, visible, spatial, opacity }: {
     <LayerSurface name="notification-toasts" output={output} layer="overlay" anchor={["top", "right"]}
       margin={{ top: Math.max(0, topMargin() - 12), right: 0 }} width={396} height={456} keyboard="none"
       inputRegion={trackedNodes()} blurRegion={blur.region()}>
-      <column style={{ width: "100%", padding: "12px 14px 28px 22px", gap: "8px" }}>
+      <column inert={!visible()} style={{ width: "100%", padding: "12px 14px 28px 22px", gap: "8px" }}>
         <Show when={popups()[0]?.id} keyed>
           {_id => <ToastCard toast={() => popups()[0]!} track={track} blur={blur} stackSpatial={spatial} stackOpacity={opacity} promoted={promoted()} />}
         </Show>
@@ -226,6 +227,7 @@ function ToastSurface({ output, popups, visible, spatial, opacity }: {
               next={footer().next}
               track={track}
               blur={blur}
+              inert={popups().length <= 1}
               progress={footerPresence.progress}
               opacity={footerPresence.opacity}
             />

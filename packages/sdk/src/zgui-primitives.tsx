@@ -564,7 +564,7 @@ export function M3Collapsible(props: M3CollapsibleProps): NativeChild {
 
   return (
     <Show when={presence.mounted()} fallback={<box style={{ display: "none" }} />}>
-      <box style={clipStyle()}>
+      <box inert={!props.open} style={clipStyle()}>
         <box ref={setInnerNode} style={innerStyle()}>
           {props.children}
         </box>

@@ -467,7 +467,7 @@ function OutgoingQuickSettingsLayer(props: {
   const noop = () => {};
   const progress = () => Math.max(0, Math.min(1, fade()));
   return (
-    <box ariaHidden style={{
+    <box ariaHidden inert style={{
       position: "absolute", top: "0px", left: "0px", right: "0px",
       pointerEvents: "none",
       opacity: progress(),

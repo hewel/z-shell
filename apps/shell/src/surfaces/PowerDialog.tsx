@@ -7,6 +7,7 @@ import { POWER_DIALOG_COPY, resolveMonitorLogicalSize, type PowerConfirmAction }
 
 function PowerDialogContent(props: {
   action: Accessor<PowerConfirmAction>;
+  inert: boolean;
   spatial: M3Spring;
   opacity: M3Spring;
 }): NativeChild {
@@ -34,7 +35,7 @@ function PowerDialogContent(props: {
   });
 
   return (
-    <box testId="power-dialog-backdrop" onClick={closePowerDialog} style={{
+    <box testId="power-dialog-backdrop" inert={props.inert} onClick={closePowerDialog} style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center",
       backgroundColor: scrimBackdrop(55, props.opacity(), dark()),
@@ -108,7 +109,7 @@ export function PowerDialog(): NativeChild {
               <LayerSurface name="power-dialog" output={output} layer="overlay"
                 anchor={["top", "bottom", "left", "right"]} width={size().width} height={size().height}
                 exclusiveZone={-1} keyboard="exclusive">
-                <PowerDialogContent action={() => entry().action} spatial={presence.progress} opacity={presence.opacity} />
+                <PowerDialogContent action={() => entry().action} inert={!presence.present()} spatial={presence.progress} opacity={presence.opacity} />
               </LayerSurface>
             )}
           </Show>

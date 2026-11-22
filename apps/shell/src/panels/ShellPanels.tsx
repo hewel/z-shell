@@ -79,6 +79,7 @@ function PanelContent(props: {
   maxHeight: number;
   position: BarPosition;
   centered: boolean;
+  inert: boolean;
   theme: ShellStore["theme"];
   spatial: M3Spring;
   opacity: M3Spring;
@@ -89,7 +90,7 @@ function PanelContent(props: {
   useShellTheme(props.theme.data);
   const scheme = useMotionScheme();
   return (
-    <box style={POPOVER_BLEED_STYLE}>
+    <box inert={props.inert} style={POPOVER_BLEED_STYLE}>
       <box
         ref={node => {
           props.cardRef?.(node);
@@ -158,7 +159,7 @@ export function ShellPanels(): NativeChild {
             inputRegion={cardNode() ? [cardNode()!] : []}
             placement={geometry().placement} offset={geometry().offset} grab blurRegion={blur.region()} onDismiss={handleDismiss}>
             <PanelContent id={target.id} maxHeight={maxHeight} position={position()} centered={centered}
-              theme={theme} spatial={presence.progress} opacity={presence.opacity} cardRef={setCardNode} blurRef={blur.ref}>
+              inert={!presence.present()} theme={theme} spatial={presence.progress} opacity={presence.opacity} cardRef={setCardNode} blurRef={blur.ref}>
               <Component />
             </PanelContent>
           </PopupSurface>

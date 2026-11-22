@@ -72,6 +72,7 @@ function PopupContent(props: {
   header?: string;
   cardTestId?: string;
   position: BarPosition;
+  inert: boolean;
   spatial: M3Spring;
   opacity: M3Spring;
   cardRef?: (node: NativeNode) => void;
@@ -84,7 +85,7 @@ function PopupContent(props: {
   const scheme = useMotionScheme();
   return (
     <MenuRootPrimitive open onDismiss={props.onDismiss}>
-      <box style={POPOVER_BLEED_STYLE}>
+      <box inert={props.inert} style={POPOVER_BLEED_STYLE}>
         <box
           ref={node => {
             props.cardRef?.(node);
@@ -249,7 +250,7 @@ export function BarPopups(): NativeChild {
               inputRegion={cardNode() ? [cardNode()!] : []}
               placement={geometry().placement} offset={geometry().offset} grab blurRegion={blur.region()}
               onDismiss={() => { trayPresence.dismissInstant(); closeTrayMenu(); }}>
-              <PopupContent padding="8px" label={item().label} header={item().label} cardTestId="tray-menu-card" position={position()} spatial={trayPresence.progress} opacity={trayPresence.opacity}
+              <PopupContent padding="8px" label={item().label} header={item().label} cardTestId="tray-menu-card" position={position()} inert={!trayPresence.present()} spatial={trayPresence.progress} opacity={trayPresence.opacity}
                 cardRef={setCardNode} blurRef={blur.ref} onDismiss={closeTrayMenu}>
                 <For each={trayRows()} keyed={row => row.node.id}>
                   {row => (
@@ -279,7 +280,7 @@ export function BarPopups(): NativeChild {
               inputRegion={cardNode() ? [cardNode()!] : []}
               placement={geometry().placement} offset={geometry().offset} grab blurRegion={blur.region()}
               onDismiss={() => { imePresence.dismissInstant(); closeImeMenu(); }}>
-              <PopupContent padding="8px" label="Input method" header="Input method" cardTestId="ime-menu-card" position={position()} spatial={imePresence.progress} opacity={imePresence.opacity}
+              <PopupContent padding="8px" label="Input method" header="Input method" cardTestId="ime-menu-card" position={position()} inert={!imePresence.present()} spatial={imePresence.progress} opacity={imePresence.opacity}
                 cardRef={setCardNode} blurRef={blur.ref} onDismiss={closeImeMenu}>
                 <For each={ime.data()?.group_ims} keyed={im => im.unique_name}>
                   {im => {

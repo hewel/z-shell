@@ -48,6 +48,7 @@ const STANDARD_PLUGIN_PANEL_WIDTH = 396;
 function PluginPanelFrame(props: {
   theme: ShellStore["theme"];
   position: BarPosition;
+  inert: boolean;
   spatial: M3Spring;
   opacity: M3Spring;
   cardRef?: (node: NativeNode) => void;
@@ -57,7 +58,7 @@ function PluginPanelFrame(props: {
   useShellTheme(props.theme.data);
   const scheme = useMotionScheme();
   return (
-    <box style={POPOVER_BLEED_STYLE}>
+    <box inert={props.inert} style={POPOVER_BLEED_STYLE}>
       <box
         ref={node => {
           props.cardRef?.(node);
@@ -290,7 +291,7 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
               geometryInsets={POPOVER_SHADOW_INSETS}
               inputRegion={cardNode() ? [cardNode()!] : []}
               placement={geometry().placement} offset={geometry().offset} grab blurRegion={blur.region()} onDismiss={dismissPluginPanelInstant}>
-              <PluginPanelFrame theme={theme} position={current().position} spatial={panelPresence.progress} opacity={panelPresence.opacity} cardRef={setCardNode} blurRef={blur.ref}>
+              <PluginPanelFrame theme={theme} position={current().position} inert={!panelPresence.present()} spatial={panelPresence.progress} opacity={panelPresence.opacity} cardRef={setCardNode} blurRef={blur.ref}>
                 <PanelComponent client={publicClient} onClose={dismissPluginPanel} onOpenSettings={onOpenSettings} />
               </PluginPanelFrame>
             </PopupSurface>

@@ -223,6 +223,7 @@ export function createRetainedPresence<T>(
 ): {
   readonly value: Accessor<NonNullable<T> | null>;
   readonly visible: Accessor<boolean>;
+  readonly present: Accessor<boolean>;
   readonly progress: M3Spring;
   readonly opacity: M3Spring;
   readonly dismissInstant: () => void;
@@ -292,6 +293,7 @@ export function createRetainedPresence<T>(
       return current !== undefined ? current : null;
     },
     visible,
+    present: visible,
     progress,
     opacity,
     dismissInstant,

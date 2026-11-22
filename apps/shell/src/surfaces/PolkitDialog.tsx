@@ -26,6 +26,7 @@ const clipped = { minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", tex
 
 function PolkitContent(props: {
   active: Accessor<PolkitPromptView>;
+  inert: boolean;
   spatial: M3Spring;
   opacity: M3Spring;
 }): NativeChild {
@@ -125,7 +126,7 @@ function PolkitContent(props: {
   });
 
   return (
-    <box style={{
+    <box inert={props.inert} style={{
       position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
       display: "flex", alignItems: "center", justifyContent: "center",
       backgroundColor: scrimBackdrop(55, props.opacity(), dark()),
@@ -293,7 +294,7 @@ export function PolkitDialog(): NativeChild {
               <LayerSurface name="polkit-dialog" output={output} layer="overlay"
                 anchor={["top", "bottom", "left", "right"]} width={size().width} height={size().height}
                 exclusiveZone={-1} keyboard="exclusive">
-                <PolkitContent active={() => entry().prompt} spatial={presence.progress} opacity={presence.opacity} />
+                <PolkitContent active={() => entry().prompt} inert={!presence.present()} spatial={presence.progress} opacity={presence.opacity} />
               </LayerSurface>
             )}
           </Show>
