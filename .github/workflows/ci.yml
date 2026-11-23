@@ -13,20 +13,32 @@ jobs:
   rust:
     name: Rust format, test, clippy, doc
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Ensure the GSettings test fixture can compile
+        run: |
+          if ! command -v glib-compile-schemas >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y libglib2.0-bin
+          fi
       - run: cargo fmt --check
       - run: cargo test --workspace
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo doc --workspace --no-deps
 
+  # Static lint, typecheck, and unit tests only; no headless Vulkan
+  # design-preview.test.ts.
   design-lint:
     name: Design lint & SDK/plugin unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ZGUI_JS_REF: ca97d16b327e97e334cd78db62fde08df7ea048a
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,18 +46,19 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
-      - name: Checkout sibling zgui-js (when accessible)
-        continue-on-error: true
+      - name: Checkout pinned sibling zgui-js
         uses: actions/checkout@v4
         with:
           repository: hewel/zgui-js
+          ref: ${{ env.ZGUI_JS_REF }}
           path: zgui-js
       - name: Install & run lint/typecheck/tests (requires sibling zgui-js)
-        if: hashFiles('zgui-js/package.json') != ''
         working-directory: z-shell
         run: |
-          (cd ../zgui-js && bun install)
-          bun install
+          echo "z-shell: $(git rev-parse HEAD)"
+          echo "zgui-js: $(git -C ../zgui-js rev-parse HEAD)"
+          (cd ../zgui-js && bun install --frozen-lockfile)
+          bun install --frozen-lockfile
           bun run lint
           bun run typecheck
           bun test --timeout=30000 packages/sdk/tests/motion.test.ts packages/sdk/tests/zgui.test.ts packages/plugin-api/tests/ apps/shell/tests/topics.test.ts apps/shell/tests/design-lint.test.ts apps/shell/tests/plugin-services.test.ts plugins/

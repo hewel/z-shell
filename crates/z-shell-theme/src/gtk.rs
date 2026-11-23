@@ -90,6 +90,7 @@ impl GtkLinker {
     }
 
     /// Links both GTK generations to `scheme`, preserving prior user files.
+    /// GSettings synchronization is best-effort; a missing schema or key does not affect linking.
     #[must_use]
     pub fn link(&self, scheme: &ColorScheme, dark: bool) -> GtkLinkStatus {
         let _guard = self.operation.lock().expect("GTK operation lock poisoned");
@@ -418,43 +419,78 @@ fn render_css(scheme: &ColorScheme, dark: bool) -> String {
 }
 
 fn set_gsettings_color_scheme(dark: bool) {
+    type SchemaSourceGetDefault = unsafe extern "C" fn() -> *mut c_void;
+    type SchemaSourceLookup =
+        unsafe extern "C" fn(*mut c_void, *const c_char, c_int) -> *mut c_void;
+    type SchemaHasKey = unsafe extern "C" fn(*mut c_void, *const c_char) -> c_int;
     type SettingsNew = unsafe extern "C" fn(*const c_char) -> *mut c_void;
     type SettingsSetEnum = unsafe extern "C" fn(*mut c_void, *const c_char, c_int) -> c_int;
-    type ObjectUnref = unsafe extern "C" fn(*mut c_void);
+    type Unref = unsafe extern "C" fn(*mut c_void);
 
-    // SAFETY: loading a system library does not call any of its functions; symbol
-    // signatures below are checked against GIO's stable C ABI before invocation.
+    // SAFETY: this loads the system GIO library, whose initialization and
+    // finalization routines may run.
     let Ok(library) = (unsafe { libloading::Library::new("libgio-2.0.so.0") }) else {
         tracing::debug!("libgio is unavailable; skipping GSettings color-scheme hook");
         return;
     };
-    // SAFETY: symbol names are NUL-terminated and their types match gio/gsettings.h
-    // and gobject/gobject.h. The library outlives every symbol invocation.
+    // SAFETY: symbol names are NUL-terminated and their types match the GIO
+    // and GObject C headers. The library outlives every symbol invocation.
     let symbols = unsafe {
-        let new = library.get::<SettingsNew>(b"g_settings_new\0");
-        let set = library.get::<SettingsSetEnum>(b"g_settings_set_enum\0");
-        let unref = library.get::<ObjectUnref>(b"g_object_unref\0");
-        match (new, set, unref) {
-            (Ok(new), Ok(set), Ok(unref)) => Some((new, set, unref)),
-            _ => None,
-        }
+        (
+            library.get::<SchemaSourceGetDefault>(b"g_settings_schema_source_get_default\0"),
+            library.get::<SchemaSourceLookup>(b"g_settings_schema_source_lookup\0"),
+            library.get::<SchemaHasKey>(b"g_settings_schema_has_key\0"),
+            library.get::<Unref>(b"g_settings_schema_unref\0"),
+            library.get::<SettingsNew>(b"g_settings_new\0"),
+            library.get::<SettingsSetEnum>(b"g_settings_set_enum\0"),
+            library.get::<Unref>(b"g_object_unref\0"),
+        )
     };
-    let Some((new, set, unref)) = symbols else {
+    let (
+        Ok(default_source),
+        Ok(lookup),
+        Ok(has_key),
+        Ok(schema_unref),
+        Ok(new),
+        Ok(set),
+        Ok(object_unref),
+    ) = symbols
+    else {
         tracing::debug!("GSettings symbols are unavailable; skipping color-scheme hook");
         return;
     };
-    // SAFETY: schema and key are static C strings. A non-null settings pointer is
-    // owned here, used only with these symbols, and released exactly once.
+    // SAFETY: the default source is borrowed from GIO and used only if non-null.
+    // The schema ID and key are static C strings. We verify both are present
+    // before creating and updating settings. Each owned reference is released once.
     unsafe {
-        let settings = new(c"org.gnome.desktop.interface".as_ptr());
-        if settings.is_null() {
-            tracing::debug!("GNOME interface schema is unavailable");
+        let source = default_source();
+        if source.is_null() {
+            tracing::debug!("No default GSettings schema source; skipping color-scheme hook");
             return;
         }
-        let accepted = set(settings, c"color-scheme".as_ptr(), if dark { 1 } else { 2 });
+        let schema_id = c"org.gnome.desktop.interface".as_ptr();
+        let schema = lookup(source, schema_id, 1);
+        if schema.is_null() {
+            tracing::debug!("GNOME interface schema is unavailable; skipping color-scheme hook");
+            return;
+        }
+        let key = c"color-scheme".as_ptr();
+        let supports_color_scheme = has_key(schema, key) != 0;
+        schema_unref(schema);
+        if !supports_color_scheme {
+            tracing::debug!("GNOME interface schema lacks color-scheme; skipping GSettings hook");
+            return;
+        }
+
+        let settings = new(schema_id);
+        if settings.is_null() {
+            tracing::debug!("Could not open GNOME interface settings");
+            return;
+        }
+        let accepted = set(settings, key, if dark { 1 } else { 2 });
         if accepted == 0 {
             tracing::debug!("GSettings did not accept the color-scheme update");
         }
-        unref(settings);
+        object_unref(settings);
     }
 }
