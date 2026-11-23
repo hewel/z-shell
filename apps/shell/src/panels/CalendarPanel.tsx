@@ -270,7 +270,7 @@ export function CalendarPanel() {
       <scroll testId="cal-notif-scroll" role="scrollView" ariaLabel="Notifications list" style={{
         flexGrow: 1, flexShrink: 1, minHeight: "0px", width: "100%", overflow: "hidden auto",
       }}>
-        <column style={{ gap: "8px", paddingRight: "4px", paddingBottom: "2px" }}>
+        <column style={{ gap: "8px", paddingBottom: "2px" }}>
           <Show when={history().length > 0} fallback={
             <column testId="cal-notif-empty" style={{
               width: "100%", borderRadius: "14px", backgroundColor: containerHigh,

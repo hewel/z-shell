@@ -37,6 +37,7 @@
   --color-on-error-container: #FFDAD6;
   --zgui-ring: var(--color-primary);
   --zgui-corner-shape: superellipse(2.83);
+  --zgui-scrollbar-mode: overlay;
   --font-sans: "Roboto Flex", sans-serif;
   --font-mono: "JetBrains Mono", monospace;
   --radius-xs: 6px;
