@@ -218,19 +218,29 @@ impl DesktopServices {
         paths: &ShellPaths,
         options: DesktopOptions,
     ) -> DesktopHandle {
-        let notifications = notifications::Notifications::install(hub, paths.media_dir());
-        let ime_refresh = Arc::new(Notify::new());
-        let tray = tray::Tray::install(
+        let launcher = launcher::Launcher::install(
+            hub,
+            paths,
+            options.xdg_data_dirs.clone(),
+            options.icon_theme.clone(),
+        );
+        let notifications = notifications::Notifications::install(
             hub,
             paths.media_dir(),
             options.xdg_data_dirs.clone(),
             options.icon_theme.clone(),
+            Arc::clone(&launcher),
+        );
+        let ime_refresh = Arc::new(Notify::new());
+        let tray = tray::Tray::install(
+            hub,
+            paths.media_dir(),
+            options.xdg_data_dirs,
+            options.icon_theme,
             Arc::clone(&ime_refresh),
         );
         let ime = ime::Ime::install(hub, options.ime, ime_refresh);
         let media = media::Media::install(hub, paths.media_dir(), options.offline_policy);
-        let launcher =
-            launcher::Launcher::install(hub, paths, options.xdg_data_dirs, options.icon_theme);
 
         let (stop, running) = watch::channel(());
         let (notifications_enabled, notifications_setting) = watch::channel(options.notifications);

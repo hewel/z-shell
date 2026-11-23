@@ -19,8 +19,14 @@ use zbus::{
 };
 
 use crate::{
-    assets::{Blobs, MAX_IMAGE_BYTES, cache_icon, cache_image, local_path, png_rgba, read_bounded},
-    failed, ok, payload, publish, register,
+    apps,
+    assets::{
+        Blobs, ImageDimensions, MAX_IMAGE_BYTES, cache_icon_with_dimensions,
+        cache_image_with_dimensions, local_path, png_rgba, read_bounded,
+    },
+    failed,
+    launcher::Launcher,
+    ok, payload, publish, register,
 };
 
 const TOPIC: &str = "desktop.notifications";
@@ -28,6 +34,7 @@ pub(crate) const NAME: &str = "org.freedesktop.Notifications";
 const PATH: &str = "/org/freedesktop/Notifications";
 const HISTORY_LIMIT: usize = 100;
 const DEFAULT_TIMEOUT_MS: u64 = 5000;
+const RESUME_MIN_GRACE: Duration = Duration::from_millis(2000);
 const EXPIRED: u32 = 1;
 const DISMISSED: u32 = 2;
 const CLOSED_BY_CLIENT: u32 = 3;
@@ -38,6 +45,9 @@ pub(crate) struct Notifications {
     state: Mutex<State>,
     timer_changed: Notify,
     media_dir: PathBuf,
+    xdg_data_dirs: Vec<PathBuf>,
+    icon_theme: String,
+    launcher: Arc<Launcher>,
     image_work: Arc<Semaphore>,
 }
 
@@ -48,6 +58,7 @@ struct State {
     next_id: u32,
     next_revision: u64,
     dnd: bool,
+    paused: bool,
     history: VecDeque<Entry>,
     blobs: Blobs,
 }
@@ -61,7 +72,14 @@ struct Entry {
 enum Lifetime {
     Closed,
     Persistent,
-    Deadline(Instant),
+    Deadline {
+        at: Instant,
+        original: Duration,
+    },
+    Paused {
+        remaining: Duration,
+        original: Duration,
+    },
 }
 
 impl Lifetime {
@@ -71,8 +89,8 @@ impl Lifetime {
 
     fn deadline(&self) -> Option<Instant> {
         match self {
-            Self::Deadline(instant) => Some(*instant),
-            Self::Closed | Self::Persistent => None,
+            Self::Deadline { at, .. } => Some(*at),
+            Self::Closed | Self::Persistent | Self::Paused { .. } => None,
         }
     }
 }
@@ -84,17 +102,18 @@ struct Notification {
     app_name: String,
     summary: String,
     body: String,
-    icon: Option<Icon>,
-    attachment: Option<MediaRef>,
+    icon: Option<NotificationMedia>,
+    attachment: Option<NotificationMedia>,
     actions: Vec<Action>,
     urgency: u8,
 }
 
-#[derive(Serialize)]
-#[serde(untagged)]
-enum Icon {
-    Name(String),
-    Cached(MediaRef),
+#[derive(Clone, Serialize)]
+struct NotificationMedia {
+    #[serde(flatten)]
+    media: MediaRef,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dimensions: Option<ImageDimensions>,
 }
 
 #[derive(Serialize)]
@@ -124,12 +143,21 @@ impl From<NotificationError> for RpcError {
 }
 
 impl Notifications {
-    pub(crate) fn install(hub: &BusHub, media_dir: PathBuf) -> Arc<Self> {
+    pub(crate) fn install(
+        hub: &BusHub,
+        media_dir: PathBuf,
+        xdg_data_dirs: Vec<PathBuf>,
+        icon_theme: String,
+        launcher: Arc<Launcher>,
+    ) -> Arc<Self> {
         let service = Arc::new(Self {
             hub: hub.clone(),
             state: Mutex::new(State::default()),
             timer_changed: Notify::new(),
             media_dir,
+            xdg_data_dirs,
+            icon_theme,
+            launcher,
             image_work: Arc::new(Semaphore::new(2)),
         });
         service.publish(&service.state(), UpdateKind::SourceBaseline);
@@ -160,6 +188,13 @@ impl Notifications {
             "notifications.set-dnd",
             "Set notification Do Not Disturb",
             Self::set_dnd,
+        );
+        register(
+            hub,
+            &service,
+            "notifications.set-paused",
+            "Pause or resume active notification popup auto-expiry",
+            Self::set_paused,
         );
         register(
             hub,
@@ -226,6 +261,7 @@ impl Notifications {
     pub(crate) fn disconnected(&self) {
         let mut state = self.state();
         if state.connection.take().is_some() {
+            state.paused = false;
             state.history.clear();
             state.blobs = Blobs::default();
             self.publish(&state, UpdateKind::Live);
@@ -293,12 +329,20 @@ impl Notifications {
         state.next_revision = (state.next_revision % MAX_SAFE_JS_INT) + 1;
         let revision = state.next_revision;
         let attachment = match incoming.attachment {
-            Some(Attachment::Png(png)) => state.blobs.insert_png(png),
+            Some(Attachment::Png { bytes, dimensions }) => {
+                state
+                    .blobs
+                    .insert_png(bytes)
+                    .map(|media| NotificationMedia {
+                        media,
+                        dimensions: Some(dimensions),
+                    })
+            }
             Some(Attachment::Cached(mut media)) => {
                 if let MediaRef::RuntimePath {
                     revision: image_revision,
                     ..
-                } = &mut media
+                } = &mut media.media
                 {
                     *image_revision = revision;
                 }
@@ -307,10 +351,21 @@ impl Notifications {
             None => None,
         };
         let popup = !state.dnd;
+        let paused = state.paused;
         state.history.push_front(Entry {
             popup,
             lifetime: incoming.timeout.map_or(Lifetime::Persistent, |duration| {
-                Lifetime::Deadline(Instant::now() + duration)
+                if paused {
+                    Lifetime::Paused {
+                        remaining: duration,
+                        original: duration,
+                    }
+                } else {
+                    Lifetime::Deadline {
+                        at: Instant::now() + duration,
+                        original: duration,
+                    }
+                }
             }),
             notification: Notification {
                 id,
@@ -331,6 +386,9 @@ impl Notifications {
 
     fn expire(&self) -> Vec<u32> {
         let mut state = self.state();
+        if state.paused {
+            return Vec::new();
+        }
         let mut closed = Vec::new();
         let now = Instant::now();
         let mut popup_changed = false;
@@ -466,6 +524,46 @@ impl Notifications {
         }
         Ok(ok())
     }
+
+    async fn set_paused(
+        self: Arc<Self>,
+        call: CommandCall,
+    ) -> Result<CommandInvokeResult, RpcError> {
+        #[derive(Deserialize)]
+        struct SetPaused {
+            paused: bool,
+        }
+        let SetPaused { paused } = payload(&call)?;
+        let mut state = self.state();
+        if state.paused == paused {
+            return Ok(ok());
+        }
+        state.paused = paused;
+        let now = Instant::now();
+        for entry in &mut state.history {
+            if paused {
+                if let Lifetime::Deadline { at, original } = entry.lifetime {
+                    entry.lifetime = Lifetime::Paused {
+                        remaining: at.saturating_duration_since(now),
+                        original,
+                    };
+                }
+            } else if let Lifetime::Paused {
+                remaining,
+                original,
+            } = entry.lifetime
+            {
+                let grace = original.min(RESUME_MIN_GRACE);
+                let effective = remaining.max(grace);
+                entry.lifetime = Lifetime::Deadline {
+                    at: now + effective,
+                    original,
+                };
+            }
+        }
+        self.timer_changed.notify_one();
+        Ok(ok())
+    }
 }
 
 impl State {
@@ -487,7 +585,8 @@ impl State {
             .history
             .remove(index)
             .expect("notification index is in bounds");
-        self.blobs.revoke(entry.notification.attachment.as_ref());
+        self.blobs
+            .revoke(entry.notification.attachment.as_ref().map(|a| &a.media));
         entry
     }
 }
@@ -497,7 +596,7 @@ struct Incoming {
     app_name: String,
     summary: String,
     body: String,
-    icon: Option<Icon>,
+    icon: Option<NotificationMedia>,
     attachment: Option<Attachment>,
     actions: Vec<Action>,
     urgency: u8,
@@ -505,8 +604,11 @@ struct Incoming {
 }
 
 enum Attachment {
-    Png(Vec<u8>),
-    Cached(MediaRef),
+    Png {
+        bytes: Vec<u8>,
+        dimensions: ImageDimensions,
+    },
+    Cached(NotificationMedia),
 }
 
 struct Interface {
@@ -553,34 +655,59 @@ impl Interface {
         };
         let icon_path = local_path(&app_icon);
         let app_icon = clip_text(app_icon, 256);
+        let app_name = clip_text(app_name, 128);
+        let desktop_entry = hints
+            .get("desktop-entry")
+            .and_then(|value| <&str>::try_from(value).ok())
+            .map(|value| clip_text(value.to_owned(), 256))
+            .filter(|value| !value.is_empty());
         let has_image = hints.keys().any(|key| {
             matches!(
                 key.as_str(),
                 "image-data" | "image_data" | "icon_data" | "image-path" | "image_path"
             )
         });
-        let (icon, attachment) = if (icon_path.is_some() || has_image)
+        let needs_icon_lookup = icon_path.is_some()
+            || !app_icon.is_empty()
+            || desktop_entry.is_some()
+            || !app_name.is_empty();
+        let (icon, attachment) = if (needs_icon_lookup || has_image)
             && let Ok(permit) = service.image_work.clone().try_acquire_owned()
         {
             let media_dir = service.media_dir.clone();
+            let xdg_data_dirs = service.xdg_data_dirs.clone();
+            let icon_theme = service.icon_theme.clone();
+            let launcher = Arc::clone(&service.launcher);
+            let app_name_for_icon = app_name.clone();
             tokio::task::spawn_blocking(move || {
                 let _permit = permit;
-                let icon = match icon_path {
-                    Some(path) => cache_icon(&media_dir, &path).map(Icon::Cached),
-                    None => theme_icon(app_icon),
+                let icon = resolve_notification_icon(
+                    &media_dir,
+                    &xdg_data_dirs,
+                    &icon_theme,
+                    &launcher,
+                    icon_path.as_deref(),
+                    &app_icon,
+                    desktop_entry.as_deref(),
+                    &app_name_for_icon,
+                );
+                let attachment = if has_image {
+                    resolve_attachment(&media_dir, hints)
+                } else {
+                    None
                 };
-                (icon, resolve_attachment(&media_dir, hints))
+                (icon, attachment)
             })
             .await
             .unwrap_or_default()
         } else {
-            (theme_icon(app_icon), None)
+            (None, None)
         };
         let (id, evicted) = service
             .receive(
                 Incoming {
                     replaces: replaces_id,
-                    app_name: clip_text(app_name, 128),
+                    app_name,
                     summary: clip_text(summary, 256),
                     body: clip_text(body, 2048),
                     icon,
@@ -669,31 +796,107 @@ fn parse_actions(actions: Vec<String>) -> Vec<Action> {
     actions
 }
 
-fn theme_icon(name: String) -> Option<Icon> {
-    (!name.is_empty() && !name.contains(['/', '\n', '\t'])).then_some(Icon::Name(name))
+#[expect(
+    clippy::too_many_arguments,
+    reason = "internal icon resolution helper bundling notification fields and XDG lookup roots"
+)]
+fn resolve_notification_icon(
+    media_dir: &Path,
+    xdg_data_dirs: &[PathBuf],
+    icon_theme: &str,
+    launcher: &Launcher,
+    icon_path: Option<&Path>,
+    app_icon: &str,
+    desktop_entry: Option<&str>,
+    app_name: &str,
+) -> Option<NotificationMedia> {
+    if let Some(path) = icon_path {
+        return cache_icon_with_dimensions(media_dir, path)
+            .map(|(media, dimensions)| NotificationMedia { media, dimensions });
+    }
+    fn clean_name(name: &str) -> Option<&str> {
+        let trimmed = name.trim();
+        (!trimmed.is_empty() && !trimmed.contains(['/', '\n', '\t'])).then_some(trimmed)
+    }
+    let app_icon_name = clean_name(app_icon);
+    let desktop_name = desktop_entry.and_then(clean_name);
+    let app_name_trimmed = (!app_name.trim().is_empty()).then_some(app_name.trim());
+
+    if let Some(name) = app_icon_name
+        && let Some(media) = apps::resolve_icon(name, xdg_data_dirs, icon_theme, None, media_dir)
+    {
+        return Some(NotificationMedia {
+            media,
+            dimensions: None,
+        });
+    }
+
+    let catalog_icon = match launcher.lookup_app_icon(desktop_name, app_icon_name, app_name_trimmed)
+    {
+        Some(found) => found,
+        None if !xdg_data_dirs.is_empty() => {
+            let catalog = apps::scan(xdg_data_dirs, icon_theme, media_dir);
+            apps::find_desktop_icon(&catalog, desktop_name, app_icon_name, app_name_trimmed)
+        }
+        None => None,
+    };
+    if let Some(media) = catalog_icon {
+        return Some(NotificationMedia {
+            media,
+            dimensions: None,
+        });
+    }
+
+    if let Some(entry) = desktop_name {
+        let stem = entry.strip_suffix(".desktop").unwrap_or(entry);
+        if let Some(media) = apps::resolve_icon(stem, xdg_data_dirs, icon_theme, None, media_dir) {
+            return Some(NotificationMedia {
+                media,
+                dimensions: None,
+            });
+        }
+    }
+
+    if let Some(name) = app_name_trimmed {
+        let lower = name.to_lowercase();
+        if let Some(candidate) = clean_name(&lower)
+            && let Some(media) =
+                apps::resolve_icon(candidate, xdg_data_dirs, icon_theme, None, media_dir)
+        {
+            return Some(NotificationMedia {
+                media,
+                dimensions: None,
+            });
+        }
+    }
+
+    None
 }
 
 fn resolve_attachment(dir: &Path, mut hints: HashMap<String, OwnedValue>) -> Option<Attachment> {
     for key in ["image-data", "image_data", "icon_data"] {
-        if let Some(image) = hints.remove(key).and_then(image_data) {
-            return Some(Attachment::Png(image));
+        if let Some((bytes, dimensions)) = hints.remove(key).and_then(image_data) {
+            return Some(Attachment::Png { bytes, dimensions });
         }
     }
     for key in ["image-path", "image_path"] {
-        if let Some(media) = hints
+        if let Some((media, dimensions)) = hints
             .get(key)
             .and_then(|value| <&str>::try_from(value).ok())
             .and_then(local_path)
             .and_then(|path| read_bounded(&path, MAX_IMAGE_BYTES))
-            .and_then(|bytes| cache_image(dir, &bytes))
+            .and_then(|bytes| cache_image_with_dimensions(dir, &bytes))
         {
-            return Some(Attachment::Cached(media));
+            return Some(Attachment::Cached(NotificationMedia {
+                media,
+                dimensions: Some(dimensions),
+            }));
         }
     }
     None
 }
 
-fn image_data(value: OwnedValue) -> Option<Vec<u8>> {
+fn image_data(value: OwnedValue) -> Option<(Vec<u8>, ImageDimensions)> {
     let fields: [Value<'_>; 7] = Structure::try_from(value)
         .ok()?
         .into_fields()
@@ -731,8 +934,9 @@ fn image_data(value: OwnedValue) -> Option<Vec<u8>> {
     }
     let width = u32::try_from(width).ok()?;
     let height = u32::try_from(height).ok()?;
+    let dimensions = ImageDimensions { width, height };
     if alpha && stride == row_len {
-        return png_rgba(width, height, &bytes[..row_len * h]);
+        return png_rgba(width, height, &bytes[..row_len * h]).map(|png| (png, dimensions));
     }
     let mut packed = Vec::with_capacity(w * h * 4);
     for row in bytes.chunks(stride).take(h) {
@@ -745,5 +949,5 @@ fn image_data(value: OwnedValue) -> Option<Vec<u8>> {
             }
         }
     }
-    png_rgba(width, height, &packed)
+    png_rgba(width, height, &packed).map(|png| (png, dimensions))
 }

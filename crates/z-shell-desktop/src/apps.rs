@@ -211,6 +211,60 @@ pub(crate) fn resolve_icon(
     Icons::new(data_dirs, theme, cache_dir).resolve(name)
 }
 
+/// Match a notification's `desktop-entry`, `app_icon`, or `app_name` against a scanned `.desktop`
+/// catalog and return its already-cached icon `MediaRef`.
+pub(crate) fn find_desktop_icon(
+    catalog: &Catalog,
+    desktop_entry: Option<&str>,
+    app_icon: Option<&str>,
+    app_name: Option<&str>,
+) -> Option<MediaRef> {
+    let normalize = |raw: &str| {
+        let trimmed = raw.trim();
+        let stem = trimmed
+            .strip_suffix(".desktop")
+            .or_else(|| trimmed.strip_suffix(".DESKTOP"))
+            .unwrap_or(trimmed);
+        stem.to_lowercase()
+    };
+
+    let matches_entry = |id: &str, app: &App, candidate: &str, match_title: bool| {
+        let stem = normalize(id);
+        if stem == candidate {
+            return true;
+        }
+        if stem
+            .rsplit('.')
+            .next()
+            .is_some_and(|segment| segment == candidate)
+        {
+            return true;
+        }
+        if app
+            .startup_wm_class
+            .as_deref()
+            .is_some_and(|wm| wm.eq_ignore_ascii_case(candidate))
+        {
+            return true;
+        }
+        match_title && app.title.eq_ignore_ascii_case(candidate)
+    };
+
+    for (raw, match_title) in [(desktop_entry, false), (app_icon, false), (app_name, true)] {
+        let Some(value) = raw.map(normalize).filter(|v| !v.is_empty()) else {
+            continue;
+        };
+        if let Some(icon) = catalog
+            .iter()
+            .find(|(id, app)| app.icon.is_some() && matches_entry(id, app, &value, match_title))
+            .and_then(|(_, app)| app.icon.clone())
+        {
+            return Some(icon);
+        }
+    }
+    None
+}
+
 pub(crate) fn scan(data_dirs: &[PathBuf], theme: &str, cache_dir: &Path) -> Catalog {
     let mut catalog = Catalog::new();
     let mut seen = HashSet::new();

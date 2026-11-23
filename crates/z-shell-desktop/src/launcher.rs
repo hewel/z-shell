@@ -445,6 +445,21 @@ impl Launcher {
         state.providers.clear();
     }
 
+    /// Look up an installed app's cached icon from the scanned desktop catalog.
+    /// Returns `None` while the initial catalog scan is still in progress.
+    pub(crate) fn lookup_app_icon(
+        &self,
+        desktop_entry: Option<&str>,
+        app_icon: Option<&str>,
+        app_name: Option<&str>,
+    ) -> Option<Option<MediaRef>> {
+        let state = self.state.lock().expect("launcher state lock poisoned");
+        state
+            .apps
+            .as_ref()
+            .map(|catalog| apps::find_desktop_icon(catalog, desktop_entry, app_icon, app_name))
+    }
+
     fn list(&self, call: &CommandCall) -> Result<CommandInvokeResult, RpcError> {
         let list: List = payload(call)?;
         let state = self.state.lock().expect("launcher state lock poisoned");

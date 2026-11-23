@@ -110,7 +110,12 @@ async fn replaces_both_views_and_separates_app_icon_from_attachment() {
         panic!("expected runtime path")
     };
     assert!(path.starts_with(paths.media_dir()));
-    assert_eq!(first["popups"][0]["icon"], "mail-unread");
+    assert_eq!(
+        first["popups"][0]["attachment"]["dimensions"],
+        json!({"width": 1, "height": 1})
+    );
+    // With empty xdg_data_dirs, unresolved theme names fall back to null so UI renders the bell.
+    assert_eq!(first["popups"][0]["icon"], Value::Null);
 
     assert_eq!(notify(&proxy, id, "second", file_hint(&image)).await, id);
     let replaced = next_update(&stream).await;
@@ -140,7 +145,7 @@ async fn replaces_both_views_and_separates_app_icon_from_attachment() {
     );
     let missing = next_update(&stream).await;
     assert_eq!(missing["history"][0]["attachment"], Value::Null);
-    assert_eq!(missing["history"][0]["icon"], "mail-unread");
+    assert_eq!(missing["history"][0]["icon"], Value::Null);
 }
 
 #[tokio::test]
@@ -377,4 +382,210 @@ async fn unavailable_session_bus_does_not_prevent_starting_the_launcher() {
     }
     let (apps, stream) = subscribe(&hub, "desktop.apps").await;
     assert_eq!(ready(apps, &stream).await["available"], true);
+}
+
+#[tokio::test]
+async fn resolves_xdg_app_icons_and_exposes_image_dimensions() {
+    let bus = TestBus::new();
+    let client = bus.connection().await;
+    let root = tempfile::tempdir().unwrap();
+    let xdg_data = root.path().join("share");
+    let icon_dir = xdg_data.join("icons/hicolor/48x48/apps");
+    let apps_dir = xdg_data.join("applications");
+    std::fs::create_dir_all(&icon_dir).unwrap();
+    std::fs::create_dir_all(&apps_dir).unwrap();
+
+    // Fixture XDG theme icons for Discord (named app_icon) and Ghostty (via .desktop entry).
+    RgbaImage::from_pixel(48, 48, Rgba([88, 101, 242, 255]))
+        .save(icon_dir.join("discord.png"))
+        .unwrap();
+    RgbaImage::from_pixel(48, 48, Rgba([34, 40, 56, 255]))
+        .save(icon_dir.join("com.mitchellh.ghostty.png"))
+        .unwrap();
+    std::fs::write(
+        apps_dir.join("com.mitchellh.ghostty.desktop"),
+        "[Desktop Entry]\nType=Application\nName=Ghostty\nExec=/bin/true\nIcon=com.mitchellh.ghostty\n",
+    )
+    .unwrap();
+
+    let paths = paths(root.path());
+    let hub = BusHub::new("test", paths.media_dir());
+    let _desktop = DesktopServices::install_with_options(
+        &hub,
+        &paths,
+        DesktopOptions {
+            session_bus: SessionBusAddress::Address(bus.address().into()),
+            tray: false,
+            xdg_data_dirs: vec![xdg_data],
+            icon_theme: "hicolor".to_owned(),
+            ..DesktopOptions::default()
+        },
+    );
+    let (initial, stream) = subscribe(&hub, TOPIC).await;
+    assert_eq!(ready(initial, &stream).await["available"], true);
+    let proxy = dbus_proxy(&client).await;
+
+    // 1. Discord: theme app_icon="discord" + 128x128 avatar in image-data
+    let avatar_bytes = vec![120_u8; 128 * 128 * 4];
+    let avatar_hint: OwnedValue = DbusValue::from((
+        128_i32,
+        128_i32,
+        128_i32 * 4,
+        true,
+        8_i32,
+        4_i32,
+        avatar_bytes,
+    ))
+    .try_into()
+    .unwrap();
+    let _: u32 = proxy
+        .call(
+            "Notify",
+            &(
+                "Discord",
+                0_u32,
+                "discord",
+                "QuickFlash",
+                "Avatar message",
+                Vec::<String>::new(),
+                HashMap::from([("image-data", avatar_hint)]),
+                0_i32,
+            ),
+        )
+        .await
+        .unwrap();
+    let discord = next_update(&stream).await;
+    let discord_icon: MediaRef = serde_json::from_value(discord["popups"][0]["icon"].clone())
+        .expect("resolved discord icon");
+    assert!(matches!(discord_icon, MediaRef::RuntimePath { .. }));
+    assert_eq!(
+        discord["popups"][0]["attachment"]["dimensions"],
+        json!({"width": 128, "height": 128})
+    );
+
+    // 2. Ghostty: empty app_icon, resolved via desktop-entry / app_name fallback
+    let _: u32 = proxy
+        .call(
+            "Notify",
+            &(
+                "Ghostty",
+                0_u32,
+                "",
+                "Approval requested",
+                "CLI ready",
+                Vec::<String>::new(),
+                HashMap::<String, OwnedValue>::new(),
+                0_i32,
+            ),
+        )
+        .await
+        .unwrap();
+    let ghostty = next_update(&stream).await;
+    let ghostty_icon: MediaRef = serde_json::from_value(ghostty["popups"][0]["icon"].clone())
+        .expect("resolved ghostty .desktop icon");
+    assert!(matches!(ghostty_icon, MediaRef::RuntimePath { .. }));
+
+    // 3. niri screenshot: 320x180 PNG file passed directly in app_icon carries real dimensions
+    let shot = root.path().join("niri-shot.png");
+    RgbaImage::from_pixel(320, 180, Rgba([100, 180, 250, 255]))
+        .save(&shot)
+        .unwrap();
+    let _: u32 = proxy
+        .call(
+            "Notify",
+            &(
+                "niri",
+                0_u32,
+                shot.to_str().unwrap(),
+                "Screenshot captured",
+                "You can paste the image from the clipboard.",
+                Vec::<String>::new(),
+                HashMap::<String, OwnedValue>::new(),
+                0_i32,
+            ),
+        )
+        .await
+        .unwrap();
+    let niri = next_update(&stream).await;
+    let niri_icon: MediaRef =
+        serde_json::from_value(niri["popups"][0]["icon"].clone()).expect("cached niri shot");
+    assert!(matches!(niri_icon, MediaRef::RuntimePath { .. }));
+    assert_eq!(
+        niri["popups"][0]["icon"]["dimensions"],
+        json!({"width": 320, "height": 180})
+    );
+}
+
+#[tokio::test]
+async fn set_paused_freezes_and_resumes_popup_auto_expiry() {
+    let bus = TestBus::new();
+    let client = bus.connection().await;
+    let root = tempfile::tempdir().unwrap();
+    let paths = paths(root.path());
+    let hub = BusHub::new("test", paths.media_dir());
+    let desktop = DesktopServices::install_with_options(
+        &hub,
+        &paths,
+        DesktopOptions {
+            session_bus: SessionBusAddress::Address(bus.address().into()),
+            tray: false,
+            xdg_data_dirs: Vec::new(),
+            ..DesktopOptions::default()
+        },
+    );
+    let (initial, stream) = subscribe(&hub, TOPIC).await;
+    assert_eq!(ready(initial, &stream).await["available"], true);
+    let proxy = dbus_proxy(&client).await;
+
+    // Pause before notifying: a short-lived 60ms popup must stay active while paused.
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "notifications.set-paused",
+        json!({"paused": true}),
+    )
+    .await
+    .unwrap();
+    let id: u32 = proxy
+        .call(
+            "Notify",
+            &(
+                "Discord",
+                0_u32,
+                "",
+                "Hold me",
+                "Hovering pauses countdown",
+                Vec::<String>::new(),
+                HashMap::<String, OwnedValue>::new(),
+                60_i32,
+            ),
+        )
+        .await
+        .unwrap();
+    let live = next_update(&stream).await;
+    assert_eq!(live["popups"][0]["id"], id);
+
+    // Wait well past 60ms while paused: no expiry update may fire.
+    tokio::time::sleep(Duration::from_millis(140)).await;
+    let still_open = tokio::time::timeout(Duration::from_millis(60), next_update(&stream)).await;
+    assert!(
+        still_open.is_err(),
+        "popup must not expire while notifications.set-paused is true"
+    );
+
+    // Resuming restarts countdown and expires the popup cleanly into history.
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "notifications.set-paused",
+        json!({"paused": false}),
+    )
+    .await
+    .unwrap();
+    let expired = tokio::time::timeout(Duration::from_secs(2), next_update(&stream))
+        .await
+        .expect("resumed popup expires");
+    assert_eq!(expired["popups"], json!([]));
+    assert_eq!(expired["history"][0]["id"], id);
+    desktop.shutdown().await;
 }

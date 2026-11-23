@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use image::{
     ExtendedColorType, ImageEncoder, ImageFormat, ImageReader, Limits, codecs::png::PngEncoder,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use z_shell_bus::CommandCall;
@@ -23,6 +23,12 @@ pub(crate) const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 const MAX_IMAGE_DIMENSION: u32 = 4096;
 // JSON octets use at most four bytes each; leave room for the RPC envelope.
 const MAX_BLOB_BYTES: usize = 200_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ImageDimensions {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+}
 
 pub(crate) fn local_path(value: &str) -> Option<PathBuf> {
     let Some(uri) = value.strip_prefix("file://") else {
@@ -62,6 +68,13 @@ pub(crate) fn read_bounded(path: &Path, max: usize) -> Option<Vec<u8>> {
 }
 
 pub(crate) fn cache_image(dir: &Path, bytes: &[u8]) -> Option<MediaRef> {
+    cache_image_with_dimensions(dir, bytes).map(|(media, _)| media)
+}
+
+pub(crate) fn cache_image_with_dimensions(
+    dir: &Path,
+    bytes: &[u8],
+) -> Option<(MediaRef, ImageDimensions)> {
     let format = image::guess_format(bytes).ok()?;
     let (extension, mime) = match format {
         ImageFormat::Png => ("png", "image/png"),
@@ -75,11 +88,23 @@ pub(crate) fn cache_image(dir: &Path, bytes: &[u8]) -> Option<MediaRef> {
     limits.max_image_height = Some(MAX_IMAGE_DIMENSION);
     limits.max_alloc = Some(64 * 1024 * 1024);
     reader.limits(limits);
-    reader.decode().ok()?;
-    cache(dir, bytes, extension, mime)
+    let decoded = reader.decode().ok()?;
+    let dimensions = ImageDimensions {
+        width: decoded.width(),
+        height: decoded.height(),
+    };
+    let media = cache(dir, bytes, extension, mime)?;
+    Some((media, dimensions))
 }
 
 pub(crate) fn cache_icon(dir: &Path, path: &Path) -> Option<MediaRef> {
+    cache_icon_with_dimensions(dir, path).map(|(media, _)| media)
+}
+
+pub(crate) fn cache_icon_with_dimensions(
+    dir: &Path,
+    path: &Path,
+) -> Option<(MediaRef, Option<ImageDimensions>)> {
     let bytes = read_bounded(path, MAX_IMAGE_BYTES)?;
     if path
         .extension()
@@ -106,11 +131,11 @@ pub(crate) fn cache_icon(dir: &Path, path: &Path) -> Option<MediaRef> {
         if svg.starts_with("<svg")
             && svg[4..].starts_with(|c: char| c.is_ascii_whitespace() || matches!(c, '>' | '/'))
         {
-            return cache(dir, &bytes, "svg", "image/svg+xml");
+            return cache(dir, &bytes, "svg", "image/svg+xml").map(|media| (media, None));
         }
         return None;
     }
-    cache_image(dir, &bytes)
+    cache_image_with_dimensions(dir, &bytes).map(|(media, dims)| (media, Some(dims)))
 }
 
 fn cache(dir: &Path, bytes: &[u8], extension: &str, mime: &str) -> Option<MediaRef> {
