@@ -16,24 +16,6 @@ export const grow = { flexGrow: 1, flexBasis: "0px", minWidth: "0px" } as const;
 export const clipped = { minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
 export const hiddenSection = { display: "none" } as const;
 
-export function ShellSwitch(props: {
-  checked: boolean;
-  ariaLabel: string;
-  disabled?: boolean;
-  testId?: string;
-  onToggle: () => void;
-}): NativeChild {
-  return (
-    <M3Switch
-      checked={props.checked}
-      ariaLabel={props.ariaLabel}
-      {...(props.disabled !== undefined ? { disabled: props.disabled } : {})}
-      {...(props.testId !== undefined ? { testId: props.testId } : {})}
-      onToggle={props.onToggle}
-    />
-  );
-}
-
 export function SettingsSwitch(props: {
   label: string;
   detail?: string;
@@ -53,7 +35,7 @@ export function SettingsSwitch(props: {
           <text style={{ ...clipped, fontSize: "11px", color: muted }}>{props.detail}</text>
         </Show>
       </column>
-      <ShellSwitch
+      <M3Switch
         checked={props.checked}
         ariaLabel={props.label}
         {...(props.disabled !== undefined ? { disabled: props.disabled } : {})}

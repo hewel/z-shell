@@ -4,7 +4,6 @@ import { createOpacityEnter, useMotionScheme } from "../../motion.ts";
 import { useShellStore } from "../../store.ts";
 import type { IdleAction } from "../../topics.ts";
 import {
-  ShellSwitch,
   clipped,
   container,
   containerHigh,
@@ -363,7 +362,7 @@ export function IdlePane(): NativeChild {
                   </text>
                 </column>
                 <M3CardAction style={{ flexShrink: 0 }}>
-                  <ShellSwitch
+                  <M3Switch
                     testId={`settings-idle-switch-${rule().name}`}
                     ariaLabel={`Enable ${rule().name}`}
                     checked={rule().enabled}

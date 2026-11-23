@@ -8,8 +8,10 @@ import {
   cx,
   focus,
   getWindowRect,
+  observeGeometry,
   type NativeChild,
   type NativeEvent,
+  type NativeKeyEvent,
   type NativeNode,
   type NativeStyle,
 } from "@hewel/zgui";
@@ -135,8 +137,18 @@ export function M3Switch(props: M3SwitchProps): NativeChild {
       : "var(--color-on-primary-container)"
   );
 
+  const handleKeyDown = (event: NativeKeyEvent) => {
+    if (props.disabled) return;
+    if (event.key === " " || event.key === "Spacebar" || event.key === "Enter") {
+      event.preventDefault();
+      props.onToggle();
+    }
+  };
+
   return (
-    <Button
+    <control
+      role="switch"
+      tabIndex={props.disabled ? -1 : 0}
       testId={props.testId ?? null}
       data-switch-root="true"
       data-checked={props.checked ? "true" : null}
@@ -149,6 +161,7 @@ export function M3Switch(props: M3SwitchProps): NativeChild {
       }}
       onPointerUp={() => { if (pressed()) setPressed(false); }}
       onPointerCancel={() => { if (pressed()) setPressed(false); }}
+      onKeyDown={handleKeyDown}
       onClick={() => { if (!props.disabled) props.onToggle(); }}
     >
       <box
@@ -177,7 +190,7 @@ export function M3Switch(props: M3SwitchProps): NativeChild {
           />
         </Show>
       </box>
-    </Button>
+    </control>
   );
 }
 
@@ -533,10 +546,13 @@ export function M3Collapsible(props: M3CollapsibleProps): NativeChild {
   const [innerNode, setInnerNode] = createSignal<NativeNode | null>(null);
   const [measuredHeight, setMeasuredHeight] = createSignal(props.estimatedHeight ?? 64);
 
-  createEffect(() => [presence.mounted(), props.open, innerNode()] as const, ([mounted, _open, node]) => {
+  createEffect(() => [presence.mounted(), innerNode()] as const, ([mounted, node]) => {
     if (!mounted || !node) return;
     const rect = getWindowRect(node);
-    if (rect && rect.height > 1) setMeasuredHeight(rect.height);
+    if (rect && rect.height > 1) setMeasuredHeight(Math.ceil(rect.height));
+    return observeGeometry(node, "borderSize", size => {
+      if (size.height > 1) setMeasuredHeight(Math.ceil(size.height));
+    });
   });
 
   const clipStyle = (): NativeStyle => {

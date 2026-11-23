@@ -8,6 +8,7 @@ import {
   untrack,
   type Accessor,
 } from "@hewel/zgui";
+import { createRetainedPresence } from "@hewel/zgui/primitives";
 import type { ZShellClient } from "./client.ts";
 import {
   SPRING_EPSILON,
@@ -175,8 +176,7 @@ export function createPresence(
   options: PresenceOptions = {},
 ): PresenceState {
   const initialVisible = untrack(visible);
-  const [exiting, setExiting] = createSignal(false);
-  let wasVisible = initialVisible;
+  const [retired, setRetired] = createSignal(!initialVisible);
   let skipNextExit = false;
   const enterRole = options.enterRole ?? "defaultSpatial";
   const enterOpacityRole = options.enterOpacityRole ?? "fastEffects";
@@ -199,11 +199,18 @@ export function createPresence(
     },
   );
 
+  // Derive a non-nullish presence payload (`true | undefined`) so `false` is never retained as a live value.
+  const retained = createRetainedPresence<true>(
+    () => (visible() ? true : undefined),
+    {
+      settled: () => retired() || (opacity.settled() && opacity() <= SPRING_EPSILON.unit),
+    },
+  );
+
   const dismissInstant = (): void => {
     skipNextExit = true;
-    setExiting(false);
     if (!untrack(visible)) {
-      wasVisible = false;
+      setRetired(true);
       progress.jump(0);
       opacity.jump(0);
     }
@@ -211,32 +218,27 @@ export function createPresence(
 
   createEffect(visible, isVisible => {
     if (isVisible) {
-      wasVisible = true;
       skipNextExit = false;
-      setExiting(false);
+      setRetired(false);
       return;
     }
-    const shouldExit = wasVisible && !skipNextExit && !options.instantExit?.();
-    wasVisible = false;
+    const instant = skipNextExit || Boolean(options.instantExit?.());
     skipNextExit = false;
-    if (shouldExit) {
-      setExiting(true);
-    } else {
-      setExiting(false);
+    if (instant || (untrack(opacity.settled) && untrack(opacity) <= SPRING_EPSILON.unit)) {
+      setRetired(true);
       progress.jump(0);
       opacity.jump(0);
     }
   });
 
   createEffect(
-    () => exiting() && !visible() && opacity.settled() && opacity() <= SPRING_EPSILON.unit,
+    () => !visible() && !retired() && opacity.settled() && opacity() <= SPRING_EPSILON.unit,
     done => {
-      if (done) setExiting(false);
+      if (done) setRetired(true);
     },
   );
 
-  // `mounted` is strictly derived: whenever `visible()` is true the surface can never desync to unmounted.
-  const mounted = (): boolean => visible() || exiting();
+  const mounted = (): boolean => visible() || (!retired() && retained.mounted());
   return { mounted, progress, opacity, dismissInstant };
 }
 

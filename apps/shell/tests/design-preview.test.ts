@@ -460,7 +460,7 @@ describe("apps/shell design geometry & pixel lint", () => {
       // M3Switch desktop geometry (44x24px) in Bar & layout settings, and 34px desktop M3Button height in Power Dialog.
       {
         const switchNodes = settingsBar.tree.nodes.filter(
-          node => node.role === "button" && node.boundsLogical && Math.round(node.boundsLogical.width) === 44 && Math.round(node.boundsLogical.height) === 24,
+          node => node.role === "switch" && node.boundsLogical && Math.round(node.boundsLogical.width) === 44 && Math.round(node.boundsLogical.height) === 24,
         );
         expect(switchNodes.length, "settings-bar 44x24px M3Switch controls").toBeGreaterThanOrEqual(4);
         const cancelBounds = treeNode(power.tree, "power-dialog-cancel").boundsLogical!;
