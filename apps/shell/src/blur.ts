@@ -90,16 +90,20 @@ export function roundedRectBlurRegion(
   const strips: NativeWindowRect[] = [];
   const cornerInset = (dy: number): number => {
     if (dy >= r) return r;
+    if (dy <= 0) return 0;
     const dx = n === 2
       ? Math.sqrt(Math.max(0, r * r - dy * dy))
       : r * Math.pow(Math.max(0, 1 - Math.pow(dy / r, n)), 1 / n);
-    return Math.ceil(r - dx);
+    // Pixel-center coverage rounding (`round` at row midpoint): every included edge pixel has
+    // >= 50% area inside the painted curve (hiding <= 0.5px under the 1px border/AA) while
+    // eliminating the 1px unblurred dark notch along flat superellipse tangents.
+    return Math.min(r, Math.max(0, Math.round(r - dx)));
   };
 
-  // Top corner arc: y in [y0, y0 + r). Worst-case distance from corner center (y0 + r) is at band top `y`.
+  // Top corner arc: y in [y0, y0 + r). Evaluate at the top row's pixel center `y + 0.5`.
   for (let y = y0; y < y0 + r; y += bandStep) {
     const bandEnd = Math.min(y0 + r, y + bandStep);
-    const inset = cornerInset(y0 + r - y);
+    const inset = cornerInset(y0 + r - (y + 0.5));
     appendMergedStrip(strips, x0 + inset, y, w - 2 * inset, bandEnd - y);
   }
 
@@ -110,10 +114,10 @@ export function roundedRectBlurRegion(
     appendMergedStrip(strips, x0, midStart, w, midEnd - midStart);
   }
 
-  // Bottom corner arc: y in [y1 - r, y1). Worst-case distance from corner center (y1 - r) is at `bandEnd`.
+  // Bottom corner arc: y in [y1 - r, y1). Evaluate at the bottom row's pixel center `bandEnd - 0.5`.
   for (let y = y1 - r; y < y1; y += bandStep) {
     const bandEnd = Math.min(y1, y + bandStep);
-    const inset = cornerInset(bandEnd - (y1 - r));
+    const inset = cornerInset((bandEnd - 0.5) - (y1 - r));
     appendMergedStrip(strips, x0 + inset, y, w - 2 * inset, bandEnd - y);
   }
 
