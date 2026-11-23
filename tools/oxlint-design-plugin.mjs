@@ -1946,6 +1946,126 @@ const rules = {
     },
   },
 
+  "no-partial-card-hover": {
+    meta: {
+      type: "problem",
+      docs: { description: "Disallow negative margins on <Button>/<control> elements used to expand hover hit targets inside cards" },
+      schema: [],
+    },
+    create(context) {
+      let aliases = new Map();
+      const negativeMarginConsts = new Map();
+      const MARGIN_KEYS = new Set([
+        "margin",
+        "marginTop",
+        "marginRight",
+        "marginBottom",
+        "marginLeft",
+        "margin-top",
+        "margin-right",
+        "margin-bottom",
+        "margin-left",
+        "marginInline",
+        "marginBlock",
+        "marginInlineStart",
+        "marginInlineEnd",
+        "marginBlockStart",
+        "marginBlockEnd",
+        "margin-inline",
+        "margin-block",
+        "margin-inline-start",
+        "margin-inline-end",
+        "margin-block-start",
+        "margin-block-end",
+      ]);
+
+      const unwrap = expr =>
+        expr && (expr.type === "TSSatisfiesExpression" || expr.type === "TSAsExpression") ? expr.expression : expr;
+
+      const findNegativeMarginValue = expr => {
+        const node = unwrap(expr);
+        if (!node) return null;
+        if (node.type === "UnaryExpression" && node.operator === "-") {
+          const arg = unwrap(node.argument);
+          if (arg?.type === "Literal" && typeof arg.value === "number" && arg.value > 0) {
+            return `-${arg.value}`;
+          }
+        }
+        const text = resolveStaticText(node, aliases);
+        if (text !== null && /(?:^|\s)-\d/.test(text.trim())) {
+          return JSON.stringify(text);
+        }
+        if (node.type === "ConditionalExpression") {
+          return findNegativeMarginValue(node.consequent) ?? findNegativeMarginValue(node.alternate);
+        }
+        return null;
+      };
+
+      const findNegativeMarginInStyle = expr => {
+        const node = unwrap(expr);
+        if (!node) return null;
+        if (node.type === "Identifier") {
+          return negativeMarginConsts.get(node.name) ?? null;
+        }
+        if (node.type === "ConditionalExpression") {
+          return findNegativeMarginInStyle(node.consequent) ?? findNegativeMarginInStyle(node.alternate);
+        }
+        if (node.type !== "ObjectExpression") return null;
+
+        for (const prop of node.properties ?? []) {
+          if (prop.type === "SpreadElement") {
+            const spreadHit = findNegativeMarginInStyle(prop.argument);
+            if (spreadHit) return spreadHit;
+            continue;
+          }
+          const key = propertyName(prop);
+          if (!key || !MARGIN_KEYS.has(key)) continue;
+          const neg = findNegativeMarginValue(prop.value);
+          if (neg !== null) return { key, value: neg, node: prop };
+        }
+        return null;
+      };
+
+      const recordStyleConst = item => {
+        if (item.id?.type !== "Identifier" || !item.init) return;
+        const hit = findNegativeMarginInStyle(item.init);
+        if (hit) negativeMarginConsts.set(item.id.name, hit);
+      };
+
+      return {
+        Program(program) {
+          aliases = collectStringAliases(program);
+          for (const stmt of program.body ?? []) {
+            const decl = stmt.type === "ExportNamedDeclaration" ? stmt.declaration : stmt;
+            if (decl?.type === "VariableDeclaration") {
+              for (const item of decl.declarations ?? []) recordStyleConst(item);
+            }
+          }
+        },
+        VariableDeclarator(node) {
+          recordStyleConst(node);
+        },
+        JSXOpeningElement(node) {
+          if (node.name?.type !== "JSXIdentifier") return;
+          const tag = node.name.name;
+          if (tag !== "Button" && tag !== "control") return;
+          const styleAttr = (node.attributes ?? []).find(
+            attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === "style",
+          );
+          const styleExpr = styleAttr?.value?.type === "JSXExpressionContainer" ? styleAttr.value.expression : null;
+          if (!styleExpr) return;
+          const hit = findNegativeMarginInStyle(styleExpr);
+          if (hit) {
+            context.report({
+              node: styleAttr,
+              message: `Partial Card Hover Rule: <${tag}> must not use negative margin (${hit.key}: ${hit.value}) to stretch hover hits inside a card — this causes clipped box-in-box hover highlights. Use M3InteractiveCard (stretched full-card hit layer) or SplitTile instead.`,
+            });
+          }
+        },
+      };
+    },
+  },
+
   "no-lint-suppression": {
     meta: {
       type: "problem",

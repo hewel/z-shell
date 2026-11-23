@@ -1,5 +1,5 @@
 import { Button, For, Match, Show, Switch, TextField, createMemo, createSignal, type Accessor, type NativeChild } from "@hewel/zgui";
-import { M3Button, M3Collapsible, M3Switch } from "@z-shell/sdk/primitives";
+import { M3Button, M3CardAction, M3Collapsible, M3InteractiveCard, M3Switch } from "@z-shell/sdk/primitives";
 import { ShellIcon, type ShellIconName } from "../icons.tsx";
 import { SPRING_EPSILON, createEnterProgress, createM3Spring, sharedAxisXStyle, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
@@ -366,28 +366,37 @@ function AudioDeviceRow(props: { device: Accessor<AudioDevice>; kind: "sink" | "
   const target = () => ({ kind: props.kind, index: props.device().index });
   const name = () => props.device().description || props.device().name;
   return (
-    <column style={{
-      borderRadius: "14px", padding: "8px 10px", gap: "6px",
-      backgroundColor: props.active ? selectedFill : containerHighest,
-      color: props.active ? selectedInk : onSurface,
-      border: props.active ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
-    }}>
-      <Button ariaLabel={name()} selected={props.active} onClick={() => void invokePublic("audio.set-default", target())}
-        style={{ ...row, minHeight: "30px", borderRadius: "8px", padding: "2px 6px", margin: "-2px -6px", color: props.active ? selectedInk : onSurface }}>
+    <M3InteractiveCard
+      layout="column"
+      testId={`qs-audio-${props.kind}-${props.device().index}`}
+      actionTestId={`qs-audio-${props.kind}-select-${props.device().index}`}
+      ariaLabel={name()}
+      selected={props.active}
+      onClick={() => void invokePublic("audio.set-default", target())}
+      style={{
+        borderRadius: "14px", padding: "8px 10px", gap: "6px",
+        backgroundColor: props.active ? selectedFill : containerHighest,
+        color: props.active ? selectedInk : onSurface,
+        border: props.active ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
+      }}
+    >
+      <row style={{ ...row, minHeight: "26px" }}>
         <ShellIcon name={props.kind === "sink" ? "volumeHigh" : "mic"} size={16} color={props.active ? selectedInk : muted} />
         <text style={{ ...grow, ...clipped, fontWeight: props.active ? 600 : 500 }}>{name()}</text>
-      </Button>
-      <PrecisionSliderRow
-        label={`${name()} volume`}
-        icon={props.device().muted ? "volumeMute" : props.kind === "sink" ? "volumeHigh" : "mic"}
-        iconLabel={props.device().muted ? "Unmute device" : "Mute device"}
-        value={props.device().volume * 100}
-        disabled={!props.device().channels}
-        showTrailingSlot={false}
-        onIconClick={() => void invokePublic("audio.set-mute", { ...target(), muted: !props.device().muted })}
-        onChange={percent => void invokePublic("audio.set-volume", { ...target(), volume: percent / 100 })}
-      />
-    </column>
+      </row>
+      <M3CardAction>
+        <PrecisionSliderRow
+          label={`${name()} volume`}
+          icon={props.device().muted ? "volumeMute" : props.kind === "sink" ? "volumeHigh" : "mic"}
+          iconLabel={props.device().muted ? "Unmute device" : "Mute device"}
+          value={props.device().volume * 100}
+          disabled={!props.device().channels}
+          showTrailingSlot={false}
+          onIconClick={() => void invokePublic("audio.set-mute", { ...target(), muted: !props.device().muted })}
+          onChange={percent => void invokePublic("audio.set-volume", { ...target(), volume: percent / 100 })}
+        />
+      </M3CardAction>
+    </M3InteractiveCard>
   );
 }
 

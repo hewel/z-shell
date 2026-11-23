@@ -1,6 +1,6 @@
 import { Button, For, Image, Show, TextField, createEffect, createMemo, createSignal, getWindowRect, mountStylesheet, scrollIntoView, type Accessor, type NativeKeyEvent, type NativeNode } from "@hewel/zgui";
 import { createVirtualFocus } from "@hewel/zgui/primitives";
-import { M3Button, M3FilterChip } from "@z-shell/sdk/primitives";
+import { M3Button, M3CardAction, M3FilterChip, M3InteractiveCard } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
 import { SPRING_EPSILON, createM3Spring, useMotionScheme } from "../motion.ts";
@@ -48,13 +48,24 @@ function ClipboardRow(props: {
   });
 
   return (
-    <row testId={`clip-entry-${entry().id}`} {...(props.onRowRef ? { ref: props.onRowRef } : {})} style={{
-      position: "relative", zIndex: 1,
-      borderRadius: "14px", padding: "10px", gap: "10px", alignItems: "center",
-      backgroundColor: entry().pinned ? primaryContainer : containerHigh,
-      border: entry().pinned ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
-      color: entry().pinned ? onPrimaryContainer : onSurface,
-    }}>
+    <M3InteractiveCard
+      layout="row"
+      testId={`clip-entry-${entry().id}`}
+      actionTestId={`clip-copy-${entry().id}`}
+      ariaLabel={title()}
+      {...(props.onRowRef ? { ref: props.onRowRef } : {})}
+      onClick={() => {
+        void invokePublic("clipboard.copy", { id: entry().id });
+        closePanels();
+      }}
+      style={{
+        zIndex: 1,
+        borderRadius: "14px", padding: "10px", gap: "10px", alignItems: "center",
+        backgroundColor: entry().pinned ? primaryContainer : containerHigh,
+        border: entry().pinned ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
+        color: entry().pinned ? onPrimaryContainer : onSurface,
+      }}
+    >
       <Show when={src()} fallback={
         <box style={{ ...thumbnail, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: containerHighest }}>
           <ShellIcon name={entry().kind === "image" ? "image" : entry().preview.startsWith("http") ? "link" : "fileText"} size={18} color={primary} />
@@ -62,14 +73,7 @@ function ClipboardRow(props: {
       }>
         <Image testId={`clip-image-${entry().id}`} src={src()} style={thumbnailImage} />
       </Show>
-      <Button testId={`clip-copy-${entry().id}`} style={{
-        display: "flex", flexGrow: 1, flexBasis: "0px", minWidth: "0px", flexDirection: "column", alignItems: "stretch", gap: "2px",
-        borderRadius: "10px", padding: "4px 6px", margin: "-4px -6px",
-      }}
-        onClick={() => {
-          void invokePublic("clipboard.copy", { id: entry().id });
-          closePanels();
-        }}>
+      <column style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "2px" }}>
         <text style={{ ...truncate, fontWeight: 500, fontSize: "13px" }}>{title()}</text>
         <text data-tabular="true" style={{
           ...truncate, fontFamily: "var(--font-mono)", fontSize: "11px", fontVariantNumeric: "tabular-nums",
@@ -77,21 +81,25 @@ function ClipboardRow(props: {
         }}>
           {`${entry().pinned ? "Pinned · " : ""}${entry().kind} · ${entry().byte_len} B`}
         </text>
-      </Button>
-      <Button testId={`clip-pin-${entry().id}`} ariaLabel={entry().pinned ? "Unpin entry" : "Pin entry"} checked={entry().pinned}
-        style={{
-          ...iconButton,
-          backgroundColor: entry().pinned ? "color-mix(in srgb, var(--color-primary) 20%, transparent)" : containerHighest,
-        }}
-        onClick={() => { void invokePublic(entry().pinned ? "clipboard.unpin" : "clipboard.pin", { id: entry().id }); }}>
-        <ShellIcon name="pin" size={14} color={entry().pinned ? onPrimaryContainer : muted} />
-      </Button>
-      <Button testId={`clip-forget-${entry().id}`} ariaLabel="Forget entry"
-        style={{ ...iconButton, backgroundColor: containerHighest }}
-        onClick={() => { void invokePublic("clipboard.forget", { id: entry().id }); }}>
-        <ShellIcon name="trash" size={14} color="var(--color-error)" />
-      </Button>
-    </row>
+      </column>
+      <M3CardAction style={{ flexShrink: 0 }}>
+        <Button testId={`clip-pin-${entry().id}`} ariaLabel={entry().pinned ? "Unpin entry" : "Pin entry"} checked={entry().pinned}
+          style={{
+            ...iconButton,
+            backgroundColor: entry().pinned ? "color-mix(in srgb, var(--color-primary) 20%, transparent)" : containerHighest,
+          }}
+          onClick={() => { void invokePublic(entry().pinned ? "clipboard.unpin" : "clipboard.pin", { id: entry().id }); }}>
+          <ShellIcon name="pin" size={14} color={entry().pinned ? onPrimaryContainer : muted} />
+        </Button>
+      </M3CardAction>
+      <M3CardAction style={{ flexShrink: 0 }}>
+        <Button testId={`clip-forget-${entry().id}`} ariaLabel="Forget entry"
+          style={{ ...iconButton, backgroundColor: containerHighest }}
+          onClick={() => { void invokePublic("clipboard.forget", { id: entry().id }); }}>
+          <ShellIcon name="trash" size={14} color="var(--color-error)" />
+        </Button>
+      </M3CardAction>
+    </M3InteractiveCard>
   );
 }
 

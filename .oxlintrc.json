@@ -54,6 +54,7 @@
         "zshell/scoped-dismiss-instant": "error",
         "zshell/interactive-hover-radius": "error",
         "zshell/centered-text-badge": "error",
+        "zshell/no-partial-card-hover": "error",
         "zgui/no-direct-bridge": "error",
         "zgui/no-cleanup-in-ref": "error",
         "zgui/no-top-level-service-call": "error",

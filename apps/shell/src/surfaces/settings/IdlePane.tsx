@@ -1,5 +1,5 @@
 import { Button, For, Show, TextField, createEffect, createMemo, createSignal, type Accessor, type NativeChild } from "@hewel/zgui";
-import { M3Button, M3SegmentedControl, M3Switch } from "@z-shell/sdk/primitives";
+import { M3Button, M3CardAction, M3InteractiveCard, M3SegmentedControl, M3Switch } from "@z-shell/sdk/primitives";
 import { createOpacityEnter, useMotionScheme } from "../../motion.ts";
 import { useShellStore } from "../../store.ts";
 import type { IdleAction } from "../../topics.ts";
@@ -339,17 +339,21 @@ export function IdlePane(): NativeChild {
           {rule => {
             const selected = () => selectedName() === rule().name;
             return (
-              <row style={{
-                borderRadius: "14px", padding: "8px 10px", alignItems: "center", gap: "10px",
-                backgroundColor: selected() ? primaryContainer : container,
-                border: selected() ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
-                color: selected() ? onPrimaryContainer : onSurface,
-              }}>
-                <Button testId={`settings-idle-rule-${rule().name}`} onClick={() => selectRule(rule().name)} style={{
-                  ...grow, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "1px",
-                  minHeight: "32px", borderRadius: "10px", padding: "6px 8px", margin: "-6px -8px",
-                  backgroundColor: "transparent", color: selected() ? onPrimaryContainer : onSurface,
-                }}>
+              <M3InteractiveCard
+                layout="row"
+                testId={`settings-idle-rule-card-${rule().name}`}
+                actionTestId={`settings-idle-rule-${rule().name}`}
+                ariaLabel={formatRuleTitle(rule().action, rule().name)}
+                selected={selected()}
+                onClick={() => selectRule(rule().name)}
+                style={{
+                  borderRadius: "14px", padding: "8px 10px", alignItems: "center", gap: "10px",
+                  backgroundColor: selected() ? primaryContainer : container,
+                  border: selected() ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
+                  color: selected() ? onPrimaryContainer : onSurface,
+                }}
+              >
+                <column style={{ ...grow, gap: "1px", minHeight: "32px", justifyContent: "center" }}>
                   <text style={{ ...clipped, fontSize: "13px", fontWeight: 600 }}>{formatRuleTitle(rule().action, rule().name)}</text>
                   <text data-tabular="true" style={{
                     ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", fontVariantNumeric: "tabular-nums",
@@ -357,13 +361,16 @@ export function IdlePane(): NativeChild {
                   }}>
                     {`after ${formatRuleDuration(rule().timeout_seconds)}${rule().locked_timeout_seconds ? ` · locked ${formatRuleDuration(rule().locked_timeout_seconds!)}` : ""}${rule().enabled ? "" : " · Disabled"}`}
                   </text>
-                </Button>
-                <ShellSwitch
-                  ariaLabel={`Enable ${rule().name}`}
-                  checked={rule().enabled}
-                  onToggle={() => updateRule(rule().name, r => ({ ...r, enabled: !r.enabled }))}
-                />
-              </row>
+                </column>
+                <M3CardAction style={{ flexShrink: 0 }}>
+                  <ShellSwitch
+                    testId={`settings-idle-switch-${rule().name}`}
+                    ariaLabel={`Enable ${rule().name}`}
+                    checked={rule().enabled}
+                    onToggle={() => updateRule(rule().name, r => ({ ...r, enabled: !r.enabled }))}
+                  />
+                </M3CardAction>
+              </M3InteractiveCard>
             );
           }}
         </For>

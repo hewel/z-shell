@@ -664,3 +664,105 @@ export function M3DialogShell(props: M3DialogShellProps): NativeChild {
     </column>
   );
 }
+
+export interface M3InteractiveCardProps {
+  readonly layout?: "row" | "column";
+  readonly testId?: string | null;
+  readonly actionTestId?: string | null;
+  readonly ariaLabel?: string | null;
+  readonly selected?: boolean;
+  readonly expanded?: boolean;
+  readonly disabled?: boolean;
+  readonly inert?: boolean;
+  readonly ref?: (node: NativeNode) => void;
+  readonly class?: string;
+  readonly style?: NativeStyle;
+  readonly onClick?: ((event: NativeEvent) => void) | undefined;
+  readonly children?: NativeChild;
+}
+
+/**
+ * Full-card interactive container using a stretched sibling hit layer so M3
+ * :hover/:active state layers fill the entire outer rounded card (including
+ * superellipse corners) without negative-margin "box-in-box" clipping.
+ * Wrap independent secondary controls inside `<M3CardAction>` so hovering them
+ * hits only the secondary control without double-highlighting the card.
+ */
+export function M3InteractiveCard(props: M3InteractiveCardProps): NativeChild {
+  const interactive = () => (props.onClick !== undefined ? "true" : null);
+  const className = () => cx(styles.interactiveCard, props.class);
+  const renderHitLayer = () => (
+    <Show when={props.onClick !== undefined}>
+      <Button
+        testId={props.actionTestId ?? null}
+        ariaLabel={props.ariaLabel ?? null}
+        selected={props.selected ?? null}
+        expanded={props.expanded ?? null}
+        disabled={props.disabled ?? false}
+        onClick={event => props.onClick?.(event)}
+        class={styles.interactiveCardHit}
+      />
+    </Show>
+  );
+
+  if (props.layout === "row") {
+    return (
+      <row
+        testId={props.testId ?? null}
+        data-interactive={interactive()}
+        {...(props.inert !== undefined ? { inert: props.inert } : {})}
+        {...(props.ref ? { ref: props.ref } : {})}
+        class={className()}
+        {...(props.style !== undefined ? { style: props.style } : {})}
+      >
+        {renderHitLayer()}
+        {props.children}
+      </row>
+    );
+  }
+
+  return (
+    <column
+      testId={props.testId ?? null}
+      data-interactive={interactive()}
+      {...(props.inert !== undefined ? { inert: props.inert } : {})}
+      {...(props.ref ? { ref: props.ref } : {})}
+      class={className()}
+      {...(props.style !== undefined ? { style: props.style } : {})}
+    >
+      {renderHitLayer()}
+      {props.children}
+    </column>
+  );
+}
+
+export interface M3CardActionProps {
+  readonly layout?: "box" | "row" | "column";
+  readonly class?: string;
+  readonly style?: NativeStyle;
+  readonly children?: NativeChild;
+}
+
+/** Elevates a secondary interactive control above `M3InteractiveCard`'s hit layer. */
+export function M3CardAction(props: M3CardActionProps): NativeChild {
+  const className = () => cx(styles.interactiveCardAction, props.class);
+  if (props.layout === "row") {
+    return (
+      <row class={className()} {...(props.style !== undefined ? { style: props.style } : {})}>
+        {props.children}
+      </row>
+    );
+  }
+  if (props.layout === "column") {
+    return (
+      <column class={className()} {...(props.style !== undefined ? { style: props.style } : {})}>
+        {props.children}
+      </column>
+    );
+  }
+  return (
+    <box class={className()} {...(props.style !== undefined ? { style: props.style } : {})}>
+      {props.children}
+    </box>
+  );
+}

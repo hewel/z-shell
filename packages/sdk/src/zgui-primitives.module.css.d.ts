@@ -23,5 +23,8 @@ declare const styles: {
   readonly linearProgressInactive: string;
   readonly dialogCard: string;
   readonly dialogBadge: string;
+  readonly interactiveCard: string;
+  readonly interactiveCardHit: string;
+  readonly interactiveCardAction: string;
 };
 export default styles;

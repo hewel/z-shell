@@ -1,6 +1,6 @@
-import { Button, For, Show, createMemo, createSignal, type Accessor, type NativeChild } from "@hewel/zgui";
+import { For, Show, createMemo, createSignal, type Accessor, type NativeChild } from "@hewel/zgui";
 import type { ZShellClient } from "@z-shell/sdk";
-import { M3Collapsible, M3IconButton, M3LinearProgress } from "@z-shell/sdk/primitives";
+import { M3Collapsible, M3IconButton, M3InteractiveCard, M3LinearProgress } from "@z-shell/sdk/primitives";
 import { SPRING_EPSILON, createM3Spring, useGlobalMotionScheme, useTopic, type MotionScheme } from "@z-shell/sdk/zgui";
 import type { AiUsageSnapshot, QuotaEntry } from "./service.ts";
 
@@ -48,13 +48,14 @@ function ProviderQuotaCard(props: {
   const extraEntries = () => props.entries.slice(1);
 
   return (
-    <column style={subcard}>
-      <Button ariaLabel={`Toggle ${props.provider} details`} expanded={expanded()}
-        onClick={() => setExpanded(open => !open)} style={{
-          display: "flex", flexDirection: "row", alignItems: "center", gap: "10px",
-          width: "100%", minHeight: "34px", padding: "4px 6px", margin: "-4px -6px", borderRadius: "10px",
-          backgroundColor: "transparent", color: onSurface,
-        }}>
+    <M3InteractiveCard
+      layout="column"
+      ariaLabel={extraEntries().length > 0 ? `Toggle ${props.provider} details` : null}
+      expanded={expanded()}
+      onClick={extraEntries().length > 0 ? () => setExpanded(open => !open) : undefined}
+      style={{ ...subcard, color: onSurface }}
+    >
+      <row style={{ alignItems: "center", gap: "10px", width: "100%", minHeight: "34px" }}>
         <box ariaHidden style={{
           display: "flex", width: "34px", height: "34px", borderRadius: "10px", flexShrink: 0,
           alignItems: "center", justifyContent: "center", backgroundColor: containerHighest,
@@ -73,7 +74,7 @@ function ProviderQuotaCard(props: {
             transform: `rotate(${chevronDeg().toFixed(1)}deg)`,
           }} />
         </Show>
-      </Button>
+      </row>
 
       <Show when={primaryEntry()}>
         {entry => <MetricBar quota={entry()} />}
@@ -86,7 +87,7 @@ function ProviderQuotaCard(props: {
           </For>
         </column>
       </M3Collapsible>
-    </column>
+    </M3InteractiveCard>
   );
 }
 

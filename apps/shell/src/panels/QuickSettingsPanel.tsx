@@ -128,7 +128,7 @@ function QuickTile(props: {
   const ink = () => props.active ? onPrimaryContainer : onSurface;
   const subInk = () => props.active ? onPrimaryContainer : muted;
   return (
-    <row data-qs-tile="true" style={{
+    <row testId={props.outgoing ? null : `qs-tile-card-${props.id}`} data-qs-tile="true" style={{
       ...grow, height: "50px", borderRadius: "14px", alignItems: "center",
       backgroundColor: props.active ? primaryContainer : containerHigh,
       border: props.active ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",

@@ -714,6 +714,60 @@ describe("zshell oxlint design plugin", () => {
     );
     expect(goodPlainHeader.status, goodPlainHeader.output).toBe(0);
   });
+
+  test("zshell/no-partial-card-hover forbids negative margins on <Button>/<control>", () => {
+    const badShorthand = lintSnippet(
+      "CalendarPanel.tsx",
+      `export const Card = () => (
+        <Button style={{ borderRadius: "10px", padding: "2px", margin: "-2px" }}>
+          <text>Ghostty</text>
+        </Button>
+      );`,
+      "zshell/no-partial-card-hover",
+    );
+    expect(badShorthand.status).not.toBe(0);
+
+    const badTwoAxis = lintSnippet(
+      "ClipboardPanel.tsx",
+      `export const Row = () => (
+        <Button style={{ borderRadius: "10px", padding: "4px 6px", margin: "-4px -6px" }}>
+          <text>Entry</text>
+        </Button>
+      );`,
+      "zshell/no-partial-card-hover",
+    );
+    expect(badTwoAxis.status).not.toBe(0);
+
+    const badSideControl = lintSnippet(
+      "IdlePane.tsx",
+      `const hitStyle = { borderRadius: "10px", marginLeft: "-8px" } as const;
+      export const Rule = () => <control style={{ ...hitStyle }} />;`,
+      "zshell/no-partial-card-hover",
+    );
+    expect(badSideControl.status).not.toBe(0);
+
+    const goodInteractiveCard = lintSnippet(
+      "CalendarPanel.tsx",
+      `export const Card = () => (
+        <M3InteractiveCard layout="column" onClick={() => {}} style={{ borderRadius: "14px", padding: "10px" }}>
+          <text>Ghostty</text>
+        </M3InteractiveCard>
+      );`,
+      "zshell/no-partial-card-hover",
+    );
+    expect(goodInteractiveCard.status, goodInteractiveCard.output).toBe(0);
+
+    const goodPositiveMargin = lintSnippet(
+      "SettingsWindow.tsx",
+      `export const Btn = () => (
+        <Button style={{ borderRadius: "10px", marginTop: "4px", padding: "6px 10px" }}>
+          <text>Save</text>
+        </Button>
+      );`,
+      "zshell/no-partial-card-hover",
+    );
+    expect(goodPositiveMargin.status, goodPositiveMargin.output).toBe(0);
+  });
 });
 
 function parseCubicPoints(d: string): { x: number; y: number }[] {
