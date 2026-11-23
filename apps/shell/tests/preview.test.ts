@@ -753,9 +753,10 @@ describe("apps/shell preview", () => {
             payload: { id: 1, action_key: "open" },
             atMs: 40,
           },
-          { id: 27, name: "notifications.dismiss", payload: { id: 1 }, atMs: 40 },
-          { id: 28, name: "ime.select-candidate", payload: { index: 1 }, atMs: 2070 },
-          { id: 29, name: "ime.page-down", payload: {}, atMs: 2070 },
+          { id: 27, name: "notifications.set-paused", payload: { paused: true }, atMs: 40 },
+          { id: 28, name: "notifications.dismiss", payload: { id: 1 }, atMs: 40 },
+          { id: 29, name: "ime.select-candidate", payload: { index: 1 }, atMs: 2070 },
+          { id: 30, name: "ime.page-down", payload: {}, atMs: 2070 },
         ],
       }), null, 2));
       writeFileSync(scenario, JSON.stringify({

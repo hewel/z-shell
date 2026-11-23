@@ -307,16 +307,106 @@ export interface NotificationAction {
   readonly label: string;
 }
 
+export interface NotificationImageDimensions {
+  readonly width: number;
+  readonly height: number;
+}
+
+export type NotificationMediaRef = MediaRef & {
+  readonly dimensions?: NotificationImageDimensions | null;
+};
+
 export interface NotificationItem {
   readonly id: number;
   readonly revision: number;
   readonly app_name: string;
   readonly summary: string;
   readonly body: string;
-  readonly icon: string | MediaRef | null;
-  readonly attachment: MediaRef | null;
+  readonly icon: string | NotificationMediaRef | null;
+  readonly attachment: NotificationMediaRef | null;
   readonly actions: readonly NotificationAction[];
   readonly urgency: number;
+}
+
+export interface NotificationMediaLayout {
+  readonly leadingMedia: NotificationMediaRef | null;
+  readonly leadingKind: "avatar" | "app-icon" | null;
+  readonly appBadge: NotificationMediaRef | null;
+  readonly previewBanner: NotificationMediaRef | null;
+  readonly fallbackKind: "image" | "bell";
+}
+
+function isWideNotificationPreview(media: NotificationMediaRef | null | undefined): boolean {
+  const dims = media?.dimensions;
+  if (!dims || dims.width <= 0 || dims.height <= 0) return false;
+  return dims.width / dims.height > 1.35 && dims.width > 160;
+}
+
+function isAvatarOrSquareMedia(media: NotificationMediaRef | null | undefined): boolean {
+  const dims = media?.dimensions;
+  if (!dims || dims.width <= 0 || dims.height <= 0) return false;
+  const ratio = dims.width / dims.height;
+  return (ratio >= 0.75 && ratio <= 1.35) || Math.max(dims.width, dims.height) <= 160;
+}
+
+/**
+ * Aspect-aware media routing shared by NotificationToasts and CalendarPanel (12B):
+ * - Form A (square/avatar/small <= 160px attachment): route to leading avatar/cover slot + circular XDG app badge.
+ * - Form B (wide screenshot/photo > 1.35 & width > 160px in attachment OR app_icon): promote to full-width cover banner.
+ */
+export function resolveNotificationMediaLayout(
+  item: Pick<NotificationItem, "icon" | "attachment">,
+): NotificationMediaLayout {
+  const iconMedia = item.icon && typeof item.icon !== "string" ? item.icon : null;
+  const attachmentMedia = item.attachment ?? null;
+
+  if (attachmentMedia) {
+    if (isAvatarOrSquareMedia(attachmentMedia)) {
+      return {
+        leadingMedia: attachmentMedia,
+        leadingKind: "avatar",
+        appBadge: iconMedia && !isWideNotificationPreview(iconMedia) ? iconMedia : null,
+        previewBanner: null,
+        fallbackKind: "bell",
+      };
+    }
+    const usableAppIcon = iconMedia && !isWideNotificationPreview(iconMedia) ? iconMedia : null;
+    return {
+      leadingMedia: usableAppIcon,
+      leadingKind: usableAppIcon ? "app-icon" : null,
+      appBadge: null,
+      previewBanner: attachmentMedia,
+      fallbackKind: "image",
+    };
+  }
+
+  if (iconMedia && isWideNotificationPreview(iconMedia)) {
+    return {
+      leadingMedia: null,
+      leadingKind: null,
+      appBadge: null,
+      previewBanner: iconMedia,
+      fallbackKind: "image",
+    };
+  }
+
+  if (iconMedia) {
+    return {
+      leadingMedia: iconMedia,
+      leadingKind: "app-icon",
+      appBadge: null,
+      previewBanner: null,
+      fallbackKind: "bell",
+    };
+  }
+
+  return {
+    leadingMedia: null,
+    leadingKind: null,
+    appBadge: null,
+    previewBanner: null,
+    fallbackKind: "bell",
+  };
 }
 
 /**

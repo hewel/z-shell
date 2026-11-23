@@ -1863,6 +1863,86 @@ describe("apps/shell design geometry & pixel lint", () => {
         height: 1440,
         thumbnail: null,
       }));
+      const discordAvatarBytes = makeSolidPngBytes(128, 128, 0x3b, 0x6b, 0x63);
+      const discordIconBytes = makeSolidPngBytes(48, 48, 0x58, 0x65, 0xf2);
+      const niriShotBytes = makeSolidPngBytes(320, 180, 0x74, 0xc0, 0xfc);
+      const ghosttyIconBytes = makeSolidPngBytes(48, 48, 0x2b, 0x36, 0x54);
+      const discordIconRef = {
+        kind: "blob_handle",
+        token: "notif-12b-discord-icon",
+        mime: "image/png",
+        byte_len: discordIconBytes.length,
+      };
+      const discordAvatarRef = {
+        kind: "blob_handle",
+        token: "notif-12b-discord-avatar",
+        mime: "image/png",
+        byte_len: discordAvatarBytes.length,
+        dimensions: { width: 128, height: 128 },
+      };
+      const niriShotRef = {
+        kind: "blob_handle",
+        token: "notif-12b-niri-shot",
+        mime: "image/png",
+        byte_len: niriShotBytes.length,
+        dimensions: { width: 320, height: 180 },
+      };
+      const ghosttyIconRef = {
+        kind: "blob_handle",
+        token: "notif-12b-ghostty-icon",
+        mime: "image/png",
+        byte_len: ghosttyIconBytes.length,
+      };
+      const discordNotif12b = {
+        id: 201,
+        revision: 1,
+        app_name: "Discord",
+        summary: "QuickFlash (#mobile, Text Channels)",
+        body: "I guess for me, I am really not a fan of how iOS looks and would much rather have one unified look across both platforms.",
+        icon: discordIconRef,
+        attachment: discordAvatarRef,
+        actions: [{ key: "default", label: "" }],
+        urgency: 1,
+      };
+      const history12b = [
+        discordNotif12b,
+        {
+          id: 202,
+          revision: 1,
+          app_name: "niri",
+          summary: "Screenshot captured",
+          body: "You can paste the image from the clipboard.",
+          icon: niriShotRef,
+          attachment: null,
+          actions: [
+            { key: "open", label: "Open" },
+            { key: "copy", label: "Copy path" },
+          ],
+          urgency: 1,
+        },
+        {
+          id: 203,
+          revision: 1,
+          app_name: "Ghostty",
+          summary: "Approval requested",
+          body: "Antigravity CLI is ready for input",
+          icon: ghosttyIconRef,
+          attachment: null,
+          actions: [],
+          urgency: 1,
+        },
+        {
+          id: 204,
+          revision: 1,
+          app_name: "System",
+          summary: "Update ready",
+          body: "Fallback bell only when no XDG icon or image",
+          icon: null,
+          attachment: null,
+          actions: [],
+          urgency: 1,
+        },
+      ];
 
       const timeline = createVirtualTimeline();
       timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
@@ -1901,10 +1981,24 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.advance("media-idle-settle", 400);
       timeline.step({ id: "capture-media-idle", op: "capture", surface: "panel-media", captureId: "media-idle" });
 
-      // 3. 13B · Calendar Empty Notifications
+      // 3. 13B · Calendar Empty Notifications & 12B · Notification Media & Avatar Layouts (Toast + History)
       timeline.step({ id: "open-cal-empty", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-clock" }, button: "primary" });
       timeline.advance("cal-empty-settle", 400);
       timeline.step({ id: "capture-cal-empty", op: "capture", surface: "panel-calendar", captureId: "cal-empty" });
+      const notifMedia12bAtMs = timeline.after(20);
+      const notifMedia12bBlob1AtMs = timeline.after(30);
+      const notifMedia12bBlob2AtMs = timeline.after(35);
+      const notifMedia12bBlob3AtMs = timeline.after(40);
+      const notifMedia12bBlob4AtMs = timeline.after(45);
+      timeline.advance("notif-media-12b-settle", 450);
+      timeline.step({ id: "capture-cal-notif-media-12b", op: "capture", surface: "panel-calendar", captureId: "cal-notif-media-12b" });
+      const notifToast12bAtMs = timeline.after(20);
+      const notifToast12bBlob1AtMs = timeline.after(30);
+      const notifToast12bBlob2AtMs = timeline.after(35);
+      timeline.advance("notif-toast-12b-settle", 450);
+      timeline.step({ id: "capture-toast-notif-media-12b", op: "capture", surface: "notification-toasts", captureId: "toast-notif-media-12b" });
+      const notifClear12bAtMs = timeline.after(10);
+      timeline.advance("notif-clear-12b-settle", 120);
 
       // 4. 09E · Bar Popups (IME Switcher & Kimpanel)
       timeline.step({ id: "open-ime-menu", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-ime" }, button: "secondary" });
@@ -2088,6 +2182,24 @@ describe("apps/shell design geometry & pixel lint", () => {
             data: { available: true, selected_player_id: null, any_playing: false, cover: null, players: [] },
           },
           {
+            atMs: notifMedia12bAtMs,
+            topic: "desktop.notifications",
+            revision: 2,
+            data: { available: true, dnd: false, popups: [], history: history12b },
+          },
+          {
+            atMs: notifToast12bAtMs,
+            topic: "desktop.notifications",
+            revision: 3,
+            data: { available: true, dnd: false, popups: [discordNotif12b], history: history12b },
+          },
+          {
+            atMs: notifClear12bAtMs,
+            topic: "desktop.notifications",
+            revision: 4,
+            data: { available: true, dnd: false, popups: [], history: [] },
+          },
+          {
             atMs: kimpanelShowAtMs,
             topic: "desktop.ime.panel",
             revision: 2,
@@ -2163,6 +2275,54 @@ describe("apps/shell design geometry & pixel lint", () => {
             atMs: clipCopyAtMs,
             result: { data: { copied: 102 } },
           },
+          {
+            socket: "host",
+            id: 3,
+            name: "notifications.fetch-blob",
+            payload: { token: "notif-12b-discord-avatar" },
+            atMs: notifMedia12bBlob1AtMs,
+            result: { data: { bytes: discordAvatarBytes } },
+          },
+          {
+            socket: "host",
+            id: 4,
+            name: "notifications.fetch-blob",
+            payload: { token: "notif-12b-discord-icon" },
+            atMs: notifMedia12bBlob2AtMs,
+            result: { data: { bytes: discordIconBytes } },
+          },
+          {
+            socket: "host",
+            id: 5,
+            name: "notifications.fetch-blob",
+            payload: { token: "notif-12b-niri-shot" },
+            atMs: notifMedia12bBlob3AtMs,
+            result: { data: { bytes: niriShotBytes } },
+          },
+          {
+            socket: "host",
+            id: 6,
+            name: "notifications.fetch-blob",
+            payload: { token: "notif-12b-ghostty-icon" },
+            atMs: notifMedia12bBlob4AtMs,
+            result: { data: { bytes: ghosttyIconBytes } },
+          },
+          {
+            socket: "host",
+            id: 7,
+            name: "notifications.fetch-blob",
+            payload: { token: "notif-12b-discord-avatar" },
+            atMs: notifToast12bBlob1AtMs,
+            result: { data: { bytes: discordAvatarBytes } },
+          },
+          {
+            socket: "host",
+            id: 8,
+            name: "notifications.fetch-blob",
+            payload: { token: "notif-12b-discord-icon" },
+            atMs: notifToast12bBlob2AtMs,
+            result: { data: { bytes: discordIconBytes } },
+          },
         ],
       }), null, 2));
       writeFileSync(scenario, JSON.stringify({
@@ -2173,7 +2333,7 @@ describe("apps/shell design geometry & pixel lint", () => {
       }, null, 2));
 
       const result = runPreview(published.dist, fixture, scenario, out);
-      expectCleanPreview(result, 8, 0);
+      expectCleanPreview(result, 10, 0);
 
       // Verify 22A · Wallpaper Library
       const wpLib = readCapture(out, "settings-window", "wallpaper-library");
@@ -2196,10 +2356,37 @@ describe("apps/shell design geometry & pixel lint", () => {
       expect(treeNode(mediaIdle.tree, "media-idle-empty").boundsLogical).toBeDefined();
       expect(treeNode(mediaIdle.tree, "media-sink-toggle").boundsLogical).toBeDefined();
 
-      // Verify 13B · Calendar Empty Notifications
+      // Verify 13B · Calendar Empty Notifications & 12B · Notification Media & Avatar Layouts
       const calEmpty = readCapture(out, "panel-calendar", "cal-empty");
       expect(treeNode(calEmpty.tree, "cal-notif-empty").boundsLogical).toBeDefined();
       expect(calEmpty.tree.nodes.some(node => node.text === "All caught up")).toBe(true);
+
+      const calMedia12b = readCapture(out, "panel-calendar", "cal-notif-media-12b");
+      // Form A (Discord 128x128 square avatar + XDG app icon): avatar in leading 36x36 slot + 16x16 circular badge, no bottom preview.
+      const discordAvatar = treeNode(calMedia12b.tree, "cal-notif-avatar-201").boundsLogical!;
+      expect([Math.round(discordAvatar.width), Math.round(discordAvatar.height)]).toEqual([36, 36]);
+      const discordBadge = treeNode(calMedia12b.tree, "cal-notif-badge-201").boundsLogical!;
+      expect([Math.round(discordBadge.width), Math.round(discordBadge.height)]).toEqual([16, 16]);
+      expect(calMedia12b.tree.nodes.some(node => node.testId === "cal-notif-preview-201"), "Form A renders no bottom attachment block").toBe(false);
+      // Form B (niri 320x180 16:9 screenshot in app_icon): full-width 104px cover banner below body + image icon fallback.
+      expect(treeNode(calMedia12b.tree, "cal-notif-fallback-202").boundsLogical).toBeDefined();
+      const niriPreview = treeNode(calMedia12b.tree, "cal-notif-preview-202").boundsDevice!;
+      expect(niriPreview.width, "Form B wide screenshot spans full card width").toBeGreaterThan(300);
+      expect(Math.round(niriPreview.height), "Form B history cover height == 104").toBe(104);
+      const previewSample = pixel(calMedia12b.image, Math.round(niriPreview.x + niriPreview.width / 2), Math.round(niriPreview.y + 8));
+      expect(previewSample[2], "Form B preview filled edge-to-edge by cover image").toBeGreaterThan(180);
+      // XDG app icon only (Ghostty) & fallback bell (System).
+      expect(treeNode(calMedia12b.tree, "cal-notif-avatar-203").boundsLogical).toBeDefined();
+      expect(calMedia12b.tree.nodes.some(node => node.testId === "cal-notif-badge-203")).toBe(false);
+      expect(treeNode(calMedia12b.tree, "cal-notif-fallback-204").boundsLogical).toBeDefined();
+
+      // Toast Form A (Discord 40x40 avatar + 18x18 circular app badge, no bottom attachment).
+      const toastMedia12b = readCapture(out, "notification-toasts", "toast-notif-media-12b");
+      const toastAvatar = treeNode(toastMedia12b.tree, "toast-icon-201").boundsLogical!;
+      expect([Math.round(toastAvatar.width), Math.round(toastAvatar.height)]).toEqual([40, 40]);
+      const toastBadge = treeNode(toastMedia12b.tree, "toast-badge-201").boundsLogical!;
+      expect([Math.round(toastBadge.width), Math.round(toastBadge.height)]).toEqual([18, 18]);
+      expect(toastMedia12b.tree.nodes.some(node => node.testId === "toast-attachment-201"), "Toast Form A omits bottom attachment").toBe(false);
 
       // Verify 09E · IME Switcher & Kimpanel
       const imeMenu = readCapture(out, "ime-menu", "ime-menu-09e");
@@ -2444,6 +2631,608 @@ describe("apps/shell design geometry & pixel lint", () => {
       expect(bootGlass.barAlpha, "profile backgroundBlur=true boots Bar glassier than Popover").toBeLessThan(bootGlass.qsAlpha);
       expect(bootGlass.qsAlpha, "profile backgroundBlur=true boots Popover glassier than Settings").toBeLessThan(bootGlass.settingsAlpha);
       expect(bootGlass.settingsAlpha, "profile backgroundBlur=true keeps Settings 100% solid").toBe(255);
+    } finally {
+      cleanup();
+    }
+  }, 30_000);
+
+  previewTest("L4 Hover Atlas: M3InteractiveCard Full-Card Hover vs Isolated Secondary Controls & Representative Hover States", () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-design-hover-atlas-");
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const monitor = { id: "DP-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900, scale: 1 };
+      const catalogItems = [
+        { id: "wp-1", name: "glacier-studio.png", source_path: "/home/hewel/Pictures/Wallpapers/glacier-studio.png", width: 2560, height: 1440, thumbnail: null },
+        { id: "wp-2", name: "alpine-fog.png", source_path: "/home/hewel/Pictures/Wallpapers/alpine-fog.png", width: 2560, height: 1440, thumbnail: null },
+        { id: "wp-3", name: "pine-moon.png", source_path: "/home/hewel/Pictures/Wallpapers/pine-moon.png", width: 2560, height: 1440, thumbnail: null },
+      ];
+
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+
+      // 1. StatusBar floating island hover & Dock icon hover
+      timeline.step({ id: "capture-bar-rest", op: "capture", surface: "bar-dp-1", captureId: "bar-rest" });
+      timeline.step({ id: "hover-bar-clock", op: "pointer.move", target: { surface: "bar-dp-1", testId: "bar-clock" } });
+      timeline.advance("bar-clock-hover-settle", 150);
+      timeline.step({ id: "capture-bar-clock-hover", op: "capture", surface: "bar-dp-1", captureId: "bar-clock-hover" });
+
+      // Reveal dock via far-left launcher button so browser icon on the right is strictly at rest.
+      timeline.step({ id: "reveal-dock-rest", op: "pointer.move", target: { surface: "dock-dp-1", testId: "dock-launcher" } });
+      timeline.advance("dock-reveal-settle", 420);
+      timeline.step({ id: "capture-dock-rest", op: "capture", surface: "dock-dp-1", captureId: "dock-rest" });
+      timeline.step({ id: "hover-dock-app", op: "pointer.move", target: { surface: "dock-dp-1", testId: "dock-app-org.example.browser" } });
+      timeline.advance("dock-app-hover-settle", 180);
+      timeline.step({ id: "capture-dock-app-hover", op: "capture", surface: "dock-dp-1", captureId: "dock-app-hover" });
+
+      // 2. CalendarPanel: full-card body hover vs right × dismiss button hover
+      timeline.step({ id: "open-cal", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-clock" }, button: "primary" });
+      timeline.advance("cal-open-settle", 400);
+      timeline.step({ id: "capture-cal-rest", op: "capture", surface: "panel-calendar", captureId: "cal-rest" });
+      timeline.step({ id: "hover-cal-card-body", op: "pointer.move", target: { surface: "panel-calendar", testId: "cal-notif-default-1" } });
+      timeline.advance("cal-body-hover-settle", 150);
+      timeline.step({ id: "capture-cal-card-hover", op: "capture", surface: "panel-calendar", captureId: "cal-card-hover" });
+      timeline.step({ id: "hover-cal-dismiss", op: "pointer.move", target: { surface: "panel-calendar", testId: "cal-notif-dismiss-1" } });
+      timeline.advance("cal-dismiss-hover-settle", 150);
+      timeline.step({ id: "capture-cal-dismiss-hover", op: "capture", surface: "panel-calendar", captureId: "cal-dismiss-hover" });
+
+      // 3. ClipboardPanel: entry body hover vs Pin / Forget hover
+      timeline.step({
+        id: "open-clipboard", op: "service.emit", channel: "control.message",
+        value: { args: ["panel", "clipboard"], reply: { text: "{\"activePanel\":\"clipboard\"}" } },
+      });
+      timeline.advance("clip-open-settle", 400);
+      timeline.step({ id: "capture-clip-rest", op: "capture", surface: "panel-clipboard", captureId: "clip-rest" });
+      timeline.step({ id: "hover-clip-body", op: "pointer.move", target: { surface: "panel-clipboard", testId: "clip-copy-101" } });
+      timeline.advance("clip-body-hover-settle", 150);
+      timeline.step({ id: "capture-clip-body-hover", op: "capture", surface: "panel-clipboard", captureId: "clip-body-hover" });
+      timeline.step({ id: "hover-clip-pin", op: "pointer.move", target: { surface: "panel-clipboard", testId: "clip-pin-101" } });
+      timeline.advance("clip-pin-hover-settle", 150);
+      timeline.step({ id: "capture-clip-pin-hover", op: "capture", surface: "panel-clipboard", captureId: "clip-pin-hover" });
+      timeline.step({ id: "hover-clip-forget", op: "pointer.move", target: { surface: "panel-clipboard", testId: "clip-forget-101" } });
+      timeline.advance("clip-forget-hover-settle", 150);
+      timeline.step({ id: "capture-clip-forget-hover", op: "capture", surface: "panel-clipboard", captureId: "clip-forget-hover" });
+
+      // 4. QuickSettings: SplitTile left half hover vs right > arrow hover
+      timeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-network" }, button: "primary" });
+      timeline.advance("qs-open-settle", 450);
+      timeline.step({ id: "capture-qs-rest", op: "capture", surface: "panel-quick-settings", captureId: "qs-rest" });
+      timeline.step({ id: "hover-qs-split-left", op: "pointer.move", target: { surface: "panel-quick-settings", testId: "qs-tile-wifi" } });
+      timeline.advance("qs-left-hover-settle", 150);
+      timeline.step({ id: "capture-qs-split-left", op: "capture", surface: "panel-quick-settings", captureId: "qs-split-left-hover" });
+      timeline.step({ id: "hover-qs-split-right", op: "pointer.move", target: { surface: "panel-quick-settings", testId: "qs-open-wifi" } });
+      timeline.advance("qs-right-hover-settle", 150);
+      timeline.step({ id: "capture-qs-split-right", op: "capture", surface: "panel-quick-settings", captureId: "qs-split-right-hover" });
+
+      // 5. MediaPanel: output sink chip hover, Play/Pause hover, unseekable progress bar hover (0 diff)
+      timeline.step({ id: "open-media", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-media" }, button: "primary" });
+      timeline.advance("media-open-settle", 400);
+      timeline.step({ id: "capture-media-rest", op: "capture", surface: "panel-media", captureId: "media-rest" });
+      timeline.step({ id: "hover-media-sink", op: "pointer.move", target: { surface: "panel-media", testId: "media-sink-toggle" } });
+      timeline.advance("media-sink-hover-settle", 150);
+      timeline.step({ id: "capture-media-sink-hover", op: "capture", surface: "panel-media", captureId: "media-sink-hover" });
+      timeline.step({ id: "hover-media-play", op: "pointer.move", target: { surface: "panel-media", testId: "media-play-pause" } });
+      timeline.advance("media-play-hover-settle", 150);
+      timeline.step({ id: "capture-media-play-hover", op: "capture", surface: "panel-media", captureId: "media-play-hover" });
+      timeline.step({ id: "hover-media-progress", op: "pointer.move", target: { surface: "panel-media", testId: "media-progress" } });
+      timeline.advance("media-progress-hover-settle", 150);
+      timeline.step({ id: "capture-media-progress-hover", op: "capture", surface: "panel-media", captureId: "media-progress-hover" });
+
+      // 6. Settings — IdlePane: rule row body hover vs right M3Switch hover
+      timeline.step({
+        id: "open-settings-idle", op: "service.emit", channel: "control.message",
+        value: { args: ["settings", "idle"], reply: { text: "{\"settingsWindowOpen\":true,\"settingsWindowTab\":\"idle\"}" } },
+      });
+      timeline.advance("idle-open-settle", 400);
+      timeline.step({ id: "capture-idle-rest", op: "capture", surface: "settings-window", captureId: "idle-rest" });
+      timeline.step({ id: "hover-idle-rule", op: "pointer.move", target: { surface: "settings-window", testId: "settings-idle-rule-dpms" } });
+      timeline.advance("idle-rule-hover-settle", 150);
+      timeline.step({ id: "capture-idle-rule-hover", op: "capture", surface: "settings-window", captureId: "idle-rule-hover" });
+      timeline.step({ id: "hover-idle-switch", op: "pointer.move", target: { surface: "settings-window", testId: "settings-idle-switch-dpms" } });
+      timeline.advance("idle-switch-hover-settle", 150);
+      timeline.step({ id: "capture-idle-switch-hover", op: "capture", surface: "settings-window", captureId: "idle-switch-hover" });
+
+      // 7. Settings — AppearancePane: sidebar nav item, M3SegmentedControl item, wallpaper thumbnail
+      const wpListAtMs = timeline.after(20);
+      timeline.step({
+        id: "open-settings-appearance", op: "service.emit", channel: "control.message",
+        value: { args: ["settings", "appearance"], reply: { text: "{\"settingsWindowOpen\":true,\"settingsWindowTab\":\"appearance\"}" } },
+      });
+      timeline.advance("appearance-open-settle", 400);
+      timeline.step({ id: "capture-settings-app-rest", op: "capture", surface: "settings-window", captureId: "settings-app-rest" });
+      timeline.step({ id: "hover-settings-nav", op: "pointer.move", target: { surface: "settings-window", testId: "settings-nav-bar" } });
+      timeline.advance("settings-nav-hover-settle", 150);
+      timeline.step({ id: "capture-settings-nav-hover", op: "capture", surface: "settings-window", captureId: "settings-nav-hover" });
+      timeline.step({ id: "hover-settings-seg", op: "pointer.move", target: { surface: "settings-window", testId: "settings-motion-expressive" } });
+      timeline.advance("settings-seg-hover-settle", 150);
+      timeline.step({ id: "capture-settings-seg-hover", op: "capture", surface: "settings-window", captureId: "settings-seg-hover" });
+      timeline.step({ id: "hover-settings-wp", op: "pointer.move", target: { surface: "settings-window", testId: "settings-wp-wp-2" } });
+      timeline.advance("settings-wp-hover-settle", 150);
+      timeline.step({ id: "capture-settings-wp-hover", op: "capture", surface: "settings-window", captureId: "settings-wp-hover" });
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-design-hover-atlas",
+        initialTopics: {
+          "wayland.outputs": {
+            capability: "connected",
+            outputs: [{
+              output_instance_id: 1, name: "DP-1", description: "Hover Atlas Display", make: "Test", model: "1440x900",
+              x: 0, y: 0, width: 1440, height: 900, mode_width: 1440, mode_height: 900, refresh_mhz: 60000, scale: 1,
+              physical_width_mm: null, physical_height_mm: null,
+            }],
+          },
+          "wayland.workspaces": {
+            capability: "connected",
+            groups: [{ group_id: 1, output_instance_ids: [1] }],
+            workspaces: [
+              { workspace_id: 1, group_id: 1, name: "1", id_str: "1", coordinates: [1], active: true, urgent: false, hidden: false, capabilities: ["activate"] },
+              { workspace_id: 2, group_id: 1, name: "2", id_str: "2", coordinates: [2], active: false, urgent: false, hidden: false, capabilities: ["activate"] },
+            ],
+          },
+          "wayland.windows": {
+            capability: "connected",
+            windows: [{
+              window_id: 10, app_id: "org.example.editor", title: "z-shell — Editor",
+              activated: true, minimized: false, maximized: false, fullscreen: false, output_instance_ids: [1],
+            }],
+          },
+          "desktop.apps": {
+            available: true,
+            count: 2,
+            pinned_apps: ["org.example.editor", "org.example.browser"],
+            apps: [
+              { id: "org.example.editor", title: "Editor", startup_wm_class: "org.example.editor", icon: null },
+              { id: "org.example.browser", title: "Browser", startup_wm_class: "org.example.browser", icon: null },
+            ],
+          },
+          "desktop.notifications": {
+            available: true,
+            dnd: false,
+            popups: [],
+            history: [
+              {
+                id: 1,
+                revision: 1,
+                app_name: "Ghostty",
+                summary: "Build completed",
+                body: "z-shell-ui compiled cleanly in 4.2s",
+                icon: null,
+                attachment: null,
+                actions: [
+                  { key: "default", label: "" },
+                  { key: "open", label: "Open" },
+                ],
+                urgency: 1,
+              },
+              {
+                id: 2,
+                revision: 1,
+                app_name: "System",
+                summary: "Snapshot synced",
+                body: "No default action card",
+                icon: null,
+                attachment: null,
+                actions: [],
+                urgency: 1,
+              },
+            ],
+          },
+          clipboard: {
+            persistence: { mode: "encrypted" },
+            transport: { status: "ready" },
+            locked: "unlocked",
+            entry_count: 2,
+            entries: [
+              { id: 101, kind: "text", mime: "text/plain", preview: "https://github.com/ariakit/ariakit", pinned: false, byte_len: 34, dimensions: null, media: null },
+              { id: 102, kind: "text", mime: "text/plain", preview: "Wallpaper", pinned: true, byte_len: 9, dimensions: null, media: null },
+            ],
+          },
+          "desktop.media": {
+            available: true,
+            selected_player_id: "jellypilot",
+            any_playing: false,
+            cover: null,
+            players: [{
+              id: "jellypilot",
+              identity: "JellyPilot",
+              playback_status: "paused",
+              position_us: 60_000_000,
+              capabilities: { can_play: true, can_pause: true, can_go_next: true, can_go_previous: true, can_seek: false },
+              metadata: { title: "Unseekable Stream", artists: ["Live Radio"], album: "Broadcast", length_us: 180_000_000 },
+            }],
+          },
+          "system.audio": {
+            available: true,
+            default_sink: "speakers",
+            default_source: null,
+            sinks: [
+              { index: 1, name: "speakers", description: "Studio Speakers", volume: 0.65, muted: false, channels: 2 },
+              { index: 2, name: "headphones", description: "WH-1000XM5", volume: 0.45, muted: false, channels: 2 },
+            ],
+            sources: [],
+            sink_inputs: [],
+          },
+          "system.network": {
+            available: true,
+            connectivity: "full",
+            ethernet: [],
+            wifi: {
+              enabled: true,
+              hardware_enabled: true,
+              scanning: false,
+              devices: [{
+                id: "wlan0",
+                interface: "wlan0",
+                active_ap_id: "ap-studio",
+                active_connection: "Studio-5G",
+                access_points: [{ id: "ap-studio", ssid: "Studio-5G", strength: 82, secured: true, active: true }],
+              }],
+              profiles: [],
+            },
+          },
+          "session.idle": {
+            available: true,
+            caffeine: false,
+            service_status: { status: "running" },
+            rules: [
+              { name: "lock", enabled: true, timeout_seconds: 300, locked_timeout_seconds: null, action: "lock", resume_command: null, pre_action_fade_seconds: 2 },
+              { name: "dpms", enabled: true, timeout_seconds: 600, locked_timeout_seconds: 30, action: "screen_off", resume_command: null, pre_action_fade_seconds: 0 },
+            ],
+            active_inhibitors: [],
+          },
+          wallpaper: {
+            available: true,
+            fit: "cover",
+            sync_theme: true,
+            slideshow_seconds: 0,
+            catalog_count: catalogItems.length,
+            current: { source_path: catalogItems[0]!.source_path, media: null, width: 2560, height: 1440, fit: "cover" },
+            per_output: { "DP-1": { source_path: catalogItems[0]!.source_path, media: null, width: 2560, height: 1440, fit: "cover" } },
+            last_error: null,
+          },
+          settings: {
+            general: { offline_mode: false, log_level: "info" },
+            bar: {
+              position: "top",
+              style: "floating",
+              gaps: 12,
+              edge_overrides: { top: null, right: null, bottom: null, left: null },
+              launcher_enabled: true,
+              dock_enabled: true,
+              clock_24h: true,
+              clock_seconds: false,
+            },
+            theme: {
+              mode: "dark",
+              variant: "tonal",
+              seed_color: null,
+              motion_scheme: "standard",
+              backend: "builtin",
+              gtk_linking: false,
+            },
+            ime: { mode: "indicator_only", candidate_layout: "auto", switch_osd: true },
+            polkit: { enabled: true },
+            wallpaper: { directories: ["~/Pictures/Wallpapers"], fit: "cover", sync_theme: true, slideshow_seconds: 0 },
+            pre_action_fade_seconds: 0,
+            configured_plugins: [],
+          },
+        },
+        commands: [
+          {
+            id: 26,
+            name: "wallpaper.list",
+            payload: { offset: 0, limit: 16 },
+            atMs: wpListAtMs,
+            result: { data: { total: catalogItems.length, items: catalogItems } },
+          },
+        ],
+      }), null, 2));
+
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-hover-atlas",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(published.dist, fixture, scenario, out);
+      expectCleanPreview(result, 25, 0);
+
+      const assertRoundedHoverCorners = (
+        beforeImg: ReturnType<typeof readCapture>["image"],
+        afterImg: ReturnType<typeof readCapture>["image"],
+        bounds: DeviceBounds,
+        label: string,
+      ) => {
+        const x0 = Math.floor(bounds.x);
+        const y0 = Math.floor(bounds.y);
+        const x1 = Math.ceil(bounds.x + bounds.width) - 1;
+        const y1 = Math.ceil(bounds.y + bounds.height) - 1;
+        for (const [cornerName, cx, cy] of [
+          ["top-left", x0, y0],
+          ["top-right", x1, y0],
+          ["bottom-left", x0, y1],
+          ["bottom-right", x1, y1],
+        ] as const) {
+          expect(
+            pixelChannelDiff(pixel(beforeImg, cx, cy), pixel(afterImg, cx, cy)),
+            `${label} rounded outer corner ${cornerName} (${cx},${cy})`,
+          ).toBe(0);
+        }
+      };
+
+      // 1. CalendarPanel: full-card highlight spans right edge beyond × vs isolated × with zero card double-highlight
+      const calRest = readCapture(out, "panel-calendar", "cal-rest");
+      const calBodyHover = readCapture(out, "panel-calendar", "cal-card-hover");
+      const calDismissHover = readCapture(out, "panel-calendar", "cal-dismiss-hover");
+      const calCard = treeNode(calRest.tree, "cal-notif-1").boundsDevice!;
+      const calDismiss = treeNode(calRest.tree, "cal-notif-dismiss-1").boundsDevice!;
+      expect(
+        diffRegionPixels(calRest.image, calBodyHover.image, { x: calCard.x + 4, y: calCard.y + 18, width: 20, height: 24 }),
+        "Calendar card body hover reaches left card edge",
+      ).toBeGreaterThan(20);
+      expect(
+        diffRegionPixels(calRest.image, calBodyHover.image, { x: calCard.x + calCard.width - 28, y: calCard.y + calCard.height - 28, width: 22, height: 18 }),
+        "Calendar card body hover reaches right-bottom edge (no clipped box-in-box before ×)",
+      ).toBeGreaterThan(20);
+      assertRoundedHoverCorners(calRest.image, calBodyHover.image, calCard, "cal-notif-1");
+      expect(
+        diffRegionPixels(calRest.image, calDismissHover.image, calDismiss),
+        "Calendar × hover highlights × button",
+      ).toBeGreaterThan(20);
+      expect(
+        diffRegionPixels(calRest.image, calDismissHover.image, { x: calCard.x + 6, y: calCard.y + 10, width: 120, height: 32 }),
+        "Calendar × hover produces zero double-highlight on card body",
+      ).toBe(0);
+
+      // 2. ClipboardPanel: full-card body hover vs isolated Pin & Forget buttons
+      const clipRest = readCapture(out, "panel-clipboard", "clip-rest");
+      const clipBodyHover = readCapture(out, "panel-clipboard", "clip-body-hover");
+      const clipPinHover = readCapture(out, "panel-clipboard", "clip-pin-hover");
+      const clipForgetHover = readCapture(out, "panel-clipboard", "clip-forget-hover");
+      const clipCard = treeNode(clipRest.tree, "clip-entry-101").boundsDevice!;
+      const clipPin = treeNode(clipRest.tree, "clip-pin-101").boundsDevice!;
+      const clipForget = treeNode(clipRest.tree, "clip-forget-101").boundsDevice!;
+      expect(
+        diffRegionPixels(clipRest.image, clipBodyHover.image, { x: clipCard.x + 4, y: clipCard.y + 12, width: 16, height: 24 }),
+        "Clipboard card body hover reaches left edge behind thumbnail",
+      ).toBeGreaterThan(10);
+      expect(
+        diffRegionPixels(clipRest.image, clipBodyHover.image, { x: clipCard.x + clipCard.width - 14, y: clipCard.y + 12, width: 10, height: 24 }),
+        "Clipboard card body hover reaches right card edge",
+      ).toBeGreaterThan(10);
+      assertRoundedHoverCorners(clipRest.image, clipBodyHover.image, clipCard, "clip-entry-101");
+      expect(diffRegionPixels(clipRest.image, clipPinHover.image, clipPin), "Clipboard Pin hover highlights Pin").toBeGreaterThan(15);
+      expect(
+        diffRegionPixels(clipRest.image, clipPinHover.image, { x: clipCard.x + 6, y: clipCard.y + 10, width: 160, height: 28 }),
+        "Clipboard Pin hover leaves card body unhighlighted",
+      ).toBe(0);
+      expect(diffRegionPixels(clipRest.image, clipForgetHover.image, clipForget), "Clipboard Forget hover highlights Forget").toBeGreaterThan(15);
+      expect(
+        diffRegionPixels(clipRest.image, clipForgetHover.image, { x: clipCard.x + 6, y: clipCard.y + 10, width: 160, height: 28 }),
+        "Clipboard Forget hover leaves card body unhighlighted",
+      ).toBe(0);
+
+      // 3. IdlePane: full-card rule row hover vs isolated right M3Switch hover
+      const idleRest = readCapture(out, "settings-window", "idle-rest");
+      const idleBodyHover = readCapture(out, "settings-window", "idle-rule-hover");
+      const idleSwitchHover = readCapture(out, "settings-window", "idle-switch-hover");
+      const idleCard = treeNode(idleRest.tree, "settings-idle-rule-card-dpms").boundsDevice!;
+      const idleSwitch = treeNode(idleRest.tree, "settings-idle-switch-dpms").boundsDevice!;
+      expect(
+        diffRegionPixels(idleRest.image, idleBodyHover.image, { x: idleCard.x + 4, y: idleCard.y + 12, width: 20, height: 24 }),
+        "Idle rule body hover reaches left edge",
+      ).toBeGreaterThan(15);
+      expect(
+        diffRegionPixels(idleRest.image, idleBodyHover.image, { x: idleCard.x + idleCard.width - 14, y: idleCard.y + 12, width: 10, height: 24 }),
+        "Idle rule body hover reaches right edge beyond switch",
+      ).toBeGreaterThan(10);
+      assertRoundedHoverCorners(idleRest.image, idleBodyHover.image, idleCard, "settings-idle-rule-card-dpms");
+      expect(diffRegionPixels(idleRest.image, idleSwitchHover.image, idleSwitch), "Idle switch hover highlights switch").toBeGreaterThan(10);
+      expect(
+        diffRegionPixels(idleRest.image, idleSwitchHover.image, { x: idleCard.x + 6, y: idleCard.y + 10, width: 180, height: 24 }),
+        "Idle switch hover leaves rule row body unhighlighted",
+      ).toBe(0);
+
+      // 4. QuickSettings SplitTile left half vs right > arrow
+      const qsRest = readCapture(out, "panel-quick-settings", "qs-rest");
+      const qsLeftHover = readCapture(out, "panel-quick-settings", "qs-split-left-hover");
+      const qsRightHover = readCapture(out, "panel-quick-settings", "qs-split-right-hover");
+      const qsLeft = treeNode(qsRest.tree, "qs-tile-wifi").boundsDevice!;
+      const qsRight = treeNode(qsRest.tree, "qs-open-wifi").boundsDevice!;
+      expect(diffRegionPixels(qsRest.image, qsLeftHover.image, qsLeft), "SplitTile left hover highlights left half").toBeGreaterThan(20);
+      expect(diffRegionPixels(qsRest.image, qsLeftHover.image, qsRight), "SplitTile left hover does not highlight right >").toBe(0);
+      expect(diffRegionPixels(qsRest.image, qsRightHover.image, qsRight), "SplitTile right > hover highlights > button").toBeGreaterThan(10);
+      expect(diffRegionPixels(qsRest.image, qsRightHover.image, qsLeft), "SplitTile right > hover does not highlight left half").toBe(0);
+
+      // 5. MediaPanel: sink chip, Play/Pause, unseekable progress bar (0 diff)
+      const mediaRest = readCapture(out, "panel-media", "media-rest");
+      const mediaSinkHover = readCapture(out, "panel-media", "media-sink-hover");
+      const mediaPlayHover = readCapture(out, "panel-media", "media-play-hover");
+      const mediaProgressHover = readCapture(out, "panel-media", "media-progress-hover");
+      expect(diffRegionPixels(mediaRest.image, mediaSinkHover.image, treeNode(mediaRest.tree, "media-sink-toggle").boundsDevice!), "Media sink chip hover").toBeGreaterThan(20);
+      expect(diffRegionPixels(mediaRest.image, mediaPlayHover.image, treeNode(mediaRest.tree, "media-play-pause").boundsDevice!), "Media play/pause hover").toBeGreaterThan(20);
+      expect(diffRegionPixels(mediaRest.image, mediaProgressHover.image, treeNode(mediaRest.tree, "media-progress").boundsDevice!), "Unseekable media progress bar hover == 0 diff").toBe(0);
+
+      // 6. Settings: sidebar nav, M3SegmentedControl, wallpaper thumbnail
+      const appRest = readCapture(out, "settings-window", "settings-app-rest");
+      const navHover = readCapture(out, "settings-window", "settings-nav-hover");
+      const segHover = readCapture(out, "settings-window", "settings-seg-hover");
+      const wpHover = readCapture(out, "settings-window", "settings-wp-hover");
+      expect(diffRegionPixels(appRest.image, navHover.image, treeNode(appRest.tree, "settings-nav-bar").boundsDevice!), "Settings sidebar nav hover").toBeGreaterThan(20);
+      expect(diffRegionPixels(appRest.image, segHover.image, treeNode(appRest.tree, "settings-motion-expressive").boundsDevice!), "Settings M3SegmentedControl hover").toBeGreaterThan(20);
+      expect(diffRegionPixels(appRest.image, wpHover.image, treeNode(appRest.tree, "settings-wp-wp-2").boundsDevice!), "Settings wallpaper thumbnail hover").toBeGreaterThan(20);
+
+      // 7. StatusBar island & Dock icon
+      const barRest = readCapture(out, "bar-dp-1", "bar-rest");
+      const barClockHover = readCapture(out, "bar-dp-1", "bar-clock-hover");
+      expect(diffRegionPixels(barRest.image, barClockHover.image, treeNode(barRest.tree, "bar-clock").boundsDevice!), "StatusBar floating island hover").toBeGreaterThan(20);
+      const dockRest = readCapture(out, "dock-dp-1", "dock-rest");
+      const dockAppHover = readCapture(out, "dock-dp-1", "dock-app-hover");
+      const dockApp = treeNode(dockRest.tree, "dock-app-org.example.browser").boundsDevice!;
+      expect(
+        diffRegionPixels(dockRest.image, dockAppHover.image, { x: Math.max(0, dockApp.x - 10), y: Math.max(0, dockApp.y - 12), width: dockApp.width + 20, height: dockApp.height + 20 }),
+        "Dock icon hover feedback",
+      ).toBeGreaterThan(20);
+    } finally {
+      cleanup();
+    }
+  }, 30_000);
+
+  previewTest("L4 12C Top-Right Notification Stack: Collapsed Layered Deck -> Expand -> Collapse + Pause Auto-Expiry", () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-design-toast-stack-");
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const monitor = { id: "DP-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900, scale: 1 };
+      const popups4 = [
+        {
+          id: 301,
+          revision: 1,
+          app_name: "Discord",
+          summary: "QuickFlash (#mobile)",
+          body: "I guess for me, I am really not a fan of how iOS looks and would much rather have one unified look.",
+          icon: null,
+          attachment: null,
+          actions: [{ key: "default", label: "" }],
+          urgency: 1,
+        },
+        {
+          id: 302,
+          revision: 1,
+          app_name: "niri",
+          summary: "Screenshot captured",
+          body: "You can paste the image from the clipboard.",
+          icon: null,
+          attachment: null,
+          actions: [{ key: "open", label: "Open" }],
+          urgency: 1,
+        },
+        {
+          id: 303,
+          revision: 1,
+          app_name: "Ghostty",
+          summary: "Approval requested",
+          body: "Antigravity CLI is ready for input",
+          icon: null,
+          attachment: null,
+          actions: [{ key: "terminal", label: "Show terminal" }],
+          urgency: 1,
+        },
+        {
+          id: 304,
+          revision: 1,
+          app_name: "System",
+          summary: "Backup finished",
+          body: "Encrypted snapshot synced to remote",
+          icon: null,
+          attachment: null,
+          actions: [],
+          urgency: 1,
+        },
+      ];
+
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+      timeline.advance("stack-enter-settle", 450);
+      timeline.step({ id: "capture-collapsed", op: "capture", surface: "notification-toasts", captureId: "toast-stack-collapsed" });
+
+      const pauseTrueAtMs = timeline.after(20);
+      timeline.step({ id: "expand-toast-stack", op: "pointer.click", target: { surface: "notification-toasts", testId: "toast-expand-toggle" }, button: "primary" });
+      timeline.advance("stack-expand-settle", 450);
+      timeline.step({ id: "capture-expanded", op: "capture", surface: "notification-toasts", captureId: "toast-stack-expanded" });
+
+      timeline.step({ id: "collapse-toast-stack", op: "pointer.click", target: { surface: "notification-toasts", testId: "toast-collapse-toggle" }, button: "primary" });
+      timeline.advance("stack-collapse-settle", 400);
+      timeline.step({ id: "capture-recollapsed", op: "capture", surface: "notification-toasts", captureId: "toast-stack-recollapsed" });
+      const clearPopupsAtMs = timeline.after(15);
+      const pauseFalseAtMs = timeline.after(25);
+      timeline.advance("stack-clear-settle", 200);
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-design-toast-stack",
+        initialTopics: {
+          "wayland.outputs": {
+            capability: "connected",
+            outputs: [{
+              output_instance_id: 1, name: "DP-1", description: "Toast Stack Monitor", make: "Test", model: "1440x900",
+              x: 0, y: 0, width: 1440, height: 900, mode_width: 1440, mode_height: 900, refresh_mhz: 60000, scale: 1,
+              physical_width_mm: null, physical_height_mm: null,
+            }],
+          },
+          "desktop.notifications": {
+            available: true,
+            dnd: false,
+            popups: popups4,
+            history: popups4,
+          },
+        },
+        topicUpdates: [
+          {
+            atMs: clearPopupsAtMs,
+            topic: "desktop.notifications",
+            revision: 2,
+            data: { available: true, dnd: false, popups: [], history: popups4 },
+          },
+        ],
+        commands: [
+          {
+            id: 26,
+            name: "notifications.set-paused",
+            payload: { paused: true },
+            atMs: pauseTrueAtMs,
+          },
+          {
+            id: 27,
+            name: "notifications.set-paused",
+            payload: { paused: false },
+            atMs: pauseFalseAtMs,
+          },
+        ],
+      }), null, 2));
+
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-toast-stack",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(published.dist, fixture, scenario, out);
+      expectCleanPreview(result, 3, 0);
+
+      // 1. Collapsed state (Form A): main card + 2 tucked deck layers + M3InteractiveCard +3 more footer.
+      const collapsed = readCapture(out, "notification-toasts", "toast-stack-collapsed");
+      expect(treeNode(collapsed.tree, "toast-card-301").boundsLogical).toBeDefined();
+      expect(treeNode(collapsed.tree, "toast-deck-peek").boundsLogical).toBeDefined();
+      expect(treeNode(collapsed.tree, "toast-deck-layer-1").boundsLogical).toBeDefined();
+      expect(treeNode(collapsed.tree, "toast-deck-layer-2").boundsLogical).toBeDefined();
+      expect(treeNode(collapsed.tree, "toast-more-footer").boundsLogical).toBeDefined();
+      expect(treeNode(collapsed.tree, "toast-expand-toggle").boundsLogical).toBeDefined();
+      expect(collapsed.tree.nodes.some(node => node.text === "+3 more")).toBe(true);
+      expect(collapsed.tree.nodes.some(node => node.testId === "toast-card-302")).toBe(false);
+
+      // 2. Expanded state (Form B): top fixed control bar + multiple cards simultaneously visible.
+      const expanded = readCapture(out, "notification-toasts", "toast-stack-expanded");
+      expect(treeNode(expanded.tree, "toast-expanded-header").boundsLogical).toBeDefined();
+      expect(treeNode(expanded.tree, "toast-collapse-toggle").boundsLogical).toBeDefined();
+      expect(expanded.tree.nodes.some(node => node.text === "4 active")).toBe(true);
+      expect(treeNode(expanded.tree, "toast-card-301").boundsLogical).toBeDefined();
+      expect(treeNode(expanded.tree, "toast-card-302").boundsLogical).toBeDefined();
+      expect(treeNode(expanded.tree, "toast-card-303").boundsLogical).toBeDefined();
+      expect(treeNode(expanded.tree, "toast-card-304").boundsLogical).toBeDefined();
+      expect(expanded.image.height, "expanded LayerSurface grows beyond collapsed 456px height").toBeGreaterThan(456);
+
+      // 3. Re-collapsed state: header and secondary cards dismissed, footer restored.
+      const recollapsed = readCapture(out, "notification-toasts", "toast-stack-recollapsed");
+      expect(treeNode(recollapsed.tree, "toast-card-301").boundsLogical).toBeDefined();
+      expect(treeNode(recollapsed.tree, "toast-more-footer").boundsLogical).toBeDefined();
+      expect(recollapsed.tree.nodes.some(node => node.testId === "toast-expanded-header")).toBe(false);
+      expect(recollapsed.tree.nodes.some(node => node.testId === "toast-card-302")).toBe(false);
     } finally {
       cleanup();
     }

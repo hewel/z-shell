@@ -28,6 +28,7 @@ import {
   resolveDesktopApp,
   resolveMonitorLogicalSize,
   resolveMonitorWallpaper,
+  resolveNotificationMediaLayout,
   selectActiveMediaPlayer,
   splitNotificationActions,
   type ActiveWallpaper,
@@ -906,5 +907,67 @@ describe("resolveClipboardSelection", () => {
     const deletedLast = [{ id: 10 }, { id: 20 }];
     expect(resolveClipboardSelection(deletedLast, 30, 2)).toEqual({ index: 1, entry: { id: 20 } });
     expect(resolveClipboardSelection([], 10, 0)).toEqual({ index: -1, entry: null });
+  });
+});
+
+describe("resolveNotificationMediaLayout (12B)", () => {
+  const discordIcon = { kind: "runtime_path", path: "/media/discord.png", mime: "image/png", revision: 1 } as const;
+  const avatar128 = {
+    kind: "blob_handle",
+    token: "avatar-128",
+    mime: "image/png",
+    byte_len: 2048,
+    dimensions: { width: 128, height: 128 },
+  } as const;
+  const wideShot = {
+    kind: "runtime_path",
+    path: "/media/shot.png",
+    mime: "image/png",
+    revision: 2,
+    dimensions: { width: 1920, height: 1080 },
+  } as const;
+
+  test("routes Form A square avatar/cover attachments into leading slot with XDG app badge and no bottom banner", () => {
+    expect(resolveNotificationMediaLayout({ icon: discordIcon, attachment: avatar128 })).toEqual({
+      leadingMedia: avatar128,
+      leadingKind: "avatar",
+      appBadge: discordIcon,
+      previewBanner: null,
+      fallbackKind: "bell",
+    });
+  });
+
+  test("routes Form B wide screenshots from either attachment or app_icon to full-width cover preview", () => {
+    expect(resolveNotificationMediaLayout({ icon: discordIcon, attachment: wideShot })).toEqual({
+      leadingMedia: discordIcon,
+      leadingKind: "app-icon",
+      appBadge: null,
+      previewBanner: wideShot,
+      fallbackKind: "image",
+    });
+    expect(resolveNotificationMediaLayout({ icon: wideShot, attachment: null })).toEqual({
+      leadingMedia: null,
+      leadingKind: null,
+      appBadge: null,
+      previewBanner: wideShot,
+      fallbackKind: "image",
+    });
+  });
+
+  test("renders resolved XDG app icon directly and falls back to bell only when no icon or image exists", () => {
+    expect(resolveNotificationMediaLayout({ icon: discordIcon, attachment: null })).toEqual({
+      leadingMedia: discordIcon,
+      leadingKind: "app-icon",
+      appBadge: null,
+      previewBanner: null,
+      fallbackKind: "bell",
+    });
+    expect(resolveNotificationMediaLayout({ icon: null, attachment: null })).toEqual({
+      leadingMedia: null,
+      leadingKind: null,
+      appBadge: null,
+      previewBanner: null,
+      fallbackKind: "bell",
+    });
   });
 });

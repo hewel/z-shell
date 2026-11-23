@@ -1,12 +1,14 @@
 import { Button, For, Image, Show, createMemo, createSignal, onCleanup, type Accessor } from "@hewel/zgui";
-import { M3Button } from "@z-shell/sdk/primitives";
+import { M3Button, M3CardAction, M3InteractiveCard } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
-import { PANEL_MAX_HEIGHTS, buildMonthCalendarGrid, formatBarClock, formatFullDate, formatMonthYear, splitNotificationActions, type NotificationItem } from "../topics.ts";
+import { PANEL_MAX_HEIGHTS, buildMonthCalendarGrid, formatBarClock, formatFullDate, formatMonthYear, resolveNotificationMediaLayout, splitNotificationActions, type NotificationItem } from "../topics.ts";
 
 const primary = "var(--color-primary)";
 const onPrimary = "var(--color-on-primary)";
+const primaryContainer = "var(--color-primary-container)";
+const onPrimaryContainer = "var(--color-on-primary-container)";
 const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
 const containerHigh = "var(--color-surface-container-high)";
@@ -16,9 +18,11 @@ const pill = {
   display: "flex", borderRadius: "10px", minHeight: "30px", padding: "4px 10px",
   flexShrink: 0, alignItems: "center", justifyContent: "center", backgroundColor: containerHighest,
 } as const;
-const imageTile = { width: "32px", height: "32px", borderRadius: "8px", flexShrink: 0 } as const;
-const iconImage = { ...imageTile, objectFit: "cover", overflow: "hidden" } as const;
-const attachmentImage = { width: "100%", height: "84px", borderRadius: "8px", objectFit: "contain" } as const;
+const imageTile = { width: "36px", height: "36px", borderRadius: "10px", flexShrink: 0 } as const;
+const previewFrame = {
+  width: "100%", height: "104px", borderRadius: "10px", overflow: "hidden",
+  border: "1px solid color-mix(in srgb, var(--color-outline-variant) 42%, transparent)",
+} as const;
 const gridCell = { display: "flex", flexBasis: "0px", flexGrow: 1, minWidth: "0px", height: "30px", alignItems: "center", justifyContent: "center" } as const;
 const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 const rowStarts = [0, 7, 14, 21, 28, 35] as const;
@@ -26,74 +30,106 @@ const rowStarts = [0, 7, 14, 21, 28, 35] as const;
 function NotificationRow(props: { item: Accessor<NotificationItem> }) {
   const { hostClient, invokePublic } = useShellStore();
   const { item } = props;
-  const icon = useDaemonMedia(hostClient, () => {
-    const ref = item().icon;
-    return typeof ref === "string" ? null : ref;
-  }, { fetchCommand: "notifications.fetch-blob" });
-  const attachment = useDaemonMedia(hostClient, () => item().attachment, { fetchCommand: "notifications.fetch-blob" });
+  const mediaLayout = createMemo(() => resolveNotificationMediaLayout(item()));
+  const leading = useDaemonMedia(hostClient, () => mediaLayout().leadingMedia, { fetchCommand: "notifications.fetch-blob" });
+  const badge = useDaemonMedia(hostClient, () => mediaLayout().appBadge, { fetchCommand: "notifications.fetch-blob" });
+  const preview = useDaemonMedia(hostClient, () => mediaLayout().previewBanner, { fetchCommand: "notifications.fetch-blob" });
   const actions = createMemo(() => splitNotificationActions(item().actions));
 
   const bodyContent = () => (
     <row style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "10px", alignItems: "flex-start" }}>
-      <Show when={icon.src()} fallback={
-        <box style={{ ...imageTile, display: "flex", backgroundColor: containerHighest, alignItems: "center", justifyContent: "center" }}>
-          <ShellIcon name="bell" size={16} color={primary} />
-        </box>
-      }>
-        <Image src={icon.src()} style={iconImage} />
-      </Show>
+      <box testId={`cal-notif-leading-${item().id}`} style={{ position: "relative", width: "36px", height: "36px", flexShrink: 0 }}>
+        <Show when={leading.src()} fallback={
+          <box testId={`cal-notif-fallback-${item().id}`} style={{
+            ...imageTile, display: "flex", alignItems: "center", justifyContent: "center",
+            backgroundColor: mediaLayout().fallbackKind === "image" ? primaryContainer : containerHighest,
+          }}>
+            <ShellIcon
+              name={mediaLayout().fallbackKind === "image" ? "image" : "bell"}
+              size={17}
+              color={mediaLayout().fallbackKind === "image" ? onPrimaryContainer : primary}
+            />
+          </box>
+        }>
+          <Image
+            testId={`cal-notif-avatar-${item().id}`}
+            src={leading.src()}
+            style={{
+              ...imageTile,
+              objectFit: mediaLayout().leadingKind === "avatar" ? "cover" : "contain",
+              overflow: "hidden",
+            }}
+          />
+        </Show>
+        <Show when={badge.src()}>
+          <box
+            testId={`cal-notif-badge-${item().id}`}
+            style={{
+              position: "absolute", right: "-3px", bottom: "-3px",
+              width: "16px", height: "16px", borderRadius: "999px", "--zgui-corner-shape": "none",
+              backgroundColor: containerHigh, border: `2px solid ${containerHigh}`,
+              overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+          >
+            <Image src={badge.src()} style={{ width: "100%", height: "100%", borderRadius: "999px", "--zgui-corner-shape": "none", objectFit: "cover" }} />
+          </box>
+        </Show>
+      </box>
       <column style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "3px" }}>
         <text style={{ color: muted, fontSize: "11px" }}>{item().app_name}</text>
         <text style={{ fontWeight: 600, fontSize: "13px" }}>{item().summary}</text>
-        <Show when={item().body}><text style={{ color: muted, fontSize: "12px" }}>{item().body}</text></Show>
-        <Show when={attachment.src()}>
-          <Image src={attachment.src()} style={attachmentImage} />
+        <Show when={item().body}>
+          <text style={{ color: muted, fontSize: "12px", lineHeight: "17px", maxHeight: "52px", overflow: "hidden" }}>{item().body}</text>
         </Show>
       </column>
     </row>
   );
 
   return (
-    <column testId={`cal-notif-${item().id}`} style={{
-      borderRadius: "14px", backgroundColor: containerHigh, padding: "10px", gap: "8px",
-    }}>
+    <M3InteractiveCard
+      layout="column"
+      testId={`cal-notif-${item().id}`}
+      actionTestId={`cal-notif-default-${item().id}`}
+      ariaLabel={actions().defaultAction ? (actions().defaultAction!.label.trim() || `Open ${item().summary || item().app_name}`) : null}
+      onClick={actions().defaultAction
+        ? () => {
+            const def = actions().defaultAction;
+            if (def) void invokePublic("notifications.invoke-action", { id: item().id, action_key: def.key });
+          }
+        : undefined}
+      style={{ borderRadius: "14px", backgroundColor: containerHigh, padding: "10px", gap: "8px" }}
+    >
       <row style={{ gap: "10px", alignItems: "flex-start" }}>
-        <Show when={actions().defaultAction} fallback={bodyContent()}>
-          {defaultAction => (
-            <Button
-              testId={`cal-notif-default-${item().id}`}
-              ariaLabel={defaultAction().label.trim() || `Open ${item().summary || item().app_name}`}
-              onClick={() => { void invokePublic("notifications.invoke-action", { id: item().id, action_key: defaultAction().key }); }}
-              style={{
-                flexGrow: 1, flexBasis: "0px", minWidth: "0px", display: "flex", flexDirection: "row",
-                alignItems: "flex-start", borderRadius: "10px", padding: "2px", margin: "-2px",
-                backgroundColor: "transparent", color: onSurface, textAlign: "left",
-              }}
-            >
-              {bodyContent()}
-            </Button>
-          )}
-        </Show>
-        <Button testId={`cal-notif-dismiss-${item().id}`} ariaLabel="Dismiss notification"
-          style={{ ...pill, width: "28px", padding: "0px" }}
-          onClick={() => { void invokePublic("notifications.dismiss", { id: item().id }); }}>
-          <ShellIcon name="close" size={14} color={muted} />
-        </Button>
+        {bodyContent()}
+        <M3CardAction style={{ flexShrink: 0 }}>
+          <Button testId={`cal-notif-dismiss-${item().id}`} ariaLabel="Dismiss notification"
+            style={{ ...pill, width: "28px", padding: "0px" }}
+            onClick={() => { void invokePublic("notifications.dismiss", { id: item().id }); }}>
+            <ShellIcon name="close" size={14} color={muted} />
+          </Button>
+        </M3CardAction>
       </row>
+      <Show when={preview.src()}>
+        <box testId={`cal-notif-preview-${item().id}`} style={previewFrame}>
+          <Image src={preview.src()} style={{ width: "100%", height: "100%", borderRadius: "10px", objectFit: "cover" }} />
+        </box>
+      </Show>
       <Show when={actions().buttonActions.length > 0}>
-        <row style={{ flexWrap: "wrap", gap: "6px", paddingLeft: "42px" }}>
+        <row style={{ flexWrap: "wrap", gap: "6px", paddingLeft: "46px" }}>
           <For each={actions().buttonActions} keyed={action => action.key}>
             {action => (
-              <Button testId={`cal-notif-action-${item().id}-${action().key}`}
-                style={{ ...pill, backgroundColor: "var(--color-secondary-container)", color: "var(--color-on-secondary-container)", fontSize: "11px" }}
-                onClick={() => { void invokePublic("notifications.invoke-action", { id: item().id, action_key: action().key }); }}>
-                <text>{action().label}</text>
-              </Button>
+              <M3CardAction>
+                <Button testId={`cal-notif-action-${item().id}-${action().key}`}
+                  style={{ ...pill, backgroundColor: "var(--color-secondary-container)", color: "var(--color-on-secondary-container)", fontSize: "11px" }}
+                  onClick={() => { void invokePublic("notifications.invoke-action", { id: item().id, action_key: action().key }); }}>
+                  <text>{action().label}</text>
+                </Button>
+              </M3CardAction>
             )}
           </For>
         </row>
       </Show>
-    </column>
+    </M3InteractiveCard>
   );
 }
 

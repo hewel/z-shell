@@ -75,6 +75,24 @@
       "previewRelPath": null
     },
     {
+      "id": "12b-notif-media",
+      "name": "12B · Notification Media & Avatar Layouts (Toast + History)",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "DAA-0",
+      "refFile": "12b-notif-media.jpg",
+      "previewRelPath": "z-shell-preview-design-new-states/out/captures/surfaces/panel-calendar/cal-notif-media-12b.png"
+    },
+    {
+      "id": "12c-toast-stack",
+      "name": "12C · Top-Right Notification Stack (Collapsed vs Expanded)",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "DDV-0",
+      "refFile": "12c-toast-stack.jpg",
+      "previewRelPath": "z-shell-preview-design-toast-stack/out/captures/surfaces/notification-toasts/toast-stack-expanded.png"
+    },
+    {
       "id": "13-cal",
       "name": "13 · Calendar & Notifications",
       "theme": "dark",
