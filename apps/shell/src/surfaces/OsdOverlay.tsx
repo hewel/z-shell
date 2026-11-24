@@ -1,6 +1,5 @@
-import { For, LayerSurface, Show, createEffect, createMemo, createSignal, type Accessor, type Monitor, type NativeChild } from "@hewel/zgui";
+import { For, LayerSurface, Show, createEffect, createMemo, createSignal, onCleanup, type Accessor, type Monitor, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { M3Slider } from "@z-shell/sdk/primitives";
-import { createSingleNodeRoundedBlur } from "../blur.ts";
 import { ShellIcon } from "../icons.tsx";
 import {
   createLinearProgress,
@@ -22,10 +21,11 @@ const capsule = {
   color: onSurface,
 } as const;
 
-function OsdPill({ osd, spatial, opacity }: {
+function OsdPill({ osd, spatial, opacity, pillRef }: {
   osd: Accessor<OsdPayload>;
   spatial: M3Spring;
   opacity: M3Spring;
+  pillRef?: (node: NativeNode | null) => void;
 }): NativeChild {
   const scheme = useMotionScheme();
   const value = () => Math.max(0, Math.min(100, osd().value ?? 0));
@@ -33,9 +33,10 @@ function OsdPill({ osd, spatial, opacity }: {
     const { kind, muted } = osd();
     return kind === "brightness" ? "brightness" : kind === "ime" ? "terminal" : muted ? "volumeMute" : "volumeHigh";
   };
+  onCleanup(() => pillRef?.(null));
 
   return (
-    <row role="status" ariaLabel={osd().label} style={{
+    <row ref={node => pillRef?.(node)} testId="osd-pill" role="status" ariaLabel={osd().label} style={{
       ...capsule, width: "280px", height: "48px", padding: "0 12px 0 8px", gap: "10px", alignItems: "center",
       opacity: Math.max(0, Math.min(1, opacity())),
       transform: scheme() === "reduced"
@@ -148,24 +149,23 @@ export function OsdOverlay(): NativeChild {
     <>
       <Show when={osdPresence.value()?.output} keyed>
         {output => {
-          const blur = createSingleNodeRoundedBlur(
-            24,
-            () => osdPresence.visible() && osdPresence.progress.settled(),
-            2,
-          );
+          const [pillNode, setPillNode] = createSignal<NativeNode | null>(null);
+          let disposed = false;
+          onCleanup(() => { disposed = true; });
+          const bindPillRef = (node: NativeNode | null) => {
+            if (!disposed) setPillNode(node);
+          };
           return (
             <LayerSurface name="osd-overlay" output={output} layer="overlay" anchor={["bottom"]}
-              margin={{ bottom: 52 }} width={344} height={108} keyboard="none" inputRegion="empty" blurRegion={blur.region()}>
+              margin={{ bottom: 52 }} width={344} height={108} keyboard="none" inputRegion="empty" blurRegion={pillNode() ? [pillNode()!] : "none"}>
               <box style={{
                 position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
                 display: "flex", alignItems: "flex-end", justifyContent: "center",
                 paddingBottom: "36px",
               }}>
-                <box ref={blur.ref}>
-                  <Show when={osdPresence.value()}>
-                    {entry => <OsdPill osd={() => entry().payload} spatial={osdPresence.progress} opacity={osdPresence.opacity} />}
-                  </Show>
-                </box>
+                <Show when={osdPresence.value()}>
+                  {entry => <OsdPill osd={() => entry().payload} spatial={osdPresence.progress} opacity={osdPresence.opacity} pillRef={bindPillRef} />}
+                </Show>
               </box>
             </LayerSurface>
           );

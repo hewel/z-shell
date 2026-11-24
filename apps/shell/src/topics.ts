@@ -439,6 +439,18 @@ export function splitNotificationActions(actions: readonly NotificationAction[])
   return { defaultAction, buttonActions };
 }
 
+/**
+ * Normalizes notification body line breaks for compact toast/history display:
+ * converts CRLF/CR to LF, collapses consecutive blank lines into a single line break,
+ * preserves meaningful single newlines, and trims outer whitespace.
+ */
+export function formatNotificationBody(body: string): string {
+  return body
+    .replace(/\r\n?/g, "\n")
+    .replace(/\n(?:[ \t]*\n)+/g, "\n")
+    .trim();
+}
+
 export interface DesktopNotificationsSnapshot {
   readonly available: boolean;
   readonly dnd: boolean;

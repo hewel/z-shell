@@ -210,3 +210,8 @@ control:not(:disabled):active > [data-press-visual="card"] {
 [data-highlighted="true"]:not([data-disabled="true"]) {
   background-color: color-mix(in srgb, var(--color-on-surface) var(--state-hover), transparent);
 }
+
+.notification-body {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}

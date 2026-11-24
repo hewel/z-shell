@@ -1,6 +1,5 @@
 import { For, PopupSurface, Show, createMemo, createSignal, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { MenuItemPrimitive, MenuListPrimitive, MenuRootPrimitive } from "@hewel/zgui/primitives";
-import { createSingleNodeRoundedBlur } from "../blur.ts";
 import { ShellIcon } from "../icons.tsx";
 import { createRetainedPresence, panelMotionStyle, popoverContentMotionStyle, useMotionScheme, type M3Spring } from "../motion.ts";
 import { POPOVER_BLEED_STYLE, POPOVER_SHADOW_INSETS, resolvePopoverGeometry } from "../panels/ShellPanels.tsx";
@@ -76,7 +75,6 @@ function PopupContent(props: {
   spatial: M3Spring;
   opacity: M3Spring;
   cardRef?: (node: NativeNode) => void;
-  blurRef?: (node: NativeNode) => void;
   onDismiss: () => void;
   children: NativeChild;
 }) {
@@ -87,10 +85,7 @@ function PopupContent(props: {
     <MenuRootPrimitive open onDismiss={props.onDismiss}>
       <box inert={props.inert} style={POPOVER_BLEED_STYLE}>
         <box
-          ref={node => {
-            props.cardRef?.(node);
-            props.blurRef?.(node);
-          }}
+          ref={props.cardRef}
           testId={props.cardTestId ?? null}
           data-theme-rev={String(theme.revision())}
           style={{
@@ -242,16 +237,15 @@ export function BarPopups(): NativeChild {
       <Show when={trayPresence.value()}>
         {item => {
           const [cardNode, setCardNode] = createSignal<NativeNode | null>(null);
-          const blur = createSingleNodeRoundedBlur(16, () => trayPresence.visible() && trayPresence.progress.settled());
           return (
             <PopupSurface name="tray-menu" parent={item().target.parentSurface} anchorRect={item().target.anchorRect}
               width={trayWidth()} height="auto" minHeight={48} maxHeight={MENU_MAX_HEIGHT}
               geometryInsets={POPOVER_SHADOW_INSETS}
               inputRegion={cardNode() ? [cardNode()!] : []}
-              placement={geometry().placement} offset={geometry().offset} grab blurRegion={blur.region()}
+              placement={geometry().placement} offset={geometry().offset} grab blurRegion={cardNode() ? [cardNode()!] : "none"}
               onDismiss={() => { trayPresence.dismissInstant(); closeTrayMenu(); }}>
               <PopupContent padding="8px" label={item().label} header={item().label} cardTestId="tray-menu-card" position={position()} inert={!trayPresence.present()} spatial={trayPresence.progress} opacity={trayPresence.opacity}
-                cardRef={setCardNode} blurRef={blur.ref} onDismiss={closeTrayMenu}>
+                cardRef={setCardNode} onDismiss={closeTrayMenu}>
                 <For each={trayRows()} keyed={row => row.node.id}>
                   {row => (
                     <Show when={!row().node.separator} fallback={<box ariaHidden style={separator} />}>
@@ -272,16 +266,15 @@ export function BarPopups(): NativeChild {
       <Show when={imePresence.value()}>
         {target => {
           const [cardNode, setCardNode] = createSignal<NativeNode | null>(null);
-          const blur = createSingleNodeRoundedBlur(16, () => imePresence.visible() && imePresence.progress.settled());
           return (
             <PopupSurface name="ime-menu" parent={target().parentSurface} anchorRect={target().anchorRect}
               width={imeWidth()} height="auto" minHeight={48} maxHeight={MENU_MAX_HEIGHT}
               geometryInsets={POPOVER_SHADOW_INSETS}
               inputRegion={cardNode() ? [cardNode()!] : []}
-              placement={geometry().placement} offset={geometry().offset} grab blurRegion={blur.region()}
+              placement={geometry().placement} offset={geometry().offset} grab blurRegion={cardNode() ? [cardNode()!] : "none"}
               onDismiss={() => { imePresence.dismissInstant(); closeImeMenu(); }}>
               <PopupContent padding="8px" label="Input method" header="Input method" cardTestId="ime-menu-card" position={position()} inert={!imePresence.present()} spatial={imePresence.progress} opacity={imePresence.opacity}
-                cardRef={setCardNode} blurRef={blur.ref} onDismiss={closeImeMenu}>
+                cardRef={setCardNode} onDismiss={closeImeMenu}>
                 <For each={ime.data()?.group_ims} keyed={im => im.unique_name}>
                   {im => {
                     const isActive = () => im().unique_name === ime.data()?.active_im?.unique_name;

@@ -1,5 +1,4 @@
 import { PopupSurface, Show, createMemo, createSignal, untrack, type NativeChild, type NativeNode, type PopupSurfacePlacement } from "@hewel/zgui";
-import { createSingleNodeRoundedBlur } from "../blur.ts";
 import {
   createRetainedPresence,
   panelMotionStyle,
@@ -86,7 +85,6 @@ function PanelContent(props: {
   spatial: M3Spring;
   opacity: M3Spring;
   cardRef?: (node: NativeNode) => void;
-  blurRef?: (node: NativeNode) => void;
   children: NativeChild;
 }) {
   useShellTheme(props.theme.data);
@@ -94,10 +92,7 @@ function PanelContent(props: {
   return (
     <box inert={props.inert} style={POPOVER_BLEED_STYLE}>
       <box
-        ref={node => {
-          props.cardRef?.(node);
-          props.blurRef?.(node);
-        }}
+        ref={props.cardRef}
         testId={`panel-root-${props.id}`}
         data-theme-rev={String(props.theme.revision())}
         style={{
@@ -153,15 +148,14 @@ export function ShellPanels(): NativeChild {
           closePanels();
         };
         const [cardNode, setCardNode] = createSignal<NativeNode | null>(null);
-        const blur = createSingleNodeRoundedBlur(22, () => presence.visible() && presence.progress.settled());
         return (
           <PopupSurface name={`panel-${target.id}`} parent={target.parentSurface} anchorRect={target.anchorRect}
             width={width} height="auto" minHeight={80} maxHeight={maxHeight}
             geometryInsets={POPOVER_SHADOW_INSETS}
             inputRegion={cardNode() ? [cardNode()!] : []}
-            placement={geometry().placement} offset={geometry().offset} grab blurRegion={blur.region()} onDismiss={handleDismiss}>
+            placement={geometry().placement} offset={geometry().offset} grab blurRegion={cardNode() ? [cardNode()!] : "none"} onDismiss={handleDismiss}>
             <PanelContent id={target.id} maxHeight={maxHeight} position={position()} centered={centered}
-              inert={!presence.present()} theme={theme} spatial={presence.progress} opacity={presence.opacity} cardRef={setCardNode} blurRef={blur.ref}>
+              inert={!presence.present()} theme={theme} spatial={presence.progress} opacity={presence.opacity} cardRef={setCardNode}>
               <Component />
             </PanelContent>
           </PopupSurface>

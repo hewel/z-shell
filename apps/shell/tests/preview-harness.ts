@@ -228,15 +228,46 @@ export function readCapture(out: string, surface: string, captureId: string) {
   };
 }
 
+export function blurRegionCoversPoint(
+  blurRegion: RecordedBlurRegion | undefined,
+  x: number,
+  y: number,
+): boolean {
+  if (blurRegion === "full") return true;
+  if (!Array.isArray(blurRegion)) return false;
+  return blurRegion.some(s => x >= s.x && x < s.x + s.width && y >= s.y && y < s.y + s.height);
+}
+
+export function blurRegionIntersectsRect(
+  blurRegion: RecordedBlurRegion | undefined,
+  rect: DeviceBounds,
+): boolean {
+  if (rect.width <= 0 || rect.height <= 0) return false;
+  if (blurRegion === "full") return true;
+  if (!Array.isArray(blurRegion)) return false;
+  const rx1 = rect.x + rect.width;
+  const ry1 = rect.y + rect.height;
+  return blurRegion.some(
+    s => s.x < rx1 && s.x + s.width > rect.x && s.y < ry1 && s.y + s.height > rect.y,
+  );
+}
+
+export interface RoundedBlurStripOptions {
+  /** Maximum top-row horizontal inset for superellipse(2.83) tangent coverage (e.g. `14` for R=22px). */
+  readonly maxTopInset?: number;
+}
+
 /**
  * Verifies that a captured surface publishes integer horizontal blur strips (`<= 256`) strictly
- * contained within `bounds` and never covering its sharp outer corners (`radius > 0`).
+ * contained within `bounds`, covering the full middle span, excluding all four sharp outer corners,
+ * and (when `maxTopInset` is given) preserving superellipse tangent interior coverage.
  */
 export function assertRoundedBlurStrips(
   blurRegion: RecordedBlurRegion | undefined,
   bounds: DeviceBounds,
   radius: number,
   label: string,
+  options?: RoundedBlurStripOptions,
 ): void {
   expect(Array.isArray(blurRegion), `${label}: blurRegion is rounded strip array`).toBe(true);
   const strips = blurRegion as readonly DeviceBounds[];
@@ -256,12 +287,45 @@ export function assertRoundedBlurStrips(
     expect(strip.x + strip.width, `${label}: strip right <= card right`).toBeLessThanOrEqual(x1);
     expect(strip.y + strip.height, `${label}: strip bottom <= card bottom`).toBeLessThanOrEqual(y1);
   }
+  const midY = Math.floor(bounds.y + bounds.height / 2);
+  const midStrips = strips.filter(s => midY >= s.y && midY < s.y + s.height);
+  expect(midStrips.length, `${label}: middle band covered at y=${midY}`).toBeGreaterThan(0);
+  const midLeft = Math.min(...midStrips.map(s => s.x));
+  const midRight = Math.max(...midStrips.map(s => s.x + s.width));
+  expect(midLeft, `${label}: middle full-width left aligns with card`).toBeLessThanOrEqual(Math.ceil(bounds.x) + 1);
+  expect(midRight, `${label}: middle full-width right aligns with card`).toBeGreaterThanOrEqual(Math.floor(bounds.x + bounds.width) - 1);
+
   if (radius >= 8) {
-    // Top-left corner pixel (bounds.x, bounds.y) must NOT be covered by any blur strip (zero corner leak).
-    const coversTopLeft = strips.some(
-      s => bounds.x >= s.x && bounds.x < s.x + s.width && bounds.y >= s.y && bounds.y < s.y + s.height,
-    );
-    expect(coversTopLeft, `${label}: top-left rounded corner excluded from blurRegion`).toBe(false);
+    // All four sharp outer bounding-box corners must NOT be covered by any blur strip (zero corner leak).
+    const rightCornerX = Math.floor(bounds.x + bounds.width - 0.01);
+    const bottomCornerY = Math.floor(bounds.y + bounds.height - 0.01);
+    const leftCornerX = Math.floor(bounds.x);
+    const topCornerY = Math.floor(bounds.y);
+    for (const [corner, cx, cy] of [
+      ["top-left", leftCornerX, topCornerY],
+      ["top-right", rightCornerX, topCornerY],
+      ["bottom-left", leftCornerX, bottomCornerY],
+      ["bottom-right", rightCornerX, bottomCornerY],
+    ] as const) {
+      expect(
+        blurRegionCoversPoint(strips, cx, cy),
+        `${label}: ${corner} rounded corner (${cx},${cy}) excluded from blurRegion`,
+      ).toBe(false);
+    }
+  }
+
+  if (options?.maxTopInset !== undefined) {
+    const minY = Math.min(...strips.map(s => s.y));
+    const topStrips = strips.filter(s => s.y === minY);
+    const topLeft = Math.min(...topStrips.map(s => s.x));
+    const topRight = Math.max(...topStrips.map(s => s.x + s.width));
+    const leftInset = topLeft - bounds.x;
+    const rightInset = (bounds.x + bounds.width) - topRight;
+    expect(minY, `${label}: top strip starts at card top edge`).toBeLessThanOrEqual(Math.ceil(bounds.y) + 1);
+    expect(leftInset, `${label}: superellipse top-left tangent inset > 0`).toBeGreaterThan(0);
+    expect(leftInset, `${label}: superellipse top-left tangent inset <= ${options.maxTopInset}px`).toBeLessThanOrEqual(options.maxTopInset);
+    expect(rightInset, `${label}: superellipse top-right tangent inset > 0`).toBeGreaterThan(0);
+    expect(rightInset, `${label}: superellipse top-right tangent inset <= ${options.maxTopInset}px`).toBeLessThanOrEqual(options.maxTopInset);
   }
 }
 

@@ -589,3 +589,79 @@ async fn set_paused_freezes_and_resumes_popup_auto_expiry() {
     assert_eq!(expired["history"][0]["id"], id);
     desktop.shutdown().await;
 }
+
+#[tokio::test]
+async fn sanitizes_dbus_notify_body_markup_for_popups_and_history_without_advertising_markup() {
+    let bus = TestBus::new();
+    let client = bus.connection().await;
+    let root = tempfile::tempdir().unwrap();
+    let paths = paths(root.path());
+    let hub = BusHub::new("test", paths.media_dir());
+    let desktop = DesktopServices::install_with_options(
+        &hub,
+        &paths,
+        DesktopOptions {
+            session_bus: SessionBusAddress::Address(bus.address().into()),
+            tray: false,
+            xdg_data_dirs: Vec::new(),
+            ..DesktopOptions::default()
+        },
+    );
+    let (initial, stream) = subscribe(&hub, TOPIC).await;
+    assert_eq!(ready(initial, &stream).await["available"], true);
+    let proxy = dbus_proxy(&client).await;
+
+    let capabilities: Vec<String> = proxy.call("GetCapabilities", &()).await.unwrap();
+    assert_eq!(
+        capabilities,
+        vec!["actions", "body", "icon-static", "persistence"]
+    );
+    assert!(!capabilities.iter().any(|cap| cap == "body-markup"));
+    assert!(!capabilities.iter().any(|cap| cap == "body-hyperlinks"));
+
+    let cases = [
+        (
+            "Chrome PWA",
+            "<a href=\"https://chat.example.com/room/42\">chat.example.com</a>\n\n<b>Deploy</b> finished &amp; passed",
+            "chat.example.com\n\nDeploy finished & passed",
+        ),
+        (
+            "Escaped & Image",
+            "&lt;b&gt;raw&lt;/b&gt; &amp;lt; <img src=\"file:///secret.png\" alt=\"Chart &amp; metrics\"/>",
+            "<b>raw</b> &lt; Chart & metrics",
+        ),
+        (
+            "Plain Code",
+            "a < b && c > d; Vec<String>",
+            "a < b && c > d; Vec<String>",
+        ),
+    ];
+
+    for (summary, raw_body, expected_body) in cases {
+        let _: u32 = proxy
+            .call(
+                "Notify",
+                &(
+                    "Google Chrome",
+                    0_u32,
+                    "",
+                    summary,
+                    raw_body,
+                    Vec::<String>::new(),
+                    HashMap::<String, OwnedValue>::new(),
+                    0_i32,
+                ),
+            )
+            .await
+            .expect("Notify with body succeeds");
+        let snapshot = next_update(&stream).await;
+        for view in ["popups", "history"] {
+            assert_eq!(
+                snapshot[view][0]["body"], expected_body,
+                "{summary} in {view}"
+            );
+        }
+    }
+
+    desktop.shutdown().await;
+}

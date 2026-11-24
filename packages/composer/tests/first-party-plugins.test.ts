@@ -16,7 +16,7 @@ import { createPluginContext } from "@z-shell/plugin-api";
 import { ZShellClient, type InhibitorEntry } from "@z-shell/sdk";
 import { connectUnixSocket } from "@z-shell/sdk/bun";
 
-import { buildShellPreviewFixture } from "../../../apps/shell/tests/fixture-builder.ts";
+import { INITIAL_SNAPSHOT_AT_MS, buildShellPreviewFixture } from "../../../apps/shell/tests/fixture-builder.ts";
 import { expectCleanPreview, runPreview, zguiHost } from "../../../apps/shell/tests/preview-harness.ts";
 import { NOSLEEP_DEFAULTS, createNoSleepPlugin } from "../../../plugins/nosleep/src/service.ts";
 import {
@@ -293,7 +293,7 @@ describe("First-party reference plugins end-to-end", () => {
         }));
         publicSocket.events.push({
           kind: "message",
-          atMs: 4,
+          atMs: INITIAL_SNAPSHOT_AT_MS,
           text: JSON.stringify({
             jsonrpc: "2.0",
             id: subscription.id,

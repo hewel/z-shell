@@ -1,11 +1,10 @@
 import { Button, For, Image, LayerSurface, Show, createEffect, createMemo, createSignal, mountStylesheet, onCleanup, type Accessor, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { M3CardAction, M3InteractiveCard } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
-import { SUPERELLIPSE_EXPONENT, createRoundedBlurGroup, type RoundedBlurGroup } from "../blur.ts";
 import { ShellIcon } from "../icons.tsx";
 import { createEnterProgress, createOpacityEnter, createPresence, createRetainedPresence, useMotionScheme, type M3Spring } from "../motion.ts";
 import { useShellStore } from "../store.ts";
-import { resolveNotificationMediaLayout, splitNotificationActions, type NotificationItem } from "../topics.ts";
+import { formatNotificationBody, resolveNotificationMediaLayout, splitNotificationActions, type NotificationItem } from "../topics.ts";
 
 const primary = "var(--color-primary)";
 const primaryContainer = "var(--color-primary-container)";
@@ -31,14 +30,20 @@ type TrackNode = (node: NativeNode) => () => void;
 
 function trackedRef(track: TrackNode): (node: NativeNode) => void {
   let detach: (() => void) | undefined;
-  onCleanup(() => detach?.());
-  return node => { detach = track(node); };
+  onCleanup(() => {
+    detach?.();
+    detach = undefined;
+  });
+  return node => {
+    detach?.();
+    detach = track(node);
+  };
 }
 
-function ToastCard({ toast, track, blur, stackSpatial, stackOpacity, promoted, staggerIndex = 0 }: {
+function ToastCard({ toast, track, trackBlur, stackSpatial, stackOpacity, promoted, staggerIndex = 0 }: {
   toast: Accessor<NotificationItem>;
   track: TrackNode;
-  blur: RoundedBlurGroup;
+  trackBlur: TrackNode;
   stackSpatial: M3Spring;
   stackOpacity: M3Spring;
   promoted: boolean;
@@ -55,6 +60,7 @@ function ToastCard({ toast, track, blur, stackSpatial, stackOpacity, promoted, s
   const combinedOpacity = () => Math.max(0, Math.min(1, cardFade() * stackOpacity()));
   const flipDeltaY = propsOr(promoted, 44, 14 + Math.min(staggerIndex, 4) * 10);
   const actions = createMemo(() => splitNotificationActions(toast().actions));
+  const formattedBody = createMemo(() => formatNotificationBody(toast().body));
 
   const bodyContent = () => (
     <row style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "10px", alignItems: "flex-start" }}>
@@ -98,15 +104,17 @@ function ToastCard({ toast, track, blur, stackSpatial, stackOpacity, promoted, s
       <column style={{ flexGrow: 1, minWidth: "0px", gap: "2px" }}>
         <text style={{ ...clipped, color: muted, fontSize: "11px" }}>{toast().app_name}</text>
         <text style={{ ...clipped, fontSize: "14px", fontWeight: 600 }}>{toast().summary}</text>
-        <Show when={toast().body}>
-          <text style={{ color: muted, fontSize: "12px", maxHeight: "56px", overflow: "hidden" }}>{toast().body}</text>
+        <Show when={formattedBody()}>
+          {body => (
+            <text testId={`toast-body-${toast().id}`} class="notification-body" style={{ color: muted, fontSize: "12px", maxHeight: "56px", overflow: "hidden" }}>{body()}</text>
+          )}
         </Show>
       </column>
     </row>
   );
 
   const inputRef = trackedRef(track);
-  const blurRef = blur.useTarget(22);
+  const blurRef = trackedRef(trackBlur);
 
   return (
     <M3InteractiveCard
@@ -213,20 +221,21 @@ function ToastDeckPeek({ count, track, onExpand }: {
   );
 }
 
-function ToastFooter({ count, next, track, blur, inert, progress, opacity, onExpand }: {
+function ToastFooter({ count, next, track, trackBlur, inert, progress, opacity, stackOpacity, onExpand }: {
   count: number;
   next: NotificationItem;
   track: TrackNode;
-  blur: RoundedBlurGroup;
+  trackBlur: TrackNode;
   inert: boolean;
   progress: M3Spring;
   opacity: M3Spring;
+  stackOpacity: M3Spring;
   onExpand: () => void;
 }): NativeChild {
   const { invokePublic } = useShellStore();
   const scheme = useMotionScheme();
   const inputRef = trackedRef(track);
-  const blurRef = blur.useTarget(16);
+  const blurRef = trackedRef(trackBlur);
   const nextLabel = () => (next.app_name ? `${next.app_name} · ${next.summary}` : next.summary);
   return (
     <M3InteractiveCard
@@ -240,7 +249,7 @@ function ToastFooter({ count, next, track, blur, inert, progress, opacity, onExp
       style={{
         borderRadius: "16px", backgroundColor: container, border: outline, boxShadow: "var(--shadow-level-2)",
         padding: "6px 10px", gap: "8px", alignItems: "center",
-        opacity: Math.max(0, Math.min(1, opacity())),
+        opacity: Math.max(0, Math.min(1, opacity() * stackOpacity())),
         transform: scheme() === "reduced" ? "none" : `translateY(${((1 - progress()) * 10).toFixed(2)}px)`,
       }}
     >
@@ -263,15 +272,16 @@ function ToastFooter({ count, next, track, blur, inert, progress, opacity, onExp
   );
 }
 
-function ToastExpandedHeader({ count, track, blur, onCollapse }: {
+function ToastExpandedHeader({ count, track, trackBlur, stackOpacity, onCollapse }: {
   count: Accessor<number>;
   track: TrackNode;
-  blur: RoundedBlurGroup;
+  trackBlur: TrackNode;
+  stackOpacity: M3Spring;
   onCollapse: () => void;
 }): NativeChild {
   const { invokePublic } = useShellStore();
   const inputRef = trackedRef(track);
-  const blurRef = blur.useTarget(16);
+  const blurRef = trackedRef(trackBlur);
   return (
     <row
       ref={node => { inputRef(node); blurRef(node); }}
@@ -279,6 +289,7 @@ function ToastExpandedHeader({ count, track, blur, onCollapse }: {
       style={{
         borderRadius: "16px", backgroundColor: container, border: outline, boxShadow: "var(--shadow-level-2)",
         padding: "6px 10px", gap: "8px", alignItems: "center",
+        opacity: Math.max(0, Math.min(1, stackOpacity())),
       }}
     >
       <Button
@@ -325,6 +336,7 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
   const { settings, invokePublic } = useShellStore();
   const scheme = useMotionScheme();
   const [trackedNodes, setTrackedNodes] = createSignal<readonly NativeNode[]>([]);
+  const [blurNodes, setBlurNodes] = createSignal<readonly NativeNode[]>([]);
   const [promoted, setPromoted] = createSignal(false);
   const [expanded, setExpanded] = createSignal(false);
   const [hovered, setHovered] = createSignal(false);
@@ -370,11 +382,24 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
     enterOpacityRole: "fastEffects",
     exitRole: "fastEffects",
   });
+  let disposed = false;
+  onCleanup(() => { disposed = true; });
   const track: TrackNode = node => {
-    setTrackedNodes(nodes => [...nodes, node]);
-    return () => setTrackedNodes(nodes => nodes.filter(candidate => candidate !== node));
+    if (disposed) return () => {};
+    setTrackedNodes(nodes => (nodes.includes(node) ? nodes : [...nodes, node]));
+    return () => {
+      if (disposed) return;
+      setTrackedNodes(nodes => nodes.filter(candidate => candidate !== node));
+    };
   };
-  const blur = createRoundedBlurGroup(22, () => visible() && spatial.settled(), SUPERELLIPSE_EXPONENT);
+  const trackBlur: TrackNode = node => {
+    if (disposed) return () => {};
+    setBlurNodes(nodes => (nodes.includes(node) ? nodes : [...nodes, node]));
+    return () => {
+      if (disposed) return;
+      setBlurNodes(nodes => nodes.filter(candidate => candidate !== node));
+    };
+  };
   const topMargin = createMemo(() => {
     const bar = settings.data()?.bar;
     if (bar?.position && bar.position !== "top") return 14;
@@ -390,7 +415,7 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
   return (
     <LayerSurface name="notification-toasts" output={output} layer="overlay" anchor={["top", "right"]}
       margin={{ top: Math.max(0, topMargin() - 12), right: 0 }} width={396} height={surfaceHeight()} keyboard="none"
-      inputRegion={trackedNodes()} blurRegion={blur.region()}>
+      inputRegion={trackedNodes()} blurRegion={blurNodes().length > 0 ? blurNodes() : "none"}>
       <column
         inert={!visible()}
         onPointerEnter={() => setHovered(true)}
@@ -403,7 +428,7 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
             <>
               <column style={{ width: "100%", gap: "0px" }}>
                 <Show when={popups()[0]?.id} keyed>
-                  {_id => <ToastCard toast={() => popups()[0]!} track={track} blur={blur} stackSpatial={spatial} stackOpacity={opacity} promoted={promoted()} />}
+                  {_id => <ToastCard toast={() => popups()[0]!} track={track} trackBlur={trackBlur} stackSpatial={spatial} stackOpacity={opacity} promoted={promoted()} />}
                 </Show>
                 <Show when={popups().length > 1}>
                   <ToastDeckPeek count={popups().length} track={track} onExpand={() => setExpanded(true)} />
@@ -415,10 +440,11 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
                     count={footer().count}
                     next={footer().next}
                     track={track}
-                    blur={blur}
+                    trackBlur={trackBlur}
                     inert={popups().length <= 1 || expanded()}
                     progress={footerPresence.progress}
                     opacity={footerPresence.opacity}
+                    stackOpacity={opacity}
                     onExpand={() => setExpanded(true)}
                   />
                 )}
@@ -430,7 +456,8 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
             <ToastExpandedHeader
               count={() => popups().length}
               track={track}
-              blur={blur}
+              trackBlur={trackBlur}
+              stackOpacity={opacity}
               onCollapse={() => setExpanded(false)}
             />
           </box>
@@ -446,7 +473,7 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
                   <ToastCard
                     toast={item}
                     track={track}
-                    blur={blur}
+                    trackBlur={trackBlur}
                     stackSpatial={spatial}
                     stackOpacity={opacity}
                     promoted={false}

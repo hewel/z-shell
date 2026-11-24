@@ -3,7 +3,6 @@ import {
   type Component, type NativeChild, type NativeNode, type NativeWindowRect,
 } from "@hewel/zgui";
 import { type PluginSettingsProps } from "@z-shell/sdk/zgui";
-import { createSingleNodeRoundedBlur } from "../blur.ts";
 import {
   createRetainedPresence,
   panelMotionStyle,
@@ -52,7 +51,6 @@ function PluginPanelFrame(props: {
   spatial: M3Spring;
   opacity: M3Spring;
   cardRef?: (node: NativeNode) => void;
-  blurRef?: (node: NativeNode) => void;
   children: NativeChild;
 }): NativeChild {
   useShellTheme(props.theme.data);
@@ -60,10 +58,7 @@ function PluginPanelFrame(props: {
   return (
     <box inert={props.inert} style={POPOVER_BLEED_STYLE}>
       <box
-        ref={node => {
-          props.cardRef?.(node);
-          props.blurRef?.(node);
-        }}
+        ref={props.cardRef}
         testId="plugin-panel-root"
         data-theme-rev={String(props.theme.revision())}
         style={{
@@ -284,14 +279,13 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
             openSettingsWindow(page ? page.id : "appearance");
           };
           const [cardNode, setCardNode] = createSignal<NativeNode | null>(null);
-          const blur = createSingleNodeRoundedBlur(22, () => panelPresence.visible() && panelPresence.progress.settled());
           return (
             <PopupSurface name={formatSurfaceName("plugin-panel", instanceId)} parent={formatSurfaceName("bar", outputId)} anchorRect={current().anchorRect}
               width={width} height="auto" minHeight={80} maxHeight={PANEL_MAX_HEIGHTS.plugin}
               geometryInsets={POPOVER_SHADOW_INSETS}
               inputRegion={cardNode() ? [cardNode()!] : []}
-              placement={geometry().placement} offset={geometry().offset} grab blurRegion={blur.region()} onDismiss={dismissPluginPanelInstant}>
-              <PluginPanelFrame theme={theme} position={current().position} inert={!panelPresence.present()} spatial={panelPresence.progress} opacity={panelPresence.opacity} cardRef={setCardNode} blurRef={blur.ref}>
+              placement={geometry().placement} offset={geometry().offset} grab blurRegion={cardNode() ? [cardNode()!] : "none"} onDismiss={dismissPluginPanelInstant}>
+              <PluginPanelFrame theme={theme} position={current().position} inert={!panelPresence.present()} spatial={panelPresence.progress} opacity={panelPresence.opacity} cardRef={setCardNode}>
                 <PanelComponent client={publicClient} onClose={dismissPluginPanel} onOpenSettings={onOpenSettings} />
               </PluginPanelFrame>
             </PopupSurface>

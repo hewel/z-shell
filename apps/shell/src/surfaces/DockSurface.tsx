@@ -3,7 +3,6 @@ import {
   type Accessor, type Monitor, type NativeChild, type NativeNode, type NativeStyle, type NativeWindowRect,
 } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
-import { SUPERELLIPSE_EXPONENT, createSingleNodeRoundedBlur } from "../blur.ts";
 import { ShellIcon } from "../icons.tsx";
 import { SPRING_EPSILON, createM3Spring, useMotionScheme, type M3Spring } from "../motion.ts";
 import { useShellStore } from "../store.ts";
@@ -123,7 +122,7 @@ function DockCapsule(props: {
   monitorId: string;
   slideProgress: M3Spring;
   animatedWidth: M3Spring;
-  blurRef?: (node: NativeNode) => void;
+  capsuleRef?: (node: NativeNode) => void;
   pinned: readonly DockEntry[];
   runningOnly: readonly DockEntry[];
 }) {
@@ -156,7 +155,7 @@ function DockCapsule(props: {
   const focusBarOpacity = createM3Spring(() => (focusedOffset() !== null ? 1 : 0), "fastEffects", { scheme });
 
   return (
-    <row ref={props.blurRef} testId={`dock-root-${props.monitorId}`} role="toolbar" ariaLabel="Dock" onClick={() => dismissOverlay()} style={{
+    <row ref={props.capsuleRef} testId={`dock-root-${props.monitorId}`} role="toolbar" ariaLabel="Dock" onClick={() => dismissOverlay()} style={{
       ...capsule,
       width: `${Math.round(props.animatedWidth())}px`,
       transform: `translateY(${(props.slideProgress() * hiddenSlideOffset).toFixed(2)}px)`,
@@ -258,16 +257,12 @@ function MonitorDock(props: {
   const scheme = useMotionScheme();
   const slideProgress = createM3Spring(() => (revealed() ? 0 : 1), "defaultSpatial", { scheme });
   const animatedWidth = createM3Spring(capsuleWidth, "defaultSpatial", { scheme, epsilon: SPRING_EPSILON.px });
-  const blur = createSingleNodeRoundedBlur(
-    22,
-    () => revealed() && slideProgress.settled() && animatedWidth.settled(),
-    SUPERELLIPSE_EXPONENT,
-  );
+  const [capsuleNode, setCapsuleNode] = createSignal<NativeNode | null>(null);
 
   return (
     <LayerSurface name={formatSurfaceName("dock", props.monitor().id)} output={props.monitor().id} layer="top"
       anchor={["bottom", "left", "right"]} margin={{ bottom: 0 }} width={layerWidth()} height={dockLayerHeight}
-      exclusiveZone={0} keyboard="none" inputRegion={inputRegion()} blurRegion={blur.region()}>
+      exclusiveZone={0} keyboard="none" inputRegion={inputRegion()} blurRegion={capsuleNode() ? [capsuleNode()!] : "none"}>
       <box testId={`dock-surface-${props.monitor().id}`} style={{
         // Fill the full LayerSurface viewport (including the bottom-edge trigger strip) instead of
         // shrinking to the content-sized :root height.
@@ -289,7 +284,7 @@ function MonitorDock(props: {
           monitorId={props.monitor().id}
           slideProgress={slideProgress}
           animatedWidth={animatedWidth}
-          blurRef={blur.ref}
+          capsuleRef={setCapsuleNode}
           pinned={props.pinned()}
           runningOnly={props.runningOnly()}
         />

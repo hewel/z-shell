@@ -472,6 +472,8 @@ function sortEvents<T extends Record<string, unknown>>(events: readonly T[]): T[
     .map(({ event }) => event);
 }
 
+export const INITIAL_SNAPSHOT_AT_MS = 20;
+
 export function buildShellPreviewFixture(options: ShellPreviewFixtureOptions = {}) {
   const waylandDisplay = options.waylandDisplay ?? "wayland-1";
   const xdgRuntimeDir = options.xdgRuntimeDir ?? "/zgui-preview-only/runtime";
@@ -492,11 +494,14 @@ export function buildShellPreviewFixture(options: ShellPreviewFixtureOptions = {
   const hostCommandIds = hostCommands.map((command, index) =>
     command.id ?? (expectHostRegister ? 3 : 2) + index);
 
+  // Deliver initial topic snapshots at 20ms (past the first 60Hz 16.67ms refresh interval) so
+  // initial bar layout reconfigurations (e.g. docked/vertical) paired with native node blurRegion
+  // updates do not collide with zgui-host's resize-pacing decline loop on FrameObserver.
   const snapshotEvents = SHELL_TOPIC_ORDER.map((topic, index) => {
     const data = options.initialTopics && Object.hasOwn(options.initialTopics, topic)
       ? options.initialTopics[topic]
       : initialTopics[topic];
-    return message(4, {
+    return message(INITIAL_SNAPSHOT_AT_MS, {
       jsonrpc: "2.0",
       id: index + 2,
       result: {

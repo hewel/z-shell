@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      ZGUI_JS_REF: ca97d16b327e97e334cd78db62fde08df7ea048a
+      ZGUI_JS_REF: 8587236828fec6690af96f4c6303d27fe76e0dd8
     steps:
       - uses: actions/checkout@v4
         with:

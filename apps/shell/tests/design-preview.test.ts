@@ -7,6 +7,8 @@ import { buildShellPreviewFixture, makeSampleTelemetrySnapshot, makeSolidPngByte
 import {
   assertRoundedBlurStrips,
   assertSameBounds,
+  blurRegionCoversPoint,
+  blurRegionIntersectsRect,
   buildPublishedShell,
   createPreviewWorkspace,
   createVirtualTimeline,
@@ -3688,6 +3690,428 @@ describe("apps/shell design geometry & pixel lint", () => {
       expect(treeNode(degWin.tree, "sysmon-sidebar-status").text).toBe("Live snapshot");
     } finally {
       dRun.cleanup();
+    }
+  }, 30_000);
+
+  previewTest("L4 #35 Notification Body Wrapping: Multiline Newlines & Long Unbroken URL Continuation Pixels in Toast and CalendarPanel", () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-design-notif-wrap-");
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const monitor = { id: "DP-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900, scale: 1 };
+      const wrapItems = [
+        {
+          id: 401,
+          revision: 1,
+          app_name: "Baseline",
+          summary: "Single line",
+          body: "Short single line",
+          icon: null,
+          attachment: null,
+          actions: [],
+          urgency: 1,
+        },
+        {
+          id: 402,
+          revision: 1,
+          app_name: "Google Chrome",
+          summary: "New message",
+          body: "chat.example.com\n\nSecond line after blank\nThird line preserved",
+          icon: null,
+          attachment: null,
+          actions: [],
+          urgency: 1,
+        },
+        {
+          id: 403,
+          revision: 1,
+          app_name: "CI Runner",
+          summary: "Artifact published",
+          body: "https://deployments.example.internal/pipelines/2026/11/25/release-v2.14.0-commit-0123456789abcdef/artifacts/build-summary.html",
+          icon: null,
+          attachment: null,
+          actions: [],
+          urgency: 1,
+        },
+      ];
+
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+      timeline.advance("toast-enter-settle", 450);
+
+      // Expand toast stack so all 3 notifications (single-line, multiline, long URL) render simultaneously.
+      const pauseTrueAtMs = timeline.after(15);
+      timeline.step({ id: "expand-wrap-toasts", op: "pointer.click", target: { surface: "notification-toasts", testId: "toast-expand-toggle" }, button: "primary" });
+      timeline.advance("toast-expand-settle", 450);
+      timeline.step({ id: "capture-toast-wrap", op: "capture", surface: "notification-toasts", captureId: "toast-wrap" });
+
+      // Open CalendarPanel to verify history list wrapping parity.
+      timeline.step({ id: "open-cal-wrap", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-clock" }, button: "primary" });
+      timeline.advance("cal-wrap-settle", 450);
+      timeline.step({ id: "capture-cal-wrap", op: "capture", surface: "panel-calendar", captureId: "cal-wrap" });
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-design-notif-wrap",
+        initialTopics: {
+          "wayland.outputs": {
+            capability: "connected",
+            outputs: [{
+              output_instance_id: 1, name: "DP-1", description: "Wrap Monitor", make: "Test", model: "1440x900",
+              x: 0, y: 0, width: 1440, height: 900, mode_width: 1440, mode_height: 900, refresh_mhz: 60000, scale: 1,
+              physical_width_mm: null, physical_height_mm: null,
+            }],
+          },
+          "desktop.notifications": {
+            available: true,
+            dnd: false,
+            popups: wrapItems,
+            history: wrapItems,
+          },
+        },
+        commands: [
+          {
+            id: 26,
+            name: "notifications.set-paused",
+            payload: { paused: true },
+            atMs: pauseTrueAtMs,
+          },
+        ],
+      }), null, 2));
+
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-notif-wrap",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(published.dist, fixture, scenario, out);
+      expectCleanPreview(result, 2, 0);
+
+      const assertWrappedBody = (
+        capture: ReturnType<typeof readCapture>,
+        cardPrefix: string,
+        bodyPrefix: string,
+        surfaceLabel: string,
+      ) => {
+        const singleBody = treeNode(capture.tree, `${bodyPrefix}-401`).boundsLogical!;
+        const singleHeight = singleBody.height;
+        expect(singleHeight, `${surfaceLabel}: baseline single-line height`).toBeGreaterThan(10);
+        expect(singleHeight, `${surfaceLabel}: baseline stays single line`).toBeLessThan(24);
+
+        const multilineNode = treeNode(capture.tree, `${bodyPrefix}-402`);
+        expect(multilineNode.text, `${surfaceLabel}: formatNotificationBody collapses blank lines`).toBe(
+          "chat.example.com\nSecond line after blank\nThird line preserved",
+        );
+
+        for (const [id, kind] of [[402, "multiline"], [403, "long-url"]] as const) {
+          const cardNode = treeNode(capture.tree, `${cardPrefix}-${id}`);
+          const bodyNode = treeNode(capture.tree, `${bodyPrefix}-${id}`);
+          const cardLog = cardNode.boundsLogical!;
+          const bodyLog = bodyNode.boundsLogical!;
+          const cardDev = cardNode.boundsDevice!;
+          const bodyDev = bodyNode.boundsDevice!;
+
+          expect(bodyLog.height, `${surfaceLabel} ${kind}: expands beyond single line`).toBeGreaterThan(singleHeight + 10);
+          expect(bodyLog.height, `${surfaceLabel} ${kind}: multi-line height >= 28px`).toBeGreaterThanOrEqual(28);
+          expect(
+            bodyLog.x + bodyLog.width,
+            `${surfaceLabel} ${kind}: stays within card right edge (no overflow)`,
+          ).toBeLessThanOrEqual(cardLog.x + cardLog.width - 8);
+
+          // Sample unobstructed card interior background and verify 2nd+ line band paints visible foreground glyphs.
+          const cardBg = pixel(
+            capture.image,
+            Math.floor(cardDev.x + cardDev.width - 10),
+            Math.floor(cardDev.y + cardDev.height - 6),
+          );
+          const contY0 = Math.floor(bodyDev.y + singleHeight + 2);
+          const contY1 = Math.min(capture.image.height - 1, Math.ceil(bodyDev.y + bodyDev.height) - 1);
+          const contX0 = Math.max(0, Math.floor(bodyDev.x));
+          const contX1 = Math.min(capture.image.width - 1, Math.ceil(bodyDev.x + bodyDev.width) - 1);
+          let continuationGlyphPixels = 0;
+          for (let y = contY0; y <= contY1; y++) {
+            for (let x = contX0; x <= contX1; x++) {
+              if (pixelChannelDiff(pixel(capture.image, x, y), cardBg) > 20) {
+                continuationGlyphPixels++;
+              }
+            }
+          }
+          expect(
+            continuationGlyphPixels,
+            `${surfaceLabel} ${kind}: 2nd+ continuation line pixels visibly rendered`,
+          ).toBeGreaterThan(20);
+        }
+      };
+
+      assertWrappedBody(readCapture(out, "notification-toasts", "toast-wrap"), "toast-card", "toast-body", "NotificationToasts");
+      assertWrappedBody(readCapture(out, "panel-calendar", "cal-wrap"), "cal-notif", "cal-notif-body", "CalendarPanel");
+    } finally {
+      cleanup();
+    }
+  }, 30_000);
+
+  previewTest("L4 #33 Native Rounded BlurRegion: Mid-Flight Transform Alignment, Programmatic Exit Cutoff, Scrolled Clipping & Gaps, Hidden Dock, and Superellipse Tangent Coverage", () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-design-native-blur-");
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const monitor = { id: "DP-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 760, scale: 1 };
+      const popups6 = Array.from({ length: 6 }, (_, idx) => ({
+        id: 501 + idx,
+        revision: 1,
+        app_name: `App ${idx + 1}`,
+        summary: `Notification ${idx + 1}`,
+        body: `Body message ${idx + 1} with enough detail to ensure the expanded stack overflows vertically.`,
+        icon: null,
+        attachment: null,
+        actions: [{ key: "open", label: "Open" }],
+        urgency: 1,
+      }));
+
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+
+      // 1. Capture revealed Dock at boot (R=22px superellipse), then test mid-flight popover entrance (t ≈ 55ms) vs settled R=22px superellipse(2.83) card.
+      timeline.step({ id: "capture-dock-revealed", op: "capture", surface: "dock-dp-1", captureId: "dock-revealed" });
+      timeline.step({ id: "open-qs-mid", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-network" }, button: "primary" });
+      timeline.advance("qs-midflight-tick", 55);
+      timeline.step({ id: "capture-qs-midflight", op: "capture", surface: "panel-quick-settings", captureId: "qs-midflight" });
+      timeline.advance("qs-settle-tick", 420);
+      timeline.step({ id: "capture-qs-settled", op: "capture", surface: "panel-quick-settings", captureId: "qs-settled" });
+      timeline.step({ id: "dismiss-qs", op: "key.press", surface: "panel-quick-settings", key: "Escape" });
+      timeline.advance("qs-dismiss-settle", 80);
+
+      // 2. Auto-hide Dock slides off viewport after 500ms idle timer + spring slide -> blurRegion === "none".
+      timeline.advance("dock-autohide-settle", 650);
+      timeline.step({ id: "capture-dock-hidden", op: "capture", surface: "dock-dp-1", captureId: "dock-hidden" });
+
+      // 3. Collapsed notification stack (ToastCard + ToastFooter, excluding ToastDeckPeek) programmatic exit -> blurRegion === "none".
+      const collapsedPushAtMs = timeline.after(10);
+      timeline.advance("collapsed-enter-settle", 450);
+      timeline.step({ id: "capture-toast-collapsed-settled", op: "capture", surface: "notification-toasts", captureId: "toast-collapsed-settled" });
+      const collapsedClearAtMs = timeline.after(10);
+      timeline.advance("collapsed-exit-tail", 65);
+      timeline.step({ id: "capture-toast-collapsed-exiting", op: "capture", surface: "notification-toasts", captureId: "toast-collapsed-exiting" });
+      timeline.advance("collapsed-exit-finish", 260);
+
+      // 4. Expanded notification stack (ToastExpandedHeader + scrollable cards):
+      //    scroll to half-visible card (clipping & zero gap fill) -> programmatic exit -> blurRegion === "none".
+      const expandedPushAtMs = timeline.after(10);
+      timeline.advance("expanded-enter-settle", 450);
+      const pauseTrueAtMs = timeline.after(15);
+      timeline.step({ id: "expand-stack", op: "pointer.click", target: { surface: "notification-toasts", testId: "toast-expand-toggle" }, button: "primary" });
+      timeline.advance("expanded-settle", 450);
+      timeline.step({
+        id: "scroll-expanded-stack",
+        op: "wheel",
+        target: { surface: "notification-toasts", testId: "toast-expanded-scroll" },
+        delta: { x: 0, y: 75, unit: "pixels" },
+      });
+      timeline.advance("expanded-scroll-settle", 80);
+      timeline.step({ id: "capture-toast-expanded-scrolled", op: "capture", surface: "notification-toasts", captureId: "toast-expanded-scrolled" });
+
+      const expandedClearAtMs = timeline.after(10);
+      const pauseFalseAtMs = timeline.after(20);
+      timeline.advance("expanded-exit-tail", 65);
+      timeline.step({ id: "capture-toast-expanded-exiting", op: "capture", surface: "notification-toasts", captureId: "toast-expanded-exiting" });
+      timeline.advance("expanded-exit-finish", 260);
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-design-native-blur",
+        initialTopics: {
+          "wayland.outputs": {
+            capability: "connected",
+            outputs: [{
+              output_instance_id: 1, name: "DP-1", description: "Native Blur Monitor", make: "Test", model: "1440x760",
+              x: 0, y: 0, width: 1440, height: 760, mode_width: 1440, mode_height: 760, refresh_mhz: 60000, scale: 1,
+              physical_width_mm: null, physical_height_mm: null,
+            }],
+          },
+          "desktop.apps": {
+            available: true,
+            count: 2,
+            pinned_apps: ["org.example.editor", "org.example.browser"],
+            apps: [
+              { id: "org.example.editor", title: "Editor", startup_wm_class: "org.example.editor", icon: null },
+              { id: "org.example.browser", title: "Browser", startup_wm_class: "org.example.browser", icon: null },
+            ],
+          },
+          "desktop.notifications": { available: true, dnd: false, popups: [], history: [] },
+        },
+        topicUpdates: [
+          {
+            atMs: collapsedPushAtMs,
+            topic: "desktop.notifications",
+            revision: 2,
+            data: { available: true, dnd: false, popups: popups6, history: popups6 },
+          },
+          {
+            atMs: collapsedClearAtMs,
+            topic: "desktop.notifications",
+            revision: 3,
+            data: { available: true, dnd: false, popups: [], history: popups6 },
+          },
+          {
+            atMs: expandedPushAtMs,
+            topic: "desktop.notifications",
+            revision: 4,
+            data: { available: true, dnd: false, popups: popups6, history: popups6 },
+          },
+          {
+            atMs: expandedClearAtMs,
+            topic: "desktop.notifications",
+            revision: 5,
+            data: { available: true, dnd: false, popups: [], history: popups6 },
+          },
+        ],
+        commands: [
+          {
+            id: 26,
+            name: "notifications.set-paused",
+            payload: { paused: true },
+            atMs: pauseTrueAtMs,
+          },
+          {
+            id: 27,
+            name: "notifications.set-paused",
+            payload: { paused: false },
+            atMs: pauseFalseAtMs,
+          },
+        ],
+      }), null, 2));
+
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-native-blur",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time", "input.wheel"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(published.dist, fixture, scenario, out);
+      expectCleanPreview(result, 8, 0);
+
+      // 1. Mid-flight popover blurRegion non-empty and aligned to same-frame transformed bounds; settled superellipse(2.83) R=22px tangent coverage & zero shadow leak.
+      const qsMid = readCapture(out, "panel-quick-settings", "qs-midflight");
+      const qsSettled = readCapture(out, "panel-quick-settings", "qs-settled");
+      const midCard = treeNode(qsMid.tree, "panel-root-quick-settings").boundsLogical!;
+      const settledCard = treeNode(qsSettled.tree, "panel-root-quick-settings").boundsLogical!;
+      expect(
+        Math.abs(midCard.y - settledCard.y) + Math.abs(midCard.width - settledCard.width),
+        "qs-midflight card is genuinely mid-transform relative to settled frame",
+      ).toBeGreaterThan(1);
+      assertRoundedBlurStrips(qsMid.frame.blurRegion, midCard, 22, "qs mid-flight blurRegion");
+      assertRoundedBlurStrips(qsSettled.frame.blurRegion, settledCard, 22, "qs settled superellipse(2.83) blurRegion", { maxTopInset: 14 });
+      for (const [edge, px, py] of [
+        ["left-shadow", settledCard.x - 6, settledCard.y + settledCard.height / 2],
+        ["right-shadow", settledCard.x + settledCard.width + 6, settledCard.y + settledCard.height / 2],
+        ["top-shadow", settledCard.x + settledCard.width / 2, settledCard.y - 6],
+        ["bottom-shadow", settledCard.x + settledCard.width / 2, settledCard.y + settledCard.height + 6],
+      ] as const) {
+        expect(blurRegionCoversPoint(qsSettled.frame.blurRegion, px, py), `qs ${edge} gutter has zero blur`).toBe(false);
+      }
+
+      // 2. Dock revealed superellipse(2.83) R=22px -> slid-out hidden dock === "none".
+      const dockRevealed = readCapture(out, "dock-dp-1", "dock-revealed");
+      const dockHidden = readCapture(out, "dock-dp-1", "dock-hidden");
+      assertRoundedBlurStrips(
+        dockRevealed.frame.blurRegion,
+        treeNode(dockRevealed.tree, "dock-root-DP-1").boundsLogical!,
+        22,
+        "dock revealed superellipse(2.83) blurRegion",
+        { maxTopInset: 14 },
+      );
+      expect(dockHidden.frame.blurRegion, "auto-hidden Dock slid off viewport resolves to blurRegion='none'").toBe("none");
+
+      // 3. Collapsed stack: ToastCard + ToastFooter blurred, ToastDeckPeek + gap unblurred, programmatic exit < 0.5 -> "none".
+      const collapsedSettled = readCapture(out, "notification-toasts", "toast-collapsed-settled");
+      const collapsedCard = treeNode(collapsedSettled.tree, "toast-card-501").boundsLogical!;
+      const collapsedFooter = treeNode(collapsedSettled.tree, "toast-more-footer").boundsLogical!;
+      expect(
+        blurRegionCoversPoint(collapsedSettled.frame.blurRegion, collapsedCard.x + collapsedCard.width / 2, collapsedCard.y + collapsedCard.height / 2),
+        "collapsed ToastCard center covered by blur",
+      ).toBe(true);
+      expect(
+        blurRegionCoversPoint(collapsedSettled.frame.blurRegion, collapsedFooter.x + collapsedFooter.width / 2, collapsedFooter.y + collapsedFooter.height / 2),
+        "collapsed ToastFooter center covered by blur",
+      ).toBe(true);
+      expect(
+        blurRegionIntersectsRect(collapsedSettled.frame.blurRegion, {
+          x: collapsedCard.x,
+          y: collapsedCard.y + collapsedCard.height + 2,
+          width: collapsedCard.width,
+          height: Math.max(1, collapsedFooter.y - (collapsedCard.y + collapsedCard.height) - 4),
+        }),
+        "ToastDeckPeek and card-to-footer gap excluded from blurRegion",
+      ).toBe(false);
+      const collapsedExiting = readCapture(out, "notification-toasts", "toast-collapsed-exiting");
+      expect(collapsedExiting.frame.blurRegion, "collapsed stack programmatic exit tail (<0.5 opacity) resolves to blurRegion='none'").toBe("none");
+
+      // 4. Expanded scrolled stack: header blurred, half-visible scrolled card clipped strictly to scroll viewport, gaps unblurred, programmatic exit < 0.5 -> "none".
+      const expandedScrolled = readCapture(out, "notification-toasts", "toast-expanded-scrolled");
+      const expHeader = treeNode(expandedScrolled.tree, "toast-expanded-header").boundsLogical!;
+      const expScroll = treeNode(expandedScrolled.tree, "toast-expanded-scroll").boundsLogical!;
+      expect(
+        blurRegionCoversPoint(expandedScrolled.frame.blurRegion, expHeader.x + expHeader.width / 2, expHeader.y + expHeader.height / 2),
+        "expanded ToastExpandedHeader retains blur while scrolled",
+      ).toBe(true);
+      // Gap between header and scroll viewport must have zero blur fill.
+      expect(
+        blurRegionIntersectsRect(expandedScrolled.frame.blurRegion, {
+          x: expHeader.x,
+          y: expHeader.y + expHeader.height + 1,
+          width: expHeader.width,
+          height: Math.max(1, expScroll.y - (expHeader.y + expHeader.height) - 2),
+        }),
+        "header-to-scroll gap has zero blur fill",
+      ).toBe(false);
+
+      const scrolledCards = popups6.map(item => treeNode(expandedScrolled.tree, `toast-card-${item.id}`).boundsLogical!);
+      // Top card (501) is scrolled partially above scroll viewport top edge.
+      const topCard = scrolledCards[0]!;
+      expect(topCard.y, "top card scrolled above scroll viewport top").toBeLessThan(expScroll.y);
+      expect(topCard.y + topCard.height, "top card remains partially visible inside scroll viewport").toBeGreaterThan(expScroll.y + 12);
+      expect(
+        blurRegionCoversPoint(
+          expandedScrolled.frame.blurRegion,
+          topCard.x + topCard.width / 2,
+          Math.floor((expScroll.y + topCard.y + topCard.height) / 2),
+        ),
+        "visible lower portion of scrolled top card retains blur",
+      ).toBe(true);
+      // Any blur strip inside scroll region must never escape into the clipped upper band above expScroll.y (between header bottom and scroll top) or below expScroll bottom.
+      expect(
+        blurRegionIntersectsRect(expandedScrolled.frame.blurRegion, {
+          x: topCard.x,
+          y: expScroll.y + expScroll.height + 1,
+          width: topCard.width,
+          height: 100,
+        }),
+        "out-of-viewport bottom scrolled cards produce zero blur below scroll viewport",
+      ).toBe(false);
+      // Gap between two adjacent visible cards (502 and 503) inside scroll viewport has zero blur fill.
+      const card2 = scrolledCards[1]!;
+      const card3 = scrolledCards[2]!;
+      expect(card2.y, "card 502 visible inside scroll").toBeGreaterThanOrEqual(expScroll.y);
+      expect(card3.y, "card 503 starts below card 502 with gap").toBeGreaterThan(card2.y + card2.height + 2);
+      expect(
+        blurRegionIntersectsRect(expandedScrolled.frame.blurRegion, {
+          x: card2.x,
+          y: card2.y + card2.height + 1,
+          width: card2.width,
+          height: Math.max(1, card3.y - (card2.y + card2.height) - 2),
+        }),
+        "inter-card gap inside expanded scroll stack has zero blur fill",
+      ).toBe(false);
+
+      const expandedExiting = readCapture(out, "notification-toasts", "toast-expanded-exiting");
+      expect(expandedExiting.frame.blurRegion, "expanded stack programmatic exit tail (<0.5 opacity) resolves to blurRegion='none'").toBe("none");
+    } finally {
+      cleanup();
     }
   }, 30_000);
 });

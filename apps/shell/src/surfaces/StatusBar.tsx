@@ -3,7 +3,6 @@ import {
   type Accessor, type ButtonProps, type Monitor, type NativeEvent, type NativeNode, type NativeStyle, type NativeWheelEvent, type NativeWindowRect,
 } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
-import { createRoundedBlurGroup, type RoundedBlurGroup } from "../blur.ts";
 import { MiniSparkline, SplitDualArcGauge } from "../charts/TelemetryCharts.tsx";
 import { ShellIcon } from "../icons.tsx";
 import { SPRING_EPSILON, createEnterProgress, createM3Spring, useMotionScheme } from "../motion.ts";
@@ -48,6 +47,19 @@ interface BarClock {
 }
 
 type StyleObj = Exclude<NativeStyle, string>;
+type TrackBlurNode = (node: NativeNode) => () => void;
+
+function useBlurRef(track: TrackBlurNode): (node: NativeNode) => void {
+  let detach: (() => void) | undefined;
+  onCleanup(() => {
+    detach?.();
+    detach = undefined;
+  });
+  return node => {
+    detach?.();
+    detach = track(node);
+  };
+}
 
 function segmentChrome(vertical: boolean, docked: boolean, active = false, interactive = false): StyleObj {
   if (docked) {
@@ -281,12 +293,12 @@ function WorkspaceTrack(props: {
   );
 }
 
-function ActiveWindowPill(props: { window: Accessor<WaylandWindow>; vertical: boolean; docked: boolean; blur: RoundedBlurGroup }) {
+function ActiveWindowPill(props: { window: Accessor<WaylandWindow>; vertical: boolean; docked: boolean; trackBlur: TrackBlurNode }) {
   const { apps, hostClient } = useShellStore();
   const app = createMemo(() => resolveDesktopApp(apps.data()?.apps, props.window().app_id));
   const { src } = useDaemonMedia(hostClient, () => app()?.icon, { fetchCommand: "launcher.fetch-blob" });
   const base = () => segmentChrome(props.vertical, props.docked);
-  const blurRef = props.blur.useTarget();
+  const blurRef = useBlurRef(props.trackBlur);
   return (
     <box ref={blurRef} testId="bar-active-window" ariaLabel={props.window().title} style={
       props.vertical
@@ -407,13 +419,13 @@ function ClockPill(props: {
   monitorId: string;
   surfaceName: string;
   layout: ResolvedBarLayout;
-  blur: RoundedBlurGroup;
+  trackBlur: TrackBlurNode;
 }) {
   const { notifications, togglePanel } = useShellStore();
   const count = () => notifications.data()?.history.length ?? 0;
   const dnd = () => notifications.data()?.dnd ?? false;
   const base = () => segmentChrome(props.vertical, props.docked, props.active, true);
-  const blurRef = props.blur.useTarget();
+  const blurRef = useBlurRef(props.trackBlur);
   return (
     <Button ref={blurRef} testId="bar-clock" ariaLabel={props.clock().horizontal}
       data-bar-segment={props.docked ? "docked" : "floating"}
@@ -470,10 +482,10 @@ function SystemMonitorTrigger(props: {
   monitorId: string;
   surfaceName: string;
   layout: ResolvedBarLayout;
-  blur: RoundedBlurGroup;
+  trackBlur: TrackBlurNode;
 }) {
   const { telemetry, togglePanel } = useShellStore();
-  const blurRef = props.blur.useTarget();
+  const blurRef = useBlurRef(props.trackBlur);
   const cpuPct = () => telemetry.data()?.cpu_usage_percent ?? null;
   const ramPct = () => computeMemoryBreakdown(telemetry.data()?.memory)?.usedPercent ?? null;
   const cpuLabel = () => (cpuPct() === null ? "—" : `${Math.round(cpuPct()!)}%`);
@@ -578,11 +590,11 @@ function SystemPill(props: {
   monitorId: string;
   surfaceName: string;
   layout: ResolvedBarLayout;
-  blur: RoundedBlurGroup;
+  trackBlur: TrackBlurNode;
 }) {
   const { ime, privacy, network, bluetooth, audio, power, togglePanel, invokePublic, openImeMenu } = useShellStore();
   let systemNode: NativeNode | undefined;
-  const blurRef = props.blur.useTarget();
+  const blurRef = useBlurRef(props.trackBlur);
   const quickSettings = (event: NativeEvent) => {
     event.stopPropagation();
     const anchorNode = props.vertical ? (systemNode ?? event.currentTarget) : event.currentTarget;
@@ -732,12 +744,12 @@ function BarContent(props: {
   launcher: boolean;
   clock: Accessor<BarClock>;
   seconds: boolean;
-  blur: RoundedBlurGroup;
+  trackBlur: TrackBlurNode;
 }) {
   const store = useShellStore();
   const { activePanel, togglePanel, dismissOverlay, invokePublic } = store;
   useShellTheme(store.theme.data);
-  const workspacesRef = props.blur.useTarget();
+  const workspacesRef = useBlurRef(props.trackBlur);
   const vertical = createMemo(() => props.layout.isVertical);
   const docked = createMemo(() => props.layout.style === "docked");
   const surfaceName = () => formatSurfaceName("bar", props.monitor.id);
@@ -797,7 +809,7 @@ function BarContent(props: {
       <box style={vertical() ? verticalGroup : group}>
         <Show when={props.launcher}>
           {() => {
-            const launcherRef = props.blur.useTarget();
+            const launcherRef = useBlurRef(props.trackBlur);
             return (
               <Button ref={launcherRef} testId="bar-launcher" ariaLabel="Launcher"
                 data-bar-segment={docked() ? "docked" : "floating"}
@@ -846,16 +858,16 @@ function BarContent(props: {
         <Show when={activeWindow()}>
           {window => <>
             <Show when={docked()}><Divider vertical={vertical()} /></Show>
-            <ActiveWindowPill window={window} vertical={vertical()} docked={docked()} blur={props.blur} />
+            <ActiveWindowPill window={window} vertical={vertical()} docked={docked()} trackBlur={props.trackBlur} />
           </>}
         </Show>
       </box>
       <ClockPill vertical={vertical()} docked={docked()} active={activePanel() === "calendar"}
-        clock={props.clock} seconds={props.seconds} monitorId={props.monitor.id} surfaceName={surfaceName()} layout={props.layout} blur={props.blur} />
+        clock={props.clock} seconds={props.seconds} monitorId={props.monitor.id} surfaceName={surfaceName()} layout={props.layout} trackBlur={props.trackBlur} />
       <box style={{ ...(vertical() ? verticalGroup : group), justifyContent: "flex-end" }}>
         <Show when={slots().length > 0}>
           {() => {
-            const slotsRef = props.blur.useTarget();
+            const slotsRef = useBlurRef(props.trackBlur);
             return (
               <box ref={slotsRef} testId="bar-plugin-slots" onClick={event => event.stopPropagation()} style={vertical()
                 ? { ...segmentChrome(true, docked()), width: docked() ? "32px" : "40px", gap: "4px", padding: "8px 0" }
@@ -867,7 +879,7 @@ function BarContent(props: {
         </Show>
         <Show when={player()}>
           {active => {
-            const mediaRef = props.blur.useTarget();
+            const mediaRef = useBlurRef(props.trackBlur);
             return <>
               <Show when={docked() && slots().length > 0}><Divider vertical={vertical()} /></Show>
               <Button ref={mediaRef} testId="bar-media" ariaLabel={mediaLabel()}
@@ -916,11 +928,11 @@ function BarContent(props: {
           monitorId={props.monitor.id}
           surfaceName={surfaceName()}
           layout={props.layout}
-          blur={props.blur}
+          trackBlur={props.trackBlur}
         />
         <Show when={trayItems().length > 0}>
           {() => {
-            const trayRef = props.blur.useTarget();
+            const trayRef = useBlurRef(props.trackBlur);
             return <>
               <Show when={docked()}><Divider vertical={vertical()} /></Show>
               <box ref={trayRef} testId="bar-tray" style={vertical()
@@ -935,7 +947,7 @@ function BarContent(props: {
         </Show>
         <Show when={docked()}><Divider vertical={vertical()} /></Show>
         <SystemPill vertical={vertical()} docked={docked()} active={activePanel() === "quick-settings" || activePanel() === "battery"}
-          monitorId={props.monitor.id} surfaceName={surfaceName()} layout={props.layout} blur={props.blur} />
+          monitorId={props.monitor.id} surfaceName={surfaceName()} layout={props.layout} trackBlur={props.trackBlur} />
       </box>
     </box>
   );
@@ -966,15 +978,23 @@ export function StatusBar() {
     <For each={monitors()} keyed={monitor => monitor.id}>
       {monitor => {
         const layout = createMemo(() => resolveBarLayout(barSettings(), monitor(), outputs.data()));
-        const blur = createRoundedBlurGroup(
-          () => (layout().isVertical ? 20 : 16),
-          () => layout().style === "floating",
-        );
+        const [blurNodes, setBlurNodes] = createSignal<readonly NativeNode[]>([]);
+        let disposed = false;
+        onCleanup(() => { disposed = true; });
+        const trackBlur: TrackBlurNode = node => {
+          if (disposed) return () => {};
+          setBlurNodes(nodes => (nodes.includes(node) ? nodes : [...nodes, node]));
+          return () => {
+            if (disposed) return;
+            setBlurNodes(nodes => nodes.filter(candidate => candidate !== node));
+          };
+        };
         return (
           <LayerSurface name={formatSurfaceName("bar", monitor().id)} output={monitor().id} layer="top" anchor={[...layout().anchor]}
             width={layout().width} height={layout().height} margin={layout().margin} exclusiveZone={layout().exclusiveZone}
-            inputRegion={layout().inputRegion ? [...layout().inputRegion!] : "full"} blurRegion={blur.region()} keyboard="none">
-            <BarContent monitor={monitor()} layout={layout()} launcher={barSettings().launcher_enabled !== false} clock={clock} seconds={clockSeconds()} blur={blur} />
+            inputRegion={layout().inputRegion ? [...layout().inputRegion!] : "full"}
+            blurRegion={layout().style === "floating" && blurNodes().length > 0 ? blurNodes() : "none"} keyboard="none">
+            <BarContent monitor={monitor()} layout={layout()} launcher={barSettings().launcher_enabled !== false} clock={clock} seconds={clockSeconds()} trackBlur={trackBlur} />
           </LayerSurface>
         );
       }}

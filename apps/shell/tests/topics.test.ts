@@ -25,6 +25,7 @@ import {
   formatFrequencyMhz,
   formatFullDate,
   formatMonthYear,
+  formatNotificationBody,
   formatPollInterval,
   formatRateBytesPerSec,
   formatSurfaceName,
@@ -985,6 +986,18 @@ describe("resolveNotificationMediaLayout (12B)", () => {
       previewBanner: null,
       fallbackKind: "bell",
     });
+  });
+});
+
+describe("formatNotificationBody", () => {
+  test("normalizes line endings, collapses consecutive blank lines, trims edges, and preserves single newlines", () => {
+    expect(formatNotificationBody("chat.example.com\n\nDeploy finished")).toBe("chat.example.com\nDeploy finished");
+    expect(formatNotificationBody("  line 1\r\n\r\n  \t \rline 2\nline 3  \n\n")).toBe("line 1\nline 2\nline 3");
+    expect(formatNotificationBody("first\nsecond\nthird")).toBe("first\nsecond\nthird");
+    expect(formatNotificationBody("   \n\t\n  ")).toBe("");
+    expect(formatNotificationBody("https://example.com/very/long/unbroken/path/segment")).toBe(
+      "https://example.com/very/long/unbroken/path/segment",
+    );
   });
 });
 

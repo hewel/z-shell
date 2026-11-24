@@ -3,7 +3,7 @@ import { M3Button, M3CardAction, M3InteractiveCard } from "@z-shell/sdk/primitiv
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
-import { PANEL_MAX_HEIGHTS, buildMonthCalendarGrid, formatBarClock, formatFullDate, formatMonthYear, resolveNotificationMediaLayout, splitNotificationActions, type NotificationItem } from "../topics.ts";
+import { PANEL_MAX_HEIGHTS, buildMonthCalendarGrid, formatBarClock, formatFullDate, formatMonthYear, formatNotificationBody, resolveNotificationMediaLayout, splitNotificationActions, type NotificationItem } from "../topics.ts";
 
 const primary = "var(--color-primary)";
 const onPrimary = "var(--color-on-primary)";
@@ -35,6 +35,7 @@ function NotificationRow(props: { item: Accessor<NotificationItem> }) {
   const badge = useDaemonMedia(hostClient, () => mediaLayout().appBadge, { fetchCommand: "notifications.fetch-blob" });
   const preview = useDaemonMedia(hostClient, () => mediaLayout().previewBanner, { fetchCommand: "notifications.fetch-blob" });
   const actions = createMemo(() => splitNotificationActions(item().actions));
+  const formattedBody = createMemo(() => formatNotificationBody(item().body));
 
   const bodyContent = () => (
     <row style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "10px", alignItems: "flex-start" }}>
@@ -78,8 +79,10 @@ function NotificationRow(props: { item: Accessor<NotificationItem> }) {
       <column style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "3px" }}>
         <text style={{ color: muted, fontSize: "11px" }}>{item().app_name}</text>
         <text style={{ fontWeight: 600, fontSize: "13px" }}>{item().summary}</text>
-        <Show when={item().body}>
-          <text style={{ color: muted, fontSize: "12px", lineHeight: "17px", maxHeight: "52px", overflow: "hidden" }}>{item().body}</text>
+        <Show when={formattedBody()}>
+          {body => (
+            <text testId={`cal-notif-body-${item().id}`} class="notification-body" style={{ color: muted, fontSize: "12px", lineHeight: "17px", maxHeight: "52px", overflow: "hidden" }}>{body()}</text>
+          )}
         </Show>
       </column>
     </row>
