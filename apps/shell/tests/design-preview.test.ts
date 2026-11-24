@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
 import type { PublishedApplication } from "@hewel/zgui-build";
-import { buildShellPreviewFixture, makeSolidPngBytes } from "./fixture-builder.ts";
+import { buildShellPreviewFixture, makeSampleTelemetrySnapshot, makeSolidPngBytes } from "./fixture-builder.ts";
 import {
   assertRoundedBlurStrips,
   assertSameBounds,
@@ -86,6 +86,11 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.step({ id: "open-settings-power", op: "pointer.click", target: { surface: "settings-window", testId: "settings-nav-power" }, button: "primary" });
       timeline.advance("settings-power-settle", 250);
       timeline.step({ id: "capture-settings-power", op: "capture", surface: "settings-window", captureId: "settings-power" });
+      timeline.step({
+        id: "close-settings", op: "service.emit", channel: "control.message",
+        value: { args: ["settings", "close"], reply: { text: "{\"settingsWindowOpen\":false}" } },
+      });
+      timeline.advance("settings-close-settle", 100);
 
       timeline.step({
         id: "open-power-dialog", op: "service.emit", channel: "control.message",
@@ -1501,6 +1506,11 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.step({ id: "click-idle-action-command", op: "pointer.click", target: { surface: "settings-window", testId: "settings-idle-action-custom_command" }, button: "primary" });
       timeline.advance("idle-command-settle", 250);
       timeline.step({ id: "capture-idle-command-editor", op: "capture", surface: "settings-window", captureId: "idle-command-editor" });
+      timeline.step({
+        id: "close-settings-idle", op: "service.emit", channel: "control.message",
+        value: { args: ["settings", "close"], reply: { text: "{\"settingsWindowOpen\":false}" } },
+      });
+      timeline.advance("idle-settings-close-settle", 100);
 
       // --- 5. Launcher search filter layout stability ---
       const launcherInitialAtMs = timeline.after(15);
@@ -3235,6 +3245,449 @@ describe("apps/shell design geometry & pixel lint", () => {
       expect(recollapsed.tree.nodes.some(node => node.testId === "toast-card-302")).toBe(false);
     } finally {
       cleanup();
+    }
+  }, 30_000);
+
+  previewTest("L4 System Monitor (04C & 22J): Horizontal Trigger, Click Flows, Multi-Monitor, Mutual Exclusion, Single-Instance & Time-Range Curve Switching", () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-design-sysmon-");
+    const interactiveRoles = new Set(["button", "switch", "slider", "menuItem", "menuItemCheckBox", "menuItemRadio", "tab", "radio"]);
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const primaryMonitor = { id: "DP-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900, scale: 1 };
+      const secondaryMonitor = { id: "HDMI-A-1", name: "HDMI-A-1", x: 1440, y: 0, width: 1280, height: 720, scale: 1 };
+
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [primaryMonitor, secondaryMonitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+      timeline.step({ id: "capture-bar-horizontal", op: "capture", surface: "bar-dp-1", captureId: "bar-sysmon-horizontal" });
+
+      // 1. Click bar-sysmon on DP-1 -> opens 04C popover
+      timeline.step({ id: "open-sysmon-dp1", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-sysmon" }, button: "primary" });
+      timeline.advance("sysmon-open-settle", 450);
+      timeline.step({ id: "capture-sysmon-popover", op: "capture", surface: "panel-system-monitor", captureId: "sysmon-popover" });
+
+      // 2. Second click on same monitor closes popover
+      timeline.step({ id: "toggle-close-sysmon-dp1", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-sysmon" }, button: "primary" });
+      timeline.advance("sysmon-close-settle", 350);
+      timeline.step({
+        id: "status-after-second-click", op: "service.emit", channel: "control.message",
+        value: {
+          args: ["status"],
+          reply: { text: "{\"publicStatus\":\"ready\",\"hostStatus\":\"ready\",\"themeDark\":true,\"daemonVersion\":\"0.1.0-preview\",\"monitors\":[\"DP-1\",\"HDMI-A-1\"],\"activePanel\":null}" },
+        },
+      });
+
+      // 3. Re-open on DP-1 then click bar-sysmon on HDMI-A-1 -> cross-monitor anchor switch (stays open)
+      timeline.step({ id: "reopen-sysmon-dp1", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-sysmon" }, button: "primary" });
+      timeline.advance("sysmon-reopen-settle", 400);
+      timeline.step({ id: "switch-sysmon-hdmi", op: "pointer.click", target: { surface: "bar-hdmi-a-1", testId: "bar-sysmon" }, button: "primary" });
+      timeline.advance("sysmon-hdmi-settle", 400);
+      timeline.step({ id: "capture-sysmon-hdmi", op: "capture", surface: "panel-system-monitor", captureId: "sysmon-popover-hdmi" });
+
+      // 4. Panel mutual exclusion: Calendar -> Media -> QuickSettings -> back to System Monitor
+      timeline.step({ id: "mutex-calendar", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-clock" }, button: "primary" });
+      timeline.advance("mutex-cal-settle", 350);
+      timeline.step({ id: "mutex-media", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-media" }, button: "primary" });
+      timeline.advance("mutex-media-settle", 350);
+      timeline.step({ id: "mutex-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-audio" }, button: "primary" });
+      timeline.advance("mutex-qs-settle", 350);
+      timeline.step({ id: "mutex-sysmon", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-sysmon" }, button: "primary" });
+      timeline.advance("mutex-sysmon-settle", 400);
+
+      // 5. Open 22J detailed window from 04C primary button (auto-closes popover)
+      timeline.step({ id: "open-detailed-win", op: "pointer.click", target: { surface: "panel-system-monitor", testId: "sysmon-open-detailed" }, button: "primary" });
+      timeline.advance("win-open-settle", 450);
+      timeline.step({ id: "capture-win-overview", op: "capture", surface: "system-monitor-window", captureId: "sysmon-window-overview" });
+
+      // 6. Switch time-range segmented control: 60s -> 5m -> 15m (distinct fixture curves -> pixel diff check)
+      timeline.step({ id: "select-5m", op: "pointer.click", target: { surface: "system-monitor-window", testId: "sysmon-range-5m" }, button: "primary" });
+      timeline.advance("range-5m-settle", 350);
+      timeline.step({ id: "capture-win-5m", op: "capture", surface: "system-monitor-window", captureId: "sysmon-window-5m" });
+
+      timeline.step({ id: "select-15m", op: "pointer.click", target: { surface: "system-monitor-window", testId: "sysmon-range-15m" }, button: "primary" });
+      timeline.advance("range-15m-settle", 350);
+      timeline.step({ id: "capture-win-15m", op: "capture", surface: "system-monitor-window", captureId: "sysmon-window-15m" });
+
+      // 7. Navigate all 4 dedicated hardware category views
+      timeline.step({ id: "nav-cpu", op: "pointer.click", target: { surface: "system-monitor-window", testId: "sysmon-nav-cpu" }, button: "primary" });
+      timeline.advance("nav-cpu-settle", 300);
+      timeline.step({ id: "capture-win-cpu", op: "capture", surface: "system-monitor-window", captureId: "sysmon-window-cpu" });
+
+      timeline.step({ id: "nav-memory", op: "pointer.click", target: { surface: "system-monitor-window", testId: "sysmon-nav-memory" }, button: "primary" });
+      timeline.advance("nav-memory-settle", 300);
+      timeline.step({ id: "capture-win-memory", op: "capture", surface: "system-monitor-window", captureId: "sysmon-window-memory" });
+
+      timeline.step({ id: "nav-gpu", op: "pointer.click", target: { surface: "system-monitor-window", testId: "sysmon-nav-gpu" }, button: "primary" });
+      timeline.advance("nav-gpu-settle", 300);
+      timeline.step({ id: "capture-win-gpu", op: "capture", surface: "system-monitor-window", captureId: "sysmon-window-gpu" });
+
+      timeline.step({ id: "nav-storage", op: "pointer.click", target: { surface: "system-monitor-window", testId: "sysmon-nav-storage" }, button: "primary" });
+      timeline.advance("nav-storage-settle", 300);
+      timeline.step({ id: "capture-win-storage", op: "capture", surface: "system-monitor-window", captureId: "sysmon-window-storage" });
+
+      // 8. Close 22J window and immediately re-open via pop-out icon button -> single-instance lifecycle check
+      timeline.step({ id: "close-win", op: "pointer.click", target: { surface: "system-monitor-window", testId: "sysmon-window-close" }, button: "primary" });
+      timeline.advance("close-win-settle", 120);
+      timeline.step({ id: "reopen-popover-for-popout", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-sysmon" }, button: "primary" });
+      timeline.advance("reopen-popover-settle", 350);
+      timeline.step({ id: "click-popout-icon", op: "pointer.click", target: { surface: "panel-system-monitor", testId: "sysmon-popout" }, button: "primary" });
+      timeline.advance("reopen-win-settle", 400);
+      timeline.step({ id: "capture-win-reopened", op: "capture", surface: "system-monitor-window", captureId: "sysmon-window-reopened" });
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-design-sysmon",
+        initialTopics: {
+          "wayland.outputs": {
+            capability: "connected",
+            outputs: [
+              {
+                output_instance_id: 1, name: "DP-1", description: "Primary", make: "Test", model: "1440x900",
+                x: 0, y: 0, width: 1440, height: 900, mode_width: 1440, mode_height: 900, refresh_mhz: 60000, scale: 1,
+                physical_width_mm: null, physical_height_mm: null,
+              },
+              {
+                output_instance_id: 2, name: "HDMI-A-1", description: "Secondary", make: "Test", model: "1280x720",
+                x: 1440, y: 0, width: 1280, height: 720, mode_width: 1280, mode_height: 720, refresh_mhz: 60000, scale: 1,
+                physical_width_mm: null, physical_height_mm: null,
+              },
+            ],
+          },
+          "wayland.workspaces": {
+            capability: "connected",
+            groups: [
+              { group_id: 1, output_instance_ids: [1] },
+              { group_id: 2, output_instance_ids: [2] },
+            ],
+            workspaces: [
+              { workspace_id: 1, group_id: 1, name: "1", id_str: "1", coordinates: [1], active: true, urgent: false, hidden: false, capabilities: ["activate"] },
+              { workspace_id: 2, group_id: 2, name: "2", id_str: "2", coordinates: [1], active: true, urgent: false, hidden: false, capabilities: ["activate"] },
+            ],
+          },
+          "desktop.media": {
+            available: true,
+            selected_player_id: "spotify",
+            any_playing: true,
+            cover: null,
+            players: [{
+              id: "spotify", identity: "Spotify", playback_status: "playing", position_us: 60_000_000,
+              capabilities: { can_play: true, can_pause: true, can_go_next: true, can_go_previous: true, can_seek: true },
+              metadata: { title: "Ambient Flow", artists: ["Synth"], album: "Focus", length_us: 240_000_000 },
+            }],
+          },
+          "system.audio": {
+            availability: "available",
+            default_sink: "speakers",
+            default_source: null,
+            sinks: [{ index: 1, name: "speakers", description: "Speakers", volume: 0.6, muted: false, channels: 2 }],
+            sources: [],
+            sink_inputs: [],
+            source_outputs: [],
+          },
+          "system.power": {
+            available: true,
+            on_ac: false,
+            battery: {
+              percentage: 84,
+              state: "discharging",
+              time_to_empty_seconds: 15_000,
+              time_to_full_seconds: null,
+              energy_rate_watts: 18.4,
+              capacity_percent: 96,
+              charge_cycles: 95,
+            },
+            profiles: { available: true, active_profile: "balanced", profiles: ["performance", "balanced", "power-saver"] },
+          },
+          "system.telemetry": makeSampleTelemetrySnapshot(),
+        },
+      }), null, 2));
+
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-sysmon",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(published.dist, fixture, scenario, out);
+      expectCleanPreview(result, 11, 0);
+
+      // 1. Horizontal bar trigger geometry
+      const barCap = readCapture(out, "bar-dp-1", "bar-sysmon-horizontal");
+      const barTrigger = treeNode(barCap.tree, "bar-sysmon").boundsLogical!;
+      expect(barTrigger.height, "horizontal floating bar-sysmon is 32px tall").toBeCloseTo(32, 0);
+      expect(treeNode(barCap.tree, "bar-sysmon-cpu").text).toBe("24%");
+      expect(treeNode(barCap.tree, "bar-sysmon-ram").text).toBe("36%");
+
+      // 2. 04C Popover geometry, transparency, shadow bleed, zero-scroll, hit targets >= 24px
+      const pop = readCapture(out, "panel-system-monitor", "sysmon-popover");
+      const popCard = treeNode(pop.tree, "panel-root-system-monitor").boundsLogical!;
+      expect(popCard.width, "04C popover matches 396px standard tier").toBeCloseTo(396, 1);
+      expect(maxRowAlpha(pop.image, 0), "04C top shadow bleed fades cleanly").toBeLessThanOrEqual(8);
+      expect(maxColAlpha(pop.image, 0), "04C left shadow bleed fades cleanly").toBeLessThanOrEqual(8);
+      expect(pixel(pop.image, 0, 0)[3], "04C transparent popup outer corner").toBe(0);
+      const popScroll = treeNode(pop.tree, "panel-system-monitor");
+      if (popScroll.scrollMetrics) {
+        expect(popScroll.scrollMetrics.overflowY, "04C popover fits with zero vertical scroll").toBe(false);
+      }
+      expect(treeNode(pop.tree, "sysmon-poll-pill").boundsLogical).toBeDefined();
+      expect(treeNode(pop.tree, "sysmon-popover-battery").text).toBe("Battery 84% · 18.4 W");
+      expect(treeNode(pop.tree, "sysmon-tile-gpu").boundsLogical).toBeDefined();
+      expect(treeNode(pop.tree, "sysmon-tile-thermal").boundsLogical).toBeDefined();
+      expect(treeNode(pop.tree, "sysmon-tile-network").boundsLogical).toBeDefined();
+      expect(treeNode(pop.tree, "sysmon-tile-disk").boundsLogical).toBeDefined();
+
+      // Cross-monitor popover rendered cleanly on HDMI-A-1
+      const popHdmi = readCapture(out, "panel-system-monitor", "sysmon-popover-hdmi");
+      expect(treeNode(popHdmi.tree, "panel-root-system-monitor").boundsLogical?.width).toBeCloseTo(396, 1);
+
+      // 3. 22J Window Overview: 820x600 opaque edge-to-edge, zero-scroll, hit targets >= 24px
+      const winOverview = readCapture(out, "system-monitor-window", "sysmon-window-overview");
+      expect(winOverview.image.width).toBe(820);
+      expect(winOverview.image.height).toBe(600);
+      for (const [cx, cy] of [[0, 0], [819, 0], [0, 599], [819, 599]] as const) {
+        expect(pixel(winOverview.image, cx, cy)[3], `22J corner (${cx},${cy}) must be opaque`).toBe(255);
+      }
+      const winScroll = treeNode(winOverview.tree, "sysmon-content-scroll");
+      if (winScroll.scrollMetrics) {
+        expect(winScroll.scrollMetrics.overflowY, "22J Overview fits 820x600 with zero vertical scroll").toBe(false);
+      }
+      for (const node of winOverview.tree.nodes) {
+        if (!node.role || !interactiveRoles.has(node.role) || !node.boundsLogical) continue;
+        expect(node.boundsLogical.width, `22J hit target width ${node.testId ?? node.name}`).toBeGreaterThanOrEqual(24);
+        expect(node.boundsLogical.height, `22J hit target height ${node.testId ?? node.name}`).toBeGreaterThanOrEqual(24);
+      }
+
+      // 4. Time-range curve switching produces distinct rendered chart pixels (60s vs 5m vs 15m)
+      const win5m = readCapture(out, "system-monitor-window", "sysmon-window-5m");
+      const win15m = readCapture(out, "system-monitor-window", "sysmon-window-15m");
+      const cpuChartBounds = treeNode(winOverview.tree, "sysmon-win-cpu-chart").boundsDevice!;
+      expect(
+        diffRegionPixels(winOverview.image, win5m.image, cpuChartBounds),
+        "switching 60s -> 5m visibly changes rendered CPU history curve pixels",
+      ).toBeGreaterThan(40);
+      expect(
+        diffRegionPixels(win5m.image, win15m.image, cpuChartBounds),
+        "switching 5m -> 15m visibly changes rendered CPU history curve pixels",
+      ).toBeGreaterThan(40);
+
+      // 5. All 4 hardware subviews & single-instance reopen
+      expect(treeNode(readCapture(out, "system-monitor-window", "sysmon-window-cpu").tree, "sysmon-cpu-pane").boundsLogical).toBeDefined();
+      expect(treeNode(readCapture(out, "system-monitor-window", "sysmon-window-memory").tree, "sysmon-memory-pane").boundsLogical).toBeDefined();
+      expect(treeNode(readCapture(out, "system-monitor-window", "sysmon-window-gpu").tree, "sysmon-gpu-pane").boundsLogical).toBeDefined();
+      expect(treeNode(readCapture(out, "system-monitor-window", "sysmon-window-storage").tree, "sysmon-storage-pane").boundsLogical).toBeDefined();
+      const winReopened = readCapture(out, "system-monitor-window", "sysmon-window-reopened");
+      expect(treeNode(winReopened.tree, "sysmon-overview-pane").boundsLogical).toBeDefined();
+    } finally {
+      cleanup();
+    }
+  }, 30_000);
+
+  previewTest("L4 System Monitor Vertical Split Dual-Arc Trigger, Light Mode & Degraded Hardware (No GPU / No Battery / Legacy)", () => {
+    const lightScheme = {
+      surface: "#F9F9FF",
+      surface_dim: "#D9DAE0",
+      surface_bright: "#F9F9FF",
+      surface_container_lowest: "#FFFFFF",
+      surface_container_low: "#F3F3FA",
+      surface_container: "#EDEDF4",
+      surface_container_high: "#E7E8EE",
+      surface_container_highest: "#E1E2E9",
+      on_surface: "#191C20",
+      on_surface_variant: "#43474E",
+      inverse_surface: "#2E3036",
+      inverse_on_surface: "#F0F0F7",
+      outline: "#74777F",
+      outline_variant: "#C3C6CF",
+      scrim: "#000000",
+      primary: "#3C6090",
+      on_primary: "#FFFFFF",
+      primary_container: "#D4E3FF",
+      on_primary_container: "#224876",
+      secondary: "#545F71",
+      on_secondary: "#FFFFFF",
+      secondary_container: "#D8E3F8",
+      on_secondary_container: "#3D4758",
+      tertiary: "#6D5677",
+      on_tertiary: "#FFFFFF",
+      tertiary_container: "#F6D9FF",
+      on_tertiary_container: "#543F5E",
+      error: "#BA1A1A",
+      on_error: "#FFFFFF",
+      error_container: "#FFDAD6",
+      on_error_container: "#93000A",
+    } as const;
+
+    // --- Sub-run 1: Vertical 40x40 Split Dual-Arc + Light Mode 04C & 22J ---
+    const vRun = createPreviewWorkspace("z-shell-preview-design-sysmon-variants-");
+    try {
+      const fixture = join(vRun.workspace, "fixture.json");
+      const scenario = join(vRun.workspace, "scenario.json");
+      const monitor = { id: "DP-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900, scale: 1 };
+
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 250);
+      timeline.step({ id: "ready", op: "settle" });
+      timeline.step({ id: "capture-bar-left-sysmon", op: "capture", surface: "bar-dp-1", captureId: "bar-left-sysmon" });
+
+      // Click vertical 40x40 split dual-arc trigger -> opens Light Mode 04C popover
+      timeline.step({ id: "click-vertical-sysmon", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-sysmon" }, button: "primary" });
+      timeline.advance("vertical-popover-settle", 450);
+      timeline.step({ id: "capture-popover-light", op: "capture", surface: "panel-system-monitor", captureId: "sysmon-popover-light" });
+
+      // Pop out to Light Mode 22J window
+      timeline.step({ id: "open-win-light", op: "pointer.click", target: { surface: "panel-system-monitor", testId: "sysmon-popout" }, button: "primary" });
+      timeline.advance("win-light-settle", 450);
+      timeline.step({ id: "capture-win-light", op: "capture", surface: "system-monitor-window", captureId: "sysmon-window-light" });
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-design-sysmon-variants",
+        initialTopics: {
+          theme: { dark: false, variant: "tonal", backend: "builtin", last_error: null, scheme: lightScheme },
+          settings: {
+            general: { offline_mode: false, log_level: "info" },
+            bar: {
+              position: "left",
+              style: "floating",
+              gaps: 14,
+              edge_overrides: { top: null, right: null, bottom: null, left: null },
+              launcher_enabled: true,
+              dock_enabled: false,
+              clock_24h: true,
+              clock_seconds: false,
+            },
+            theme: { mode: "light", variant: "tonal", seed_color: null, backend: "builtin", gtk_linking: false },
+            ime: { mode: "indicator_only", candidate_layout: "auto", switch_osd: true },
+            polkit: { enabled: true },
+            wallpaper: { directories: [], fit: "cover", sync_theme: true, slideshow_seconds: 300 },
+            pre_action_fade_seconds: 0,
+            configured_plugins: [],
+          },
+          "wayland.outputs": {
+            capability: "connected",
+            outputs: [{
+              output_instance_id: 1, name: "DP-1", description: "Vertical Light Monitor", make: "Test", model: "1440x900",
+              x: 0, y: 0, width: 1440, height: 900, mode_width: 1440, mode_height: 900, refresh_mhz: 60000, scale: 1,
+              physical_width_mm: null, physical_height_mm: null,
+            }],
+          },
+          "wayland.workspaces": {
+            capability: "connected",
+            groups: [{ group_id: 1, output_instance_ids: [1] }],
+            workspaces: [
+              { workspace_id: 1, group_id: 1, name: "1", id_str: "1", coordinates: [1], active: true, urgent: false, hidden: false, capabilities: ["activate"] },
+            ],
+          },
+          "system.power": {
+            available: true,
+            on_ac: true,
+            battery: {
+              percentage: 92,
+              state: "charging",
+              time_to_empty_seconds: null,
+              time_to_full_seconds: 1200,
+              energy_rate_watts: null,
+              capacity_percent: 98,
+              charge_cycles: 40,
+            },
+            profiles: { available: true, active_profile: "balanced", profiles: ["performance", "balanced", "power-saver"] },
+          },
+          "system.telemetry": makeSampleTelemetrySnapshot(),
+        },
+      }), null, 2));
+
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-sysmon-variants",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(published.dist, fixture, scenario, vRun.out);
+      expectCleanPreview(result, 3, 0);
+
+      const vBar = readCapture(vRun.out, "bar-dp-1", "bar-left-sysmon");
+      const vTrigger = treeNode(vBar.tree, "bar-sysmon").boundsLogical!;
+      expect(vTrigger.width, "vertical floating bar-sysmon is 40px wide").toBeCloseTo(40, 0);
+      expect(vTrigger.height, "vertical floating bar-sysmon is 40px tall").toBeCloseTo(40, 0);
+
+      const lightPop = readCapture(vRun.out, "panel-system-monitor", "sysmon-popover-light");
+      expect(treeNode(lightPop.tree, "panel-root-system-monitor").boundsLogical?.width).toBeCloseTo(396, 1);
+      // Unknown energy_rate_watts must omit watts rather than printing "0 W"
+      expect(treeNode(lightPop.tree, "sysmon-popover-battery").text).toBe("Battery 92%");
+
+      const lightWin = readCapture(vRun.out, "system-monitor-window", "sysmon-window-light");
+      expect(lightWin.image.width).toBe(820);
+      expect(lightWin.image.height).toBe(600);
+      expect(pixel(lightWin.image, 0, 0)[3]).toBe(255);
+      expect(pixel(lightWin.image, 819, 599)[3]).toBe(255);
+    } finally {
+      vRun.cleanup();
+    }
+
+    // --- Sub-run 2: Degraded Desktop Hardware (No Battery, No GPU, Legacy Snapshot) ---
+    const dRun = createPreviewWorkspace("z-shell-preview-design-sysmon-degraded-");
+    try {
+      const fixture = join(dRun.workspace, "fixture.json");
+      const scenario = join(dRun.workspace, "scenario.json");
+      const monitor = { id: "DP-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900, scale: 1 };
+
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+      timeline.step({ id: "open-degraded-popover", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-sysmon" }, button: "primary" });
+      timeline.advance("degraded-pop-settle", 450);
+      timeline.step({ id: "capture-degraded-popover", op: "capture", surface: "panel-system-monitor", captureId: "sysmon-popover-degraded" });
+      timeline.step({ id: "open-degraded-win", op: "pointer.click", target: { surface: "panel-system-monitor", testId: "sysmon-open-detailed" }, button: "primary" });
+      timeline.advance("degraded-win-settle", 450);
+      timeline.step({ id: "capture-degraded-win", op: "capture", surface: "system-monitor-window", captureId: "sysmon-window-degraded" });
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-design-sysmon-degraded",
+        initialTopics: {
+          "wayland.outputs": {
+            capability: "connected",
+            outputs: [{
+              output_instance_id: 1, name: "DP-1", description: "Desktop No Battery No GPU", make: "Test", model: "1440x900",
+              x: 0, y: 0, width: 1440, height: 900, mode_width: 1440, mode_height: 900, refresh_mhz: 60000, scale: 1,
+              physical_width_mm: null, physical_height_mm: null,
+            }],
+          },
+          "system.power": {
+            available: true,
+            on_ac: true,
+            battery: null,
+            profiles: { available: false, active_profile: null, profiles: [] },
+          },
+          "system.telemetry": makeSampleTelemetrySnapshot({ legacy: true, includeGpu: false }),
+        },
+      }), null, 2));
+
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-sysmon-degraded",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(published.dist, fixture, scenario, dRun.out);
+      expectCleanPreview(result, 2, 0);
+
+      const degPop = readCapture(dRun.out, "panel-system-monitor", "sysmon-popover-degraded");
+      expect(degPop.tree.nodes.some(n => n.testId === "sysmon-popover-battery"), "no battery footer on desktop").toBe(false);
+      expect(degPop.tree.nodes.some(n => n.testId === "sysmon-tile-gpu"), "no GPU tile when GPU absent").toBe(false);
+      expect(degPop.tree.nodes.some(n => n.testId === "sysmon-poll-pill"), "no unverified cadence pill on legacy snapshot").toBe(false);
+      expect(degPop.tree.nodes.some(n => n.testId === "sysmon-popover-cpu-chart"), "no fabricated chart on legacy snapshot").toBe(false);
+
+      const degWin = readCapture(dRun.out, "system-monitor-window", "sysmon-window-degraded");
+      expect(degWin.tree.nodes.some(n => n.testId === "sysmon-nav-gpu"), "no GPU nav tab when GPU absent").toBe(false);
+      expect(degWin.tree.nodes.some(n => n.testId === "sysmon-range-60s"), "no range segmented control when history absent").toBe(false);
+      expect(treeNode(degWin.tree, "sysmon-sidebar-status").text).toBe("Live snapshot");
+    } finally {
+      dRun.cleanup();
     }
   }, 30_000);
 });

@@ -4,12 +4,13 @@ import {
 } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { createRoundedBlurGroup, type RoundedBlurGroup } from "../blur.ts";
+import { MiniSparkline, SplitDualArcGauge } from "../charts/TelemetryCharts.tsx";
 import { ShellIcon } from "../icons.tsx";
 import { SPRING_EPSILON, createEnterProgress, createM3Spring, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import {
-  DEFAULT_BAR_SETTINGS, filterWorkspacesForMonitor, findActiveWindowForMonitor,
+  DEFAULT_BAR_SETTINGS, computeMemoryBreakdown, filterWorkspacesForMonitor, findActiveWindowForMonitor,
   formatBarClock, formatSurfaceName, isImeTrayItem, resolveBarLayout, resolveBarPopupAnchor, resolveDesktopApp, selectActiveMediaPlayer,
   type ResolvedBarLayout, type TrayItem, type WaylandWindow, type WaylandWorkspace,
 } from "../topics.ts";
@@ -462,6 +463,114 @@ function ClockPill(props: {
   );
 }
 
+function SystemMonitorTrigger(props: {
+  vertical: boolean;
+  docked: boolean;
+  active: boolean;
+  monitorId: string;
+  surfaceName: string;
+  layout: ResolvedBarLayout;
+  blur: RoundedBlurGroup;
+}) {
+  const { telemetry, togglePanel } = useShellStore();
+  const blurRef = props.blur.useTarget();
+  const cpuPct = () => telemetry.data()?.cpu_usage_percent ?? null;
+  const ramPct = () => computeMemoryBreakdown(telemetry.data()?.memory)?.usedPercent ?? null;
+  const cpuLabel = () => (cpuPct() === null ? "—" : `${Math.round(cpuPct()!)}%`);
+  const ramLabel = () => (ramPct() === null ? "—" : `${Math.round(ramPct()!)}%`);
+  const sparkline = () => telemetry.data()?.history?.window_60s.cpu_percent ?? null;
+  const base = () => segmentChrome(props.vertical, props.docked, props.active, true);
+
+  return (
+    <Button
+      ref={blurRef}
+      testId="bar-sysmon"
+      ariaLabel={`System monitor · CPU ${cpuLabel()} · RAM ${ramLabel()}`}
+      data-bar-segment={props.docked ? "docked" : "floating"}
+      data-active={props.active ? "true" : null}
+      onClick={event => {
+        event.stopPropagation();
+        togglePanel("system-monitor", {
+          monitorId: props.monitorId,
+          parentSurface: props.surfaceName,
+          anchorRect: resolveBarPopupAnchor(props.layout, {
+            align: "target",
+            targetRect: getWindowRect(event.currentTarget),
+          }),
+        });
+      }}
+      style={props.vertical
+        ? {
+            ...base(),
+            width: props.docked ? "34px" : "40px",
+            height: props.docked ? "34px" : "40px",
+            padding: "0px",
+            borderRadius: props.docked ? "8px" : "999px",
+            "--zgui-corner-shape": "none",
+          }
+        : {
+            ...base(),
+            height: props.docked ? "28px" : "32px",
+            // Asymmetric optical cap padding: 24px (R=12) circular pulse badge inside 32px (R=16) capsule with 1px border -> 1+3=4px.
+            padding: props.docked ? "0 8px 0 4px" : "0 10px 0 3px",
+            gap: "6px",
+            whiteSpace: "nowrap",
+          }}
+    >
+      <Show when={props.vertical} fallback={
+        <row data-press-visual="compact" style={{ display: "flex", alignItems: "center", gap: "6px", pointerEvents: "none" }}>
+          <box ariaHidden style={{
+            ...center,
+            width: props.docked ? "22px" : "24px",
+            height: props.docked ? "22px" : "24px",
+            borderRadius: "999px",
+            "--zgui-corner-shape": "none",
+            backgroundColor: props.active && props.docked
+              ? "color-mix(in srgb, var(--color-on-primary-container) 14%, transparent)"
+              : primaryContainer,
+            flexShrink: 0,
+          }}>
+            <ShellIcon name="pulse" size={13} color={onPrimaryContainer} />
+          </box>
+          <text testId="bar-sysmon-cpu" data-tabular="true" style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: "11px",
+            fontWeight: 600,
+            lineHeight: "14px",
+            color: props.active && props.docked ? onPrimaryContainer : onSurface,
+            fontVariantNumeric: "tabular-nums",
+          }}>
+            {cpuLabel()}
+          </text>
+          <Show when={sparkline()}>
+            {series => <MiniSparkline values={series()} color={props.active && props.docked ? onPrimaryContainer : primary} />}
+          </Show>
+          <Divider vertical={false} short />
+          <text testId="bar-sysmon-ram" data-tabular="true" style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: "11px",
+            fontWeight: 500,
+            lineHeight: "14px",
+            color: props.active && props.docked ? onPrimaryContainer : muted,
+            fontVariantNumeric: "tabular-nums",
+          }}>
+            {ramLabel()}
+          </text>
+        </row>
+      }>
+        <box data-press-visual="compact" style={{ ...center, pointerEvents: "none" }}>
+          <SplitDualArcGauge
+            cpuPercent={cpuPct()}
+            ramPercent={ramPct()}
+            size={props.docked ? 26 : 30}
+            iconColor={props.active && props.docked ? onPrimaryContainer : onSurface}
+          />
+        </box>
+      </Show>
+    </Button>
+  );
+}
+
 function SystemPill(props: {
   vertical: boolean;
   docked: boolean;
@@ -799,6 +908,16 @@ function BarContent(props: {
             </>;
           }}
         </Show>
+        <Show when={docked() && (slots().length > 0 || Boolean(player()))}><Divider vertical={vertical()} /></Show>
+        <SystemMonitorTrigger
+          vertical={vertical()}
+          docked={docked()}
+          active={activePanel() === "system-monitor"}
+          monitorId={props.monitor.id}
+          surfaceName={surfaceName()}
+          layout={props.layout}
+          blur={props.blur}
+        />
         <Show when={trayItems().length > 0}>
           {() => {
             const trayRef = props.blur.useTarget();

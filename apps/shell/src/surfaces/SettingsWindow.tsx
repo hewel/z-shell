@@ -1,14 +1,11 @@
 import {
-  Button, For, Match, Show, Switch, WindowSurface,
-  createEffect, createSignal, flush,
+  Button, For, Match, Show, Switch,
+  createEffect, createSignal,
   type NativeChild,
 } from "@hewel/zgui";
 import { ShellIcon, type ShellIconName } from "../icons.tsx";
 import {
-  SPRING_EPSILON,
   createEnterProgress,
-  createM3Spring,
-  createOpacityEnter,
   sharedAxisXStyle,
   useMotionScheme,
 } from "../motion.ts";
@@ -32,6 +29,7 @@ import {
   primaryContainer,
   surface,
 } from "./settings/shared.tsx";
+import { FadeThroughPane, SingleInstanceWindowSurface, SlidingNavPill } from "./window-chrome.tsx";
 
 type ShellNavTab = {
   readonly id: "appearance" | "bar" | "idle" | "power";
@@ -40,30 +38,12 @@ type ShellNavTab = {
   readonly icon: ShellIconName;
 };
 
-const NAV_ITEM_PITCH = 37; // 34px item height + 3px column gap
-
 const SHELL_NAV_TABS: readonly ShellNavTab[] = [
   { id: "appearance", label: "Appearance", subtitle: "Dynamic Material 3 HCT palette & motion physics synced to settings.toml", icon: "palette" },
   { id: "bar", label: "Bar & layout", subtitle: "Wayland layer-shell edge strut, spacing rhythm, and visible modules", icon: "overview" },
   { id: "idle", label: "Idle & sleep", subtitle: "Automatic actions pause while media is playing · Declarative rules", icon: "sleep" },
   { id: "power", label: "Power & battery", subtitle: "UPower telemetry, power-profiles-daemon switching, and system load", icon: "batteryCharging" },
 ];
-
-/** M3 Fade Through wrapper for Settings Window right-hand pane (`opacity 0->1` + `translateY 6px->0`). */
-function FadeThroughPane(props: { readonly animate: boolean; readonly children: NativeChild }): NativeChild {
-  const scheme = useMotionScheme();
-  const fade = createOpacityEnter("defaultEffects", scheme);
-  const rise = createEnterProgress("fastSpatial", { scheme });
-  return (
-    <box style={{
-      width: "100%",
-      opacity: props.animate ? Math.max(0, Math.min(1, fade())) : 1,
-      transform: !props.animate || scheme() === "reduced" ? "none" : `translateY(${((1 - rise()) * 6).toFixed(2)}px)`,
-    }}>
-      {props.children}
-    </box>
-  );
-}
 
 /** M3 Shared Axis X wrapper for Settings sub-page drill-down (`Appearance <-> Wallpaper library`). */
 function SharedAxisXPane(props: { readonly direction: 1 | -1; readonly children: NativeChild }): NativeChild {
@@ -79,25 +59,6 @@ function SharedAxisXPane(props: { readonly direction: 1 | -1; readonly children:
     }}>
       {props.children}
     </column>
-  );
-}
-
-function SlidingNavPill(props: { readonly activeIndex: () => number }): NativeChild {
-  const scheme = useMotionScheme();
-  const pillY = createM3Spring(() => Math.max(0, props.activeIndex()) * NAV_ITEM_PITCH, "fastSpatial", {
-    scheme,
-    epsilon: SPRING_EPSILON.px,
-  });
-  const pillOpacity = createM3Spring(() => (props.activeIndex() >= 0 ? 1 : 0), "fastEffects", { scheme });
-  return (
-    <box ariaHidden style={{
-      position: "absolute", top: "0px", left: "0px", right: "0px", height: "34px", borderRadius: "10px",
-      backgroundColor: primaryContainer,
-      border: "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)",
-      pointerEvents: "none",
-      opacity: Math.max(0, Math.min(1, pillOpacity())),
-      transform: `translateY(${pillY().toFixed(2)}px)`,
-    }} />
   );
 }
 
@@ -278,28 +239,17 @@ function SettingsWindowContent(): NativeChild {
 
 export function SettingsWindow(): NativeChild {
   const { settingsWindowOpen, closeSettingsWindow } = useShellStore();
-  const [surfaceMounted, setSurfaceMounted] = createSignal(settingsWindowOpen());
-  createEffect(settingsWindowOpen, open => {
-    if (open) {
-      setSurfaceMounted(true);
-      return;
-    }
-    queueMicrotask(() => {
-      if (!settingsWindowOpen()) {
-        setSurfaceMounted(false);
-        flush();
-      }
-    });
-  });
   return (
-    <Show when={surfaceMounted()}>
-      <WindowSurface name="settings-window" title="z-shell Settings" appId="dev.zshell.shell.settings"
-        width={820} height={600} minWidth={820} minHeight={600} resizable={false} decorations="none"
-        onClose={closeSettingsWindow}>
-        <Show when={settingsWindowOpen()}>
-          <SettingsWindowContent />
-        </Show>
-      </WindowSurface>
-    </Show>
+    <SingleInstanceWindowSurface
+      open={settingsWindowOpen}
+      onClose={closeSettingsWindow}
+      name="settings-window"
+      title="z-shell Settings"
+      appId="dev.zshell.shell.settings"
+      width={820}
+      height={600}
+    >
+      <SettingsWindowContent />
+    </SingleInstanceWindowSurface>
   );
 }

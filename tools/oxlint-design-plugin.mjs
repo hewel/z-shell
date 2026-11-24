@@ -86,6 +86,14 @@ const SCALLOP_ALLOWED_FILES = new Set([
 const EXPRESSIVE_PATH_NAME_RE = /(?:scallop|rosette|shellEmblem|cookie[46]|clover4|flower5|morphShape|passwordShape)/i;
 const SVG_BEZIER_PATH_RE = /^\s*M\s*-?\d[\d.,\s-]*[CcQqSsTt]/;
 const ALLOWED_VECTOR_VIEWBOXES = new Set(["0 0 24 24", "0 0 64 64"]);
+const TELEMETRY_CHART_FILES = new Set(["TelemetryCharts.tsx"]);
+const TELEMETRY_CHART_VIEWBOXES = new Set([
+  "0 0 36 16",
+  "0 0 30 30",
+  "0 0 340 72",
+  "0 0 380 88",
+  "0 0 260 64",
+]);
 
 function propertyName(prop) {
   if (!prop || prop.type !== "Property") return null;
@@ -694,7 +702,8 @@ const rules = {
               attr.name.name === "viewBox" &&
               attrValue !== null &&
               !ALLOWED_VECTOR_VIEWBOXES.has(attrValue.trim()) &&
-              !(WAVY_ALLOWED_FILES.has(basename) && attrValue.trim() === "0 0 328 28")
+              !(WAVY_ALLOWED_FILES.has(basename) && attrValue.trim() === "0 0 328 28") &&
+              !(TELEMETRY_CHART_FILES.has(basename) && TELEMETRY_CHART_VIEWBOXES.has(attrValue.trim()))
             ) {
               context.report({
                 node: attr.value,
@@ -1011,10 +1020,10 @@ const rules = {
       schema: [],
     },
     create(context) {
-      const FLUSH_FILES = new Set(["ShellPanels.tsx", "PluginHost.tsx", "SettingsWindow.tsx", "BarPopups.tsx"]);
+      const FLUSH_FILES = new Set(["ShellPanels.tsx", "PluginHost.tsx", "SettingsWindow.tsx", "SystemMonitorWindow.tsx", "BarPopups.tsx"]);
       const basename = path.basename(context.filename ?? "");
       if (!FLUSH_FILES.has(basename)) return {};
-      const isToplevelWindow = basename === "SettingsWindow.tsx";
+      const isToplevelWindow = basename === "SettingsWindow.tsx" || basename === "SystemMonitorWindow.tsx";
       let hasGeometryInsets = false;
       const shadowNodes = [];
       return {
@@ -1389,6 +1398,7 @@ const rules = {
       const isAlwaysSolidSurface =
         basename === "SettingsWindow.tsx" ||
         basename === "SettingsSidebar.tsx" ||
+        basename === "SystemMonitorWindow.tsx" ||
         filename.includes("/apps/shell/src/surfaces/settings/") ||
         filename.startsWith("apps/shell/src/surfaces/settings/");
       const TRANSLUCENT_SURFACE_RE = /color-mix\(\s*in\s+srgb\s*,\s*var\(--color-(?:surface(?:-container(?:-(?:lowest|low|high|highest))?|-dim|-bright)?|primary-container)\)\s+(\d+(?:\.\d+)?)%\s*,\s*transparent\s*\)/i;

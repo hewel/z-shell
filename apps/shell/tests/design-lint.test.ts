@@ -246,6 +246,37 @@ describe("zshell oxlint design plugin", () => {
 
     const goodIconGrid = lintSnippet("icons.tsx", `export const ICONS = { mediaEq: { viewBox: "0 0 24 24", d: "M7 18h2V6H7v12z" }, shellEmblem: { viewBox: "0 0 64 64", d: p } };`, "zshell/material-icon-grid");
     expect(goodIconGrid.status, goodIconGrid.output).toBe(0);
+
+    const goodTelemetryChart = lintSnippet("TelemetryCharts.tsx", `export const x = <vector d={path} viewBox="0 0 30 30" />;`, "zshell/material-icon-grid");
+    expect(goodTelemetryChart.status, goodTelemetryChart.output).toBe(0);
+
+    const badTelemetryChartOutside = lintSnippet("Widget.tsx", `export const x = <vector d={path} viewBox="0 0 30 30" />;`, "zshell/material-icon-grid");
+    expect(badTelemetryChartOutside.status).not.toBe(0);
+
+    const badTelemetryChartViewBox = lintSnippet("TelemetryCharts.tsx", `export const x = <vector d={path} viewBox="0 0 123 45" />;`, "zshell/material-icon-grid");
+    expect(badTelemetryChartViewBox.status).not.toBe(0);
+  });
+
+  test("SystemMonitorWindow is guarded as a flush solid Level 3 toplevel window (no boxShadow, no backdropFilter, no translucency)", () => {
+    const badShadow = lintSnippet("SystemMonitorWindow.tsx", `export const s = { boxShadow: "var(--shadow-level-2)" };`, "zshell/no-flush-surface-shadow");
+    expect(badShadow.status).not.toBe(0);
+
+    const badBlur = lintSnippet("SystemMonitorWindow.tsx", `export const s = { backdropFilter: "blur(20px)" };`, "zshell/no-unblurred-translucent-surface");
+    expect(badBlur.status).not.toBe(0);
+
+    const badTranslucent = lintSnippet(
+      "SystemMonitorWindow.tsx",
+      `export const s = { backgroundColor: "color-mix(in srgb, var(--color-surface-container) 78%, transparent)" };`,
+      "zshell/no-unblurred-translucent-surface",
+    );
+    expect(badTranslucent.status).not.toBe(0);
+
+    const goodSolid = lintSnippet(
+      "SystemMonitorWindow.tsx",
+      `export const s = { backgroundColor: "var(--color-surface-container)" };`,
+      "zshell/no-unblurred-translucent-surface",
+    );
+    expect(goodSolid.status, goodSolid.output).toBe(0);
   });
 
   test("zshell/single-owner-ia blocks Notifications/DND in QuickSettingsPanel and SystemTelemetryCards in CalendarPanel", () => {
@@ -891,11 +922,15 @@ describe("DESIGN.md token and surface contract sync", () => {
     const shellPanels = readFileSync(join(shellDir, "src/panels/ShellPanels.tsx"), "utf8");
     const pluginHost = readFileSync(join(shellDir, "src/plugins/PluginHost.tsx"), "utf8");
     const settingsWin = readFileSync(join(shellDir, "src/surfaces/SettingsWindow.tsx"), "utf8");
+    const sysmonWin = readFileSync(join(shellDir, "src/surfaces/SystemMonitorWindow.tsx"), "utf8");
     expect(shellPanels).toContain(`height="auto"`);
     expect(pluginHost).toContain(`height="auto"`);
     expect(settingsWin).toContain("width={820}");
     expect(settingsWin).toContain("height={600}");
     expect(settingsWin).toContain(`width: "216px"`);
+    expect(sysmonWin).toContain("width={820}");
+    expect(sysmonWin).toContain("height={600}");
+    expect(sysmonWin).toContain(`width: "216px"`);
 
     // QuickSettings Wi-Fi tile decouples visual active fill (wifiConnected) from toggle a11y checked (wifi.enabled).
     const qsPanel = readFileSync(join(shellDir, "src/panels/QuickSettingsPanel.tsx"), "utf8");
@@ -915,6 +950,7 @@ describe("DESIGN.md token and surface contract sync", () => {
     expect(shellPanels).toMatch(/calendar:\s*\{\s*width:\s*396\b/);
     expect(shellPanels).toMatch(/media:\s*\{\s*width:\s*396\b/);
     expect(shellPanels).toMatch(/battery:\s*\{\s*width:\s*396\b/);
+    expect(shellPanels).toMatch(/"system-monitor":\s*\{\s*width:\s*396\b/);
     expect(shellPanels).toMatch(/clipboard:\s*\{\s*width:\s*560\b/);
     expect(powerDialog).toContain("<M3DialogShell");
     expect(polkitDialog).toContain("<M3DialogShell");
@@ -1189,6 +1225,8 @@ describe("DESIGN.md token and surface contract sync", () => {
       ["apps/shell/src/panels/QuickSettingsPanel.tsx", "QuickTile circular icon well"],
       ["apps/shell/src/panels/MediaPanel.tsx", "Media Play/Pause pill & circular transport buttons"],
       ["apps/shell/src/panels/CalendarPanel.tsx", "Calendar unread count pill"],
+      ["apps/shell/src/panels/SystemMonitorPanel.tsx", "SystemMonitor popover cadence pill & memory bar"],
+      ["apps/shell/src/surfaces/SystemMonitorWindow.tsx", "SystemMonitor window status dot & progress bars"],
       ["apps/shell/src/surfaces/settings/AppearancePane.tsx", "Settings circular color seed swatches"],
     ] as const) {
       const source = readFileSync(join(repoRoot, relPath), "utf8");

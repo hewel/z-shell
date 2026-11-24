@@ -778,6 +778,70 @@ export interface TelemetryMemory {
   readonly total_bytes: number;
   readonly available_bytes: number;
   readonly used_bytes: number;
+  readonly cached_bytes?: number | null;
+  readonly buffers_bytes?: number | null;
+  readonly reclaimable_bytes?: number | null;
+}
+
+export interface TelemetrySwap {
+  readonly total_bytes: number;
+  readonly free_bytes: number;
+  readonly used_bytes: number;
+}
+
+export interface TelemetryCpuInfo {
+  readonly core_count: number;
+  readonly per_core_usage_percent?: readonly (number | null)[];
+  readonly frequency_mhz?: number | null;
+  readonly model_name?: string | null;
+  readonly load_average?: readonly [number, number, number] | null;
+  readonly uptime_seconds?: number | null;
+}
+
+export interface TelemetryGpuInfo {
+  readonly id: string;
+  readonly name?: string | null;
+  readonly driver?: string | null;
+  readonly pci_slot?: string | null;
+  readonly utilization_percent?: number | null;
+  readonly vram_used_bytes?: number | null;
+  readonly vram_total_bytes?: number | null;
+  readonly temperature_millicelsius?: number | null;
+  readonly power_milliwatts?: number | null;
+  readonly clock_mhz?: number | null;
+}
+
+export interface TelemetryNetworkInterface {
+  readonly name: string;
+  readonly up?: boolean | null;
+  readonly rx_bytes_per_sec?: number | null;
+  readonly tx_bytes_per_sec?: number | null;
+  readonly session_rx_bytes: number;
+  readonly session_tx_bytes: number;
+}
+
+export interface TelemetryNetwork {
+  readonly active_interface?: string | null;
+  readonly rx_bytes_per_sec?: number | null;
+  readonly tx_bytes_per_sec?: number | null;
+  readonly session_rx_bytes: number;
+  readonly session_tx_bytes: number;
+  readonly interfaces?: readonly TelemetryNetworkInterface[];
+}
+
+export interface TelemetryMount {
+  readonly mount_point: string;
+  readonly device: string;
+  readonly fs_type: string;
+  readonly total_bytes: number;
+  readonly available_bytes: number;
+  readonly used_bytes: number;
+}
+
+export interface TelemetryStorage {
+  readonly read_bytes_per_sec?: number | null;
+  readonly write_bytes_per_sec?: number | null;
+  readonly mounts?: readonly TelemetryMount[];
 }
 
 export interface ThermalZone {
@@ -786,10 +850,46 @@ export interface ThermalZone {
   readonly temperature_millicelsius: number;
 }
 
+export type TelemetryThermalCategory = "cpu" | "gpu" | "nvme" | "battery" | "other";
+
+export interface TelemetryThermalSensor {
+  readonly label: string;
+  readonly category: TelemetryThermalCategory;
+  readonly source: string;
+  readonly temperature_millicelsius: number;
+}
+
+export type TelemetryRangeKey = "60s" | "5m" | "15m";
+
+export interface TelemetryHistoryWindow {
+  readonly bucket_seconds: number;
+  readonly cpu_percent?: readonly (number | null)[];
+  readonly memory_percent?: readonly (number | null)[];
+  readonly gpu_percent?: readonly (number | null)[];
+  readonly net_rx_bytes_per_sec?: readonly (number | null)[];
+  readonly net_tx_bytes_per_sec?: readonly (number | null)[];
+  readonly disk_read_bytes_per_sec?: readonly (number | null)[];
+  readonly disk_write_bytes_per_sec?: readonly (number | null)[];
+}
+
+export interface TelemetryHistory {
+  readonly window_60s: TelemetryHistoryWindow;
+  readonly window_5m: TelemetryHistoryWindow;
+  readonly window_15m: TelemetryHistoryWindow;
+}
+
 export interface SystemTelemetrySnapshot {
   readonly cpu_usage_percent: number | null;
   readonly memory: TelemetryMemory | null;
   readonly temperatures: readonly ThermalZone[];
+  readonly poll_interval_ms?: number | null;
+  readonly cpu?: TelemetryCpuInfo | null;
+  readonly swap?: TelemetrySwap | null;
+  readonly gpus?: readonly TelemetryGpuInfo[];
+  readonly network?: TelemetryNetwork | null;
+  readonly storage?: TelemetryStorage | null;
+  readonly sensors?: readonly TelemetryThermalSensor[];
+  readonly history?: TelemetryHistory | null;
 }
 
 export interface SystemUserSnapshot {
@@ -856,6 +956,7 @@ export const PANEL_MAX_HEIGHTS = {
   calendar: 760,
   media: 560,
   battery: 520,
+  "system-monitor": 760,
   clipboard: 620,
   plugin: 760,
 } as const;
@@ -1571,6 +1672,170 @@ export function formatTrackTimeUs(us: number | null | undefined): string {
 
 export function formatBytesGiB(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
+}
+
+export function formatBytesDecimalGB(bytes: number, decimals = 1): string {
+  return `${(Math.max(0, bytes) / 1024 ** 3).toFixed(decimals)} GB`;
+}
+
+export function formatBytesShort(bytes: number | null | undefined, compactUnit = false): string {
+  if (bytes === null || bytes === undefined || !Number.isFinite(bytes) || bytes < 0) {
+    return "—";
+  }
+  const tib = 1024 ** 4;
+  const gib = 1024 ** 3;
+  const mib = 1024 ** 2;
+  const kib = 1024;
+  if (bytes >= tib) {
+    const val = bytes / tib;
+    return `${val >= 100 ? Math.round(val) : val.toFixed(1)}${compactUnit ? "T" : " TB"}`;
+  }
+  if (bytes >= gib) {
+    const val = bytes / gib;
+    return `${val >= 100 ? Math.round(val) : val.toFixed(1)}${compactUnit ? "G" : " GB"}`;
+  }
+  if (bytes >= mib) {
+    const val = bytes / mib;
+    return `${val >= 10 ? Math.round(val) : val.toFixed(1)}${compactUnit ? "M" : " MB"}`;
+  }
+  if (bytes >= kib) {
+    return `${Math.round(bytes / kib)}${compactUnit ? "K" : " KB"}`;
+  }
+  return `${Math.round(bytes)}${compactUnit ? "B" : " B"}`;
+}
+
+export function formatRateBytesPerSec(bps: number | null | undefined): string {
+  if (bps === null || bps === undefined || !Number.isFinite(bps) || bps < 0) {
+    return "—";
+  }
+  const gib = 1024 ** 3;
+  const mib = 1024 ** 2;
+  const kib = 1024;
+  if (bps >= gib) {
+    const val = bps / gib;
+    return `${val >= 10 ? Math.round(val) : val.toFixed(1)} GB/s`;
+  }
+  if (bps >= mib) {
+    const val = bps / mib;
+    return `${val >= 10 ? Math.round(val) : val.toFixed(1)} MB/s`;
+  }
+  if (bps >= kib) {
+    const val = bps / kib;
+    return `${val >= 10 ? Math.round(val) : val.toFixed(1)} KB/s`;
+  }
+  return `${Math.round(bps)} B/s`;
+}
+
+export function formatFrequencyMhz(mhz: number | null | undefined, ghzDecimals = 1): string {
+  if (mhz === null || mhz === undefined || !Number.isFinite(mhz) || mhz <= 0) {
+    return "";
+  }
+  if (mhz >= 1000) {
+    return `${(mhz / 1000).toFixed(ghzDecimals)} GHz`;
+  }
+  return `${Math.round(mhz)} MHz`;
+}
+
+export function formatUptimeCompact(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds < 0) {
+    return "";
+  }
+  const totalMinutes = Math.floor(seconds / 60);
+  const days = Math.floor(totalMinutes / (24 * 60));
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) {
+    return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  }
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+  return `${minutes}m`;
+}
+
+export function formatPollInterval(ms: number | null | undefined): string | null {
+  if (ms === null || ms === undefined || !Number.isFinite(ms) || ms <= 0) {
+    return null;
+  }
+  if (ms >= 1000 && ms % 1000 === 0) {
+    return `${ms / 1000}s`;
+  }
+  if (ms >= 1000) {
+    return `${(ms / 1000).toFixed(1)}s`;
+  }
+  return `${Math.round(ms)}ms`;
+}
+
+export interface MemoryBreakdown {
+  readonly totalBytes: number;
+  readonly availableBytes: number;
+  readonly usedBytes: number;
+  readonly cacheBytes: number | null;
+  readonly visualCacheBytes: number;
+  readonly usedPercent: number;
+  readonly activePercent: number;
+  readonly cachePercent: number;
+}
+
+/**
+ * Computes non-overlapping Memory bar percentages from `used_bytes = total - available`
+ * while clamping optional kernel cache (`cached + buffers + reclaimable`) strictly to the
+ * remaining available headroom so `activePercent + cachePercent <= 100`.
+ */
+export function computeMemoryBreakdown(memory: TelemetryMemory | null | undefined): MemoryBreakdown | null {
+  if (!memory || memory.total_bytes <= 0) {
+    return null;
+  }
+  const totalBytes = memory.total_bytes;
+  const usedBytes = Math.max(0, Math.min(totalBytes, memory.used_bytes));
+  const availableBytes = Math.max(0, Math.min(totalBytes, memory.available_bytes));
+  const hasCacheField = memory.cached_bytes != null || memory.buffers_bytes != null || memory.reclaimable_bytes != null;
+  const cacheBytes = hasCacheField
+    ? Math.max(0, (memory.cached_bytes ?? 0) + (memory.buffers_bytes ?? 0) + (memory.reclaimable_bytes ?? 0))
+    : null;
+  const remainingHeadroom = Math.max(0, totalBytes - usedBytes);
+  const visualCacheBytes = cacheBytes === null ? 0 : Math.min(cacheBytes, remainingHeadroom);
+  const activePercent = Math.min(100, Math.max(0, (usedBytes / totalBytes) * 100));
+  const cachePercent = Math.min(100 - activePercent, Math.max(0, (visualCacheBytes / totalBytes) * 100));
+  return {
+    totalBytes,
+    availableBytes,
+    usedBytes,
+    cacheBytes,
+    visualCacheBytes,
+    usedPercent: activePercent,
+    activePercent,
+    cachePercent,
+  };
+}
+
+export function selectPrimaryGpu(gpus: readonly TelemetryGpuInfo[] | null | undefined): TelemetryGpuInfo | null {
+  return gpus && gpus.length > 0 ? gpus[0]! : null;
+}
+
+export function selectHeadlineTempCelsius(snapshot: SystemTelemetrySnapshot | null | undefined): number | null {
+  if (!snapshot) return null;
+  const sensors = snapshot.sensors ?? [];
+  const cpuSensor = sensors.find(sensor => sensor.category === "cpu");
+  if (cpuSensor) return Math.round(cpuSensor.temperature_millicelsius / 1000);
+  if (sensors.length > 0) return Math.round(sensors[0]!.temperature_millicelsius / 1000);
+  return maxThermalCelsius(snapshot.temperatures ?? []);
+}
+
+export function selectTelemetryHistoryWindow(
+  snapshot: SystemTelemetrySnapshot | null | undefined,
+  range: TelemetryRangeKey,
+): TelemetryHistoryWindow | null {
+  const history = snapshot?.history;
+  if (!history) return null;
+  switch (range) {
+    case "60s":
+      return history.window_60s;
+    case "5m":
+      return history.window_5m;
+    case "15m":
+      return history.window_15m;
+  }
 }
 
 export function maxThermalCelsius(zones: readonly ThermalZone[]): number | null {

@@ -1,23 +1,35 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  buildSparklinePaths,
+  buildSplitDualArcPaths,
+} from "../src/charts.ts";
+import {
   DEFAULT_BAR_SETTINGS,
   DOCKED_TOP_BAR_HEIGHT,
   DOCKED_VERTICAL_BAR_WIDTH,
+  PANEL_MAX_HEIGHTS,
   TOP_BAR_HEIGHT,
   VERTICAL_BAR_WIDTH,
   buildDockItems,
   buildMonthCalendarGrid,
   clampOverlayPosition,
+  computeMemoryBreakdown,
   filterWorkspacesForMonitor,
   findActiveWindowForMonitor,
   formatBarClock,
+  formatBytesDecimalGB,
   formatBytesGiB,
+  formatBytesShort,
   formatDurationSeconds,
+  formatFrequencyMhz,
   formatFullDate,
   formatMonthYear,
+  formatPollInterval,
+  formatRateBytesPerSec,
   formatSurfaceName,
   formatTrackTimeUs,
+  formatUptimeCompact,
   hasWindowsOnMonitor,
   isImeTrayItem,
   maxThermalCelsius,
@@ -30,6 +42,9 @@ import {
   resolveMonitorWallpaper,
   resolveNotificationMediaLayout,
   selectActiveMediaPlayer,
+  selectHeadlineTempCelsius,
+  selectPrimaryGpu,
+  selectTelemetryHistoryWindow,
   splitNotificationActions,
   type ActiveWallpaper,
   type BarPosition,
@@ -38,6 +53,7 @@ import {
   type DesktopMediaSnapshot,
   type EdgeOverrides,
   type MediaPlayer,
+  type SystemTelemetrySnapshot,
   type WallpaperSnapshot,
   type WaylandOutput,
   type WaylandOutputsSnapshot,
@@ -969,5 +985,110 @@ describe("resolveNotificationMediaLayout (12B)", () => {
       previewBanner: null,
       fallbackKind: "bell",
     });
+  });
+});
+
+describe("System Monitor telemetry helpers, chart paths & backwards compatibility", () => {
+  test("formats byte sizes, transfer rates, frequencies, uptime, and poll cadence truthfully", () => {
+    expect(PANEL_MAX_HEIGHTS["system-monitor"]).toBe(760);
+    expect(formatBytesDecimalGB(11.4 * 1024 ** 3, 1)).toBe("11.4 GB");
+    expect(formatBytesShort(1.8 * 1024 ** 3, true)).toBe("1.8G");
+    expect(formatBytesShort(240 * 1024 ** 2, true)).toBe("240M");
+    expect(formatBytesShort(null)).toBe("—");
+    expect(formatRateBytesPerSec(4.2 * 1024 ** 2)).toBe("4.2 MB/s");
+    expect(formatRateBytesPerSec(310 * 1024)).toBe("310 KB/s");
+    expect(formatRateBytesPerSec(null)).toBe("—");
+    expect(formatFrequencyMhz(3820, 2)).toBe("3.82 GHz");
+    expect(formatFrequencyMhz(800, 1)).toBe("800 MHz");
+    expect(formatFrequencyMhz(null)).toBe("");
+    expect(formatUptimeCompact(4 * 3600 + 18 * 60)).toBe("4h 18m");
+    expect(formatUptimeCompact(2 * 86400 + 3 * 3600)).toBe("2d 3h");
+    expect(formatPollInterval(1000)).toBe("1s");
+    expect(formatPollInterval(2000)).toBe("2s");
+    expect(formatPollInterval(500)).toBe("500ms");
+    expect(formatPollInterval(null)).toBeNull();
+    expect(formatPollInterval(undefined)).toBeNull();
+  });
+
+  test("computeMemoryBreakdown preserves used_bytes = total - available and clamps cache segment to non-overlapping headroom", () => {
+    const GiB = 1024 ** 3;
+    const normal = computeMemoryBreakdown({
+      total_bytes: 32 * GiB,
+      available_bytes: 20.6 * GiB,
+      used_bytes: 11.4 * GiB,
+      cached_bytes: 5.1 * GiB,
+    })!;
+    expect(normal.usedPercent).toBeCloseTo((11.4 / 32) * 100, 4);
+    expect(normal.cachePercent).toBeCloseTo((5.1 / 32) * 100, 4);
+    expect(normal.activePercent + normal.cachePercent).toBeLessThanOrEqual(100);
+
+    // Oversized cache reported by kernel must clamp strictly to remaining available headroom (never > 100%).
+    const clamped = computeMemoryBreakdown({
+      total_bytes: 16 * GiB,
+      available_bytes: 2 * GiB,
+      used_bytes: 14 * GiB,
+      cached_bytes: 6 * GiB,
+      buffers_bytes: 1 * GiB,
+      reclaimable_bytes: 1 * GiB,
+    })!;
+    expect(clamped.visualCacheBytes).toBe(2 * GiB);
+    expect(clamped.activePercent + clamped.cachePercent).toBeCloseTo(100, 6);
+  });
+
+  test("buildSparklinePaths breaks cleanly across null gaps without bridging and builds split dual-arc paths", () => {
+    const gapped = buildSparklinePaths([10, 25, null, null, 60, 80, 75], {
+      width: 340,
+      height: 72,
+      maxValue: 100,
+    });
+    expect(gapped.hasData).toBe(true);
+    expect(gapped.segmentCount).toBe(2);
+    // Two disjoint M commands prove the line breaks across null gaps rather than bridging them.
+    expect(gapped.strokePath.match(/\bM\s/g)?.length).toBe(2);
+    expect(gapped.areaPath.match(/\bZ\b/g)?.length).toBe(2);
+
+    const empty = buildSparklinePaths([null, null], { width: 340, height: 72, maxValue: 100 });
+    expect(empty.hasData).toBe(false);
+    expect(empty.strokePath).toBe("");
+
+    const arcs = buildSplitDualArcPaths(24, 36);
+    expect(arcs.leftTrack).toContain("M ");
+    expect(arcs.rightTrack).toContain("M ");
+    expect(arcs.leftFill).toContain("C ");
+    expect(arcs.rightFill).toContain("C ");
+    const zeroArcs = buildSplitDualArcPaths(null, 0);
+    expect(zeroArcs.leftFill).toBe("");
+    expect(zeroArcs.rightFill).toBe("");
+  });
+
+  test("backwards compatibility: legacy snapshots drive new selectors without fabricated data, and extended snapshots keep BatteryPanel intact", () => {
+    const legacySnapshot: SystemTelemetrySnapshot = {
+      cpu_usage_percent: 22,
+      memory: {
+        total_bytes: 34_359_738_368,
+        available_bytes: 22_119_081_984,
+        used_bytes: 12_240_656_384,
+      },
+      temperatures: [{ zone: 0, kind: "x86_pkg_temp", temperature_millicelsius: 46_000 }],
+    };
+    expect(formatPollInterval(legacySnapshot.poll_interval_ms)).toBeNull();
+    expect(selectTelemetryHistoryWindow(legacySnapshot, "60s")).toBeNull();
+    expect(selectPrimaryGpu(legacySnapshot.gpus)).toBeNull();
+    expect(selectHeadlineTempCelsius(legacySnapshot)).toBe(46);
+    expect(computeMemoryBreakdown(legacySnapshot.memory)?.cacheBytes).toBeNull();
+
+    const extendedSnapshot: SystemTelemetrySnapshot = {
+      ...legacySnapshot,
+      poll_interval_ms: 1000,
+      memory: { ...legacySnapshot.memory!, cached_bytes: 4 * 1024 ** 3 },
+      sensors: [
+        { label: "CPU", category: "cpu", source: "k10temp", temperature_millicelsius: 52_000 },
+        { label: "NVMe", category: "nvme", source: "nvme", temperature_millicelsius: 38_000 },
+      ],
+    };
+    // BatteryPanel continues reading legacy fields cleanly from extended snapshots.
+    expect(formatBytesGiB(extendedSnapshot.memory!.used_bytes)).toBe("11.4 GiB");
+    expect(maxThermalCelsius(extendedSnapshot.temperatures)).toBe(46);
+    expect(selectHeadlineTempCelsius(extendedSnapshot)).toBe(52);
   });
 });

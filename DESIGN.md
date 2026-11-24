@@ -169,9 +169,9 @@ Desktop placement follows a **`14px` global tiling rhythm** (`[bar].gaps = 14` i
 | **Bar Strut (Floating)** | Top `100% × 46px` (`32px` islands + `14px` margin); Vertical `54px × 100%` (`40px` islands + `14px` margin) | Exclusive `wlr-layer-shell` edge strut | `09 · Top Bar`, `09B · Vertical Bar` |
 | **Bar Strut (Docked)** | Top `100% × 38px` (`0px` margin, `1px` bottom hairline); Vertical `44px × 100%` (`0px` margin, `1px` inner hairline) | Exclusive flush `wlr-layer-shell` strut | `09C · Docked Top Bar`, `09D · Docked Vertical Bar` |
 | **Compact Popover** | `360px` wide | Fit-content, zero scroll | `12 · Notification Popup`, `15 · Nosleep`, `17 · Power Dialog`, `23 · Polkit Auth Prompt` |
-| **Standard Popover** | `396px` wide | Zero scroll (target ≤ `760px`) | `01 · Main`, `02 · Wi-Fi`, `03 · Bluetooth`, `04 · Sound`, `04B · Battery & Power`, `13 · Calendar`, `14 · Media Player`, `16 · AI Usage` |
+| **Standard Popover** | `396px` wide | Zero scroll (target ≤ `760px`) | `01 · Main`, `02 · Wi-Fi`, `03 · Bluetooth`, `04 · Sound`, `04B · Battery & Power`, `04C · System Monitor`, `13 · Calendar`, `14 · Media Player`, `16 · AI Usage` |
 | **Centered Modal** | `560px`–`684px` wide | Centered over dimmed scrim | `18 · Launcher` (`652px`), `19 · Clipboard` (`560px`), `20 · Workspace Overview` (`684px`) |
-| **Settings Window** | `820px × 600px` | `216px` left nav + `604px` content pane | `22 · Appearance`, `22B · Bar & Layout`, `22C · Idle & Sleep`, `22D · Power & Battery`, `22E · AI Usage`, `22F · Nosleep`, `22G · Theme Bridges`, `22H · Niri Overview` |
+| **Settings & Monitor Windows** | `820px × 600px` | `216px` left nav + `604px` content pane | `22 · Appearance`–`22H · Niri Overview`, `22J · System Monitor` |
 | **Exclusive Fullscreen** | `100% × 100%` | Exclusive `ext-session-lock-v1` [[Wayland-Layer]](#references) | `21 · Lock Screen` |
 
 ### Anchoring & Pointer Ergonomics

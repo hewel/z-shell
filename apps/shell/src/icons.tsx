@@ -273,6 +273,26 @@ export const SHELL_ICON_PATHS = {
     viewBox: "0 0 24 24",
     d: "M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42A8.962 8.962 0 0012 4c-4.97 0-9 4.03-9 9s4.02 9 9 9a8.994 8.994 0 007.03-14.61zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z",
   },
+  pulse: {
+    viewBox: "0 0 24 24",
+    d: "M2 11h3.8l2.8-6.5c.3-.7 1.5-.7 1.8 0l3.1 10.3 2.1-3.4c.2-.3.5-.4.9-.4H22v2h-4.9l-2.7 6.5c-.3.7-1.5.7-1.8 0L9.5 9.2l-2.1 3.4c-.2.3-.5.4-.9.4H2v-2z",
+  },
+  openInNew: {
+    viewBox: "0 0 24 24",
+    d: "M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z",
+  },
+  dashboard: {
+    viewBox: "0 0 24 24",
+    d: "M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z",
+  },
+  gpu: {
+    viewBox: "0 0 24 24",
+    d: "M22 9V7h-2V5c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-2h2v-2h-2v-2h2v-2h-2V9h2zm-4 10H4V5h14v14zM6 13h5v4H6v-4zm6-6h4v3h-4V7zM6 7h5v5H6V7zm6 4h4v6h-4v-6z",
+  },
+  storage: {
+    viewBox: "0 0 24 24",
+    d: "M2 20h20v-4H2v4zm2-3h2v2H4v-2zM2 4v4h20V4H2zm4 3H4V5h2v2zm-4 7h20v-4H2v4zm2-3h2v2H4v-2z",
+  },
 } as const;
 
 export type ShellIconName = keyof typeof SHELL_ICON_PATHS;

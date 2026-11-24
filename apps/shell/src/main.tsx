@@ -14,6 +14,7 @@ import { PowerDialog } from "./surfaces/PowerDialog.tsx";
 import { SessionLockOverlay } from "./surfaces/SessionLockOverlay.tsx";
 import { SettingsWindow } from "./surfaces/SettingsWindow.tsx";
 import { StatusBar } from "./surfaces/StatusBar.tsx";
+import { SystemMonitorWindow } from "./surfaces/SystemMonitorWindow.tsx";
 import { WallpaperLayer } from "./surfaces/WallpaperLayer.tsx";
 import { useShellTheme } from "./theme.ts";
 
@@ -36,6 +37,7 @@ function ShellApp() {
       <PowerDialog />
       <PolkitDialog />
       <SettingsWindow />
+      <SystemMonitorWindow />
       <SessionLockOverlay />
     </ShellProvider>
   );

@@ -12,6 +12,15 @@
       "previewRelPath": "z-shell-preview-design/out/captures/surfaces/panel-quick-settings/qs.png"
     },
     {
+      "id": "04c-sysmon-popover",
+      "name": "04C · System Monitor (Bar Triggers & Popover)",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "DHN-0",
+      "refFile": "04c-sysmon-popover.jpg",
+      "previewRelPath": "z-shell-preview-design-sysmon/out/captures/surfaces/panel-system-monitor/sysmon-popover.png"
+    },
+    {
       "id": "09-bar",
       "name": "09 · Top Bar (Floating)",
       "theme": "dark",
@@ -154,6 +163,15 @@
       "nodeId": "CZF-0",
       "refFile": "22a-wallpaper-library.jpg",
       "previewRelPath": "z-shell-preview-design-new-states/out/captures/surfaces/settings-window/wallpaper-library.png"
+    },
+    {
+      "id": "22j-sysmon-window",
+      "name": "22J · System Monitor Window (820×600)",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "DHO-0",
+      "refFile": "22j-sysmon-window.jpg",
+      "previewRelPath": "z-shell-preview-design-sysmon/out/captures/surfaces/system-monitor-window/sysmon-window-overview.png"
     },
     {
       "id": "23-polkit",

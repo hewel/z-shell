@@ -15,12 +15,14 @@ import { CalendarPanel } from "./CalendarPanel.tsx";
 import { ClipboardPanel } from "./ClipboardPanel.tsx";
 import { MediaPanel } from "./MediaPanel.tsx";
 import { QuickSettingsPanel } from "./QuickSettingsPanel.tsx";
+import { SystemMonitorPanel } from "./SystemMonitorPanel.tsx";
 
 const panels = {
   "quick-settings": { width: 396, maxHeight: PANEL_MAX_HEIGHTS["quick-settings"], Component: QuickSettingsPanel },
   calendar: { width: 396, maxHeight: PANEL_MAX_HEIGHTS.calendar, Component: CalendarPanel },
   media: { width: 396, maxHeight: PANEL_MAX_HEIGHTS.media, Component: MediaPanel },
   battery: { width: 396, maxHeight: PANEL_MAX_HEIGHTS.battery, Component: BatteryPanel },
+  "system-monitor": { width: 396, maxHeight: PANEL_MAX_HEIGHTS["system-monitor"], Component: SystemMonitorPanel },
   clipboard: { width: 560, maxHeight: PANEL_MAX_HEIGHTS.clipboard, Component: ClipboardPanel },
 };
 

@@ -120,6 +120,169 @@ export function makeSampleThemeSnapshot(primaryHex = "#7CD4FF") {
   };
 }
 
+/**
+ * Rich hardware telemetry fixture matching Paper `04C` & `22J` with distinctly shaped
+ * `60s`, `5m`, and `15m` history curves (including an explicit `null` gap in `15m`)
+ * so L4 tests can verify both visual parity and pixel-level time-range curve switching.
+ */
+export function makeSampleTelemetrySnapshot(options: {
+  readonly includeGpu?: boolean;
+  readonly legacy?: boolean;
+} = {}) {
+  const GiB = 1024 ** 3;
+  const base = {
+    cpu_usage_percent: 24.0,
+    memory: {
+      total_bytes: 32 * GiB,
+      available_bytes: Math.round(20.6 * GiB),
+      used_bytes: Math.round(11.4 * GiB),
+      ...(options.legacy ? {} : {
+        cached_bytes: Math.round(4.1 * GiB),
+        buffers_bytes: Math.round(0.4 * GiB),
+        reclaimable_bytes: Math.round(0.6 * GiB),
+      }),
+    },
+    temperatures: [
+      { zone: 0, kind: "x86_pkg_temp", temperature_millicelsius: 52_000 },
+      { zone: 1, kind: "battery", temperature_millicelsius: 31_000 },
+    ],
+  };
+  if (options.legacy) {
+    return base;
+  }
+
+  // Distinct curves across time windows:
+  // 60s: calm low wave (18..34%), 5m: steep high load plateau (68..96%), 15m: dual-phase with explicit null gap.
+  const cpu60s = [18, 21, 22, 24, 29, 31, 34, 32, 27, 25, 29, 31, 26, 24];
+  const cpu5m = [72, 78, 84, 88, 92, 95, 91, 86, 89, 94, 96, 90, 84, 88];
+  const cpu15m = [42, 46, 52, 48, null, null, 18, 22, 35, 60, 74, 68, 45, 24];
+  const mem60s = [34, 34, 35, 35, 36, 36, 36, 36, 35, 36, 36, 36, 36, 36];
+  const mem5m = [58, 60, 63, 66, 70, 74, 76, 75, 72, 71, 70, 68, 64, 62];
+  const mem15m = [30, 32, 35, 38, null, null, 45, 48, 52, 50, 44, 40, 37, 36];
+  const netRx60s = [420_000, 950_000, 1_400_000, 2_800_000, 2_100_000, 3_600_000, 4_800_000, 3_900_000, 4_400_000, 3_200_000, 4_200_000];
+  const netTx60s = [120_000, 180_000, 220_000, 310_000, 260_000, 400_000, 350_000, 290_000, 330_000, 280_000, 310_000];
+  const netRx5m = [8_200_000, 9_100_000, 7_600_000, 8_800_000, 9_500_000, 8_400_000, 7_900_000, 9_200_000, 8_600_000, 8_100_000, 8_900_000];
+  const netTx5m = [1_200_000, 1_500_000, 1_800_000, 1_600_000, 1_900_000, 1_700_000, 1_400_000, 1_600_000, 1_500_000, 1_300_000, 1_400_000];
+
+  const includeGpu = options.includeGpu !== false;
+  return {
+    ...base,
+    poll_interval_ms: 1000,
+    cpu: {
+      core_count: 8,
+      per_core_usage_percent: [48, 28, 62, 18, 42, 12, 24, 14],
+      frequency_mhz: 3820,
+      model_name: "AMD Ryzen 7 7840U w/ Radeon 780M Graphics",
+      load_average: [1.42, 1.28, 1.05],
+      uptime_seconds: 4 * 3600 + 18 * 60,
+    },
+    swap: {
+      total_bytes: 8 * GiB,
+      free_bytes: Math.round(7.6 * GiB),
+      used_bytes: Math.round(0.4 * GiB),
+    },
+    gpus: includeGpu
+      ? [{
+          id: "card0",
+          name: "Radeon 780M",
+          driver: "amdgpu",
+          pci_slot: "0000:c1:00.0",
+          utilization_percent: 18.0,
+          vram_used_bytes: Math.round(2.1 * GiB),
+          vram_total_bytes: 12 * GiB,
+          temperature_millicelsius: 46_000,
+          power_milliwatts: 14_200,
+          clock_mhz: 1450,
+        }]
+      : [],
+    network: {
+      active_interface: "enp4s0",
+      rx_bytes_per_sec: Math.round(4.2 * 1024 ** 2),
+      tx_bytes_per_sec: 310 * 1024,
+      session_rx_bytes: Math.round(1.8 * GiB),
+      session_tx_bytes: 240 * 1024 ** 2,
+      interfaces: [
+        {
+          name: "enp4s0",
+          up: true,
+          rx_bytes_per_sec: Math.round(4.2 * 1024 ** 2),
+          tx_bytes_per_sec: 310 * 1024,
+          session_rx_bytes: Math.round(1.8 * GiB),
+          session_tx_bytes: 240 * 1024 ** 2,
+        },
+        {
+          name: "wlan0",
+          up: false,
+          rx_bytes_per_sec: 0,
+          tx_bytes_per_sec: 0,
+          session_rx_bytes: 12 * 1024 ** 2,
+          session_tx_bytes: 4 * 1024 ** 2,
+        },
+      ],
+    },
+    storage: {
+      read_bytes_per_sec: 48 * 1024 ** 2,
+      write_bytes_per_sec: 12 * 1024 ** 2,
+      mounts: [
+        {
+          mount_point: "/",
+          device: "nvme0n1p2",
+          fs_type: "btrfs",
+          total_bytes: 866 * GiB,
+          available_bytes: 312 * GiB,
+          used_bytes: 554 * GiB,
+        },
+        {
+          mount_point: "/home",
+          device: "nvme0n1p3",
+          fs_type: "ext4",
+          total_bytes: 983 * GiB,
+          available_bytes: 580 * GiB,
+          used_bytes: 403 * GiB,
+        },
+      ],
+    },
+    sensors: [
+      { label: "CPU", category: "cpu", source: "k10temp", temperature_millicelsius: 52_000 },
+      ...(includeGpu ? [{ label: "GPU", category: "gpu", source: "amdgpu", temperature_millicelsius: 46_000 }] : []),
+      { label: "NVMe", category: "nvme", source: "nvme", temperature_millicelsius: 38_000 },
+      { label: "Battery", category: "battery", source: "BAT0", temperature_millicelsius: 31_000 },
+    ],
+    history: {
+      window_60s: {
+        bucket_seconds: 1,
+        cpu_percent: cpu60s,
+        memory_percent: mem60s,
+        ...(includeGpu ? { gpu_percent: [12, 14, 15, 18, 22, 19, 17, 18, 20, 18, 17, 16, 18, 18] } : {}),
+        net_rx_bytes_per_sec: netRx60s,
+        net_tx_bytes_per_sec: netTx60s,
+        disk_read_bytes_per_sec: [22e6, 36e6, 48e6, 32e6, 28e6, 44e6, 52e6, 48e6],
+        disk_write_bytes_per_sec: [8e6, 12e6, 10e6, 14e6, 9e6, 11e6, 13e6, 12e6],
+      },
+      window_5m: {
+        bucket_seconds: 5,
+        cpu_percent: cpu5m,
+        memory_percent: mem5m,
+        ...(includeGpu ? { gpu_percent: [68, 72, 76, 80, 82, 78, 74, 79, 85, 81, 77, 74, 72, 70] } : {}),
+        net_rx_bytes_per_sec: netRx5m,
+        net_tx_bytes_per_sec: netTx5m,
+        disk_read_bytes_per_sec: [90e6, 110e6, 105e6, 98e6, 120e6, 115e6, 108e6, 102e6],
+        disk_write_bytes_per_sec: [40e6, 48e6, 52e6, 46e6, 55e6, 50e6, 44e6, 42e6],
+      },
+      window_15m: {
+        bucket_seconds: 15,
+        cpu_percent: cpu15m,
+        memory_percent: mem15m,
+        ...(includeGpu ? { gpu_percent: [30, 34, 38, 36, null, null, 14, 16, 22, 28, 25, 20, 18, 18] } : {}),
+        net_rx_bytes_per_sec: [2e6, 3e6, null, null, 1e6, 4e6, 5e6, 3e6],
+        net_tx_bytes_per_sec: [200e3, 300e3, null, null, 150e3, 320e3, 360e3, 310e3],
+        disk_read_bytes_per_sec: [30e6, 40e6, null, null, 20e6, 50e6, 48e6, 44e6],
+        disk_write_bytes_per_sec: [10e6, 14e6, null, null, 8e6, 12e6, 11e6, 12e6],
+      },
+    },
+  };
+}
+
 function defaultTopicSnapshots(): Record<ShellTopic, unknown> {
   return {
     theme: makeSampleThemeSnapshot(),

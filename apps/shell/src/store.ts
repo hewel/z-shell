@@ -51,8 +51,15 @@ export type ShellSocketPaths = {
   readonly hostSocket: string | null;
 };
 
-const PANEL_IDS = ["launcher", "overview", "calendar", "media", "quick-settings", "battery", "clipboard"] as const;
+const PANEL_IDS = ["launcher", "overview", "calendar", "media", "quick-settings", "battery", "system-monitor", "clipboard"] as const;
 export type PanelId = typeof PANEL_IDS[number];
+
+export const SYSTEM_MONITOR_TABS = ["overview", "cpu", "memory", "gpu", "storage"] as const;
+export type SystemMonitorTab = typeof SYSTEM_MONITOR_TABS[number];
+
+function isSystemMonitorTab(value: unknown): value is SystemMonitorTab {
+  return typeof value === "string" && (SYSTEM_MONITOR_TABS as readonly string[]).includes(value);
+}
 
 export type PanelTarget = {
   readonly id: PanelId;
@@ -185,6 +192,10 @@ export interface ShellStore extends ShellTopics {
   readonly settingsWindowTab: Accessor<string>;
   openSettingsWindow(tab?: string): void;
   closeSettingsWindow(): void;
+  readonly systemMonitorWindowOpen: Accessor<boolean>;
+  readonly systemMonitorWindowTab: Accessor<SystemMonitorTab>;
+  openSystemMonitorWindow(tab?: SystemMonitorTab): void;
+  closeSystemMonitorWindow(): void;
 }
 
 export function createShellStore(): ShellStore {
@@ -348,6 +359,17 @@ export function createShellStore(): ShellStore {
   }
   function closeSettingsWindow(): void {
     setSettingsWindowOpen(false);
+  }
+
+  const [systemMonitorWindowOpen, setSystemMonitorWindowOpen] = createSignal(false);
+  const [systemMonitorWindowTab, setSystemMonitorWindowTab] = createSignal<SystemMonitorTab>("overview");
+  function openSystemMonitorWindow(tab?: SystemMonitorTab): void {
+    if (tab) setSystemMonitorWindowTab(tab);
+    setOverlay(null);
+    setSystemMonitorWindowOpen(true);
+  }
+  function closeSystemMonitorWindow(): void {
+    setSystemMonitorWindowOpen(false);
   }
 
   function reportError(error: unknown): string {
@@ -536,6 +558,15 @@ export function createShellStore(): ShellStore {
         flush(() => openSettingsWindow(typeof action === "string" && action !== "open" ? action : undefined));
         return { settingsWindowOpen: settingsWindowOpen(), settingsWindowTab: settingsWindowTab() };
       }
+      case "monitor": {
+        const action = args[1];
+        if (action === "close") {
+          flush(closeSystemMonitorWindow);
+          return { systemMonitorWindowOpen: false };
+        }
+        flush(() => openSystemMonitorWindow(isSystemMonitorTab(action) ? action : undefined));
+        return { systemMonitorWindowOpen: systemMonitorWindowOpen(), systemMonitorWindowTab: systemMonitorWindowTab() };
+      }
       case "power": {
         const action = args[1];
         if (action === "close") {
@@ -618,6 +649,10 @@ export function createShellStore(): ShellStore {
     settingsWindowTab,
     openSettingsWindow,
     closeSettingsWindow,
+    systemMonitorWindowOpen,
+    systemMonitorWindowTab,
+    openSystemMonitorWindow,
+    closeSystemMonitorWindow,
   };
 }
 
