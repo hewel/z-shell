@@ -5,6 +5,7 @@ Reference for agents working on `apps/shell/`, `plugins/*/src/`, or `tools/oxlin
 ## Sibling `zgui-js` Repository
 
 - Local path: `../zgui-js` (linked via `package.json` `link:../zgui-js/packages/*`).
+- Built SDK packages: `zgui-js` exports compiled `dist/` for `@hewel/zgui` and `@hewel/zgui-services`; on fresh sibling checkouts run `(cd ../zgui-js && bun install --frozen-lockfile && bun run build:packages)` before `z-shell` lint/typecheck/tests.
 - Native host binaries:
   - Release (preferred for live testing): `../zgui-js/target/release/zgui-host`
   - Debug (used by headless preview tests): `../zgui-js/target/debug/zgui-host`

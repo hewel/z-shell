@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      ZGUI_JS_REF: 8587236828fec6690af96f4c6303d27fe76e0dd8
+      ZGUI_JS_REF: e2a98c66de4c1d7ca7838294b9b2253982916c62
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,7 +57,7 @@ jobs:
         run: |
           echo "z-shell: $(git rev-parse HEAD)"
           echo "zgui-js: $(git -C ../zgui-js rev-parse HEAD)"
-          (cd ../zgui-js && bun install --frozen-lockfile)
+          (cd ../zgui-js && bun install --frozen-lockfile && bun run build:packages)
           bun install --frozen-lockfile
           bun run lint
           bun run typecheck
