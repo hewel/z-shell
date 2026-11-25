@@ -262,7 +262,7 @@ export function createShellStore(): ShellStore {
     // Keep the logical panel state available to control callers without an output.
     if (!monitor) return { parentSurface: "", anchorRect: { x: 0, y: 0, width: size, height: size } };
     const layout = resolveBarLayout(topics.settings.data()?.bar, monitor, topics.outputs.data());
-    const align = id === "calendar" || id === "clipboard" ? "center" : "end";
+    const align = id === "calendar" ? "center" : "end";
     return {
       parentSurface: formatSurfaceName("bar", monitor.id),
       anchorRect: resolveBarPopupAnchor(layout, { align }),

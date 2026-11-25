@@ -2034,18 +2034,40 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.step({ id: "type-launcher-miss", op: "text.commit", surface: "launcher-overlay", text: "photoshp" });
       timeline.advance("launcher-empty-settle", 200);
       timeline.step({ id: "capture-launcher-empty", op: "capture", surface: "launcher-overlay", captureId: "launcher-empty" });
-      // 6. Clipboard keyboard single-step ArrowDown + Delete safe in search + Enter copies active entry
+      // 6. Clipboard overlay auto-focuses search on open: direct typing -> empty recovery -> filtered ArrowDown + safe Delete + Enter copy
       timeline.step({
         id: "open-clipboard-kbd", op: "service.emit", channel: "control.message",
         value: { args: ["panel", "clipboard"], reply: { text: "{\"activePanel\":\"clipboard\"}" } },
       });
       timeline.advance("clipboard-kbd-open", 300);
-      timeline.step({ id: "focus-clip-search", op: "pointer.click", target: { surface: "panel-clipboard", testId: "clipboard-search" }, button: "primary" });
-      timeline.step({ id: "clip-arrow-down-once", op: "key.press", surface: "panel-clipboard", key: "ArrowDown" });
-      timeline.step({ id: "clip-delete-in-search", op: "key.press", surface: "panel-clipboard", key: "Delete" });
+      timeline.step({ id: "clip-type-miss", op: "text.commit", surface: "clipboard-overlay", text: "zzz" });
+      timeline.advance("clipboard-miss-settle", 20);
+      timeline.step({
+        id: "clip-miss-hides-first", op: "assert",
+        target: { surface: "clipboard-overlay", testId: "clip-entry-101" },
+        check: { property: "exists", equals: false },
+      });
+      timeline.step({ id: "clip-bs-1", op: "key.press", surface: "clipboard-overlay", key: "Backspace" });
+      timeline.step({ id: "clip-bs-2", op: "key.press", surface: "clipboard-overlay", key: "Backspace" });
+      timeline.step({ id: "clip-bs-3", op: "key.press", surface: "clipboard-overlay", key: "Backspace" });
+      timeline.advance("clipboard-recover-settle", 20);
+      timeline.step({
+        id: "clip-recover-shows-first", op: "assert",
+        target: { surface: "clipboard-overlay", testId: "clip-entry-101" },
+        check: { property: "exists", equals: true },
+      });
+      timeline.step({ id: "clip-type-filter", op: "text.commit", surface: "clipboard-overlay", text: "d" });
+      timeline.advance("clipboard-filter-settle", 20);
+      timeline.step({
+        id: "clip-filter-hides-first", op: "assert",
+        target: { surface: "clipboard-overlay", testId: "clip-entry-101" },
+        check: { property: "exists", equals: false },
+      });
+      timeline.step({ id: "clip-arrow-down-once", op: "key.press", surface: "clipboard-overlay", key: "ArrowDown" });
+      timeline.step({ id: "clip-delete-in-search", op: "key.press", surface: "clipboard-overlay", key: "Delete" });
       const clipCopyAtMs = timeline.after(20);
-      timeline.step({ id: "clip-enter-copy", op: "key.press", surface: "panel-clipboard", key: "Enter" });
-      timeline.advance("clipboard-kbd-settle", 100);
+      timeline.step({ id: "clip-enter-copy", op: "key.press", surface: "clipboard-overlay", key: "Enter" });
+      timeline.advance("clipboard-kbd-settle", 350);
       timeline.step({ id: "finish", op: "settle" });
 
       writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
@@ -2283,9 +2305,9 @@ describe("apps/shell design geometry & pixel lint", () => {
           {
             id: 30,
             name: "clipboard.copy",
-            payload: { id: 102 },
+            payload: { id: 103 },
             atMs: clipCopyAtMs,
-            result: { data: { copied: 102 } },
+            result: { data: { copied: 103 } },
           },
           {
             socket: "host",
@@ -2345,7 +2367,7 @@ describe("apps/shell design geometry & pixel lint", () => {
       }, null, 2));
 
       const result = runPreview(published.dist, fixture, scenario, out);
-      expectCleanPreview(result, 10, 0);
+      expectCleanPreview(result, 10, 3);
 
       // Verify 22A · Wallpaper Library
       const wpLib = readCapture(out, "settings-window", "wallpaper-library");
@@ -2696,16 +2718,16 @@ describe("apps/shell design geometry & pixel lint", () => {
         value: { args: ["panel", "clipboard"], reply: { text: "{\"activePanel\":\"clipboard\"}" } },
       });
       timeline.advance("clip-open-settle", 400);
-      timeline.step({ id: "capture-clip-rest", op: "capture", surface: "panel-clipboard", captureId: "clip-rest" });
-      timeline.step({ id: "hover-clip-body", op: "pointer.move", target: { surface: "panel-clipboard", testId: "clip-copy-101" } });
+      timeline.step({ id: "capture-clip-rest", op: "capture", surface: "clipboard-overlay", captureId: "clip-rest" });
+      timeline.step({ id: "hover-clip-body", op: "pointer.move", target: { surface: "clipboard-overlay", testId: "clip-copy-101" } });
       timeline.advance("clip-body-hover-settle", 150);
-      timeline.step({ id: "capture-clip-body-hover", op: "capture", surface: "panel-clipboard", captureId: "clip-body-hover" });
-      timeline.step({ id: "hover-clip-pin", op: "pointer.move", target: { surface: "panel-clipboard", testId: "clip-pin-101" } });
+      timeline.step({ id: "capture-clip-body-hover", op: "capture", surface: "clipboard-overlay", captureId: "clip-body-hover" });
+      timeline.step({ id: "hover-clip-pin", op: "pointer.move", target: { surface: "clipboard-overlay", testId: "clip-pin-101" } });
       timeline.advance("clip-pin-hover-settle", 150);
-      timeline.step({ id: "capture-clip-pin-hover", op: "capture", surface: "panel-clipboard", captureId: "clip-pin-hover" });
-      timeline.step({ id: "hover-clip-forget", op: "pointer.move", target: { surface: "panel-clipboard", testId: "clip-forget-101" } });
+      timeline.step({ id: "capture-clip-pin-hover", op: "capture", surface: "clipboard-overlay", captureId: "clip-pin-hover" });
+      timeline.step({ id: "hover-clip-forget", op: "pointer.move", target: { surface: "clipboard-overlay", testId: "clip-forget-101" } });
       timeline.advance("clip-forget-hover-settle", 150);
-      timeline.step({ id: "capture-clip-forget-hover", op: "capture", surface: "panel-clipboard", captureId: "clip-forget-hover" });
+      timeline.step({ id: "capture-clip-forget-hover", op: "capture", surface: "clipboard-overlay", captureId: "clip-forget-hover" });
 
       // 4. QuickSettings: SplitTile left half hover vs right > arrow hover
       timeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-network" }, button: "primary" });
@@ -3000,10 +3022,10 @@ describe("apps/shell design geometry & pixel lint", () => {
       ).toBe(0);
 
       // 2. ClipboardPanel: full-card body hover vs isolated Pin & Forget buttons
-      const clipRest = readCapture(out, "panel-clipboard", "clip-rest");
-      const clipBodyHover = readCapture(out, "panel-clipboard", "clip-body-hover");
-      const clipPinHover = readCapture(out, "panel-clipboard", "clip-pin-hover");
-      const clipForgetHover = readCapture(out, "panel-clipboard", "clip-forget-hover");
+      const clipRest = readCapture(out, "clipboard-overlay", "clip-rest");
+      const clipBodyHover = readCapture(out, "clipboard-overlay", "clip-body-hover");
+      const clipPinHover = readCapture(out, "clipboard-overlay", "clip-pin-hover");
+      const clipForgetHover = readCapture(out, "clipboard-overlay", "clip-forget-hover");
       const clipCard = treeNode(clipRest.tree, "clip-entry-101").boundsDevice!;
       const clipPin = treeNode(clipRest.tree, "clip-pin-101").boundsDevice!;
       const clipForget = treeNode(clipRest.tree, "clip-forget-101").boundsDevice!;

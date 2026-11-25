@@ -1,4 +1,4 @@
-import { Button, For, Image, Show, TextField, createEffect, createMemo, createSignal, getWindowRect, mountStylesheet, scrollIntoView, type Accessor, type NativeKeyEvent, type NativeNode } from "@hewel/zgui";
+import { Button, For, Image, Show, TextField, createEffect, createMemo, createSignal, flush, focus, getWindowRect, mountStylesheet, scrollIntoView, type Accessor, type NativeKeyEvent, type NativeNode } from "@hewel/zgui";
 import { createVirtualFocus } from "@hewel/zgui/primitives";
 import { M3Button, M3CardAction, M3FilterChip, M3InteractiveCard } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
@@ -106,8 +106,16 @@ function ClipboardRow(props: {
 export function ClipboardPanel() {
   const { clipboard, invokePublic, closePanels } = useShellStore();
   mountStylesheet("z-shell-clipboard-search", `
+    .clipboard-search {
+      position: relative;
+    }
     .clipboard-search:empty::before {
       content: "${searchPlaceholder}";
+      position: absolute;
+      inset: 0;
+      padding: inherit;
+      display: flex;
+      align-items: center;
       color: var(--color-on-surface-variant);
       pointer-events: none;
     }
@@ -193,7 +201,7 @@ export function ClipboardPanel() {
     lastSelectedId = null;
     lastSelectedIndex = 0;
     const first = filtered()[0];
-    virtualFocus.setActive(first ? String(first.id) : null);
+    flush(() => virtualFocus.setActive(first ? String(first.id) : null));
   };
   const [listNode, setListNode] = createSignal<NativeNode | null>(null);
   const [highlightRect, setHighlightRect] = createSignal({ y: 0, height: 58 });
@@ -225,12 +233,12 @@ export function ClipboardPanel() {
     }
     if (list.length === 0) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
-      virtualFocus.onKeyDown(event);
+      flush(() => virtualFocus.onKeyDown(event));
     } else if (event.key === "Enter") {
       // Only copy the highlighted row when Enter originates in the search bar or panel root;
       // buttons (Pin, Forget, Filter chips, Clear) handle their own Enter activation.
       if (!inSearch && !onRoot) return;
-      virtualFocus.onKeyDown(event);
+      flush(() => virtualFocus.onKeyDown(event));
     } else if (event.key === "Delete") {
       // Never hijack Delete while editing text inside the search input.
       if (inSearch) return;
@@ -261,9 +269,9 @@ export function ClipboardPanel() {
             : "1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent)",
         }}>
           <ShellIcon name="search" size={18} color={searchFocused() ? primary : muted} />
-          <TextField ref={node => { searchNode = node; }} testId="clipboard-search" class="clipboard-search shell-composite-field" ariaLabel={searchPlaceholder} placeholder={searchPlaceholder} value={query()}
+          <TextField ref={node => { searchNode = node; focus(node); }} testId="clipboard-search" class="clipboard-search shell-composite-field" ariaLabel={searchPlaceholder} placeholder={searchPlaceholder} value={query()}
             ariaActiveDescendant={virtualFocus.activeNode()}
-            onInput={event => { setQuery(event.value); resetSelection(); }}
+            onInput={event => { flush(() => setQuery(event.value)); resetSelection(); }}
             onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)}
             style={{
               flexGrow: 1, flexBasis: "0px", minWidth: "0px", height: "36px", lineHeight: "18px",
@@ -291,7 +299,7 @@ export function ClipboardPanel() {
                   label={chip().label}
                   count={counts()[chip().key]}
                   selected={active()}
-                  onClick={() => { setFilter(chip().key); resetSelection(); }}
+                  onClick={() => { flush(() => setFilter(chip().key)); resetSelection(); }}
                 />
               );
             }}

@@ -525,7 +525,7 @@ describe("apps/shell preview", () => {
             atMs: 70,
             result: { data: { bytes: makeTinyPngBytes(0x22, 0xc5, 0x5e) } },
           },
-          { id: 29, name: "clipboard.copy", payload: { id: 11 }, atMs: 385 },
+          { id: 29, name: "clipboard.copy", payload: { id: 11 }, atMs: 390 },
         ],
       }), null, 2));
       writeFileSync(scenario, JSON.stringify({
@@ -593,21 +593,36 @@ describe("apps/shell preview", () => {
           },
           { id: "clipboard-blob-reply", op: "clock.advance", byMs: 10 },
           { id: "clipboard-image-ready", op: "clock.advance", byMs: 300 },
-          { id: "capture-clipboard", op: "capture", surface: "panel-clipboard", captureId: "panel-clipboard" },
+          { id: "capture-clipboard", op: "capture", surface: "clipboard-overlay", captureId: "clipboard-overlay" },
+          { id: "type-clipboard-search", op: "text.commit", surface: "clipboard-overlay", text: "Pinned" },
+          { id: "clipboard-search-settled", op: "clock.advance", byMs: 5 },
+          {
+            id: "clipboard-search-keeps-match",
+            op: "assert",
+            target: { surface: "clipboard-overlay", testId: "clip-entry-11" },
+            check: { property: "exists", equals: true },
+          },
+          {
+            id: "clipboard-search-hides-nonmatch",
+            op: "assert",
+            target: { surface: "clipboard-overlay", testId: "clip-entry-12" },
+            check: { property: "exists", equals: false },
+          },
           {
             id: "filter-clipboard-text",
             op: "pointer.click",
-            target: { surface: "panel-clipboard", testId: "clipboard-filter-text" },
+            target: { surface: "clipboard-overlay", testId: "clipboard-filter-text" },
             button: "primary",
           },
           { id: "clipboard-filter-settled", op: "clock.advance", byMs: 5 },
           {
             id: "copy-text-entry",
             op: "pointer.click",
-            target: { surface: "panel-clipboard", testId: "clip-copy-11" },
+            target: { surface: "clipboard-overlay", testId: "clip-copy-11" },
             button: "primary",
           },
           { id: "clipboard-copy-reply", op: "clock.advance", byMs: 10 },
+          { id: "clipboard-exit-settle", op: "clock.advance", byMs: 300 },
           { id: "clipboard-close-settled", op: "settle" },
           {
             id: "bar-healthy-after-clipboard-close",
@@ -619,17 +634,21 @@ describe("apps/shell preview", () => {
       }, null, 2));
 
       const result = runPreview(fixture, scenario, out);
-      expectCleanPreview(result, 4, 1);
+      expectCleanPreview(result, 4, 3);
       const calendar = readCapture(out, "panel-calendar", "panel-calendar");
       const media = readCapture(out, "panel-media", "panel-media");
       const battery = readCapture(out, "panel-battery", "panel-battery");
-      const clipboard = readCapture(out, "panel-clipboard", "panel-clipboard");
-      for (const capture of [calendar, media, battery, clipboard]) {
+      const clipboard = readCapture(out, "clipboard-overlay", "clipboard-overlay");
+      for (const capture of [calendar, media, battery]) {
         expect(capture.frame.renderer.alphaMode).toBe("PreMultiplied");
         expect(capture.image.width).toBeGreaterThan(0);
         expect(capture.image.height).toBeGreaterThan(0);
         expect(pixel(capture.image, 0, 0)).toEqual([0, 0, 0, 0]);
       }
+      expect(clipboard.frame.renderer.alphaMode).toBe("PreMultiplied");
+      expect([clipboard.image.width, clipboard.image.height]).toEqual([1440, 900]);
+      expect(pixel(clipboard.image, 0, 0)[3]).toBeGreaterThan(0);
+      expect(Math.round(treeNode(clipboard.tree, "clipboard-card").boundsLogical!.width)).toBe(560);
 
       expect(treeNode(calendar.tree, "cal-month-title").text).toBe("November 2023");
       expect(treeNode(calendar.tree, "cal-today-cell").text).toBe("14");

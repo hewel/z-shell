@@ -11,7 +11,6 @@ import { useShellTheme } from "../theme.ts";
 import { PANEL_MAX_HEIGHTS, type BarPosition, type BarStyle } from "../topics.ts";
 import { BatteryPanel } from "./BatteryPanel.tsx";
 import { CalendarPanel } from "./CalendarPanel.tsx";
-import { ClipboardPanel } from "./ClipboardPanel.tsx";
 import { MediaPanel } from "./MediaPanel.tsx";
 import { QuickSettingsPanel } from "./QuickSettingsPanel.tsx";
 import { SystemMonitorPanel } from "./SystemMonitorPanel.tsx";
@@ -22,7 +21,6 @@ const panels = {
   media: { width: 396, maxHeight: PANEL_MAX_HEIGHTS.media, Component: MediaPanel },
   battery: { width: 396, maxHeight: PANEL_MAX_HEIGHTS.battery, Component: BatteryPanel },
   "system-monitor": { width: 396, maxHeight: PANEL_MAX_HEIGHTS["system-monitor"], Component: SystemMonitorPanel },
-  clipboard: { width: 560, maxHeight: PANEL_MAX_HEIGHTS.clipboard, Component: ClipboardPanel },
 };
 
 /** Outer drawable shadow bleed for Level 2 popovers (`--shadow-level-2`: `0 10px 24px`). */
@@ -120,7 +118,7 @@ export function ShellPanels(): NativeChild {
   const scheme = useMotionScheme();
   const popup = createMemo(() => {
     const target = activePanelTarget();
-    if (!target?.parentSurface || target.id === "launcher" || target.id === "overview") return null;
+    if (!target?.parentSurface || target.id === "launcher" || target.id === "overview" || target.id === "clipboard") return null;
     return { target, panel: panels[target.id] };
   });
   const presence = createRetainedPresence(popup, {
@@ -139,7 +137,7 @@ export function ShellPanels(): NativeChild {
       {_key => {
         const entry = untrack(() => presence.value()!);
         const { target, panel: { width, maxHeight, Component } } = entry;
-        const centered = target.id === "calendar" || target.id === "clipboard";
+        const centered = target.id === "calendar";
         const position = (): BarPosition => settings.data()?.bar.position ?? "top";
         const barStyle = (): BarStyle => settings.data()?.bar.style ?? "floating";
         const geometry = createMemo(() => resolvePopoverGeometry(position(), barStyle(), centered));

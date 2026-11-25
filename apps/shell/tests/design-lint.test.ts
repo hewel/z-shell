@@ -939,6 +939,7 @@ describe("DESIGN.md token and surface contract sync", () => {
 
   test("surface width tiers match DESIGN.md (Compact 360, Standard 396, Clipboard 560, Launcher 652, Overview 684)", () => {
     const shellPanels = readFileSync(join(shellDir, "src/panels/ShellPanels.tsx"), "utf8");
+    const clipboardOverlay = readFileSync(join(shellDir, "src/surfaces/ClipboardOverlay.tsx"), "utf8");
     const powerDialog = readFileSync(join(shellDir, "src/surfaces/PowerDialog.tsx"), "utf8");
     const polkitDialog = readFileSync(join(shellDir, "src/surfaces/PolkitDialog.tsx"), "utf8");
     const primitivesCss = readFileSync(join(repoRoot, "packages/sdk/src/zgui-primitives.module.css"), "utf8");
@@ -951,7 +952,9 @@ describe("DESIGN.md token and surface contract sync", () => {
     expect(shellPanels).toMatch(/media:\s*\{\s*width:\s*396\b/);
     expect(shellPanels).toMatch(/battery:\s*\{\s*width:\s*396\b/);
     expect(shellPanels).toMatch(/"system-monitor":\s*\{\s*width:\s*396\b/);
-    expect(shellPanels).toMatch(/clipboard:\s*\{\s*width:\s*560\b/);
+    expect(shellPanels).not.toMatch(/\bclipboard:/);
+    expect(clipboardOverlay).toContain(`width: "560px"`);
+    expect(clipboardOverlay).toContain(`keyboard="exclusive"`);
     expect(powerDialog).toContain("<M3DialogShell");
     expect(polkitDialog).toContain("<M3DialogShell");
     expect(primitivesCss).toMatch(/\.dialogCard\s*\{[^}]*width:\s*360px;/s);
