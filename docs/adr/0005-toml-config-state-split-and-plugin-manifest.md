@@ -2,6 +2,8 @@
 
 **Status:** accepted
 
+> _Proposed to be partially reopened by [ADR-0007](0007-runtime-plugin-loading-and-store-architecture.md) on static whole-shell plugin composition: runtime plugin loading replaces build-time整壳 re-bundling via **Plugin composer**, while the three-tier TOML config/state split, `plugin.toml` single source of truth, `PluginId → EntryId → InstanceId` scoping, and permanent `sessionLock` prohibition remain in full effect._
+
 Following Noctalia's configuration discipline and `zgui-js`'s sealed-manifest security model, `z-shell` separates state into three distinct tiers:
 1. **User settings** (`$XDG_CONFIG_HOME/z-shell/settings.toml`): human-editable declarative configuration, hot-reloaded on atomic replacement with debouncing, retaining the last valid config on error and emitting live updates only when committed values change.
 2. **Durable state** (`$XDG_STATE_HOME/z-shell/state.toml`): recoverable shell-owned state (pinned apps, last wallpaper, owner-scoped tables) persisted by a single serialized writer using exclusive `0600` unique temp files, `fsync` on file and parent directory, and cross-display `flock` locking—never mutating in-memory state or topic revisions before disk commit succeeds.
