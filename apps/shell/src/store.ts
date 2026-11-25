@@ -1,11 +1,11 @@
-import { createContext, createEffect, createSignal, flush, getSessionGeneration, onCleanup, runWithOwner, useContext, useMonitors, type Accessor, type Monitor, type NativeChild, type NativeWindowRect } from "@hewel/zgui";
+import { createContext, createEffect, createMemo, createSignal, flush, getSessionGeneration, onCleanup, runWithOwner, untrack, useContext, useMonitors, type Accessor, type Monitor, type NativeChild, type NativeWindowRect } from "@hewel/zgui";
 import { mountOwned } from "@hewel/zgui/renderer";
 import { getResolvedCapabilities, onControlMessage, type JsonValue } from "@hewel/zgui-services";
 import { ZShellClient, type BusHelloResult, type BusTransport, type CommandInvokeResult } from "@z-shell/sdk";
 import { createZguiSocketTransport, setGlobalMotionScheme, useTopic, type TopicState } from "@z-shell/sdk/zgui";
 import { composedPlugins } from "./plugins/composed.ts";
 import type { ThemeTopicSnapshot } from "./theme.ts";
-import { formatSurfaceName, resolveActiveMonitor, resolveBarLayout, resolveBarPopupAnchor } from "./topics.ts";
+import { formatSurfaceName, resolveActiveMonitor, resolveBarLayout, resolveBarPopupAnchor, resolvePinnedOutput } from "./topics.ts";
 import type {
   ClipboardSnapshot,
   DesktopAppsSnapshot,
@@ -17,6 +17,7 @@ import type {
   IdleSnapshot,
   LockSnapshot,
   OsdPayload,
+  PinnedOutputState,
   PolkitSnapshot,
   PowerConfirmAction,
   PublicSettingsSummary,
@@ -662,4 +663,24 @@ export function useShellStore(): ShellStore {
   const store = useContext(ShellProvider);
   if (!store) throw new Error("useShellStore requires a ShellProvider");
   return store;
+}
+
+/**
+ * Pins an overlay to the active output when its session starts.
+ * Tracks monitor hotplug, but samples focus only when acquiring an output.
+ */
+export function usePinnedOutput<K = true>(
+  sessionKey: Accessor<K | null | undefined>,
+): Accessor<string | null> {
+  const { monitors, activeMonitor } = useShellStore();
+  const pinned = createMemo<PinnedOutputState<K>>(previous => {
+    const key = sessionKey() ?? null;
+    return resolvePinnedOutput(
+      previous,
+      key,
+      key === null ? [] : monitors(),
+      () => untrack(activeMonitor)?.id ?? null,
+    );
+  });
+  return () => pinned().outputId;
 }

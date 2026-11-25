@@ -1064,6 +1064,40 @@ export function resolveActiveMonitor(
   return monitors[0];
 }
 
+export interface PinnedOutputState<K = true> {
+  readonly sessionKey: K | null;
+  readonly outputId: string | null;
+}
+
+/**
+ * Keeps a transient overlay on its connected output for the current session.
+ * Acquires a new output on session start or disconnect, and clears on a null key.
+ */
+export function resolvePinnedOutput<K>(
+  previous: PinnedOutputState<K> | undefined,
+  sessionKey: K | null,
+  monitors: readonly Pick<Monitor, "id">[],
+  resolveFallbackOutput: () => string | null,
+): PinnedOutputState<K> {
+  if (sessionKey === null) {
+    return previous?.sessionKey === null && previous.outputId === null
+      ? previous
+      : { sessionKey: null, outputId: null };
+  }
+  const sameSession = previous !== undefined && Object.is(previous.sessionKey, sessionKey);
+  if (
+    sameSession && previous.outputId !== null
+    && monitors.some(monitor => monitor.id === previous.outputId)
+  ) {
+    return previous;
+  }
+  const candidate = resolveFallbackOutput();
+  const outputId = candidate !== null && monitors.some(monitor => monitor.id === candidate)
+    ? candidate
+    : null;
+  return sameSession && previous.outputId === outputId ? previous : { sessionKey, outputId };
+}
+
 export interface BarShadowBleed {
   readonly top: number;
   readonly right: number;

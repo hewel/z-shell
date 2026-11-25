@@ -42,6 +42,7 @@ import {
   resolveMonitorLogicalSize,
   resolveMonitorWallpaper,
   resolveNotificationMediaLayout,
+  resolvePinnedOutput,
   selectActiveMediaPlayer,
   selectHeadlineTempCelsius,
   selectPrimaryGpu,
@@ -764,6 +765,43 @@ describe("resolveActiveMonitor", () => {
     })?.id).toBe("HDMI-A-2");
 
     expect(resolveActiveMonitor(monitors)?.id).toBe("DP-1");
+  });
+});
+
+describe("resolvePinnedOutput", () => {
+  const dp = { id: "dp-1" };
+  const hdmi = { id: "hdmi-1" };
+  const monitors = [dp, hdmi];
+
+  test("acquires the active output and holds it across focus changes", () => {
+    const pinned = resolvePinnedOutput(undefined, true, monitors, () => dp.id);
+    expect(pinned.outputId).toBe(dp.id);
+    expect(resolvePinnedOutput(pinned, true, monitors, () => hdmi.id).outputId).toBe(dp.id);
+  });
+
+  test("re-pins on disconnect and stays there when the first output reconnects", () => {
+    const pinned = resolvePinnedOutput(undefined, true, monitors, () => dp.id);
+    const moved = resolvePinnedOutput(pinned, true, [hdmi], () => hdmi.id);
+    expect(moved.outputId).toBe(hdmi.id);
+    expect(resolvePinnedOutput(moved, true, monitors, () => dp.id).outputId).toBe(hdmi.id);
+  });
+
+  test("rejects an absent fallback and acquires when monitors arrive", () => {
+    const pending = resolvePinnedOutput(undefined, true, [], () => dp.id);
+    expect(pending.outputId).toBeNull();
+    expect(resolvePinnedOutput(pending, true, monitors, () => dp.id).outputId).toBe(dp.id);
+  });
+
+  test("clears the pin on session end and acquires again for the next session", () => {
+    const pinned = resolvePinnedOutput(undefined, true, monitors, () => dp.id);
+    const cleared = resolvePinnedOutput(pinned, null, monitors, () => dp.id);
+    expect(cleared).toEqual({ sessionKey: null, outputId: null });
+    expect(resolvePinnedOutput(cleared, true, monitors, () => hdmi.id).outputId).toBe(hdmi.id);
+  });
+
+  test("re-pins when a new request replaces an active session", () => {
+    const pinned = resolvePinnedOutput(undefined, 41, monitors, () => dp.id);
+    expect(resolvePinnedOutput(pinned, 42, monitors, () => hdmi.id).outputId).toBe(hdmi.id);
   });
 });
 
