@@ -55,11 +55,12 @@ interface RegistryPlugin {
   readonly contentDigest: string;
   readonly enabled: boolean;
   readonly revoked: boolean;
+  readonly migrationReapprovalRequired: boolean;
   readonly requestedCapabilities: PluginCapabilities;
   readonly approvedCapabilities: PluginCapabilities | null;
 }
 
-const REGISTRY_PLUGIN_KEYS: Record<string, true> = {
+const REGISTRY_PLUGIN_KEYS_V1: Record<string, true> = {
   id: true,
   name: true,
   version: true,
@@ -71,6 +72,22 @@ const REGISTRY_PLUGIN_KEYS: Record<string, true> = {
   requested_capabilities: true,
   approved_capabilities: true,
   accepted_build_id: true,
+};
+
+const REGISTRY_PLUGIN_KEYS_V2: Record<string, true> = {
+  id: true,
+  name: true,
+  version: true,
+  plugin_api: true,
+  shared_runtime_abi: true,
+  source: true,
+  source_identity: true,
+  content_digest: true,
+  enabled: true,
+  revoked: true,
+  migration_reapproval_required: true,
+  requested_capabilities: true,
+  approval: true,
 };
 
 function record(value: unknown, context: string): Record<string, unknown> {
@@ -107,29 +124,110 @@ function capabilities(value: unknown, context: string): PluginCapabilities {
   return normalizeCapabilities(input as unknown as PluginCapabilities);
 }
 
-function registrySource(value: unknown, context: string): string {
+const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
+const GIT_REV_PATTERN = /^[0-9a-f]{40}$/;
+
+function registrySource(value: unknown, context: string, schemaVersion: 1 | 2): string {
   const source = record(value, context);
   const kind = string(source.kind, `${context}.kind`);
+  if (schemaVersion === 1) {
+    if (kind === "path") {
+      knownKeys(source, { kind: true, root: true }, context);
+    } else if (kind === "git") {
+      knownKeys(source, { kind: true, url: true, rev: true, ref_name: true, root: true }, context);
+      string(source.url, `${context}.url`);
+      const rev = string(source.rev, `${context}.rev`);
+      if (!GIT_REV_PATTERN.test(rev)) throw new Error(`${context}.rev must be a 40-hex commit SHA`);
+      if (source.ref_name !== undefined) string(source.ref_name, `${context}.ref_name`);
+    } else {
+      throw new Error(`${context}.kind must be path or git`);
+    }
+    const root = string(source.root, `${context}.root`);
+    if (!isAbsolute(root)) throw new Error(`${context}.root must be absolute`);
+    return root;
+  }
+
   if (kind === "path") {
-    knownKeys(source, { kind: true, root: true }, context);
+    knownKeys(source, { kind: true, root: true, bundle_path: true }, context);
+    const root = string(source.root, `${context}.root`);
+    if (!isAbsolute(root)) throw new Error(`${context}.root must be absolute`);
+    const bundlePath = string(source.bundle_path, `${context}.bundle_path`);
+    if (!isAbsolute(bundlePath)) throw new Error(`${context}.bundle_path must be absolute`);
+    // Stage A compiles plugin_api = 1 TypeScript entries directly via tsrs/zgui-build,
+    // which resolves node_modules from the workspace source tree while liveDigest still pins root.
+    return root;
   } else if (kind === "git") {
-    knownKeys(source, { kind: true, url: true, rev: true, ref_name: true, root: true }, context);
+    knownKeys(
+      source,
+      { kind: true, url: true, rev: true, ref_name: true, subdir: true, bundle_path: true },
+      context,
+    );
     string(source.url, `${context}.url`);
     const rev = string(source.rev, `${context}.rev`);
-    if (!/^[0-9a-f]{40}$/.test(rev)) throw new Error(`${context}.rev must be a 40-hex commit SHA`);
+    if (!GIT_REV_PATTERN.test(rev)) throw new Error(`${context}.rev must be a 40-hex commit SHA`);
     if (source.ref_name !== undefined) string(source.ref_name, `${context}.ref_name`);
+    if (source.subdir !== undefined && source.subdir !== null) string(source.subdir, `${context}.subdir`);
+  } else if (kind === "archive") {
+    knownKeys(source, { kind: true, url: true, archive_sha256: true, bundle_path: true }, context);
+    string(source.url, `${context}.url`);
+    const archiveSha = string(source.archive_sha256, `${context}.archive_sha256`);
+    if (!SHA256_PATTERN.test(archiveSha)) {
+      throw new Error(`${context}.archive_sha256 has invalid format`);
+    }
+  } else if (kind === "catalog") {
+    knownKeys(
+      source,
+      {
+        kind: true,
+        catalog_source_id: true,
+        catalog_source_identity: true,
+        version: true,
+        transport: true,
+        bundle_path: true,
+      },
+      context,
+    );
+    string(source.catalog_source_id, `${context}.catalog_source_id`);
+    string(source.catalog_source_identity, `${context}.catalog_source_identity`);
+    string(source.version, `${context}.version`);
+    record(source.transport, `${context}.transport`);
   } else {
-    throw new Error(`${context}.kind must be path or git`);
+    throw new Error(`${context}.kind must be path, git, archive, or catalog`);
   }
-  const root = string(source.root, `${context}.root`);
-  if (!isAbsolute(root)) throw new Error(`${context}.root must be absolute`);
-  return root;
+  const bundlePath = string(source.bundle_path, `${context}.bundle_path`);
+  if (!isAbsolute(bundlePath)) throw new Error(`${context}.bundle_path must be absolute`);
+  return bundlePath;
 }
 
-function registryPlugin(value: unknown, key: string): RegistryPlugin {
+function registryApprovalV2(
+  value: unknown,
+  expectedDigest: string,
+  expectedSourceIdentity: string,
+  context: string,
+): PluginCapabilities | null {
+  if (value === null || value === undefined) return null;
+  const approval = record(value, context);
+  knownKeys(approval, { content_digest: true, source_identity: true, capabilities: true }, context);
+  const digest = string(approval.content_digest, `${context}.content_digest`);
+  if (!SHA256_PATTERN.test(digest)) {
+    throw new Error(`${context}.content_digest has invalid format`);
+  }
+  const sourceIdentity = string(approval.source_identity, `${context}.source_identity`);
+  const parsedCaps = capabilities(approval.capabilities, `${context}.capabilities`);
+  if (digest !== expectedDigest || sourceIdentity !== expectedSourceIdentity) {
+    return null;
+  }
+  return parsedCaps;
+}
+
+function registryPlugin(value: unknown, key: string, schemaVersion: 1 | 2): RegistryPlugin {
   const context = `registry plugin ${key}`;
   const input = record(value, context);
-  knownKeys(input, REGISTRY_PLUGIN_KEYS, context);
+  knownKeys(
+    input,
+    schemaVersion === 1 ? REGISTRY_PLUGIN_KEYS_V1 : REGISTRY_PLUGIN_KEYS_V2,
+    context,
+  );
   const id = string(input.id, `${context}.id`);
   if (id !== key) throw new Error(`${context} id does not match its registry key`);
   const pluginApi = input.plugin_api;
@@ -137,26 +235,53 @@ function registryPlugin(value: unknown, key: string): RegistryPlugin {
     throw new Error(`${context}.plugin_api must be an integer`);
   }
   const contentDigest = string(input.content_digest, `${context}.content_digest`);
-  if (!/^sha256:[0-9a-f]{64}$/.test(contentDigest)) {
+  if (!SHA256_PATTERN.test(contentDigest)) {
     throw new Error(`${context}.content_digest has invalid format`);
   }
-  if (input.accepted_build_id !== null && input.accepted_build_id !== undefined) {
-    string(input.accepted_build_id, `${context}.accepted_build_id`);
+  if (schemaVersion === 1) {
+    if (input.accepted_build_id !== null && input.accepted_build_id !== undefined) {
+      string(input.accepted_build_id, `${context}.accepted_build_id`);
+    }
+    const approved = input.approved_capabilities;
+    return {
+      id,
+      name: string(input.name, `${context}.name`),
+      version: string(input.version, `${context}.version`),
+      pluginApi,
+      root: registrySource(input.source, `${context}.source`, 1),
+      contentDigest,
+      enabled: boolean(input.enabled, `${context}.enabled`),
+      revoked: boolean(input.revoked, `${context}.revoked`),
+      migrationReapprovalRequired: false,
+      requestedCapabilities: capabilities(input.requested_capabilities, `${context}.requested_capabilities`),
+      approvedCapabilities: approved === null || approved === undefined
+        ? null
+        : capabilities(approved, `${context}.approved_capabilities`),
+    };
   }
-  const approved = input.approved_capabilities;
+
+  string(input.shared_runtime_abi, `${context}.shared_runtime_abi`);
+  const sourceIdentity = string(input.source_identity, `${context}.source_identity`);
   return {
     id,
     name: string(input.name, `${context}.name`),
     version: string(input.version, `${context}.version`),
     pluginApi,
-    root: registrySource(input.source, `${context}.source`),
+    root: registrySource(input.source, `${context}.source`, 2),
     contentDigest,
     enabled: boolean(input.enabled, `${context}.enabled`),
     revoked: boolean(input.revoked, `${context}.revoked`),
+    migrationReapprovalRequired: boolean(
+      input.migration_reapproval_required,
+      `${context}.migration_reapproval_required`,
+    ),
     requestedCapabilities: capabilities(input.requested_capabilities, `${context}.requested_capabilities`),
-    approvedCapabilities: approved === null || approved === undefined
-      ? null
-      : capabilities(approved, `${context}.approved_capabilities`),
+    approvedCapabilities: registryApprovalV2(
+      input.approval,
+      contentDigest,
+      sourceIdentity,
+      `${context}.approval`,
+    ),
   };
 }
 
@@ -168,10 +293,24 @@ function readRegistry(path: string): RegistryPlugin[] {
     throw new Error(`failed to read plugin registry ${path}`, { cause: error });
   }
   const input = record(parsed, "registry");
-  knownKeys(input, { schema_version: true, plugins: true }, "registry");
-  if (input.schema_version !== 1) throw new Error("registry.schema_version must be 1");
+  const version = input.schema_version;
+  if (version !== 1 && version !== 2) {
+    throw new Error("registry.schema_version must be 1 or 2");
+  }
+  if (version === 1) {
+    knownKeys(input, { schema_version: true, plugins: true }, "registry");
+  } else {
+    knownKeys(input, { schema_version: true, desired_revision: true, plugins: true }, "registry");
+    if (
+      typeof input.desired_revision !== "number" ||
+      !Number.isInteger(input.desired_revision) ||
+      input.desired_revision < 0
+    ) {
+      throw new Error("registry.desired_revision must be a non-negative integer");
+    }
+  }
   const plugins = record(input.plugins, "registry.plugins");
-  return Object.entries(plugins).map(([key, value]) => registryPlugin(value, key));
+  return Object.entries(plugins).map(([key, value]) => registryPlugin(value, key, version));
 }
 
 function readPluginSettings(path: string | undefined): Map<string, Record<string, unknown>> {
@@ -325,6 +464,9 @@ export function composePlugins(options: ComposePluginsOptions): ComposeReport {
   const enabled: EnabledPlugin[] = [];
   for (const plugin of registry) {
     if (!plugin.enabled) continue;
+    if (plugin.migrationReapprovalRequired) {
+      throw new Error(`plugin ${plugin.id} requires explicit re-approval after registry migration`);
+    }
     assertCapabilityApproval(plugin.requestedCapabilities, plugin.approvedCapabilities, plugin.revoked);
     const manifest = parsePluginManifest(plugin.root);
     if (

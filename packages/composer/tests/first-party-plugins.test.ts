@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
+  chmodSync,
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -11,6 +14,21 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+
+function removeTempTree(target: string): void {
+  const stack = [target];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+    const stat = lstatSync(current, { throwIfNoEntry: false });
+    if (!stat || stat.isSymbolicLink() || !stat.isDirectory()) continue;
+    chmodSync(current, 0o700);
+    for (const name of readdirSync(current)) {
+      stack.push(join(current, name));
+    }
+  }
+  rmSync(target, { recursive: true, force: true });
+}
 
 import { createPluginContext } from "@z-shell/plugin-api";
 import { ZShellClient, type InhibitorEntry } from "@z-shell/sdk";
@@ -111,7 +129,7 @@ describe("First-party reference plugins end-to-end", () => {
         expect(composedSource).toContain(`${plugin.id}:service`);
       }
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
+      removeTempTree(tempDir);
     }
   });
 
@@ -448,7 +466,7 @@ describe("First-party reference plugins end-to-end", () => {
       const result = runPreview(published.dist, fixture, scenario, previewOut);
       expectCleanPreview(result, 0, 7);
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
+      removeTempTree(tempDir);
     }
   });
 
@@ -591,7 +609,7 @@ describe("First-party reference plugins end-to-end", () => {
       observerClient?.close();
       hostClient?.close();
       daemon.kill();
-      rmSync(tempDir, { recursive: true, force: true });
+      removeTempTree(tempDir);
     }
   });
 });

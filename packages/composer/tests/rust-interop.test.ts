@@ -1,9 +1,24 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { composePlugins } from "../src/index.ts";
+
+function removeTempTree(target: string): void {
+  const stack = [target];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+    const stat = lstatSync(current, { throwIfNoEntry: false });
+    if (!stat || stat.isSymbolicLink() || !stat.isDirectory()) continue;
+    chmodSync(current, 0o700);
+    for (const name of readdirSync(current)) {
+      stack.push(join(current, name));
+    }
+  }
+  rmSync(target, { recursive: true, force: true });
+}
 
 describe("Rust z-shell plugin CLI -> @z-shell/composer interop", () => {
   test("composes a plugin registered, audited, approved, and enabled by Rust z-shell plugin CLI", () => {
@@ -156,7 +171,7 @@ describe("Rust z-shell plugin CLI -> @z-shell/composer interop", () => {
       expect(composedSource).toContain("hdmi-ring");
       expect(composedSource).toContain("collector");
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
+      removeTempTree(tempDir);
     }
   });
 });

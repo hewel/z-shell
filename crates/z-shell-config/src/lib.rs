@@ -7,10 +7,11 @@ pub mod store;
 
 pub use paths::{PathError, ShellPaths};
 pub use settings::{
-    BarPosition, BarSettings, BarStyle, CandidateLayout, EdgeOverrides, GeneralSettings,
-    IdleRuleAction, IdleRuleSettings, IdleSettings, ImeMode, ImeSettings, LogLevel, MotionScheme,
-    PolkitSettings, PublicSettingsSummary, ThemeBackend, ThemeMode, ThemeSettings, ThemeVariant,
-    UserSettings, WallpaperFit, WallpaperSettings,
+    BarPluginInstance, BarPluginSlot, BarPluginsSettings, BarPosition, BarSettings, BarStyle,
+    CandidateLayout, EdgeOverrides, GeneralSettings, IdleRuleAction, IdleRuleSettings,
+    IdleSettings, ImeMode, ImeSettings, LogLevel, MotionScheme, PluginSourceKind,
+    PluginSourceSettings, PluginsSettings, PolkitSettings, PublicSettingsSummary, ThemeBackend,
+    ThemeMode, ThemeSettings, ThemeVariant, UserSettings, WallpaperFit, WallpaperSettings,
 };
 pub use state::{PublicStateSummary, RuntimeState};
 pub use store::{ConfigError, ConfigStore};

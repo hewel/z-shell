@@ -14,8 +14,15 @@ z-shell-bus = { workspace = true }
 z-shell-config = { workspace = true }
 z-shell-plugins = { workspace = true }
 z-shell-protocol = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
+
+[dev-dependencies]
+flate2 = { workspace = true }
+sha2 = { workspace = true }
+tar = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

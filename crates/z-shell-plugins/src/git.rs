@@ -6,16 +6,17 @@ use std::ffi::OsStr;
 use std::fs::{self, File, Permissions};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
+use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use rustix::fs::{CWD, Mode, OFlags, RenameFlags, ResolveFlags, openat2, renameat_with};
+use rustix::fs::{Mode, OFlags, ResolveFlags, openat2};
 use sha2::{Digest, Sha256};
 use tempfile::tempdir_in;
 use thiserror::Error;
 use z_shell_protocol::PluginId;
 
+use super::bundle::{BundleError, materialize_bundle};
 use super::digest::{DigestError, content_digest};
 use super::manifest::{Manifest, ManifestError};
 use super::registry::OfflinePolicy;
@@ -24,104 +25,110 @@ const FETCHED_COMMIT: &str = "refs/z-shell/fetched^{commit}";
 const FETCHED_REF: &str = "refs/z-shell/fetched";
 const GIT_SHA1_HEX_LEN: usize = 40;
 const MAX_SYMLINK_BYTES: usize = 4095;
-const COPY_BUF_BYTES: usize = 8192;
 
 /// Error returned when fetching, resolving, or exporting a Git plugin source.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum GitError {
+    /// Remote Git fetch attempted while offline mode is active.
     #[error("git sources cannot be fetched in offline mode")]
     Offline,
+    /// Remote URL failed scheme or syntax validation.
     #[error("invalid or unsupported git remote URL")]
     InvalidUrl,
+    /// Git reference string contains forbidden characters or traversal components.
     #[error("invalid git ref {0:?}")]
     InvalidRef(String),
+    /// Remote repository did not advertise the requested branch or tag.
     #[error("git remote does not advertise ref {0:?}")]
     MissingRef(String),
+    /// Invoked `git` subprocess failed.
     #[error("git {operation} failed: {message}")]
     Command {
+        /// Git subcommand name.
         operation: &'static str,
+        /// Captured stderr or exit status.
         message: String,
     },
+    /// Git emitted unexpected output while listing or reading objects.
     #[error("git returned malformed {0}")]
     InvalidOutput(&'static str),
+    /// Tree contained an unsupported POSIX mode (such as gitlink/submodule).
     #[error("unsupported git tree entry mode {0}")]
     UnsupportedMode(String),
+    /// Monorepo `--subdir` path is empty, absolute, or contains traversal segments.
+    #[error("invalid git subdir {0:?}")]
+    InvalidSubdir(String),
+    /// Exported manifest `id` differed from the expected plugin identifier.
     #[error("git source changed plugin id: expected {expected}, got {actual}")]
     IdChanged {
+        /// Expected plugin identifier.
         expected: PluginId,
+        /// Observed plugin identifier in updated tree.
         actual: PluginId,
     },
+    /// Cache or target directory is not a plain directory.
     #[error("expected a real directory at {0}")]
     InvalidDirectory(PathBuf),
+    /// Symlink resolved outside the exported plugin subtree or bundle root.
     #[error("cannot resolve git symlink within its export: {path}")]
     UnsafeSymlink {
+        /// Offending relative symlink path.
         path: PathBuf,
+        /// Kernel `openat2` errno.
         #[source]
         source: rustix::io::Errno,
     },
+    /// Filesystem I/O failure during Git preparation or export.
     #[error("git export I/O failed: {0}")]
     Io(#[from] io::Error),
+    /// Manifest validation or `.qjsb` tree check failed.
     #[error(transparent)]
     Manifest(#[from] ManifestError),
+    /// Bundle content digest calculation failed.
     #[error(transparent)]
     Digest(#[from] DigestError),
+    /// Immutable bundle materialization failed.
+    #[error(transparent)]
+    Bundle(#[from] BundleError),
+}
+
+pub(super) struct GitWorkspace<'a> {
+    pub(super) plugins_dir: &'a Path,
+    pub(super) bundles_dir: &'a Path,
+    pub(super) staging_dir: &'a Path,
 }
 
 pub(super) struct PreparedGit {
     pub(super) url: String,
     pub(super) root: PathBuf,
     pub(super) rev: String,
+    pub(super) subdir: Option<String>,
     pub(super) manifest: Manifest,
     pub(super) content_digest: String,
 }
 
-pub(super) fn prepare(
-    plugins_dir: &Path,
+pub(super) fn prepare_bundle(
+    workspace: GitWorkspace<'_>,
     url: &str,
     ref_name: &str,
+    subdir: Option<&str>,
     policy: OfflinePolicy,
     expected_id: Option<&PluginId>,
 ) -> Result<PreparedGit, GitError> {
-    if matches!(policy, OfflinePolicy::Offline) {
-        return Err(GitError::Offline);
-    }
+    let subdir = subdir.map(validate_subdir).transpose()?;
     let url = normalize_url(url)?;
+    let rev = ensure_fetched_rev(workspace.plugins_dir, &url, ref_name, policy)?;
+    let cache = workspace
+        .plugins_dir
+        .join("git-cache")
+        .join(format!("{:x}", Sha256::digest(url.as_bytes())));
 
-    // The caller holds the registry lock and supplies its canonical plugins directory.
-    let cache_dir = plugins_dir.join("git-cache");
-    ensure_directory(&cache_dir)?;
-    let cache = cache_dir.join(format!("{:x}", Sha256::digest(url.as_bytes())));
-    let rev = match fs::symlink_metadata(&cache) {
-        Ok(metadata) if metadata.is_dir() => fetch(&cache, &url, ref_name)?,
-        Ok(_) => return Err(GitError::InvalidDirectory(cache)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let staging = tempdir_in(&cache_dir)?;
-            let repo = staging.path().join("repo");
-            fs::create_dir(&repo)?;
-            run(
-                git().current_dir(&repo).args([
-                    "init",
-                    "--bare",
-                    "--template=",
-                    "--object-format=sha1",
-                    ".",
-                ]),
-                "init",
-            )?;
-            let rev = fetch(&repo, &url, ref_name)?;
-            fs::rename(repo, &cache)?;
-            rev
-        }
-        Err(error) => return Err(error.into()),
-    };
-
-    let exports = plugins_dir.join("exports");
-    ensure_directory(&exports)?;
-    let staging = tempdir_in(&exports)?;
+    ensure_directory(workspace.staging_dir)?;
+    let staging = tempdir_in(workspace.staging_dir)?;
     let candidate = staging.path().join(&rev);
     create_export_dir(&candidate)?;
-    export_tree(&cache, &rev, &candidate)?;
+    export_tree(&cache, &rev, subdir.as_deref(), &candidate)?;
     let manifest = Manifest::load(&candidate)?;
     if let Some(expected) = expected_id
         && expected != &manifest.id
@@ -132,35 +139,41 @@ pub(super) fn prepare(
         });
     }
     let content_digest = content_digest(&candidate)?;
-
-    let id = &manifest.id;
-    let parent = exports.join(format!("{}__{}", id.author(), id.name()));
-    ensure_directory(&parent)?;
-    let root = parent.join(&rev);
-    match fs::symlink_metadata(&root) {
-        Ok(_) => {
-            // A slug collision is harmless: this rev can only have one authoritative tree.
-            // Compare types, links, modes and bytes, not the v1 digest alone.
-            if !same_tree(&candidate, &root).unwrap_or(false) {
-                renameat_with(CWD, &candidate, CWD, &root, RenameFlags::EXCHANGE)
-                    .map_err(io::Error::from)?;
-            }
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            fs::rename(candidate, &root)?;
-        }
-        Err(error) => return Err(error.into()),
-    }
+    let bundle_root = materialize_bundle(
+        workspace.bundles_dir,
+        &manifest.id,
+        &candidate,
+        &content_digest,
+    )?;
     Ok(PreparedGit {
         url,
-        root,
+        root: bundle_root,
         rev,
+        subdir,
         manifest,
         content_digest,
     })
 }
 
-fn normalize_url(url: &str) -> Result<String, GitError> {
+pub(crate) fn read_file_at_ref(
+    plugins_dir: &Path,
+    url: &str,
+    ref_name: &str,
+    rel_path: &str,
+    policy: OfflinePolicy,
+) -> Result<Vec<u8>, GitError> {
+    let rel_path = validate_subdir(rel_path)?;
+    let url = normalize_url(url)?;
+    let rev = ensure_fetched_rev(plugins_dir, &url, ref_name, policy)?;
+    let cache = plugins_dir
+        .join("git-cache")
+        .join(format!("{:x}", Sha256::digest(url.as_bytes())));
+    let spec = format!("{rev}:{rel_path}");
+    let output = run(git_in(&cache).args(["cat-file", "blob", &spec]), "cat-file")?;
+    Ok(output.stdout)
+}
+
+pub(crate) fn normalize_url(url: &str) -> Result<String, GitError> {
     // The protocol allowlist also covers redirects. Reject Git's explicit remote-helper
     // syntax, even when it names an otherwise allowed protocol.
     let helper = url.split_once("::").is_some_and(|(prefix, _)| {
@@ -183,6 +196,61 @@ fn normalize_url(url: &str) -> Result<String, GitError> {
         .into_os_string()
         .into_string()
         .map_err(|_| GitError::InvalidUrl)
+}
+
+pub(crate) fn validate_subdir(raw: &str) -> Result<String, GitError> {
+    if raw.is_empty()
+        || raw.starts_with('/')
+        || raw.ends_with('/')
+        || raw.contains('\\')
+        || raw.chars().any(char::is_control)
+    {
+        return Err(GitError::InvalidSubdir(raw.to_owned()));
+    }
+    for seg in raw.split('/') {
+        if seg.is_empty() || seg == "." || seg == ".." || seg.eq_ignore_ascii_case(".git") {
+            return Err(GitError::InvalidSubdir(raw.to_owned()));
+        }
+    }
+    Ok(raw.to_owned())
+}
+
+fn ensure_fetched_rev(
+    plugins_dir: &Path,
+    url: &str,
+    ref_name: &str,
+    policy: OfflinePolicy,
+) -> Result<String, GitError> {
+    if matches!(policy, OfflinePolicy::Offline) {
+        return Err(GitError::Offline);
+    }
+    ensure_directory(plugins_dir)?;
+    let cache_dir = plugins_dir.join("git-cache");
+    ensure_directory(&cache_dir)?;
+    let cache = cache_dir.join(format!("{:x}", Sha256::digest(url.as_bytes())));
+    match fs::symlink_metadata(&cache) {
+        Ok(metadata) if metadata.is_dir() => fetch(&cache, url, ref_name),
+        Ok(_) => Err(GitError::InvalidDirectory(cache)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let staging = tempdir_in(&cache_dir)?;
+            let repo = staging.path().join("repo");
+            fs::create_dir(&repo)?;
+            run(
+                git().current_dir(&repo).args([
+                    "init",
+                    "--bare",
+                    "--template=",
+                    "--object-format=sha1",
+                    ".",
+                ]),
+                "init",
+            )?;
+            let rev = fetch(&repo, url, ref_name)?;
+            fs::rename(repo, &cache)?;
+            Ok(rev)
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn git() -> Command {
@@ -333,10 +401,14 @@ fn create_export_dir(path: &Path) -> io::Result<()> {
     fs::set_permissions(path, Permissions::from_mode(0o755))
 }
 
-fn export_tree(repo: &Path, rev: &str, root: &Path) -> Result<(), GitError> {
+fn export_tree(repo: &Path, rev: &str, subdir: Option<&str>, root: &Path) -> Result<(), GitError> {
+    let tree_spec = match subdir {
+        Some(sub) => format!("{rev}:{sub}"),
+        None => rev.to_owned(),
+    };
     // Plumbing commands preserve the raw blobs, unlike checkout (filters) or archive (attributes).
     let output = run(
-        git_in(repo).args(["ls-tree", "-rzt", "--full-tree", rev]),
+        git_in(repo).args(["ls-tree", "-rzt", "--full-tree", &tree_spec]),
         "ls-tree",
     )?;
     let mut child = git_in(repo)
@@ -499,51 +571,4 @@ fn write_tree(root: &Path, listing: &[u8], blobs: &mut Blobs) -> Result<(), GitE
         }
     }
     Ok(())
-}
-
-fn same_tree(candidate: &Path, existing: &Path) -> io::Result<bool> {
-    let expected = fs::symlink_metadata(candidate)?;
-    let actual = fs::symlink_metadata(existing)?;
-    if expected.mode() != actual.mode() {
-        return Ok(false);
-    }
-    if expected.is_symlink() {
-        return Ok(fs::read_link(candidate)? == fs::read_link(existing)?);
-    }
-    if expected.is_dir() {
-        let mut count = 0;
-        for entry in fs::read_dir(candidate)? {
-            let entry = entry?;
-            count += 1;
-            if !same_tree(&entry.path(), &existing.join(entry.file_name()))? {
-                return Ok(false);
-            }
-        }
-        let existing_count =
-            fs::read_dir(existing)?.try_fold(0, |count, entry| entry.map(|_| count + 1))?;
-        return Ok(count == existing_count);
-    }
-    if !actual.is_file() || actual.nlink() != 1 || expected.len() != actual.len() {
-        return Ok(false);
-    }
-    same_bytes(
-        File::open(candidate)?,
-        File::open(existing)?,
-        expected.len(),
-    )
-}
-
-fn same_bytes(mut expected: File, mut actual: File, mut remaining: u64) -> io::Result<bool> {
-    let mut left = [0; COPY_BUF_BYTES];
-    let mut right = [0; COPY_BUF_BYTES];
-    while remaining > 0 {
-        let n = usize::try_from(remaining.min(COPY_BUF_BYTES as u64)).map_err(io::Error::other)?;
-        expected.read_exact(&mut left[..n])?;
-        actual.read_exact(&mut right[..n])?;
-        if left[..n] != right[..n] {
-            return Ok(false);
-        }
-        remaining -= n as u64;
-    }
-    Ok(true)
 }

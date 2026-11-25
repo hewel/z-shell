@@ -173,6 +173,30 @@ impl ConfigStore {
         self.commit_patched_document(&path, &doc)
     }
 
+    /// Removes `[plugin_settings."<plugin_id>"]` from `settings.toml` when present, returning
+    /// whether an entry existed and was removed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError`] if parsing, validation, or atomic persistence fails.
+    pub fn remove_plugin_settings(&self, plugin_id: &PluginId) -> Result<bool, ConfigError> {
+        let path = self.paths.settings_file();
+        let mut doc = load_toml_document(&path)?;
+        let Some(plugins_table) = doc
+            .as_table_mut()
+            .get_mut("plugin_settings")
+            .and_then(TomlItem::as_table_like_mut)
+        else {
+            return Ok(false);
+        };
+        let removed = plugins_table.remove(plugin_id.as_str()).is_some();
+        if !removed {
+            return Ok(false);
+        }
+        self.commit_patched_document(&path, &doc)?;
+        Ok(true)
+    }
+
     fn commit_patched_document(
         &self,
         path: &Path,

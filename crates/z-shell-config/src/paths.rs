@@ -14,6 +14,11 @@ const STATE_LOCK_FILE_NAME: &str = "state.lock";
 const PLUGINS_DIR_NAME: &str = "plugins";
 const PLUGINS_REGISTRY_FILE_NAME: &str = "registry.json";
 const PLUGINS_LOCK_FILE_NAME: &str = "plugins.lock";
+const PLUGINS_BUNDLES_DIR_NAME: &str = "bundles";
+const PLUGINS_STAGING_DIR_NAME: &str = "staging";
+const PLUGINS_GIT_CACHE_DIR_NAME: &str = "git-cache";
+const PLUGIN_BYTECODE_CACHE_DIR_NAME: &str = "plugin-bytecode";
+const PLUGIN_CATALOG_CACHE_DIR_NAME: &str = "catalog-cache";
 const MEDIA_DIR_NAME: &str = "media";
 
 /// Error returned while resolving or validating XDG shell directories.
@@ -46,7 +51,9 @@ pub enum PathError {
 pub struct ShellPaths {
     config_dir: PathBuf,
     state_dir: PathBuf,
+    cache_dir: PathBuf,
     runtime_dir: PathBuf,
+    display: String,
     socket_path: PathBuf,
     host_socket_path: PathBuf,
     daemon_lock_path: PathBuf,
@@ -54,23 +61,22 @@ pub struct ShellPaths {
 
 impl ShellPaths {
     /// Resolves paths from standard XDG environment variables (`XDG_CONFIG_HOME`, `XDG_STATE_HOME`,
-    /// `XDG_RUNTIME_DIR`, and `WAYLAND_DISPLAY`).
+    /// `XDG_CACHE_HOME`, `XDG_RUNTIME_DIR`, and `WAYLAND_DISPLAY`).
     ///
     /// Refuses to silently fall back to a shared `/tmp` directory when `XDG_RUNTIME_DIR` is missing.
     ///
     /// # Errors
     ///
-    /// Returns [`PathError::MissingBaseDir`] if `XDG_RUNTIME_DIR` or config/state roots are unset.
+    /// Returns [`PathError::MissingBaseDir`] if `XDG_RUNTIME_DIR` or config/state/cache roots are unset.
     pub fn from_env() -> Result<Self, PathError> {
         let (config_dir, state_dir) = config_and_state_dirs(None, None)?;
+        let cache_dir =
+            env_cache_dir()?.ok_or(PathError::MissingBaseDir("XDG_CACHE_HOME or HOME"))?;
         let runtime_base = env::var_os("XDG_RUNTIME_DIR")
             .filter(|v| !v.is_empty())
             .map(PathBuf::from)
             .ok_or(PathError::MissingBaseDir("XDG_RUNTIME_DIR"))?;
-        let display = env::var("WAYLAND_DISPLAY")
-            .ok()
-            .filter(|s| !s.is_empty() && !s.contains('/') && !s.contains(".."))
-            .unwrap_or_else(|| "wayland-0".to_owned());
+        let display = env_display();
 
         let runtime_dir = runtime_base.join(APP_DIR_NAME);
         let socket_path = runtime_dir.join(format!("bus-{display}.sock"));
@@ -80,7 +86,9 @@ impl ShellPaths {
         Ok(Self {
             config_dir,
             state_dir,
+            cache_dir,
             runtime_dir,
+            display,
             socket_path,
             host_socket_path,
             daemon_lock_path,
@@ -100,9 +108,13 @@ impl ShellPaths {
         state_dir: Option<PathBuf>,
     ) -> Result<Self, PathError> {
         let (config_dir, state_dir) = config_and_state_dirs(config_dir, state_dir)?;
+        let cache_dir = env_cache_dir()?.unwrap_or_else(|| state_dir.join("cache"));
+        let display = env_display();
         let runtime = state_dir.join("runtime");
         let socket = runtime.join("bus.sock");
-        Ok(Self::from_roots(config_dir, state_dir, runtime, socket))
+        Ok(Self::from_roots(config_dir, state_dir, runtime, socket)
+            .with_cache_dir(cache_dir)
+            .with_display(display))
     }
 
     /// Constructs explicit paths for tests or custom daemon invocations without consulting env vars.
@@ -121,14 +133,40 @@ impl ShellPaths {
             .parent()
             .unwrap_or(&runtime_dir)
             .join("daemon.lock");
+        let cache_dir = state_dir.join("cache");
         Self {
             config_dir,
             state_dir,
+            cache_dir,
             runtime_dir,
+            display: "default".to_owned(),
             socket_path,
             host_socket_path,
             daemon_lock_path,
         }
+    }
+
+    /// Returns a copy with an overridden cache directory (`$XDG_CACHE_HOME/z-shell`).
+    #[must_use]
+    pub fn with_cache_dir(mut self, cache_dir: PathBuf) -> Self {
+        self.cache_dir = cache_dir;
+        self
+    }
+
+    /// Returns a copy with an overridden Wayland display suffix for per-display runtime files.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `display` is empty or contains path separators, `..`, or control characters.
+    #[must_use]
+    pub fn with_display(mut self, display: impl Into<String>) -> Self {
+        let display = display.into();
+        assert!(
+            is_safe_display(&display),
+            "invalid display identifier: {display:?}"
+        );
+        self.display = display;
+        self
     }
 
     /// Returns a copy with an overridden privileged host control socket path.
@@ -136,6 +174,18 @@ impl ShellPaths {
     pub fn with_host_socket_path(mut self, host_socket_path: PathBuf) -> Self {
         self.host_socket_path = host_socket_path;
         self
+    }
+
+    /// Returns the Wayland display identifier associated with these paths.
+    #[must_use]
+    pub fn display(&self) -> &str {
+        &self.display
+    }
+
+    /// Returns the cache directory (`$XDG_CACHE_HOME/z-shell`).
+    #[must_use]
+    pub fn cache_dir(&self) -> &Path {
+        &self.cache_dir
     }
 
     /// Returns the configuration directory (`$XDG_CONFIG_HOME/z-shell`).
@@ -174,7 +224,7 @@ impl ShellPaths {
         self.state_dir.join(PLUGINS_DIR_NAME)
     }
 
-    /// Returns the v1 plugin registry file path.
+    /// Returns the shared plugin registry file path (`registry.json`).
     #[must_use]
     pub fn plugins_registry_file(&self) -> PathBuf {
         self.plugins_dir().join(PLUGINS_REGISTRY_FILE_NAME)
@@ -184,6 +234,50 @@ impl ShellPaths {
     #[must_use]
     pub fn plugins_lock_file(&self) -> PathBuf {
         self.plugins_dir().join(PLUGINS_LOCK_FILE_NAME)
+    }
+
+    /// Returns the content-addressed immutable plugin bundles directory.
+    #[must_use]
+    pub fn plugins_bundles_dir(&self) -> PathBuf {
+        self.plugins_dir().join(PLUGINS_BUNDLES_DIR_NAME)
+    }
+
+    /// Returns the temporary staging directory used during plugin bundle installation.
+    #[must_use]
+    pub fn plugins_staging_dir(&self) -> PathBuf {
+        self.plugins_dir().join(PLUGINS_STAGING_DIR_NAME)
+    }
+
+    /// Returns the bare Git repository cache directory for Git plugin/catalog sources.
+    #[must_use]
+    pub fn plugins_git_cache_dir(&self) -> PathBuf {
+        self.plugins_dir().join(PLUGINS_GIT_CACHE_DIR_NAME)
+    }
+
+    /// Returns the per-display plugin runtime state/quarantine guard file (`runtime-<display>.json`).
+    #[must_use]
+    pub fn plugins_runtime_state_file(&self) -> PathBuf {
+        self.plugins_dir()
+            .join(format!("runtime-{}.json", self.display))
+    }
+
+    /// Returns the per-display runtime plugin overlay path (`plugins-overlay-<display>.json`).
+    #[must_use]
+    pub fn plugins_overlay_file(&self) -> PathBuf {
+        self.runtime_dir
+            .join(format!("plugins-overlay-{}.json", self.display))
+    }
+
+    /// Returns the local QuickJS `.qjsb` bytecode cache directory (`$XDG_CACHE_HOME/z-shell/plugin-bytecode`).
+    #[must_use]
+    pub fn plugin_bytecode_cache_dir(&self) -> PathBuf {
+        self.cache_dir.join(PLUGIN_BYTECODE_CACHE_DIR_NAME)
+    }
+
+    /// Returns the cached static catalog index directory (`$XDG_CACHE_HOME/z-shell/catalog-cache`).
+    #[must_use]
+    pub fn plugin_catalog_cache_dir(&self) -> PathBuf {
+        self.cache_dir.join(PLUGIN_CATALOG_CACHE_DIR_NAME)
     }
 
     /// Returns the runtime directory (`$XDG_RUNTIME_DIR/z-shell`).
@@ -259,6 +353,30 @@ fn config_and_state_dirs(
         .or_else(|| resolve("XDG_STATE_HOME", ".local/state"))
         .ok_or(PathError::MissingBaseDir("XDG_STATE_HOME or HOME"))?;
     Ok((config_dir, state_dir))
+}
+
+fn env_cache_dir() -> Result<Option<PathBuf>, PathError> {
+    let home = env::var_os("HOME").map(PathBuf::from);
+    Ok(env::var_os("XDG_CACHE_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| home.as_ref().map(|home| home.join(".cache")))
+        .map(|base| base.join(APP_DIR_NAME)))
+}
+
+fn env_display() -> String {
+    env::var("WAYLAND_DISPLAY")
+        .ok()
+        .filter(|s| is_safe_display(s))
+        .unwrap_or_else(|| "wayland-0".to_owned())
+}
+
+fn is_safe_display(display: &str) -> bool {
+    !display.is_empty()
+        && !display.contains('/')
+        && !display.contains('\\')
+        && !display.contains("..")
+        && !display.chars().any(char::is_control)
 }
 
 fn current_uid() -> Result<u32, PathError> {

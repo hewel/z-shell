@@ -535,4 +535,80 @@ export function mount() { createSignal(0); }
       await expect(build()).rejects.toThrow(`.${field} contains invalid entries`);
     }
   });
+
+  test("reads schema_version 2 registry records and rejects un-reapproved migrated records", () => {
+    const root = temporaryDirectory();
+    const state = temporaryDirectory();
+    const bundleRoot = join(state, "bundles", "z-shell__example");
+    const outDir = join(state, "out");
+    const registryPath = join(state, "registry.json");
+    writePlugin(root, validManifest);
+    writePlugin(bundleRoot, validManifest);
+
+    const manifest = parsePluginManifest(root);
+    const caps = normalizeCapabilities({
+      host: manifest.hostCapabilities,
+      bus: manifest.busPermissions,
+    });
+    const digest = computeContentDigest(bundleRoot);
+    const sourceIdentity = `path:${root}`;
+
+    writeFileSync(registryPath, JSON.stringify({
+      schema_version: 2,
+      desired_revision: 3,
+      plugins: {
+        [manifest.id]: {
+          id: manifest.id,
+          name: manifest.name,
+          version: manifest.version,
+          plugin_api: manifest.pluginApi,
+          shared_runtime_abi: "1.0",
+          source: { kind: "path", root, bundle_path: bundleRoot },
+          source_identity: sourceIdentity,
+          content_digest: digest,
+          enabled: true,
+          revoked: false,
+          migration_reapproval_required: false,
+          requested_capabilities: caps,
+          approval: {
+            content_digest: digest,
+            source_identity: sourceIdentity,
+            capabilities: caps,
+          },
+        },
+      },
+    }));
+
+    const report = composePlugins({ registryPath, outDir, candidateId: "candidate-v2" });
+    expect(report.plugins).toHaveLength(1);
+    expect(report.plugins[0]?.id).toBe("z-shell/example");
+
+    writeFileSync(registryPath, JSON.stringify({
+      schema_version: 2,
+      desired_revision: 4,
+      plugins: {
+        [manifest.id]: {
+          id: manifest.id,
+          name: manifest.name,
+          version: manifest.version,
+          plugin_api: manifest.pluginApi,
+          shared_runtime_abi: "1.0",
+          source: { kind: "path", root, bundle_path: bundleRoot },
+          source_identity: sourceIdentity,
+          content_digest: digest,
+          enabled: true,
+          revoked: false,
+          migration_reapproval_required: true,
+          requested_capabilities: caps,
+          approval: null,
+        },
+      },
+    }));
+
+    expect(() => composePlugins({
+      registryPath,
+      outDir: join(state, "out-migrated"),
+      candidateId: "candidate-v2-migrated",
+    })).toThrow(/migration/i);
+  });
 });

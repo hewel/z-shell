@@ -1,230 +1,790 @@
-//! Cross-process plugin source and approval registry.
+//! Cross-process v2 plugin registry, immutable bundle pins, upgrade staging, and health checks.
 
-use crate::capabilities::{CapabilityBundle, CapabilityDiff};
-use crate::digest::{DigestError, content_digest};
-use crate::git;
-use crate::manifest::{Manifest, ManifestError};
+use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
+use std::fs::{self, DirBuilder, File, OpenOptions, Permissions};
+use std::io::{self, BufWriter, Write};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
+
 use rustix::fs::{FlockOperation, flock};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, btree_map::Entry};
-use std::fs::{self, DirBuilder, File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use thiserror::Error;
-use z_shell_config::ShellPaths;
+use z_shell_config::{ConfigError, ConfigStore, ShellPaths};
 use z_shell_protocol::PluginId;
 
-const SCHEMA_VERSION: u32 = 1;
+use crate::archive::{self, ArchiveError};
+use crate::bundle::{
+    BundleError, bundle_dir_for, materialize_bundle, remove_bundle_tree, verify_bundle,
+};
+use crate::capabilities::{
+    CapabilityBundle, CapabilityDiff, CapabilityMergeError, HostCapabilities,
+    merge_host_capabilities, net_added_host_capabilities,
+};
+use crate::catalog::{CatalogArtifact, CatalogError, ResolvedCatalogRelease};
+use crate::digest::{DigestError, content_digest};
+use crate::git;
+use crate::manifest::{
+    CompatibilityError, HOST_SHARED_RUNTIME_ABI, Manifest, ManifestError,
+    SUPPORTED_PLUGIN_API_LEVEL, SharedRuntimeAbi,
+};
 
-/// Whether a Git operation may contact a remote.
+const SCHEMA_VERSION_V1: u32 = 1;
+const SCHEMA_VERSION_V2: u32 = 2;
+
+/// Whether remote Git, HTTP archive, and remote catalog fetches are allowed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OfflinePolicy {
-    /// Allow fresh Git clones and fetches.
+    /// Allow network or remote Git operations.
     Online,
-    /// Reject Git clones and fetches before invoking Git.
+    /// Forbid network or remote Git operations; permit local seeds and verified bundle caches only.
     Offline,
 }
 
-/// A plugin source, approval, or persistence operation failed.
+/// Whether `remove` also deletes `[plugin_settings."<id>"]` in user settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoveSettingsPolicy {
+    /// Retain user configuration for the removed plugin.
+    KeepSettings,
+    /// Delete the plugin's `[plugin_settings."<id>"]` entry if present.
+    PurgeSettings,
+}
+
+/// How [`PluginManager::commit_upgrade`] handles capability changes on upgrade.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpgradeApprovalMode {
+    /// Refuse if the upgrade expands capabilities beyond existing explicit approval.
+    KeepExistingOnly,
+    /// Record an explicit fresh approval covering all requested capabilities of the new version.
+    ApproveExpanded,
+}
+
+/// Where a catalog installation or upgrade artifact was sourced from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ResolvedFrom {
+    /// Reused an already-verified immutable local bundle matching the pinned `content_digest`.
+    LocalVerifiedCache,
+    /// Installed from the local bundled official seed directory.
+    BundledOfficialSeed,
+    /// Fetched from a remote HTTP archive or Git remote.
+    Remote,
+    /// Unpacked from a local archive file on disk.
+    LocalArtifact,
+}
+
+/// Error returned by plugin registry, installation, upgrade, or lifecycle operations.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum PluginError {
-    /// The registry or source could not be accessed on disk.
+    /// Filesystem I/O failure.
     #[error("plugin I/O error at {path}: {source}")]
     Io {
         /// Path involved in the operation.
         path: PathBuf,
-        /// Underlying filesystem failure.
+        /// Underlying OS error.
+        #[source]
         source: io::Error,
     },
-    /// The registry does not match its JSON schema.
+    /// Registry JSON deserialization or serialization failed.
     #[error("invalid plugin registry JSON: {0}")]
     Json(#[from] serde_json::Error),
-    /// The registry was written in a format this program does not support.
+    /// Registry schema version is unsupported.
     #[error("unsupported plugin registry schema version {0}")]
     RegistryVersion(u32),
-    /// The registry has an inconsistent record key.
+    /// Map key inside `registry.json` does not match `record.id`.
     #[error("plugin registry key does not match the record id: {0}")]
     RegistryId(PluginId),
-    /// A path source did not contain a valid manifest.
+    /// Static manifest validation failed.
     #[error(transparent)]
     Manifest(#[from] ManifestError),
-    /// The source could not be hashed.
+    /// Runtime API/ABI compatibility check failed.
+    #[error(transparent)]
+    Compatibility(#[from] CompatibilityError),
+    /// Content digest calculation failed.
     #[error(transparent)]
     Digest(#[from] DigestError),
-    /// Git clone, resolution, export, or validation failed.
+    /// Immutable bundle materialization or verification failed.
+    #[error(transparent)]
+    Bundle(#[from] BundleError),
+    /// Git fetch or export failed.
     #[error(transparent)]
     Git(#[from] git::GitError),
-    /// The plugin ID is not installed.
+    /// Archive download, digest check, or unpacking failed.
+    #[error(transparent)]
+    Archive(#[from] ArchiveError),
+    /// Catalog lookup or resolution failed.
+    #[error(transparent)]
+    Catalog(#[from] CatalogError),
+    /// Merging host capabilities across enabled plugins failed.
+    #[error(transparent)]
+    CapabilityMerge(#[from] CapabilityMergeError),
+    /// Reading or updating user settings during purge failed.
+    #[error(transparent)]
+    Config(#[from] ConfigError),
+    /// Plugin ID is not present in the registry.
     #[error("plugin {0} is not installed")]
     NotFound(PluginId),
-    /// The plugin ID is already installed.
-    #[error("plugin {0} is already installed; use sync to update it")]
+    /// Plugin ID is already installed in the registry.
+    #[error("plugin {0} is already installed; use sync or upgrade to update it")]
     AlreadyInstalled(PluginId),
-    /// A source update attempted to change plugin identity.
+    /// Operation requested a remote fetch while offline and no verified local cache matched.
+    #[error("operation blocked in offline mode without a verified local bundle cache")]
+    OfflineModeBlocked,
+    /// Cross-source installation or upgrade attempted for an existing `PluginId`.
+    #[error(
+        "plugin {id} is already bound to source {existing_source}; \
+         refusing automatic switch to {incoming_source}"
+    )]
+    SourceConflict {
+        /// Conflicting plugin ID.
+        id: PluginId,
+        /// Existing canonical `source_identity`.
+        existing_source: String,
+        /// Incoming canonical `source_identity`.
+        incoming_source: String,
+    },
+    /// Catalog release content digest did not match the unpacked/exported bundle.
+    #[error("catalog release content digest mismatch: expected {expected}, got {actual}")]
+    CatalogDigestMismatch {
+        /// Expected `sha256:<64-hex>` digest from catalog metadata.
+        expected: String,
+        /// Computed digest from actual bundle tree.
+        actual: String,
+    },
+    /// Registry state changed between `stage_upgrade` and `commit_upgrade`.
+    #[error("registry changed concurrently between upgrade staging and commit (TOCTOU mismatch)")]
+    ToctouMismatch,
+    /// Upgrade adds capabilities beyond current approval and caller did not authorize expansion.
+    #[error("upgrading plugin {0} expands capabilities and requires explicit approval")]
+    CapabilityExpansionRequiresApproval(PluginId),
+    /// Source update attempted to change the manifest's `id`.
     #[error("plugin source id changed from {expected} to {actual}")]
     IdChanged {
         /// Installed plugin ID.
         expected: PluginId,
-        /// ID found in the updated source.
+        /// ID observed in updated source.
         actual: PluginId,
     },
-    /// The plugin has no sufficient non-revoked approval.
+    /// Plugin lacks valid non-revoked approval covering its requested capabilities.
     #[error("plugin {0} requires explicit capability approval before enabling")]
     ApprovalRequired(PluginId),
-    /// Current files no longer match the pinned digest.
+    /// On-disk bundle or `--path` source drifted from the pinned digest.
     #[error("plugin {0} content digest has drifted; sync and audit the source first")]
     DigestDrift(PluginId),
 }
 
-/// Public plugin metadata without source paths, Git credentials, or settings.
+/// Public plugin metadata without source paths, credentials, or user settings values.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct PluginSummary {
     /// Canonical plugin identifier.
     pub id: PluginId,
-    /// Display name from the manifest.
+    /// Display name from manifest.
     pub name: String,
-    /// Installed package version.
+    /// Package version.
     pub version: String,
-    /// Installed plugin API level.
+    /// Manifest `plugin_api` level.
     pub plugin_api: u32,
-    /// Installed content digest.
+    /// Required `shared_runtime_abi`.
+    pub shared_runtime_abi: SharedRuntimeAbi,
+    /// Canonical source provenance binding.
+    pub source_identity: String,
+    /// Bound catalog source ID when installed from a catalog source.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub catalog_source_id: Option<String>,
+    /// Pinned bundle content digest.
     pub content_digest: String,
     /// Whether composition is enabled.
     pub enabled: bool,
     /// Whether approval has been explicitly revoked.
     pub revoked: bool,
-    /// Whether an explicit approval covers the installed capabilities.
+    /// Whether the plugin requires fresh human re-approval after v1 → v2 migration.
+    pub migration_reapproval_required: bool,
+    /// Whether a valid, non-revoked explicit approval currently covers requested capabilities.
     pub approved: bool,
 }
 
-/// Comparison of installed authority and disk content against the registry pin.
+/// Audit breakdown of installed authority, net host expansion, and bundle integrity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct AuditReport {
-    /// Installed plugin metadata.
+    /// Installed plugin summary.
     pub plugin: PluginSummary,
-    /// Installed requested authority compared to explicit approval.
+    /// Requested authority diff against the plugin's own explicit approval.
     pub diff: CapabilityDiff,
-    /// Digest computed from the source currently on disk.
+    /// Net host capabilities this plugin would add to the baseline of other currently enabled plugins.
+    pub net_added_host_capabilities: HostCapabilities,
+    /// Content digest currently observed on disk.
     pub current_content_digest: String,
-    /// Whether the source currently matches the registry pin.
+    /// True when the on-disk bundle (and `--path` source, if applicable) matches the pinned digest.
     pub digest_matches: bool,
 }
 
-/// Manages static plugin sources and durable approvals for one shell state directory.
+/// Result of installing a plugin from a catalog source.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct InstallOutcome {
+    /// Installed plugin summary (initially disabled and unapproved).
+    pub summary: PluginSummary,
+    /// Where the verified bundle originated.
+    pub resolved_from: ResolvedFrom,
+}
+
+/// Result of removing a plugin from the registry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct RemovedPlugin {
+    /// Removed plugin identifier.
+    pub id: PluginId,
+    /// Updated registry `desired_revision`.
+    pub desired_revision: u64,
+    /// True when `[plugin_settings."<id>"]` existed and was removed.
+    pub settings_purged: bool,
+}
+
+/// Prepared candidate upgrade awaiting explicit user confirmation via [`PluginManager::commit_upgrade`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct StagedUpgrade {
+    /// Target plugin identifier.
+    pub id: PluginId,
+    /// Display name in the new manifest.
+    pub name: String,
+    /// Currently installed version.
+    pub from_version: String,
+    /// Candidate new version.
+    pub to_version: String,
+    /// Candidate `plugin_api` level.
+    pub plugin_api: u32,
+    /// Candidate `shared_runtime_abi`.
+    pub shared_runtime_abi: SharedRuntimeAbi,
+    /// Pinned digest observed when staging began (TOCTOU guard).
+    pub from_digest: String,
+    /// Verified bundle digest of the staged candidate.
+    pub to_digest: String,
+    /// Bound `source_identity` shared by existing record and incoming release.
+    pub source_identity: String,
+    /// Candidate capability diff relative to current explicit approval.
+    pub diff: CapabilityDiff,
+    /// Net host capabilities added relative to other currently enabled plugins.
+    pub net_added_host_capabilities: HostCapabilities,
+    /// True when approval does not cover the new version (or migration/revocation is active).
+    pub requires_reapproval: bool,
+    /// Provenance of the staged candidate bundle.
+    pub resolved_from: ResolvedFrom,
+    #[serde(skip)]
+    new_source: Source,
+    #[serde(skip)]
+    requested_capabilities: CapabilityBundle,
+}
+
+/// Diagnostic severity reported by [`PluginManager::doctor`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DoctorSeverity {
+    /// Informational note.
+    Info,
+    /// Action recommended before enabling or upgrading.
+    Warning,
+    /// Broken state requiring remediation or re-sync.
+    Error,
+}
+
+/// One diagnostic finding from [`PluginManager::doctor`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct DoctorFinding {
+    /// Stable machine-readable finding code.
+    pub code: String,
+    /// Severity level.
+    pub severity: DoctorSeverity,
+    /// Related plugin identifier, if applicable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plugin_id: Option<PluginId>,
+    /// Human-readable description and remediation hint.
+    pub message: String,
+}
+
+/// Manages v2 static plugin bundles, catalog installs, upgrades, and durable approvals.
 #[derive(Debug, Clone)]
 pub struct PluginManager {
     paths: ShellPaths,
 }
 
 impl PluginManager {
-    /// Uses the state directory in `paths`; does not open sockets or create runtime directories.
+    /// Creates a plugin manager backed by `paths` without opening sockets or modifying runtime files.
     #[must_use]
     pub fn new(paths: ShellPaths) -> Self {
         Self { paths }
     }
 
-    /// Lists installed plugins without reading plugin source or exposing settings.
+    /// Lists all installed plugins without reading secret plugin settings.
+    ///
+    /// If an untouched v1 registry exists on disk, migrates it safely to v2 (disabling plugins,
+    /// clearing implicit approvals, and writing `registry.v1.bak.json` with mode `0600`).
     ///
     /// # Errors
     ///
-    /// Returns an error if the registry cannot be read or does not match the v1 schema.
+    /// Returns [`PluginError`] if loading or migrating the registry fails.
     pub fn list(&self) -> Result<Vec<PluginSummary>, PluginError> {
-        Ok(self.load()?.plugins.values().map(Record::summary).collect())
+        let registry = self.load_with_migration()?;
+        Ok(registry.plugins.values().map(Record::summary).collect())
     }
 
-    /// Installs a validated local directory, disabled and without approval.
+    /// Returns the monotonic `desired_revision` counter of the current registry.
     ///
     /// # Errors
     ///
-    /// Returns an error on invalid source, duplicate identity, or a registry failure.
-    pub fn add_path(&self, root: &Path) -> Result<PluginSummary, PluginError> {
+    /// Returns [`PluginError`] if the registry cannot be loaded or migrated.
+    pub fn desired_revision(&self) -> Result<u64, PluginError> {
+        Ok(self.load_with_migration()?.desired_revision)
+    }
+
+    /// Installs a validated local directory, cloning an immutable bundle snapshot.
+    ///
+    /// The plugin starts disabled without capability approval. Never modifies or deletes `root`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError`] on invalid manifest, `.qjsb` rejection, duplicate/conflicting ID,
+    /// or filesystem I/O failure.
+    pub fn add_path(&self, root: impl AsRef<Path>) -> Result<PluginSummary, PluginError> {
         let _lock = self.lock()?;
-        let registry = self.load()?;
-        let root = at(root, fs::canonicalize(root))?;
+        let registry = self.load_migrated_locked()?;
+        let root = at(root.as_ref(), fs::canonicalize(root.as_ref()))?;
         let manifest = Manifest::load(&root)?;
+        manifest.check_runtime_compatibility(HOST_SHARED_RUNTIME_ABI)?;
         let digest = content_digest(&root)?;
-        self.install(registry, manifest, Source::Path { root }, digest)
+        let source_identity = format!("path:{}", root.display());
+        if let Some(existing) = registry.plugins.get(&manifest.id) {
+            return Err(conflict_or_already_installed(existing, &source_identity));
+        }
+        let bundle_path = materialize_bundle(
+            &self.paths.plugins_bundles_dir(),
+            &manifest.id,
+            &root,
+            &digest,
+        )?;
+        self.install(
+            registry,
+            manifest,
+            Source::Path { root, bundle_path },
+            source_identity,
+            digest,
+        )
     }
 
-    /// Installs a pinned export of a Git ref, disabled and without approval.
+    /// Installs a pinned export from a Git remote root, disabled and unapproved.
     ///
     /// # Errors
     ///
-    /// Returns an error on offline policy, failed fetch or export, invalid source,
-    /// duplicate identity, or a registry failure.
+    /// Returns [`PluginError`] on offline policy, fetch/export error, invalid manifest, or
+    /// duplicate/conflicting ID.
     pub fn add_git(
         &self,
         url: &str,
         ref_name: &str,
         policy: OfflinePolicy,
     ) -> Result<PluginSummary, PluginError> {
-        let _lock = self.lock()?;
-        let registry = self.load()?;
-        let (manifest, source, digest) = self.prepare_git(url, ref_name, policy, None)?;
-        self.install(registry, manifest, source, digest)
+        self.add_git_impl(url, ref_name, None, policy)
     }
 
-    /// Compares installed capabilities against approval and checks the pinned on-disk digest.
+    /// Installs a pinned export from a monorepo `subdir` inside a Git remote, disabled and unapproved.
     ///
     /// # Errors
     ///
-    /// Returns an error if the plugin is missing or its registry or files cannot be read.
+    /// Returns [`PluginError`] on invalid `subdir`, offline policy, fetch/export error, or
+    /// duplicate/conflicting ID.
+    pub fn add_git_subdir(
+        &self,
+        url: &str,
+        ref_name: &str,
+        subdir: &str,
+        policy: OfflinePolicy,
+    ) -> Result<PluginSummary, PluginError> {
+        let validated = git::validate_subdir(subdir)?;
+        self.add_git_impl(url, ref_name, Some(&validated), policy)
+    }
+
+    fn add_git_impl(
+        &self,
+        url: &str,
+        ref_name: &str,
+        subdir: Option<&str>,
+        policy: OfflinePolicy,
+    ) -> Result<PluginSummary, PluginError> {
+        let _lock = self.lock()?;
+        let registry = self.load_migrated_locked()?;
+        let plugins_dir = at(
+            &self.paths.plugins_dir(),
+            fs::canonicalize(self.paths.plugins_dir()),
+        )?;
+        let bundles_dir = self.paths.plugins_bundles_dir();
+        let staging_dir = self.paths.plugins_staging_dir();
+        let prepared = git::prepare_bundle(
+            git::GitWorkspace {
+                plugins_dir: &plugins_dir,
+                bundles_dir: &bundles_dir,
+                staging_dir: &staging_dir,
+            },
+            url,
+            ref_name,
+            subdir,
+            policy,
+            None,
+        )?;
+        let source_identity = format!(
+            "git:{}|{}",
+            prepared.url,
+            prepared.subdir.as_deref().unwrap_or("")
+        );
+        if let Err(err) = prepared
+            .manifest
+            .check_runtime_compatibility(HOST_SHARED_RUNTIME_ABI)
+        {
+            cleanup_unreferenced_bundle(&bundles_dir, &registry, &prepared.root);
+            return Err(err.into());
+        }
+        if let Some(existing) = registry.plugins.get(&prepared.manifest.id) {
+            cleanup_unreferenced_bundle(&bundles_dir, &registry, &prepared.root);
+            return Err(conflict_or_already_installed(existing, &source_identity));
+        }
+        let source = Source::Git {
+            url: prepared.url,
+            ref_name: ref_name.to_owned(),
+            subdir: prepared.subdir,
+            rev: prepared.rev,
+            bundle_path: prepared.root,
+        };
+        self.install(
+            registry,
+            prepared.manifest,
+            source,
+            source_identity,
+            prepared.content_digest,
+        )
+    }
+
+    /// Installs a `.tar.gz` or `.tar.zst` archive pinned by SHA-256, disabled and unapproved.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError`] on offline policy, HTTP/digest/tar-bomb errors, incompatible manifest,
+    /// or duplicate/conflicting ID.
+    pub fn add_archive(
+        &self,
+        source: &str,
+        expected_sha256: &str,
+        policy: OfflinePolicy,
+    ) -> Result<PluginSummary, PluginError> {
+        let _lock = self.lock()?;
+        let registry = self.load_migrated_locked()?;
+        let bundles_dir = self.paths.plugins_bundles_dir();
+        let unpacked = archive::unpack_archive_bundle(
+            &self.paths.plugins_staging_dir(),
+            &bundles_dir,
+            source,
+            expected_sha256,
+            policy,
+        )?;
+        let source_identity = format!("archive:{}", unpacked.source);
+        if let Err(err) = unpacked
+            .manifest
+            .check_runtime_compatibility(HOST_SHARED_RUNTIME_ABI)
+        {
+            cleanup_unreferenced_bundle(&bundles_dir, &registry, &unpacked.bundle_root);
+            return Err(err.into());
+        }
+        if let Some(existing) = registry.plugins.get(&unpacked.manifest.id) {
+            cleanup_unreferenced_bundle(&bundles_dir, &registry, &unpacked.bundle_root);
+            return Err(conflict_or_already_installed(existing, &source_identity));
+        }
+        let digest = unpacked.content_digest;
+        let rec_source = Source::Archive {
+            url: unpacked.source,
+            archive_sha256: unpacked.archive_sha256,
+            bundle_path: unpacked.bundle_root,
+        };
+        self.install(
+            registry,
+            unpacked.manifest,
+            rec_source,
+            source_identity,
+            digest,
+        )
+    }
+
+    /// Installs a release resolved from a catalog source, preferring any matching verified local bundle.
+    ///
+    /// Hard-rejects cross-source collisions via [`PluginError::SourceConflict`]. Starts disabled and
+    /// unapproved.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError`] on source conflict, offline mode without local verified cache,
+    /// ABI/API incompatibility, digest mismatch, or artifact fetch/unpack failures.
+    pub fn install_from_catalog(
+        &self,
+        resolved: &ResolvedCatalogRelease,
+        policy: OfflinePolicy,
+    ) -> Result<InstallOutcome, PluginError> {
+        let _lock = self.lock()?;
+        let registry = self.load_migrated_locked()?;
+        if let Some(existing) = registry.plugins.get(&resolved.plugin.id) {
+            return Err(conflict_or_already_installed(
+                existing,
+                &resolved.source_identity,
+            ));
+        }
+
+        let (manifest, source, digest, resolved_from) =
+            self.materialize_catalog_release(&registry, resolved, policy)?;
+        let summary = self.install(
+            registry,
+            manifest,
+            source,
+            resolved.source_identity.clone(),
+            digest,
+        )?;
+        Ok(InstallOutcome {
+            summary,
+            resolved_from,
+        })
+    }
+
+    /// Stages a catalog upgrade without mutating `registry.json` or live approvals.
+    ///
+    /// Rejects cross-source switches with [`PluginError::SourceConflict`] and computes capability
+    /// diffs and net new host authority before returning [`StagedUpgrade`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError`] if the plugin is missing, source conflicts, ABI/API check fails,
+    /// offline mode blocks fetching without cache, or artifact verification fails.
+    pub fn stage_upgrade(
+        &self,
+        id: &PluginId,
+        resolved: &ResolvedCatalogRelease,
+        policy: OfflinePolicy,
+    ) -> Result<StagedUpgrade, PluginError> {
+        if &resolved.plugin.id != id {
+            return Err(PluginError::IdChanged {
+                expected: id.clone(),
+                actual: resolved.plugin.id.clone(),
+            });
+        }
+        let registry = self.load_with_migration()?;
+        let existing = registry
+            .plugins
+            .get(id)
+            .ok_or_else(|| PluginError::NotFound(id.clone()))?;
+        if existing.source_identity != resolved.source_identity {
+            return Err(PluginError::SourceConflict {
+                id: id.clone(),
+                existing_source: existing.source_identity.clone(),
+                incoming_source: resolved.source_identity.clone(),
+            });
+        }
+
+        let (manifest, new_source, to_digest, resolved_from) =
+            self.materialize_catalog_release(&registry, resolved, policy)?;
+        let shared_runtime_abi = manifest
+            .build
+            .as_ref()
+            .map_or(HOST_SHARED_RUNTIME_ABI, |b| b.shared_runtime_abi);
+        let diff = manifest
+            .capabilities
+            .diff(existing.approval.as_ref().map(|a| &a.capabilities));
+        let requires_reapproval = existing.migration_reapproval_required
+            || existing.revoked
+            || existing.approval.is_none()
+            || diff.requires_approval();
+        let baseline = merged_enabled_host_baseline(&registry, Some(id))?;
+        let net_added_host_capabilities =
+            net_added_host_capabilities(&baseline, &manifest.capabilities.host);
+
+        Ok(StagedUpgrade {
+            id: id.clone(),
+            name: manifest.name,
+            from_version: existing.version.clone(),
+            to_version: manifest.version,
+            plugin_api: manifest.plugin_api,
+            shared_runtime_abi,
+            from_digest: existing.content_digest.clone(),
+            to_digest,
+            source_identity: resolved.source_identity.clone(),
+            diff,
+            net_added_host_capabilities,
+            requires_reapproval,
+            resolved_from,
+            new_source,
+            requested_capabilities: manifest.capabilities,
+        })
+    }
+
+    /// Commits a previously staged upgrade atomically under exclusive registry lock.
+    ///
+    /// Enforces TOCTOU verification (`expected_from_digest` & `expected_to_digest`), rejects
+    /// unapproved capability expansion under [`UpgradeApprovalMode::KeepExistingOnly`], and cleans
+    /// up replaced immutable bundles that are no longer referenced.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError`] on TOCTOU mismatch, missing plugin, source conflict, unapproved
+    /// capability expansion, corrupted staged bundle, or persistence failure.
+    pub fn commit_upgrade(
+        &self,
+        staged: &StagedUpgrade,
+        expected_from_digest: &str,
+        expected_to_digest: &str,
+        approval_mode: UpgradeApprovalMode,
+    ) -> Result<PluginSummary, PluginError> {
+        let _lock = self.lock()?;
+        let mut registry = self.load_migrated_locked()?;
+        let bundles_dir = self.paths.plugins_bundles_dir();
+        let old_bundle: PathBuf;
+        let summary;
+        {
+            let record = registry
+                .plugins
+                .get_mut(&staged.id)
+                .ok_or_else(|| PluginError::NotFound(staged.id.clone()))?;
+            if record.content_digest != expected_from_digest
+                || record.content_digest != staged.from_digest
+                || staged.to_digest != expected_to_digest
+            {
+                return Err(PluginError::ToctouMismatch);
+            }
+            if record.source_identity != staged.source_identity {
+                return Err(PluginError::SourceConflict {
+                    id: staged.id.clone(),
+                    existing_source: record.source_identity.clone(),
+                    incoming_source: staged.source_identity.clone(),
+                });
+            }
+            verify_bundle(staged.new_source.bundle_path(), &staged.to_digest)?;
+
+            let diff = staged
+                .requested_capabilities
+                .diff(record.approval.as_ref().map(|a| &a.capabilities));
+            let was_enabled = record.enabled;
+            match approval_mode {
+                UpgradeApprovalMode::KeepExistingOnly => {
+                    if diff.requires_approval() {
+                        return Err(PluginError::CapabilityExpansionRequiresApproval(
+                            staged.id.clone(),
+                        ));
+                    }
+                    if !record.has_covering_approval() {
+                        record.enabled = false;
+                    } else if let Some(approval) = record.approval.as_mut() {
+                        approval.content_digest = staged.to_digest.clone();
+                    }
+                }
+                UpgradeApprovalMode::ApproveExpanded => {
+                    record.approval = Some(ApprovalRecord {
+                        content_digest: staged.to_digest.clone(),
+                        source_identity: staged.source_identity.clone(),
+                        capabilities: staged.requested_capabilities.clone(),
+                    });
+                    record.revoked = false;
+                    record.migration_reapproval_required = false;
+                }
+            }
+
+            old_bundle = record.source.bundle_path().to_path_buf();
+            record.name = staged.name.clone();
+            record.version = staged.to_version.clone();
+            record.plugin_api = staged.plugin_api;
+            record.shared_runtime_abi = staged.shared_runtime_abi;
+            record.source = staged.new_source.clone();
+            record.content_digest = staged.to_digest.clone();
+            record.requested_capabilities = staged.requested_capabilities.clone();
+            if matches!(approval_mode, UpgradeApprovalMode::ApproveExpanded) {
+                record.enabled = was_enabled && record.is_approved();
+            }
+            summary = record.summary();
+        }
+
+        registry.desired_revision = registry.desired_revision.saturating_add(1);
+        self.save(&registry)?;
+        if old_bundle != staged.new_source.bundle_path() && old_bundle.starts_with(&bundles_dir) {
+            cleanup_unreferenced_bundle(&bundles_dir, &registry, &old_bundle);
+        }
+        Ok(summary)
+    }
+
+    /// Audits an installed plugin's capabilities, net host expansion, and pinned bundle integrity.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError`] if the plugin is missing or its bundle/source cannot be hashed.
     pub fn audit(&self, id: &PluginId) -> Result<AuditReport, PluginError> {
-        let registry = self.load()?;
+        let registry = self.load_with_migration()?;
         let record = registry
             .plugins
             .get(id)
             .ok_or_else(|| PluginError::NotFound(id.clone()))?;
-        let current_content_digest = content_digest(record.source.root())?;
+        let current_content_digest = record.current_digest_for_audit()?;
+        let digest_matches =
+            current_content_digest == record.content_digest && record.verify_digest().is_ok();
+        let baseline = merged_enabled_host_baseline(&registry, Some(id))?;
+        let net_added = net_added_host_capabilities(&baseline, &record.requested_capabilities.host);
         Ok(AuditReport {
-            digest_matches: record.content_digest == current_content_digest,
-            current_content_digest,
             plugin: record.summary(),
             diff: record
                 .requested_capabilities
-                .diff(record.approved_capabilities.as_ref()),
+                .diff(record.approval.as_ref().map(|a| &a.capabilities)),
+            net_added_host_capabilities: net_added,
+            current_content_digest,
+            digest_matches,
         })
     }
 
-    /// Approves the installed requested capabilities and clears revocation without enabling.
+    /// Grants explicit capability approval bound to the current content digest and `source_identity`.
+    ///
+    /// Clears any prior revocation or migration re-approval requirement without enabling the plugin.
     ///
     /// # Errors
     ///
-    /// Returns an error on digest drift, missing plugin, or source or registry failure.
+    /// Returns [`PluginError`] on missing plugin, digest drift, corrupted bundle, or save failure.
     pub fn approve(&self, id: &PluginId) -> Result<PluginSummary, PluginError> {
         self.change(id, |record| {
             record.verify_digest()?;
-            record.approved_capabilities = Some(record.requested_capabilities.clone());
+            record.approval = Some(ApprovalRecord {
+                content_digest: record.content_digest.clone(),
+                source_identity: record.source_identity.clone(),
+                capabilities: record.requested_capabilities.clone(),
+            });
             record.revoked = false;
+            record.migration_reapproval_required = false;
             Ok(())
         })
     }
 
-    /// Clears approval, revokes the plugin, and disables composition.
+    /// Revokes explicit approval and disables composition.
     ///
     /// # Errors
     ///
-    /// Returns an error if the plugin is missing or its registry update fails.
+    /// Returns [`PluginError`] if the plugin is missing or saving fails.
     pub fn revoke(&self, id: &PluginId) -> Result<PluginSummary, PluginError> {
         self.change(id, |record| {
-            record.approved_capabilities = None;
+            record.approval = None;
             record.revoked = true;
             record.enabled = false;
             Ok(())
         })
     }
 
-    /// Enables composition only with sufficient approval and unchanged content.
+    /// Enables composition only when explicitly approved and bundle/source digests match the pin.
     ///
     /// # Errors
     ///
-    /// Returns an error on missing approval, revocation, digest drift, missing plugin,
-    /// or a source or registry failure.
+    /// Returns [`PluginError`] on missing approval, revocation, pending migration re-approval,
+    /// digest drift, or missing plugin.
     pub fn enable(&self, id: &PluginId) -> Result<PluginSummary, PluginError> {
         self.change(id, |record| {
             if !record.is_approved() {
@@ -236,11 +796,11 @@ impl PluginManager {
         })
     }
 
-    /// Disables composition without removing existing approval.
+    /// Disables composition while preserving existing explicit approval.
     ///
     /// # Errors
     ///
-    /// Returns an error if the plugin is missing or its registry update fails.
+    /// Returns [`PluginError`] if the plugin is missing or saving fails.
     pub fn disable(&self, id: &PluginId) -> Result<PluginSummary, PluginError> {
         self.change(id, |record| {
             record.enabled = false;
@@ -248,57 +808,500 @@ impl PluginManager {
         })
     }
 
-    /// Updates a source pin, disabling composition when the previous approval no longer covers it.
+    /// Re-reads and re-materializes the bundle from the plugin's bound source (`path` or `git`).
+    ///
+    /// Automatically disables composition if existing approval no longer covers the synced manifest.
     ///
     /// # Errors
     ///
-    /// Returns an error on invalid source or changed identity, a failed or forbidden Git fetch,
-    /// a missing plugin, or a registry failure.
+    /// Returns [`PluginError`] on offline policy, changed ID, invalid manifest, ABI incompatibility,
+    /// or missing plugin.
     pub fn sync(&self, id: &PluginId, policy: OfflinePolicy) -> Result<PluginSummary, PluginError> {
-        self.change(id, |record| {
-            let (manifest, digest) = match &record.source {
-                Source::Path { root } => (Manifest::load(root)?, content_digest(root)?),
-                Source::Git { url, ref_name, .. } => {
-                    let (manifest, source, digest) =
-                        self.prepare_git(url, ref_name, policy, Some(id))?;
-                    record.source = source;
-                    (manifest, digest)
+        let bundles_dir = self.paths.plugins_bundles_dir();
+        let staging_dir = self.paths.plugins_staging_dir();
+        let plugins_dir = self.paths.plugins_dir();
+        let _lock = self.lock()?;
+        let mut registry = self.load_migrated_locked()?;
+        let summary;
+        {
+            let record = registry
+                .plugins
+                .get_mut(id)
+                .ok_or_else(|| PluginError::NotFound(id.clone()))?;
+
+            let (manifest, new_source, digest) = match &record.source {
+                Source::Path { root, .. } => {
+                    let root = at(root, fs::canonicalize(root))?;
+                    let manifest = Manifest::load(&root)?;
+                    if manifest.id != *id {
+                        return Err(PluginError::IdChanged {
+                            expected: id.clone(),
+                            actual: manifest.id,
+                        });
+                    }
+                    manifest.check_runtime_compatibility(HOST_SHARED_RUNTIME_ABI)?;
+                    let digest = content_digest(&root)?;
+                    let bundle_path =
+                        materialize_bundle(&bundles_dir, &manifest.id, &root, &digest)?;
+                    (manifest, Source::Path { root, bundle_path }, digest)
+                }
+                Source::Git {
+                    url,
+                    ref_name,
+                    subdir,
+                    ..
+                } => {
+                    let plugins_canon = at(&plugins_dir, fs::canonicalize(&plugins_dir))?;
+                    let prepared = git::prepare_bundle(
+                        git::GitWorkspace {
+                            plugins_dir: &plugins_canon,
+                            bundles_dir: &bundles_dir,
+                            staging_dir: &staging_dir,
+                        },
+                        url,
+                        ref_name,
+                        subdir.as_deref(),
+                        policy,
+                        Some(id),
+                    )?;
+                    prepared
+                        .manifest
+                        .check_runtime_compatibility(HOST_SHARED_RUNTIME_ABI)?;
+                    let source = Source::Git {
+                        url: prepared.url,
+                        ref_name: ref_name.clone(),
+                        subdir: prepared.subdir,
+                        rev: prepared.rev,
+                        bundle_path: prepared.root,
+                    };
+                    (prepared.manifest, source, prepared.content_digest)
+                }
+                Source::Archive {
+                    url,
+                    archive_sha256,
+                    ..
+                } => {
+                    let unpacked = archive::unpack_archive_bundle(
+                        &staging_dir,
+                        &bundles_dir,
+                        url,
+                        archive_sha256,
+                        policy,
+                    )?;
+                    if unpacked.manifest.id != *id {
+                        return Err(PluginError::IdChanged {
+                            expected: id.clone(),
+                            actual: unpacked.manifest.id,
+                        });
+                    }
+                    unpacked
+                        .manifest
+                        .check_runtime_compatibility(HOST_SHARED_RUNTIME_ABI)?;
+                    let digest = unpacked.content_digest;
+                    let source = Source::Archive {
+                        url: unpacked.source,
+                        archive_sha256: unpacked.archive_sha256,
+                        bundle_path: unpacked.bundle_root,
+                    };
+                    (unpacked.manifest, source, digest)
+                }
+                Source::Catalog {
+                    catalog_source_id,
+                    catalog_source_identity,
+                    version,
+                    transport,
+                    bundle_path,
+                } => {
+                    verify_bundle(bundle_path, &record.content_digest)?;
+                    let manifest = Manifest::load(bundle_path)?;
+                    if manifest.id != *id {
+                        return Err(PluginError::IdChanged {
+                            expected: id.clone(),
+                            actual: manifest.id,
+                        });
+                    }
+                    let source = Source::Catalog {
+                        catalog_source_id: catalog_source_id.clone(),
+                        catalog_source_identity: catalog_source_identity.clone(),
+                        version: version.clone(),
+                        transport: transport.clone(),
+                        bundle_path: bundle_path.clone(),
+                    };
+                    (manifest, source, record.content_digest.clone())
                 }
             };
-            if manifest.id != *id {
-                return Err(PluginError::IdChanged {
-                    expected: id.clone(),
-                    actual: manifest.id,
-                });
-            }
-            record.content_digest = digest;
+
+            record.shared_runtime_abi = manifest
+                .build
+                .as_ref()
+                .map_or(HOST_SHARED_RUNTIME_ABI, |b| b.shared_runtime_abi);
+            record.content_digest = digest.clone();
             record.name = manifest.name;
             record.version = manifest.version;
             record.plugin_api = manifest.plugin_api;
             record.requested_capabilities = manifest.capabilities;
-            record.enabled &= record.is_approved();
-            Ok(())
+            record.source = new_source;
+            // Keep approval valid across sync only if non-revoked, same source, and covering
+            // requested capabilities (allowing reductions without re-approval).
+            if record.has_covering_approval() {
+                if let Some(approval) = record.approval.as_mut() {
+                    approval.content_digest = digest;
+                }
+            } else {
+                record.enabled = false;
+            }
+            summary = record.summary();
+        }
+
+        registry.desired_revision = registry.desired_revision.saturating_add(1);
+        self.save(&registry)?;
+        Ok(summary)
+    }
+
+    /// Removes a plugin from the registry and deletes its immutable bundle tree.
+    ///
+    /// Never modifies or deletes user `--path` source directories. Optionally purges
+    /// `[plugin_settings."<id>"]` when `settings_policy` is [`RemoveSettingsPolicy::PurgeSettings`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError`] if the plugin is not installed, saving fails, or settings removal fails.
+    pub fn remove(
+        &self,
+        id: &PluginId,
+        settings_policy: RemoveSettingsPolicy,
+    ) -> Result<RemovedPlugin, PluginError> {
+        let bundles_dir = self.paths.plugins_bundles_dir();
+        let bundle_to_delete: PathBuf;
+        let desired_revision: u64;
+        {
+            let _lock = self.lock()?;
+            let mut registry = self.load_migrated_locked()?;
+            let record = registry
+                .plugins
+                .remove(id)
+                .ok_or_else(|| PluginError::NotFound(id.clone()))?;
+            bundle_to_delete = record.source.bundle_path().to_path_buf();
+            registry.desired_revision = registry.desired_revision.saturating_add(1);
+            desired_revision = registry.desired_revision;
+            self.save(&registry)?;
+            if bundle_to_delete.starts_with(&bundles_dir)
+                && !registry
+                    .plugins
+                    .values()
+                    .any(|r| r.source.bundle_path() == bundle_to_delete)
+            {
+                let _ = remove_bundle_tree(&bundle_to_delete);
+            }
+        }
+
+        let settings_purged = match settings_policy {
+            RemoveSettingsPolicy::KeepSettings => false,
+            RemoveSettingsPolicy::PurgeSettings => {
+                ConfigStore::new(self.paths.clone()).remove_plugin_settings(id)?
+            }
+        };
+        Ok(RemovedPlugin {
+            id: id.clone(),
+            desired_revision,
+            settings_purged,
         })
     }
 
-    fn prepare_git(
+    /// Inspects registry consistency, bundle digests, v1 migration flags, orphan bundles, and staging dirs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError`] if the registry cannot be loaded or migrated.
+    pub fn doctor(&self) -> Result<Vec<DoctorFinding>, PluginError> {
+        let registry = self.load_with_migration()?;
+        let mut findings = Vec::new();
+        let mut active_bundles = BTreeSet::new();
+
+        for record in registry.plugins.values() {
+            active_bundles.insert(record.source.bundle_path().to_path_buf());
+            if record.migration_reapproval_required {
+                findings.push(DoctorFinding {
+                    code: "migration_reapproval_required".to_owned(),
+                    severity: DoctorSeverity::Warning,
+                    plugin_id: Some(record.id.clone()),
+                    message: format!(
+                        "plugin {} was migrated from registry v1 with approvals cleared; run `z-shell plugin audit {}` and `z-shell plugin approve {}`",
+                        record.id, record.id, record.id
+                    ),
+                });
+            }
+            if let Err(err) = verify_bundle(record.source.bundle_path(), &record.content_digest) {
+                findings.push(DoctorFinding {
+                    code: "bundle_invalid".to_owned(),
+                    severity: DoctorSeverity::Error,
+                    plugin_id: Some(record.id.clone()),
+                    message: format!("immutable bundle verification failed: {err}"),
+                });
+            } else {
+                match Manifest::load(record.source.bundle_path()) {
+                    Ok(manifest) => {
+                        if let Err(err) =
+                            manifest.check_runtime_compatibility(HOST_SHARED_RUNTIME_ABI)
+                        {
+                            findings.push(DoctorFinding {
+                                code: "incompatible_runtime".to_owned(),
+                                severity: DoctorSeverity::Error,
+                                plugin_id: Some(record.id.clone()),
+                                message: err.to_string(),
+                            });
+                        }
+                    }
+                    Err(err) => findings.push(DoctorFinding {
+                        code: "manifest_invalid".to_owned(),
+                        severity: DoctorSeverity::Error,
+                        plugin_id: Some(record.id.clone()),
+                        message: err.to_string(),
+                    }),
+                }
+            }
+
+            if let Source::Path { root, .. } = &record.source {
+                match content_digest(root) {
+                    Ok(digest) if digest != record.content_digest => findings.push(DoctorFinding {
+                        code: "path_source_drifted".to_owned(),
+                        severity: DoctorSeverity::Warning,
+                        plugin_id: Some(record.id.clone()),
+                        message: format!(
+                            "local path source {} changed since pinned digest; run `z-shell plugin sync {}`",
+                            root.display(),
+                            record.id
+                        ),
+                    }),
+                    Ok(_) => {}
+                    Err(err) => findings.push(DoctorFinding {
+                        code: "path_source_unreadable".to_owned(),
+                        severity: DoctorSeverity::Error,
+                        plugin_id: Some(record.id.clone()),
+                        message: format!("local path source {} is unreadable: {err}", root.display()),
+                    }),
+                }
+            }
+
+            if record.enabled && !record.is_approved() {
+                findings.push(DoctorFinding {
+                    code: "enabled_without_approval".to_owned(),
+                    severity: DoctorSeverity::Error,
+                    plugin_id: Some(record.id.clone()),
+                    message: "plugin is marked enabled without a valid approval".to_owned(),
+                });
+            }
+        }
+
+        let bundles_dir = self.paths.plugins_bundles_dir();
+        if bundles_dir.is_dir()
+            && let Ok(plugin_dirs) = fs::read_dir(&bundles_dir)
+        {
+            for plugin_entry in plugin_dirs.flatten() {
+                let plugin_path = plugin_entry.path();
+                if !plugin_path.is_dir() {
+                    continue;
+                }
+                if let Ok(digest_dirs) = fs::read_dir(&plugin_path) {
+                    for digest_entry in digest_dirs.flatten() {
+                        let candidate = digest_entry.path();
+                        if !active_bundles.contains(&candidate) {
+                            findings.push(DoctorFinding {
+                                code: "orphan_bundle".to_owned(),
+                                severity: DoctorSeverity::Info,
+                                plugin_id: None,
+                                message: format!(
+                                    "unreferenced bundle directory at {}",
+                                    candidate.display()
+                                ),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let staging_dir = self.paths.plugins_staging_dir();
+        if staging_dir.is_dir()
+            && let Ok(entries) = fs::read_dir(&staging_dir)
+        {
+            for entry in entries.flatten() {
+                findings.push(DoctorFinding {
+                    code: "stale_staging_dir".to_owned(),
+                    severity: DoctorSeverity::Info,
+                    plugin_id: None,
+                    message: format!("leftover staging entry at {}", entry.path().display()),
+                });
+            }
+        }
+
+        Ok(findings)
+    }
+
+    fn materialize_catalog_release(
         &self,
-        url: &str,
-        ref_name: &str,
+        registry: &Registry,
+        resolved: &ResolvedCatalogRelease,
         policy: OfflinePolicy,
-        expected_id: Option<&PluginId>,
-    ) -> Result<(Manifest, Source, String), PluginError> {
-        let dir = self.paths.plugins_dir();
-        let dir = at(&dir, fs::canonicalize(&dir))?;
-        let prepared =
-            git::prepare(&dir, url, ref_name, policy, expected_id).map_err(PluginError::Git)?;
-        let source = Source::Git {
-            url: prepared.url,
-            ref_name: ref_name.to_owned(),
-            rev: prepared.rev,
-            root: prepared.root,
+    ) -> Result<(Manifest, Source, String, ResolvedFrom), PluginError> {
+        if resolved.release.plugin_api > SUPPORTED_PLUGIN_API_LEVEL {
+            return Err(CompatibilityError::UnsupportedPluginApi {
+                plugin_api: resolved.release.plugin_api,
+                max_supported: SUPPORTED_PLUGIN_API_LEVEL,
+            }
+            .into());
+        }
+        if !resolved
+            .release
+            .shared_runtime_abi
+            .is_compatible_with_host(HOST_SHARED_RUNTIME_ABI)
+        {
+            return Err(CompatibilityError::IncompatibleRuntimeAbi {
+                required: resolved.release.shared_runtime_abi,
+                host: HOST_SHARED_RUNTIME_ABI,
+            }
+            .into());
+        }
+
+        let bundles_dir = self.paths.plugins_bundles_dir();
+        let staging_dir = self.paths.plugins_staging_dir();
+        let plugins_dir = self.paths.plugins_dir();
+        let transport = catalog_transport_from_artifact(&resolved.release.artifact);
+
+        let cached_bundle = bundle_dir_for(
+            &bundles_dir,
+            &resolved.plugin.id,
+            &resolved.release.content_digest,
+        );
+        if verify_bundle(&cached_bundle, &resolved.release.content_digest).is_ok()
+            && let Ok(manifest) = Manifest::load(&cached_bundle)
+            && manifest.id == resolved.plugin.id
+            && manifest
+                .check_runtime_compatibility(HOST_SHARED_RUNTIME_ABI)
+                .is_ok()
+        {
+            let source = Source::Catalog {
+                catalog_source_id: resolved.source_id.clone(),
+                catalog_source_identity: resolved.source_identity.clone(),
+                version: resolved.release.version.clone(),
+                transport,
+                bundle_path: cached_bundle,
+            };
+            return Ok((
+                manifest,
+                source,
+                resolved.release.content_digest.clone(),
+                ResolvedFrom::LocalVerifiedCache,
+            ));
+        }
+
+        let (bundle_path, manifest, actual_digest, resolved_from) = match &resolved.release.artifact
+        {
+            CatalogArtifact::LocalSeed { bundle_dir } => {
+                let manifest = Manifest::load(bundle_dir)?;
+                let digest = content_digest(bundle_dir)?;
+                let committed = materialize_bundle(
+                    &bundles_dir,
+                    &resolved.plugin.id,
+                    bundle_dir,
+                    &resolved.release.content_digest,
+                )?;
+                (
+                    committed,
+                    manifest,
+                    digest,
+                    ResolvedFrom::BundledOfficialSeed,
+                )
+            }
+            CatalogArtifact::Archive {
+                url,
+                archive_sha256,
+                ..
+            } => {
+                let unpacked = archive::unpack_archive_bundle(
+                    &staging_dir,
+                    &bundles_dir,
+                    url,
+                    archive_sha256,
+                    policy,
+                )
+                .map_err(|err| match err {
+                    ArchiveError::Offline => PluginError::OfflineModeBlocked,
+                    other => PluginError::Archive(other),
+                })?;
+                let origin = if url.starts_with("http://") || url.starts_with("https://") {
+                    ResolvedFrom::Remote
+                } else {
+                    ResolvedFrom::LocalArtifact
+                };
+                (
+                    unpacked.bundle_root,
+                    unpacked.manifest,
+                    unpacked.content_digest,
+                    origin,
+                )
+            }
+            CatalogArtifact::Git { url, rev, subdir } => {
+                at(
+                    &plugins_dir,
+                    DirBuilder::new()
+                        .mode(0o700)
+                        .recursive(true)
+                        .create(&plugins_dir),
+                )?;
+                let plugins_canon = at(&plugins_dir, fs::canonicalize(&plugins_dir))?;
+                let prepared = git::prepare_bundle(
+                    git::GitWorkspace {
+                        plugins_dir: &plugins_canon,
+                        bundles_dir: &bundles_dir,
+                        staging_dir: &staging_dir,
+                    },
+                    url,
+                    rev,
+                    subdir.as_deref(),
+                    policy,
+                    Some(&resolved.plugin.id),
+                )
+                .map_err(|err| match err {
+                    git::GitError::Offline => PluginError::OfflineModeBlocked,
+                    other => PluginError::Git(other),
+                })?;
+                (
+                    prepared.root,
+                    prepared.manifest,
+                    prepared.content_digest,
+                    ResolvedFrom::Remote,
+                )
+            }
         };
-        Ok((prepared.manifest, source, prepared.content_digest))
+
+        if manifest.id != resolved.plugin.id {
+            cleanup_unreferenced_bundle(&bundles_dir, registry, &bundle_path);
+            return Err(PluginError::IdChanged {
+                expected: resolved.plugin.id.clone(),
+                actual: manifest.id,
+            });
+        }
+        if actual_digest != resolved.release.content_digest {
+            cleanup_unreferenced_bundle(&bundles_dir, registry, &bundle_path);
+            return Err(PluginError::CatalogDigestMismatch {
+                expected: resolved.release.content_digest.clone(),
+                actual: actual_digest,
+            });
+        }
+        if let Err(err) = manifest.check_runtime_compatibility(HOST_SHARED_RUNTIME_ABI) {
+            cleanup_unreferenced_bundle(&bundles_dir, registry, &bundle_path);
+            return Err(err.into());
+        }
+
+        let source = Source::Catalog {
+            catalog_source_id: resolved.source_id.clone(),
+            catalog_source_identity: resolved.source_identity.clone(),
+            version: resolved.release.version.clone(),
+            transport,
+            bundle_path,
+        };
+        Ok((manifest, source, actual_digest, resolved_from))
     }
 
     fn install(
@@ -306,27 +1309,35 @@ impl PluginManager {
         mut registry: Registry,
         manifest: Manifest,
         source: Source,
+        source_identity: String,
         content_digest: String,
     ) -> Result<PluginSummary, PluginError> {
         let id = manifest.id;
         let Entry::Vacant(entry) = registry.plugins.entry(id.clone()) else {
             return Err(PluginError::AlreadyInstalled(id));
         };
+        let shared_runtime_abi = manifest
+            .build
+            .as_ref()
+            .map_or(HOST_SHARED_RUNTIME_ABI, |b| b.shared_runtime_abi);
         let summary = entry
             .insert(Record {
                 id,
                 name: manifest.name,
                 version: manifest.version,
                 plugin_api: manifest.plugin_api,
+                shared_runtime_abi,
                 source,
+                source_identity,
                 content_digest,
                 enabled: false,
                 revoked: false,
+                migration_reapproval_required: false,
                 requested_capabilities: manifest.capabilities,
-                approved_capabilities: None,
-                accepted_build_id: None,
+                approval: None,
             })
             .summary();
+        registry.desired_revision = registry.desired_revision.saturating_add(1);
         self.save(&registry)?;
         Ok(summary)
     }
@@ -337,35 +1348,136 @@ impl PluginManager {
         change: impl FnOnce(&mut Record) -> Result<(), PluginError>,
     ) -> Result<PluginSummary, PluginError> {
         let _lock = self.lock()?;
-        let mut registry = self.load()?;
+        let mut registry = self.load_migrated_locked()?;
         let record = registry
             .plugins
             .get_mut(id)
             .ok_or_else(|| PluginError::NotFound(id.clone()))?;
         change(record)?;
         let summary = record.summary();
+        registry.desired_revision = registry.desired_revision.saturating_add(1);
         self.save(&registry)?;
         Ok(summary)
     }
 
-    fn load(&self) -> Result<Registry, PluginError> {
+    fn load_with_migration(&self) -> Result<Registry, PluginError> {
         let path = self.paths.plugins_registry_file();
-        // An open descriptor sees either the old registry or the new one across rename.
-        let file = match File::open(&path) {
-            Ok(file) => file,
+        let raw_bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Registry::default()),
             Err(source) => return Err(PluginError::Io { path, source }),
         };
-        let registry: Registry = serde_json::from_reader(BufReader::new(file))?;
-        if registry.schema_version != SCHEMA_VERSION {
-            return Err(PluginError::RegistryVersion(registry.schema_version));
-        }
-        for (id, record) in &registry.plugins {
-            if *id != record.id {
-                return Err(PluginError::RegistryId(id.clone()));
+        let peek: VersionPeek = serde_json::from_slice(&raw_bytes)?;
+        match peek.schema_version {
+            SCHEMA_VERSION_V2 => parse_and_validate_v2(&raw_bytes),
+            SCHEMA_VERSION_V1 => {
+                let _lock = self.lock()?;
+                self.load_migrated_locked()
             }
+            other => Err(PluginError::RegistryVersion(other)),
         }
-        Ok(registry)
+    }
+
+    fn load_migrated_locked(&self) -> Result<Registry, PluginError> {
+        let path = self.paths.plugins_registry_file();
+        let raw_bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Registry::default()),
+            Err(source) => return Err(PluginError::Io { path, source }),
+        };
+        let peek: VersionPeek = serde_json::from_slice(&raw_bytes)?;
+        match peek.schema_version {
+            SCHEMA_VERSION_V2 => parse_and_validate_v2(&raw_bytes),
+            SCHEMA_VERSION_V1 => self.migrate_v1_to_v2(&raw_bytes),
+            other => Err(PluginError::RegistryVersion(other)),
+        }
+    }
+
+    fn migrate_v1_to_v2(&self, v1_bytes: &[u8]) -> Result<Registry, PluginError> {
+        let v1: RegistryV1 = serde_json::from_slice(v1_bytes)?;
+        let plugins_dir = self.paths.plugins_dir();
+        let bundles_dir = self.paths.plugins_bundles_dir();
+        let backup_path = plugins_dir.join("registry.v1.bak.json");
+        write_atomic_0600(&plugins_dir, &backup_path, v1_bytes)?;
+
+        let mut migrated = BTreeMap::new();
+        for (id, rec) in v1.plugins {
+            if id != rec.id {
+                return Err(PluginError::RegistryId(id));
+            }
+            let (source, source_identity, shared_runtime_abi) = match rec.source {
+                SourceV1::Path { root } => {
+                    let canonical = fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
+                    let abi = Manifest::load(&canonical)
+                        .ok()
+                        .and_then(|m| m.build.map(|b| b.shared_runtime_abi))
+                        .unwrap_or(HOST_SHARED_RUNTIME_ABI);
+                    let bundle_path =
+                        materialize_bundle(&bundles_dir, &id, &canonical, &rec.content_digest)
+                            .unwrap_or_else(|_| {
+                                bundle_dir_for(&bundles_dir, &id, &rec.content_digest)
+                            });
+                    let identity = format!("path:{}", canonical.display());
+                    (Source::Path { root, bundle_path }, identity, abi)
+                }
+                SourceV1::Git {
+                    url,
+                    rev,
+                    ref_name,
+                    root,
+                } => {
+                    let abi = Manifest::load(&root)
+                        .ok()
+                        .and_then(|m| m.build.map(|b| b.shared_runtime_abi))
+                        .unwrap_or(HOST_SHARED_RUNTIME_ABI);
+                    let bundle_path =
+                        materialize_bundle(&bundles_dir, &id, &root, &rec.content_digest)
+                            .unwrap_or_else(|_| {
+                                bundle_dir_for(&bundles_dir, &id, &rec.content_digest)
+                            });
+                    let identity = format!("git:{url}|");
+                    (
+                        Source::Git {
+                            url,
+                            ref_name,
+                            subdir: None,
+                            rev,
+                            bundle_path,
+                        },
+                        identity,
+                        abi,
+                    )
+                }
+            };
+
+            migrated.insert(
+                id,
+                Record {
+                    id: rec.id,
+                    name: rec.name,
+                    version: rec.version,
+                    plugin_api: rec.plugin_api,
+                    shared_runtime_abi,
+                    source,
+                    source_identity,
+                    content_digest: rec.content_digest,
+                    // Non-escalating migration: never preserve enabled or v1 approvals implicitly.
+                    enabled: false,
+                    revoked: rec.revoked,
+                    migration_reapproval_required: true,
+                    requested_capabilities: rec.requested_capabilities,
+                    approval: None,
+                },
+            );
+        }
+
+        let v2 = Registry {
+            schema_version: SCHEMA_VERSION_V2,
+            desired_revision: 1,
+            plugins: migrated,
+        };
+        self.save(&v2)?;
+        Ok(v2)
     }
 
     fn lock(&self) -> Result<File, PluginError> {
@@ -397,6 +1509,10 @@ impl PluginManager {
         let dir_handle = at(&dir, File::open(&dir))?;
         let temp = at(&dir, NamedTempFile::new_in(&dir))?;
         let path = temp.path();
+        at(
+            path,
+            fs::set_permissions(path, Permissions::from_mode(0o600)),
+        )?;
         let mut writer = BufWriter::new(temp.as_file());
         serde_json::to_writer_pretty(&mut writer, registry)?;
         at(path, writer.write_all(b"\n"))?;
@@ -409,71 +1525,125 @@ impl PluginManager {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Registry {
-    schema_version: u32,
-    plugins: BTreeMap<PluginId, Record>,
-}
-
-impl Default for Registry {
-    fn default() -> Self {
-        Self {
-            schema_version: SCHEMA_VERSION,
-            plugins: BTreeMap::new(),
+fn conflict_or_already_installed(existing: &Record, incoming_source: &str) -> PluginError {
+    if existing.source_identity == incoming_source {
+        PluginError::AlreadyInstalled(existing.id.clone())
+    } else {
+        PluginError::SourceConflict {
+            id: existing.id.clone(),
+            existing_source: existing.source_identity.clone(),
+            incoming_source: incoming_source.to_owned(),
         }
     }
 }
 
-#[derive(Serialize, Deserialize)]
+fn cleanup_unreferenced_bundle(bundles_dir: &Path, registry: &Registry, bundle_path: &Path) {
+    if bundle_path.starts_with(bundles_dir)
+        && !registry
+            .plugins
+            .values()
+            .any(|rec| rec.source.bundle_path() == bundle_path)
+    {
+        let _ = remove_bundle_tree(bundle_path);
+    }
+}
+
+fn merged_enabled_host_baseline(
+    registry: &Registry,
+    excluding: Option<&PluginId>,
+) -> Result<HostCapabilities, PluginError> {
+    let items: Vec<HostCapabilities> = registry
+        .plugins
+        .values()
+        .filter(|rec| excluding.is_none_or(|ex| &rec.id != ex) && rec.enabled && rec.is_approved())
+        .map(|rec| rec.requested_capabilities.host.clone())
+        .collect();
+    Ok(merge_host_capabilities(&items)?)
+}
+
+fn catalog_transport_from_artifact(artifact: &CatalogArtifact) -> CatalogTransport {
+    match artifact {
+        CatalogArtifact::Archive {
+            url,
+            archive_sha256,
+            ..
+        } => CatalogTransport::Archive {
+            url: url.clone(),
+            archive_sha256: archive_sha256.clone(),
+        },
+        CatalogArtifact::Git { url, rev, subdir } => CatalogTransport::Git {
+            url: url.clone(),
+            rev: rev.clone(),
+            subdir: subdir.clone(),
+        },
+        CatalogArtifact::LocalSeed { bundle_dir } => CatalogTransport::LocalSeed {
+            bundle_dir: bundle_dir.clone(),
+        },
+    }
+}
+
+fn parse_and_validate_v2(raw_bytes: &[u8]) -> Result<Registry, PluginError> {
+    let registry: Registry = serde_json::from_slice(raw_bytes)?;
+    for (id, record) in &registry.plugins {
+        if *id != record.id {
+            return Err(PluginError::RegistryId(id.clone()));
+        }
+    }
+    Ok(registry)
+}
+
+fn write_atomic_0600(dir: &Path, target: &Path, bytes: &[u8]) -> Result<(), PluginError> {
+    let dir_handle = at(dir, File::open(dir))?;
+    let mut temp = at(dir, NamedTempFile::new_in(dir))?;
+    let temp_path = temp.path().to_owned();
+    at(
+        &temp_path,
+        fs::set_permissions(&temp_path, Permissions::from_mode(0o600)),
+    )?;
+    at(&temp_path, temp.write_all(bytes))?;
+    at(&temp_path, temp.flush())?;
+    at(&temp_path, temp.as_file().sync_all())?;
+    at(target, temp.persist(target).map_err(|err| err.error))?;
+    at(dir, dir_handle.sync_all())
+}
+
+#[derive(Deserialize)]
+struct VersionPeek {
+    schema_version: u32,
+}
+
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Record {
+#[expect(
+    dead_code,
+    reason = "enforces exact v1 schema key presence via deny_unknown_fields"
+)]
+struct RegistryV1 {
+    schema_version: u32,
+    plugins: BTreeMap<PluginId, RecordV1>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[expect(dead_code, reason = "validated during v1-to-v2 migration")]
+struct RecordV1 {
     id: PluginId,
     name: String,
     version: String,
     plugin_api: u32,
-    source: Source,
+    source: SourceV1,
     content_digest: String,
     enabled: bool,
     revoked: bool,
     requested_capabilities: CapabilityBundle,
     approved_capabilities: Option<CapabilityBundle>,
+    #[serde(default)]
     accepted_build_id: Option<String>,
 }
 
-impl Record {
-    fn is_approved(&self) -> bool {
-        !self.revoked
-            && self
-                .approved_capabilities
-                .as_ref()
-                .is_some_and(|approved| self.requested_capabilities.is_covered_by(approved))
-    }
-
-    fn verify_digest(&self) -> Result<(), PluginError> {
-        if self.content_digest != content_digest(self.source.root())? {
-            return Err(PluginError::DigestDrift(self.id.clone()));
-        }
-        Ok(())
-    }
-
-    fn summary(&self) -> PluginSummary {
-        PluginSummary {
-            id: self.id.clone(),
-            name: self.name.clone(),
-            version: self.version.clone(),
-            plugin_api: self.plugin_api,
-            content_digest: self.content_digest.clone(),
-            enabled: self.enabled,
-            revoked: self.revoked,
-            approved: self.is_approved(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-enum Source {
+enum SourceV1 {
     Path {
         root: PathBuf,
     },
@@ -485,10 +1655,176 @@ enum Source {
     },
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Registry {
+    schema_version: u32,
+    desired_revision: u64,
+    plugins: BTreeMap<PluginId, Record>,
+}
+
+impl Default for Registry {
+    fn default() -> Self {
+        Self {
+            schema_version: SCHEMA_VERSION_V2,
+            desired_revision: 0,
+            plugins: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApprovalRecord {
+    content_digest: String,
+    source_identity: String,
+    capabilities: CapabilityBundle,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Record {
+    id: PluginId,
+    name: String,
+    version: String,
+    plugin_api: u32,
+    shared_runtime_abi: SharedRuntimeAbi,
+    source: Source,
+    source_identity: String,
+    content_digest: String,
+    enabled: bool,
+    revoked: bool,
+    migration_reapproval_required: bool,
+    requested_capabilities: CapabilityBundle,
+    approval: Option<ApprovalRecord>,
+}
+
+impl Record {
+    fn has_covering_approval(&self) -> bool {
+        !self.revoked
+            && !self.migration_reapproval_required
+            && self.approval.as_ref().is_some_and(|approved| {
+                approved.source_identity == self.source_identity
+                    && self
+                        .requested_capabilities
+                        .is_covered_by(&approved.capabilities)
+            })
+    }
+
+    fn is_approved(&self) -> bool {
+        self.has_covering_approval()
+            && self
+                .approval
+                .as_ref()
+                .is_some_and(|approved| approved.content_digest == self.content_digest)
+    }
+
+    fn verify_digest(&self) -> Result<(), PluginError> {
+        verify_bundle(self.source.bundle_path(), &self.content_digest).map_err(
+            |err| match err {
+                BundleError::DigestMismatch { .. } | BundleError::Io { .. } => {
+                    PluginError::DigestDrift(self.id.clone())
+                }
+                other => PluginError::Bundle(other),
+            },
+        )?;
+        if let Source::Path { root, .. } = &self.source
+            && self.content_digest != content_digest(root)?
+        {
+            return Err(PluginError::DigestDrift(self.id.clone()));
+        }
+        Ok(())
+    }
+
+    fn current_digest_for_audit(&self) -> Result<String, PluginError> {
+        let bundle_digest = content_digest(self.source.bundle_path())?;
+        if bundle_digest != self.content_digest {
+            return Ok(bundle_digest);
+        }
+        if let Source::Path { root, .. } = &self.source {
+            return Ok(content_digest(root)?);
+        }
+        Ok(bundle_digest)
+    }
+
+    fn summary(&self) -> PluginSummary {
+        let catalog_source_id = match &self.source {
+            Source::Catalog {
+                catalog_source_id, ..
+            } => Some(catalog_source_id.clone()),
+            _ => None,
+        };
+        PluginSummary {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            version: self.version.clone(),
+            plugin_api: self.plugin_api,
+            shared_runtime_abi: self.shared_runtime_abi,
+            source_identity: self.source_identity.clone(),
+            catalog_source_id,
+            content_digest: self.content_digest.clone(),
+            enabled: self.enabled,
+            revoked: self.revoked,
+            migration_reapproval_required: self.migration_reapproval_required,
+            approved: self.is_approved(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum CatalogTransport {
+    Archive {
+        url: String,
+        archive_sha256: String,
+    },
+    Git {
+        url: String,
+        rev: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subdir: Option<String>,
+    },
+    LocalSeed {
+        bundle_dir: PathBuf,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum Source {
+    Path {
+        root: PathBuf,
+        bundle_path: PathBuf,
+    },
+    Git {
+        url: String,
+        ref_name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subdir: Option<String>,
+        rev: String,
+        bundle_path: PathBuf,
+    },
+    Archive {
+        url: String,
+        archive_sha256: String,
+        bundle_path: PathBuf,
+    },
+    Catalog {
+        catalog_source_id: String,
+        catalog_source_identity: String,
+        version: String,
+        transport: CatalogTransport,
+        bundle_path: PathBuf,
+    },
+}
+
 impl Source {
-    fn root(&self) -> &Path {
+    fn bundle_path(&self) -> &Path {
         match self {
-            Self::Path { root } | Self::Git { root, .. } => root,
+            Self::Path { bundle_path, .. }
+            | Self::Git { bundle_path, .. }
+            | Self::Archive { bundle_path, .. }
+            | Self::Catalog { bundle_path, .. } => bundle_path,
         }
     }
 }

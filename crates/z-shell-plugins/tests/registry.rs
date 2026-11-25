@@ -88,9 +88,18 @@ fn path_lifecycle_pins_content_and_never_restores_revoked_approval() {
         0o600
     );
     let disk: Value = serde_json::from_slice(&fs::read(file).unwrap()).unwrap();
-    assert_eq!(disk["schema_version"], 1);
+    assert_eq!(disk["schema_version"], 2);
+    assert!(disk["desired_revision"].as_u64().unwrap() >= 1);
     let record = &disk["plugins"][id.as_str()];
+    assert!(record.get("quarantine").is_none());
+    assert!(record.get("accepted_build_id").is_none());
     assert_eq!(record["source"]["root"], root.to_str().unwrap());
+    assert!(
+        record["source"]["bundle_path"]
+            .as_str()
+            .unwrap()
+            .contains("/plugins/bundles/demo__hello/")
+    );
     assert_eq!(
         record["requested_capabilities"]["host"]["imagePrefixes"],
         serde_json::json!([])
@@ -99,8 +108,7 @@ fn path_lifecycle_pins_content_and_never_restores_revoked_approval() {
         record["requested_capabilities"]["bus"]["topicsRead"],
         serde_json::json!([])
     );
-    assert!(record["approved_capabilities"].is_null());
-    assert!(record["accepted_build_id"].is_null());
+    assert!(record["approval"].is_null());
 
     manager.approve(id).unwrap();
     assert!(manager.enable(id).unwrap().enabled);
@@ -146,4 +154,658 @@ fn empty_capabilities_still_require_explicit_initial_approval() {
     assert!(manager.enable(&id).is_err());
     manager.approve(&id).unwrap();
     assert!(manager.enable(&id).unwrap().enabled);
+}
+
+#[test]
+fn v1_to_v2_migration_never_escalates_privileges_and_preserves_local_source() {
+    let work = tempdir().unwrap();
+    let state = tempdir().unwrap();
+    let state_path = state.path();
+    let src_dir = work.path().join("legacy-plugin");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(src_dir.join("worker.ts"), "export default 0").unwrap();
+    manifest(&src_dir, r#""legacy-tool""#);
+    let digest = z_shell_plugins::digest::content_digest(&src_dir).unwrap();
+
+    let plugins_dir = state_path.join("plugins");
+    fs::create_dir_all(&plugins_dir).unwrap();
+    let legacy = serde_json::json!({
+        "schema_version": 1,
+        "plugins": {
+            "demo/hello": {
+                "id": "demo/hello",
+                "name": "Hello",
+                "version": "1.0.0",
+                "plugin_api": 1,
+                "source": { "kind": "path", "root": src_dir },
+                "content_digest": digest,
+                "enabled": true,
+                "revoked": false,
+                "requested_capabilities": {
+                    "host": {
+                        "commands": ["legacy-tool"],
+                        "imagePrefixes": [],
+                        "unixSockets": [],
+                        "namedSockets": [],
+                        "shellSurfaces": false,
+                        "controlChannel": false
+                    },
+                    "bus": {
+                        "topicsRead": [],
+                        "topicsPublish": [],
+                        "commandsRegister": [],
+                        "inhibitors": false
+                    }
+                },
+                "approved_capabilities": {
+                    "host": {
+                        "commands": ["legacy-tool"],
+                        "imagePrefixes": [],
+                        "unixSockets": [],
+                        "namedSockets": [],
+                        "shellSurfaces": false,
+                        "controlChannel": false
+                    },
+                    "bus": {
+                        "topicsRead": [],
+                        "topicsPublish": [],
+                        "commandsRegister": [],
+                        "inhibitors": false
+                    }
+                },
+                "accepted_build_id": "legacy-build"
+            }
+        }
+    });
+    fs::write(
+        plugins_dir.join("registry.json"),
+        serde_json::to_vec_pretty(&legacy).unwrap(),
+    )
+    .unwrap();
+
+    let paths = ShellPaths::from_roots(
+        state_path.join("config"),
+        state_path.to_owned(),
+        state_path.join("run"),
+        state_path.join("run/bus.sock"),
+    );
+    let manager = PluginManager::new(paths);
+    let list = manager.list().unwrap();
+    assert_eq!(list.len(), 1);
+    let item = &list[0];
+    assert!(
+        !item.enabled,
+        "v1 enabled plugin must be disabled on v2 migration"
+    );
+    assert!(
+        !item.approved,
+        "v1 approval must not silently carry over to v2"
+    );
+    assert!(item.migration_reapproval_required);
+    assert!(plugins_dir.join("registry.v1.bak.json").is_file());
+    assert!(src_dir.join("worker.ts").is_file());
+    assert!(manager.enable(&item.id).is_err());
+
+    let doctor = manager.doctor().unwrap();
+    assert!(
+        doctor
+            .iter()
+            .any(|f| f.code == "migration_reapproval_required")
+    );
+}
+
+#[test]
+fn cross_source_conflict_safe_remove_bundled_upgrade_offline_cache_and_toctou_upgrade() {
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+    use sha2::{Digest, Sha256};
+    use std::collections::BTreeSet;
+    use std::fs::File;
+    use tar::{Builder, Header};
+    use z_shell_config::{ConfigStore, PluginSourceKind, PluginSourceSettings};
+    use z_shell_plugins::StoreCategory;
+    use z_shell_plugins::catalog::CatalogStore;
+    use z_shell_plugins::registry::{
+        PluginError, RemoveSettingsPolicy, ResolvedFrom, UpgradeApprovalMode,
+    };
+
+    let work = tempdir().unwrap();
+    let root = work.path();
+    let paths = ShellPaths::from_roots(
+        root.join("config"),
+        root.join("state"),
+        root.join("run"),
+        root.join("run/bus.sock"),
+    )
+    .with_cache_dir(root.join("cache"));
+
+    // Prepare official bundled local seed v0.1.0 for z-shell/nosleep
+    let seed_dir = root.join("bundled-plugins");
+    let nosleep_v1 = seed_dir.join("nosleep");
+    fs::create_dir_all(nosleep_v1.join("dist/entries")).unwrap();
+    let svc1 = b"export default { v: 1, setup() {} };\n";
+    let svc1_sha = format!("sha256:{:x}", Sha256::digest(svc1));
+    fs::write(nosleep_v1.join("dist/entries/service.mjs"), svc1).unwrap();
+    fs::write(
+        nosleep_v1.join("dist/manifest.build.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": 1,
+            "shared_runtime_abi": "1.0",
+            "files": { "dist/entries/service.mjs": svc1_sha }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        nosleep_v1.join("plugin.toml"),
+        r#"
+id = "z-shell/nosleep"
+name = "NoSleep"
+version = "0.1.0"
+plugin_api = 2
+[build]
+manifest = "dist/manifest.build.json"
+shared_runtime_abi = "1.0"
+[host_capabilities]
+commands = ["caffeinate"]
+[[service]]
+id = "service"
+bundle = "dist/entries/service.mjs"
+"#,
+    )
+    .unwrap();
+
+    let sources = vec![PluginSourceSettings {
+        id: "official".to_owned(),
+        name: "Official".to_owned(),
+        kind: PluginSourceKind::HttpsJson,
+        url: "https://plugins.z-shell.org/catalog-v1.json".to_owned(),
+        ref_name: None,
+        index_path: None,
+        local_seed_dir: Some(seed_dir.clone()),
+        enabled: true,
+        priority: 100,
+    }];
+
+    let catalog = CatalogStore::new(paths.clone());
+    let manager = PluginManager::new(paths.clone());
+    let resolved_seed = catalog
+        .resolve_install(
+            &sources,
+            &"z-shell/nosleep".parse().unwrap(),
+            None,
+            Some("official"),
+            OfflinePolicy::Offline,
+        )
+        .unwrap();
+
+    let outcome = manager
+        .install_from_catalog(&resolved_seed, OfflinePolicy::Offline)
+        .unwrap();
+    assert_eq!(outcome.resolved_from, ResolvedFrom::BundledOfficialSeed);
+    let nosleep_id = outcome.summary.id.clone();
+    manager.approve(&nosleep_id).unwrap();
+    manager.enable(&nosleep_id).unwrap();
+
+    // Cross-source takeover with same PluginId via --path must hard-fail with SourceConflict.
+    let rogue_path = root.join("rogue-nosleep");
+    fs::create_dir_all(&rogue_path).unwrap();
+    fs::write(rogue_path.join("worker.ts"), "export default 1").unwrap();
+    manifest(&rogue_path, "");
+    fs::write(
+        rogue_path.join("plugin.toml"),
+        fs::read_to_string(rogue_path.join("plugin.toml"))
+            .unwrap()
+            .replace("demo/hello", "z-shell/nosleep"),
+    )
+    .unwrap();
+    let err = manager.add_path(&rogue_path).unwrap_err();
+    assert!(matches!(err, PluginError::SourceConflict { .. }));
+
+    // Build online official v0.2.0 archive (same source_identity, NO capability expansion).
+    let v2_stage = root.join("v2-stage");
+    fs::create_dir_all(v2_stage.join("dist/entries")).unwrap();
+    let svc2 = b"export default { v: 2, setup() {} };\n";
+    let svc2_sha = format!("sha256:{:x}", Sha256::digest(svc2));
+    let bm2 = serde_json::to_vec_pretty(&serde_json::json!({
+        "schema_version": 1,
+        "shared_runtime_abi": "1.0",
+        "files": { "dist/entries/service.mjs": svc2_sha }
+    }))
+    .unwrap();
+    let toml2 = br#"
+id = "z-shell/nosleep"
+name = "NoSleep"
+version = "0.2.0"
+plugin_api = 2
+[build]
+manifest = "dist/manifest.build.json"
+shared_runtime_abi = "1.0"
+[host_capabilities]
+commands = ["caffeinate"]
+[[service]]
+id = "service"
+bundle = "dist/entries/service.mjs"
+"#;
+    fs::write(v2_stage.join("dist/entries/service.mjs"), svc2).unwrap();
+    fs::write(v2_stage.join("dist/manifest.build.json"), &bm2).unwrap();
+    fs::write(v2_stage.join("plugin.toml"), toml2).unwrap();
+    let v2_content_digest = z_shell_plugins::digest::content_digest(&v2_stage).unwrap();
+
+    let tgz2_path = root.join("nosleep-0.2.0.tar.gz");
+    {
+        let gz = GzEncoder::new(File::create(&tgz2_path).unwrap(), Compression::default());
+        let mut builder = Builder::new(gz);
+        for (rel, data) in [
+            ("plugin.toml", toml2.as_slice()),
+            ("dist/entries/service.mjs", svc2.as_slice()),
+            ("dist/manifest.build.json", bm2.as_slice()),
+        ] {
+            let mut h = Header::new_gnu();
+            h.set_size(data.len() as u64);
+            h.set_mode(0o644);
+            h.set_cksum();
+            builder.append_data(&mut h, rel, data).unwrap();
+        }
+        builder.finish().unwrap();
+    }
+    let tgz2_sha = format!("sha256:{:x}", Sha256::digest(fs::read(&tgz2_path).unwrap()));
+    let _category_check: StoreCategory = StoreCategory::System;
+
+    // Populate the official catalog cache on disk so CatalogStore::resolve_install produces v0.2.0.
+    let cat_cache = paths.plugin_catalog_cache_dir();
+    fs::create_dir_all(&cat_cache).unwrap();
+    fs::write(
+        cat_cache.join("official.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": 1,
+            "source_id": "official",
+            "updated_at": "2026-11-25T00:00:00Z",
+            "plugins": [{
+                "id": "z-shell/nosleep",
+                "name": "NoSleep",
+                "author": "z-shell",
+                "summary": "Keep display awake",
+                "category": "system",
+                "tags": [],
+                "latest_version": "0.2.0",
+                "releases": [{
+                    "version": "0.2.0",
+                    "plugin_api": 2,
+                    "shared_runtime_abi": "1.0",
+                    "content_digest": v2_content_digest,
+                    "artifact": {
+                        "kind": "archive",
+                        "url": tgz2_path.to_string_lossy(),
+                        "archive_sha256": tgz2_sha,
+                        "size_bytes": fs::metadata(&tgz2_path).unwrap().len()
+                    }
+                }]
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let resolved_v2 = catalog
+        .resolve_install(
+            &sources,
+            &nosleep_id,
+            Some("0.2.0"),
+            Some("official"),
+            OfflinePolicy::Online,
+        )
+        .unwrap();
+
+    let staged = manager
+        .stage_upgrade(&nosleep_id, &resolved_v2, OfflinePolicy::Online)
+        .unwrap();
+    assert!(!staged.requires_reapproval);
+    // TOCTOU mismatch rejected
+    assert!(matches!(
+        manager.commit_upgrade(
+            &staged,
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            &staged.to_digest,
+            UpgradeApprovalMode::KeepExistingOnly,
+        ),
+        Err(PluginError::ToctouMismatch)
+    ));
+    let upgraded = manager
+        .commit_upgrade(
+            &staged,
+            &staged.from_digest,
+            &staged.to_digest,
+            UpgradeApprovalMode::KeepExistingOnly,
+        )
+        .unwrap();
+    assert_eq!(upgraded.version, "0.2.0");
+    assert!(upgraded.enabled);
+
+    // Offline local verified bundle cache hit after remove (when bundle already exists on disk),
+    // and OfflineModeBlocked when bundle is absent for a remote URL.
+    manager
+        .remove(&nosleep_id, RemoveSettingsPolicy::KeepSettings)
+        .unwrap();
+    let remote_sources = vec![PluginSourceSettings {
+        id: "remote-test".to_owned(),
+        name: "Remote Test".to_owned(),
+        kind: PluginSourceKind::HttpsJson,
+        url: "https://plugins.z-shell.org/remote-test.json".to_owned(),
+        ref_name: None,
+        index_path: None,
+        local_seed_dir: None,
+        enabled: true,
+        priority: 200,
+    }];
+    fs::write(
+        cat_cache.join("remote-test.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": 1,
+            "source_id": "remote-test",
+            "updated_at": "2026-11-25T00:00:00Z",
+            "plugins": [{
+                "id": "z-shell/nosleep",
+                "name": "NoSleep",
+                "author": "z-shell",
+                "summary": "Keep display awake",
+                "category": "system",
+                "tags": [],
+                "latest_version": "0.3.0",
+                "releases": [{
+                    "version": "0.3.0",
+                    "plugin_api": 2,
+                    "shared_runtime_abi": "1.0",
+                    "content_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "artifact": {
+                        "kind": "archive",
+                        "url": "https://plugins.z-shell.org/missing.tar.gz",
+                        "archive_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "size_bytes": 100
+                    }
+                }]
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let remote_missing = catalog
+        .resolve_install(
+            &remote_sources,
+            &nosleep_id,
+            Some("0.3.0"),
+            Some("remote-test"),
+            OfflinePolicy::Offline,
+        )
+        .unwrap();
+    assert!(matches!(
+        manager.install_from_catalog(&remote_missing, OfflinePolicy::Offline),
+        Err(PluginError::OfflineModeBlocked)
+    ));
+
+    // Re-install v0.2.0 via remote URL in offline mode when its staged bundle is cached on disk:
+    // re-stage v0.2.0? No, v0.1.0 was cleaned up by commit_upgrade, so install v0.1.0 seed first,
+    // pre-stage v0.2.0 into bundles_dir, remove v0.1.0, and verify offline remote install of v0.2.0
+    // hits LocalVerifiedCache!
+    let old_v1_bundle = z_shell_plugins::bundle::bundle_dir_for(
+        &paths.plugins_bundles_dir(),
+        &nosleep_id,
+        &outcome.summary.content_digest,
+    );
+    assert!(
+        !old_v1_bundle.exists(),
+        "commit_upgrade must clean up replaced unreferenced bundle"
+    );
+
+    let reseed = manager
+        .install_from_catalog(&resolved_seed, OfflinePolicy::Offline)
+        .unwrap();
+    assert_eq!(reseed.resolved_from, ResolvedFrom::BundledOfficialSeed);
+    fs::write(
+        cat_cache.join("official.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": 1,
+            "source_id": "official",
+            "updated_at": "2026-11-25T00:00:00Z",
+            "plugins": [{
+                "id": "z-shell/nosleep",
+                "name": "NoSleep",
+                "author": "z-shell",
+                "summary": "Keep display awake",
+                "category": "system",
+                "tags": [],
+                "latest_version": "0.2.0",
+                "releases": [{
+                    "version": "0.2.0",
+                    "plugin_api": 2,
+                    "shared_runtime_abi": "1.0",
+                    "content_digest": v2_content_digest,
+                    "artifact": {
+                        "kind": "archive",
+                        "url": tgz2_path.to_string_lossy(),
+                        "archive_sha256": tgz2_sha,
+                        "size_bytes": fs::metadata(&tgz2_path).unwrap().len()
+                    }
+                }]
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let v2_for_cache = catalog
+        .resolve_install(
+            &sources,
+            &nosleep_id,
+            Some("0.2.0"),
+            Some("official"),
+            OfflinePolicy::Online,
+        )
+        .unwrap();
+    let _pre_staged_v2 = manager
+        .stage_upgrade(&nosleep_id, &v2_for_cache, OfflinePolicy::Online)
+        .unwrap();
+    manager
+        .remove(&nosleep_id, RemoveSettingsPolicy::KeepSettings)
+        .unwrap();
+
+    fs::write(
+        cat_cache.join("official.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": 1,
+            "source_id": "official",
+            "updated_at": "2026-11-25T00:00:00Z",
+            "plugins": [{
+                "id": "z-shell/nosleep",
+                "name": "NoSleep",
+                "author": "z-shell",
+                "summary": "Keep display awake",
+                "category": "system",
+                "tags": [],
+                "latest_version": "0.2.0",
+                "releases": [{
+                    "version": "0.2.0",
+                    "plugin_api": 2,
+                    "shared_runtime_abi": "1.0",
+                    "content_digest": v2_content_digest,
+                    "artifact": {
+                        "kind": "archive",
+                        "url": "https://plugins.z-shell.org/cached-0.2.0.tar.gz",
+                        "archive_sha256": tgz2_sha,
+                        "size_bytes": fs::metadata(&tgz2_path).unwrap().len()
+                    }
+                }]
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let cached_remote = catalog
+        .resolve_install(
+            &sources,
+            &nosleep_id,
+            Some("0.2.0"),
+            Some("official"),
+            OfflinePolicy::Offline,
+        )
+        .unwrap();
+    let cached_hit = manager
+        .install_from_catalog(&cached_remote, OfflinePolicy::Offline)
+        .unwrap();
+    assert_eq!(cached_hit.resolved_from, ResolvedFrom::LocalVerifiedCache);
+    manager.approve(&nosleep_id).unwrap();
+    manager.enable(&nosleep_id).unwrap();
+
+    // Test capability-expanding upgrade rejection under KeepExistingOnly vs success under ApproveExpanded.
+    let v3_stage = root.join("v3-stage");
+    fs::create_dir_all(v3_stage.join("dist/entries")).unwrap();
+    let svc3 = b"export default { v: 3, setup() {} };\n";
+    let svc3_sha = format!("sha256:{:x}", Sha256::digest(svc3));
+    let bm3 = serde_json::to_vec_pretty(&serde_json::json!({
+        "schema_version": 1,
+        "shared_runtime_abi": "1.0",
+        "files": { "dist/entries/service.mjs": svc3_sha }
+    }))
+    .unwrap();
+    let toml3 = br#"
+id = "z-shell/nosleep"
+name = "NoSleep"
+version = "0.3.0"
+plugin_api = 2
+[build]
+manifest = "dist/manifest.build.json"
+shared_runtime_abi = "1.0"
+[host_capabilities]
+commands = ["caffeinate", "systemd-inhibit"]
+[[service]]
+id = "service"
+bundle = "dist/entries/service.mjs"
+"#;
+    fs::write(v3_stage.join("dist/entries/service.mjs"), svc3).unwrap();
+    fs::write(v3_stage.join("dist/manifest.build.json"), &bm3).unwrap();
+    fs::write(v3_stage.join("plugin.toml"), toml3).unwrap();
+    let v3_content_digest = z_shell_plugins::digest::content_digest(&v3_stage).unwrap();
+    let tgz3_path = root.join("nosleep-0.3.0.tar.gz");
+    {
+        let gz = GzEncoder::new(File::create(&tgz3_path).unwrap(), Compression::default());
+        let mut builder = Builder::new(gz);
+        for (rel, data) in [
+            ("plugin.toml", toml3.as_slice()),
+            ("dist/entries/service.mjs", svc3.as_slice()),
+            ("dist/manifest.build.json", bm3.as_slice()),
+        ] {
+            let mut h = Header::new_gnu();
+            h.set_size(data.len() as u64);
+            h.set_mode(0o644);
+            h.set_cksum();
+            builder.append_data(&mut h, rel, data).unwrap();
+        }
+        builder.finish().unwrap();
+    }
+    let tgz3_sha = format!("sha256:{:x}", Sha256::digest(fs::read(&tgz3_path).unwrap()));
+    fs::write(
+        cat_cache.join("official.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": 1,
+            "source_id": "official",
+            "updated_at": "2026-11-25T00:00:00Z",
+            "plugins": [{
+                "id": "z-shell/nosleep",
+                "name": "NoSleep",
+                "author": "z-shell",
+                "summary": "Keep display awake",
+                "category": "system",
+                "tags": [],
+                "latest_version": "0.3.0",
+                "releases": [{
+                    "version": "0.3.0",
+                    "plugin_api": 2,
+                    "shared_runtime_abi": "1.0",
+                    "content_digest": v3_content_digest,
+                    "artifact": {
+                        "kind": "archive",
+                        "url": tgz3_path.to_string_lossy(),
+                        "archive_sha256": tgz3_sha,
+                        "size_bytes": fs::metadata(&tgz3_path).unwrap().len()
+                    }
+                }]
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let resolved_v3 = catalog
+        .resolve_install(
+            &sources,
+            &nosleep_id,
+            Some("0.3.0"),
+            Some("official"),
+            OfflinePolicy::Online,
+        )
+        .unwrap();
+    let staged_v3 = manager
+        .stage_upgrade(&nosleep_id, &resolved_v3, OfflinePolicy::Online)
+        .unwrap();
+    assert!(staged_v3.requires_reapproval);
+    assert!(matches!(
+        manager.commit_upgrade(
+            &staged_v3,
+            &staged_v3.from_digest,
+            &staged_v3.to_digest,
+            UpgradeApprovalMode::KeepExistingOnly,
+        ),
+        Err(PluginError::CapabilityExpansionRequiresApproval(_))
+    ));
+    let upgraded_v3 = manager
+        .commit_upgrade(
+            &staged_v3,
+            &staged_v3.from_digest,
+            &staged_v3.to_digest,
+            UpgradeApprovalMode::ApproveExpanded,
+        )
+        .unwrap();
+    assert_eq!(upgraded_v3.version, "0.3.0");
+    assert!(upgraded_v3.approved);
+    assert!(upgraded_v3.enabled);
+
+    // Safe remove for --path plugin never deletes user source dir and honors PurgeSettings.
+    let dev_src = root.join("dev-plugin");
+    fs::create_dir_all(&dev_src).unwrap();
+    fs::write(dev_src.join("worker.ts"), "export default 0").unwrap();
+    manifest(&dev_src, r#""dev-cmd""#);
+    let dev_summary = manager.add_path(&dev_src).unwrap();
+    let cfg_store = ConfigStore::new(paths.clone());
+    let mut patch = serde_json::Map::new();
+    patch.insert("token".to_owned(), serde_json::json!("dev-secret"));
+    cfg_store
+        .patch_plugin_settings(&dev_summary.id, &patch)
+        .unwrap();
+    assert!(
+        cfg_store
+            .load_settings()
+            .unwrap()
+            .plugin_settings
+            .contains_key(&dev_summary.id)
+    );
+
+    // Check net_added_host_capabilities in audit when another plugin already covers a command.
+    let audit = manager.audit(&dev_summary.id).unwrap();
+    assert_eq!(
+        audit.net_added_host_capabilities.commands,
+        BTreeSet::from(["dev-cmd".to_owned()])
+    );
+
+    manager
+        .remove(&dev_summary.id, RemoveSettingsPolicy::PurgeSettings)
+        .unwrap();
+    assert!(
+        dev_src.join("worker.ts").is_file(),
+        "--path remove must never delete user source"
+    );
+    assert!(
+        !cfg_store
+            .load_settings()
+            .unwrap()
+            .plugin_settings
+            .contains_key(&dev_summary.id)
+    );
 }

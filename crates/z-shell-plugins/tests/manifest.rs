@@ -327,7 +327,7 @@ fn rejects_invalid_package_versions_api_levels_and_capability_declarations() {
         ("1.2.3", "1.2.3-rc.1", "version"),
         ("1.2.3", "1.2.3+build", "version"),
         ("plugin_api = 1", "plugin_api = 0", "plugin_api"),
-        ("plugin_api = 1", "plugin_api = 2", "plugin_api"),
+        ("plugin_api = 1", "plugin_api = 3", "plugin_api"),
         ("z-shell/example", "Z-shell/example", "id"),
         ("Example", " ", "name"),
     ] {
@@ -461,4 +461,280 @@ entry = "main.tsx"
             "expected error for:\n{bad}"
         );
     }
+}
+
+#[test]
+fn shared_runtime_abi_enforces_major_exact_and_minor_upward_compatibility() {
+    use z_shell_plugins::SharedRuntimeAbi;
+
+    let v1_0: SharedRuntimeAbi = "1.0".parse().unwrap();
+    let v1_1: SharedRuntimeAbi = "1.1".parse().unwrap();
+    let v2_0: SharedRuntimeAbi = "2.0".parse().unwrap();
+
+    assert!(v1_0.is_compatible_with_host(v1_0));
+    assert!(v1_0.is_compatible_with_host(v1_1));
+    assert!(!v1_1.is_compatible_with_host(v1_0));
+    assert!(!v1_0.is_compatible_with_host(v2_0));
+    assert!(!v2_0.is_compatible_with_host(v1_0));
+
+    for bad in ["", "1", "01.0", "1.0.0", "1.a"] {
+        assert!(
+            bad.parse::<SharedRuntimeAbi>().is_err(),
+            "expected ABI parse failure for {bad:?}"
+        );
+    }
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+fn write_v2_bundle_files(root: &std::path::Path, with_css: bool) {
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::create_dir_all(root.join("dist/entries")).unwrap();
+    fs::create_dir_all(root.join("assets")).unwrap();
+    fs::write(root.join("src/service.ts"), "export default {};").unwrap();
+    fs::write(root.join("src/widget.tsx"), "export default () => null;").unwrap();
+    let svc = b"export default { setup() {} };\n";
+    let wdg = b"export default function Widget() { return null; }\n";
+    fs::write(root.join("dist/entries/poller.mjs"), svc).unwrap();
+    fs::write(root.join("dist/entries/bar-temp.mjs"), wdg).unwrap();
+    fs::write(root.join("assets/icon.svg"), "<svg/>").unwrap();
+    let mut files = serde_json::Map::new();
+    files.insert(
+        "dist/entries/poller.mjs".to_owned(),
+        serde_json::Value::String(sha256_hex(svc)),
+    );
+    files.insert(
+        "dist/entries/bar-temp.mjs".to_owned(),
+        serde_json::Value::String(sha256_hex(wdg)),
+    );
+    if with_css {
+        fs::create_dir_all(root.join("dist/styles")).unwrap();
+        let css = b".abc_badge { color: var(--color-primary); }\n";
+        fs::write(root.join("dist/styles/plugin.css"), css).unwrap();
+        files.insert(
+            "dist/styles/plugin.css".to_owned(),
+            serde_json::Value::String(sha256_hex(css)),
+        );
+    }
+    let build_manifest = serde_json::json!({
+        "schema_version": 1,
+        "shared_runtime_abi": "1.0",
+        "files": files
+    });
+    fs::write(
+        root.join("dist/manifest.build.json"),
+        serde_json::to_vec_pretty(&build_manifest).unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn loads_v2_prebuilt_manifest_with_optional_css_and_extended_capabilities() {
+    use z_shell_plugins::{BarZone, SharedRuntimeAbi, StoreCategory};
+
+    for with_css in [false, true] {
+        let root = tempdir().unwrap();
+        write_v2_bundle_files(root.path(), with_css);
+        let styles_line = if with_css {
+            r#"styles = ["dist/styles/plugin.css"]"#
+        } else {
+            ""
+        };
+        fs::write(
+            root.path().join("plugin.toml"),
+            format!(
+                r#"
+id = "acme/weather"
+name = "Weather"
+version = "1.2.0"
+plugin_api = 2
+min_shell_version = "99.0.0"
+
+[store]
+category = "widgets"
+tags = ["weather"]
+icon = "assets/icon.svg"
+
+[build]
+manifest = "dist/manifest.build.json"
+shared_runtime_abi = "1.0"
+
+[host_capabilities]
+clipboard = {{ read_outside_gesture = false }}
+sqlite = {{ databases = ["weather"] }}
+files = {{ directories = ["$XDG_DATA_HOME/weather"] }}
+
+  [[host_capabilities.network_origins]]
+  origin = "https://api.open-meteo.com"
+  allow_insecure_http = false
+  allow_private_networks = false
+
+[[service]]
+id = "poller"
+entry = "src/service.ts"
+bundle = "dist/entries/poller.mjs"
+title = "Poller"
+
+[[widget]]
+id = "bar-temp"
+entry = "src/widget.tsx"
+bundle = "dist/entries/bar-temp.mjs"
+{styles_line}
+default_zone = "right"
+title = "Temp"
+"#
+            ),
+        )
+        .unwrap();
+
+        let manifest = Manifest::load(root.path()).unwrap();
+        assert_eq!(manifest.plugin_api, 2);
+        assert_eq!(
+            manifest.store.as_ref().map(|s| s.category),
+            Some(StoreCategory::Widgets)
+        );
+        assert_eq!(
+            manifest.build.as_ref().map(|b| b.shared_runtime_abi),
+            Some("1.0".parse::<SharedRuntimeAbi>().unwrap())
+        );
+        let widget = manifest
+            .entries
+            .iter()
+            .find(|e| e.id.entry() == "bar-temp")
+            .unwrap();
+        assert_eq!(widget.default_zone, Some(BarZone::Right));
+        assert_eq!(widget.styles.is_empty(), !with_css);
+        // min_shell_version is informational only and must not fail compatibility checks.
+        manifest
+            .check_runtime_compatibility("1.0".parse().unwrap())
+            .unwrap();
+    }
+}
+
+#[test]
+fn rejects_invalid_v2_manifests_qjsb_artifacts_and_deferred_external_process() {
+    // 1. Missing [build] on plugin_api = 2
+    let root = tempdir().unwrap();
+    write_v2_bundle_files(root.path(), false);
+    fs::write(
+        root.path().join("plugin.toml"),
+        r#"
+id = "acme/weather"
+name = "Weather"
+version = "1.0.0"
+plugin_api = 2
+[[service]]
+id = "poller"
+entry = "src/service.ts"
+bundle = "dist/entries/poller.mjs"
+"#,
+    )
+    .unwrap();
+    assert!(Manifest::load(root.path()).is_err());
+
+    // 2. Any .qjsb file anywhere in plugin tree is rejected
+    let qjsb_root = tempdir().unwrap();
+    write_v2_bundle_files(qjsb_root.path(), false);
+    fs::write(qjsb_root.path().join("dist/entries/evil.qjsb"), b"ZSQB").unwrap();
+    fs::write(
+        qjsb_root.path().join("plugin.toml"),
+        r#"
+id = "acme/weather"
+name = "Weather"
+version = "1.0.0"
+plugin_api = 2
+[build]
+manifest = "dist/manifest.build.json"
+shared_runtime_abi = "1.0"
+[[service]]
+id = "poller"
+entry = "src/service.ts"
+bundle = "dist/entries/poller.mjs"
+"#,
+    )
+    .unwrap();
+    assert!(Manifest::load(qjsb_root.path()).is_err());
+
+    // 3. Tampered dist/entries/poller.mjs fails build manifest digest verification
+    let tampered = tempdir().unwrap();
+    write_v2_bundle_files(tampered.path(), false);
+    fs::write(tampered.path().join("dist/entries/poller.mjs"), b"tampered").unwrap();
+    fs::write(
+        tampered.path().join("plugin.toml"),
+        r#"
+id = "acme/weather"
+name = "Weather"
+version = "1.0.0"
+plugin_api = 2
+[build]
+manifest = "dist/manifest.build.json"
+shared_runtime_abi = "1.0"
+[[service]]
+id = "poller"
+entry = "src/service.ts"
+bundle = "dist/entries/poller.mjs"
+"#,
+    )
+    .unwrap();
+    assert!(Manifest::load(tampered.path()).is_err());
+
+    // 4. Deferred external_process fields and http:// without allow_insecure_http are rejected
+    for extra in [
+        "execution = 'external_process'\nexecutable = 'bin/srv'",
+        "default_zone = 'left'",
+    ] {
+        let bad = tempdir().unwrap();
+        write_v2_bundle_files(bad.path(), false);
+        fs::write(
+            bad.path().join("plugin.toml"),
+            format!(
+                r#"
+id = "acme/weather"
+name = "Weather"
+version = "1.0.0"
+plugin_api = 2
+[build]
+manifest = "dist/manifest.build.json"
+shared_runtime_abi = "1.0"
+[[service]]
+id = "poller"
+entry = "src/service.ts"
+bundle = "dist/entries/poller.mjs"
+{extra}
+"#
+            ),
+        )
+        .unwrap();
+        assert!(
+            Manifest::load(bad.path()).is_err(),
+            "expected err for {extra}"
+        );
+    }
+
+    let bad_http = tempdir().unwrap();
+    write_v2_bundle_files(bad_http.path(), false);
+    fs::write(
+        bad_http.path().join("plugin.toml"),
+        r#"
+id = "acme/weather"
+name = "Weather"
+version = "1.0.0"
+plugin_api = 2
+[build]
+manifest = "dist/manifest.build.json"
+shared_runtime_abi = "1.0"
+[[host_capabilities.network_origins]]
+origin = "http://api.example.com"
+allow_insecure_http = false
+[[service]]
+id = "poller"
+entry = "src/service.ts"
+bundle = "dist/entries/poller.mjs"
+"#,
+    )
+    .unwrap();
+    assert!(Manifest::load(bad_http.path()).is_err());
 }

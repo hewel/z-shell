@@ -112,3 +112,10 @@ fn at<T>(path: &Path, result: io::Result<T>) -> Result<T, DigestError> {
         source,
     })
 }
+
+pub(crate) fn is_valid_sha256(digest: &str) -> bool {
+    let Some(hex) = digest.strip_prefix("sha256:") else {
+        return false;
+    };
+    hex.len() == 64 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}

@@ -2,7 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use z_shell_protocol::PluginId;
+use std::path::PathBuf;
+use z_shell_protocol::{PluginEntryId, PluginId};
 
 /// Default outer spacing in logical pixels between screen edges and shell islands.
 pub const DEFAULT_GAPS_PX: u16 = 14;
@@ -153,8 +154,89 @@ pub struct EdgeOverrides {
     pub left: Option<u16>,
 }
 
+/// Explicit bar widget instance placement and optional per-instance setting overrides.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BarPluginInstance {
+    /// Canonical `author/plugin:entry` identifier.
+    pub entry: PluginEntryId,
+    /// Unique instance slug within `(entry, output)`.
+    pub instance: String,
+    /// Optional Wayland output connector name (for example, `"DP-1"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+    /// Optional per-instance setting overrides (redacted from public settings topics).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub settings: BTreeMap<String, toml::Value>,
+}
+
+/// One slot in `[bar.plugins]` (`left`, `center`, `right`, or `hidden`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BarPluginSlot {
+    /// Shorthand `author/plugin:entry` mapping to implicit instance `"default"`.
+    Entry(PluginEntryId),
+    /// Explicit multi-instance and/or output-scoped placement.
+    Instance(BarPluginInstance),
+}
+
+impl BarPluginSlot {
+    fn redacted_for_public(&self) -> Self {
+        match self {
+            Self::Entry(entry) => Self::Entry(entry.clone()),
+            Self::Instance(instance) => Self::Instance(BarPluginInstance {
+                entry: instance.entry.clone(),
+                instance: instance.instance.clone(),
+                output: instance.output.clone(),
+                settings: BTreeMap::new(),
+            }),
+        }
+    }
+}
+
+/// Declarative bar plugin zone layout (`[bar.plugins]`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BarPluginsSettings {
+    /// Left bar zone entries/instances.
+    pub left: Vec<BarPluginSlot>,
+    /// Center bar zone entries/instances.
+    pub center: Vec<BarPluginSlot>,
+    /// Right bar zone entries/instances.
+    pub right: Vec<BarPluginSlot>,
+    /// Explicitly hidden bar widget entries/instances.
+    pub hidden: Vec<BarPluginSlot>,
+}
+
+impl BarPluginsSettings {
+    fn redacted_for_public(&self) -> Self {
+        Self {
+            left: self
+                .left
+                .iter()
+                .map(BarPluginSlot::redacted_for_public)
+                .collect(),
+            center: self
+                .center
+                .iter()
+                .map(BarPluginSlot::redacted_for_public)
+                .collect(),
+            right: self
+                .right
+                .iter()
+                .map(BarPluginSlot::redacted_for_public)
+                .collect(),
+            hidden: self
+                .hidden
+                .iter()
+                .map(BarPluginSlot::redacted_for_public)
+                .collect(),
+        }
+    }
+}
+
 /// Bar, dock, launcher, and clock preferences.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BarSettings {
     /// Screen edge where the bar is anchored.
@@ -173,6 +255,24 @@ pub struct BarSettings {
     pub clock_24h: bool,
     /// Displays seconds in the bar clock when true.
     pub clock_seconds: bool,
+    /// Declarative left/center/right/hidden plugin widget placement (`[bar.plugins]`).
+    pub plugins: BarPluginsSettings,
+}
+
+impl BarSettings {
+    fn redacted_for_public(&self) -> Self {
+        Self {
+            position: self.position,
+            style: self.style,
+            gaps: self.gaps,
+            edge_overrides: self.edge_overrides.clone(),
+            launcher_enabled: self.launcher_enabled,
+            dock_enabled: self.dock_enabled,
+            clock_24h: self.clock_24h,
+            clock_seconds: self.clock_seconds,
+            plugins: self.plugins.redacted_for_public(),
+        }
+    }
 }
 
 impl Default for BarSettings {
@@ -186,6 +286,7 @@ impl Default for BarSettings {
             dock_enabled: true,
             clock_24h: true,
             clock_seconds: false,
+            plugins: BarPluginsSettings::default(),
         }
     }
 }
@@ -392,12 +493,70 @@ impl Default for WallpaperSettings {
     }
 }
 
-/// Public non-secret settings view broadcast on the `settings` topic (excludes plugin settings tables).
+/// Transport kind for a declarative plugin catalog source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum PluginSourceKind {
+    /// Static `catalog-v1.json` served over HTTPS.
+    HttpsJson,
+    /// Git repository containing a static `catalog-v1.json` index.
+    GitJson,
+    /// Local static `catalog-v1.json` file.
+    LocalFile,
+}
+
+const fn default_true() -> bool {
+    true
+}
+
+const fn default_source_priority() -> u32 {
+    100
+}
+
+/// One configured catalog source in `[[plugins.sources]]`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PluginSourceSettings {
+    /// Unique lowercase slug identifier (for example, `"official"`).
+    pub id: String,
+    /// Human-readable display name.
+    pub name: String,
+    /// Transport kind.
+    pub kind: PluginSourceKind,
+    /// Index URL (for `https_json` / `git_json`) or local file path (for `local_file`).
+    pub url: String,
+    /// Optional Git ref for `git_json` sources.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ref_name: Option<String>,
+    /// Optional relative path to `catalog-v1.json` inside a `git_json` repository.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index_path: Option<String>,
+    /// Optional read-only local bundled plugin seed directory (for example, `/usr/share/z-shell/bundled-plugins`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_seed_dir: Option<PathBuf>,
+    /// Whether this source participates in catalog refresh and search.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Display priority (lower numbers take precedence).
+    #[serde(default = "default_source_priority")]
+    pub priority: u32,
+}
+
+/// Plugin store and catalog source preferences (`[plugins]`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PluginsSettings {
+    /// Configured static catalog sources (`[[plugins.sources]]`).
+    pub sources: Vec<PluginSourceSettings>,
+}
+
+/// Public non-secret settings view broadcast on the `settings` topic (excludes plugin settings tables).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PublicSettingsSummary {
     /// General daemon settings.
     pub general: GeneralSettings,
-    /// Bar and layout preferences.
+    /// Bar and layout preferences (with per-instance plugin settings redacted).
     pub bar: BarSettings,
     /// Dynamic theme preferences.
     pub theme: ThemeSettings,
@@ -431,6 +590,8 @@ pub struct UserSettings {
     pub wallpaper: WallpaperSettings,
     /// Idle and lock preferences.
     pub idle: IdleSettings,
+    /// Plugin store catalog sources (`[[plugins.sources]]`).
+    pub plugins: PluginsSettings,
     /// Per-plugin configuration overrides keyed by canonical `author/plugin` ID.
     pub plugin_settings: BTreeMap<PluginId, toml::Value>,
 }
@@ -441,7 +602,7 @@ impl UserSettings {
     pub fn public_summary(&self) -> PublicSettingsSummary {
         PublicSettingsSummary {
             general: self.general.clone(),
-            bar: self.bar.clone(),
+            bar: self.bar.redacted_for_public(),
             theme: self.theme.clone(),
             ime: self.ime.clone(),
             polkit: self.polkit.clone(),
@@ -586,6 +747,128 @@ impl UserSettings {
                 ));
             }
         }
+        validate_bar_plugins(&self.bar.plugins)?;
+        validate_plugin_sources(&self.plugins.sources)?;
         Ok(())
     }
+}
+
+fn is_valid_slug(slug: &str) -> bool {
+    !slug.is_empty()
+        && slug.len() <= 64
+        && slug
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
+        && !slug.starts_with('-')
+        && !slug.ends_with('-')
+}
+
+fn validate_bar_plugins(plugins: &BarPluginsSettings) -> Result<(), String> {
+    let mut seen = BTreeSet::new();
+    for (zone, slots) in [
+        ("left", &plugins.left),
+        ("center", &plugins.center),
+        ("right", &plugins.right),
+        ("hidden", &plugins.hidden),
+    ] {
+        for slot in slots {
+            let (entry, instance, output) = match slot {
+                BarPluginSlot::Entry(entry) => (entry, "default", None),
+                BarPluginSlot::Instance(inst) => {
+                    if !is_valid_slug(&inst.instance) {
+                        return Err(format!(
+                            "bar.plugins.{zone} has invalid instance slug {:?}",
+                            inst.instance
+                        ));
+                    }
+                    if let Some(output) = &inst.output
+                        && (output.trim().is_empty()
+                            || output.contains('/')
+                            || output.chars().any(char::is_control))
+                    {
+                        return Err(format!(
+                            "bar.plugins.{zone} has invalid output selector {output:?}"
+                        ));
+                    }
+                    (&inst.entry, inst.instance.as_str(), inst.output.as_deref())
+                }
+            };
+            let key = (
+                entry.to_string(),
+                instance.to_owned(),
+                output.map(ToOwned::to_owned),
+            );
+            if !seen.insert(key) {
+                return Err(format!(
+                    "duplicate bar plugin instance ({entry}, {instance:?}, {output:?})"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_plugin_sources(sources: &[PluginSourceSettings]) -> Result<(), String> {
+    let mut seen_ids = BTreeSet::new();
+    for source in sources {
+        if !is_valid_slug(&source.id) {
+            return Err(format!(
+                "plugins.sources has invalid source id {:?}",
+                source.id
+            ));
+        }
+        if !seen_ids.insert(source.id.as_str()) {
+            return Err(format!(
+                "duplicate plugin catalog source id {:?}",
+                source.id
+            ));
+        }
+        if source.name.trim().is_empty() || source.name.chars().any(char::is_control) {
+            return Err(format!(
+                "plugins.sources[{:?}] name must be non-empty without control characters",
+                source.id
+            ));
+        }
+        if source.url.trim().is_empty() || source.url.chars().any(char::is_control) {
+            return Err(format!(
+                "plugins.sources[{:?}] url must be non-empty without control characters",
+                source.id
+            ));
+        }
+        if source.kind == PluginSourceKind::HttpsJson
+            && !source.url.starts_with("https://")
+            && !source.url.starts_with("http://127.0.0.1")
+            && !source.url.starts_with("http://[::1]")
+            && !source.url.starts_with("http://localhost")
+        {
+            return Err(format!(
+                "plugins.sources[{:?}] https_json url must use https://",
+                source.id
+            ));
+        }
+        if let Some(ref_name) = &source.ref_name
+            && (ref_name.trim().is_empty() || ref_name.chars().any(char::is_control))
+        {
+            return Err(format!(
+                "plugins.sources[{:?}] ref_name must be non-empty without control characters",
+                source.id
+            ));
+        }
+        if let Some(index_path) = &source.index_path {
+            let invalid = index_path.is_empty()
+                || index_path.starts_with('/')
+                || index_path.contains('\\')
+                || index_path.chars().any(char::is_control)
+                || index_path
+                    .split('/')
+                    .any(|seg| seg.is_empty() || seg == "." || seg == "..");
+            if invalid {
+                return Err(format!(
+                    "plugins.sources[{:?}] index_path must be a safe relative path, got {index_path:?}",
+                    source.id
+                ));
+            }
+        }
+    }
+    Ok(())
 }
