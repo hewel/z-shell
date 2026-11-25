@@ -17,7 +17,7 @@
   "timeZone": "UTC",
   "clock": { "mode": "virtual", "epochMs": 1700000000000, "startUs": 0 },
   "random": { "seed": 1 },
-  "fonts": { "mode": "shipped-only", "manifest": "../../../../zgui-js/preview/fonts/fonts.json" },
+  "fonts": { "mode": "shipped-only", "manifest": "../../../node_modules/@hewel/zgui-build/sdk/preview/fonts/fonts.json" },
   "assets": { "mode": "package-only", "readiness": "required-visible" },
   "limits": {
     "maxRunWallMs": 30000,

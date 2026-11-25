@@ -444,7 +444,7 @@ describe("First-party reference plugins end-to-end", () => {
         ],
       }, null, 2));
 
-      expect(existsSync(zguiHost)).toBe(true);
+      expect(zguiHost && Bun.which(zguiHost)).not.toBeNull();
       const result = runPreview(published.dist, fixture, scenario, previewOut);
       expectCleanPreview(result, 0, 7);
     } finally {

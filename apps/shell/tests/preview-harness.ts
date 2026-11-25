@@ -7,13 +7,15 @@ import { inflateSync } from "node:zlib";
 
 import { buildShellApplication } from "@z-shell/composer";
 import type { PublishedApplication } from "@hewel/zgui-build";
+import { resolveZguiHost } from "../../../tools/resolve-zgui-host.ts";
 
 export const shellDir = resolve(import.meta.dir, "..");
 export const repoRoot = resolve(shellDir, "../..");
-export const zguiRoot = resolve(repoRoot, "../zgui-js");
-export const zguiHost = join(zguiRoot, "target/debug/zgui-host");
-const hasNixShell = Bun.which("nix-shell") !== null;
-export const previewAvailable = existsSync(zguiHost);
+const resolvedHost = await resolveZguiHost();
+export const zguiHost = resolvedHost?.executable ?? null;
+export const previewAvailable = zguiHost !== null;
+const runCwd = resolvedHost?.cargoRoot ?? repoRoot;
+const useNixShell = Bun.which("nix-shell") !== null && existsSync(join(runCwd, "shell.nix"));
 export const previewTest = previewAvailable ? test : test.skip;
 
 let cachedBuild: Promise<PublishedApplication> | undefined;
@@ -174,6 +176,9 @@ export function runPreview(
   out: string,
   options?: { readonly profile?: string },
 ): PreviewResult {
+  if (zguiHost === null) {
+    throw new Error("未找到预览所需的 zgui-host；请运行 bun install 或设置 ZGUI_JS_HOST_EXECUTABLE。");
+  }
   const args = [
     "preview", "run",
     "--bundle", bundleDist,
@@ -182,11 +187,11 @@ export function runPreview(
     "--scenario", scenario,
     "--out", out,
   ];
-  const [command, commandArgs] = hasNixShell
+  const [command, commandArgs] = useNixShell
     ? ["nix-shell", ["--run", [zguiHost, ...args].map(shellQuote).join(" ")]]
     : [zguiHost, args];
   const preview = spawnSync(command, commandArgs, {
-    cwd: zguiRoot,
+    cwd: runCwd,
     encoding: "utf8",
     timeout: 30_000,
   });

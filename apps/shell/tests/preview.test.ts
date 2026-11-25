@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect } from "bun:test";
-import { existsSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { PublishedApplication } from "@hewel/zgui-build";
@@ -52,7 +52,7 @@ describe("apps/shell preview", () => {
   });
 
   previewTest("multi-output Top Bar, per-output Wallpapers, live theme, SNI tray blob + DBusMenu popup, and interactions", () => {
-    expect(existsSync(zguiHost)).toBe(true);
+    expect(zguiHost && Bun.which(zguiHost)).not.toBeNull();
 
     const { out, cleanup } = createPreviewWorkspace("z-shell-preview-top-");
     try {

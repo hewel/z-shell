@@ -2,7 +2,6 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ZGUI_ROOT="${ZGUI_ROOT:-$(cd "$REPO_ROOT/../zgui-js" && pwd)}"
 
 if [[ -x "$REPO_ROOT/target/release/z-shelld" ]]; then
   Z_SHELLD="$REPO_ROOT/target/release/z-shelld"
@@ -14,13 +13,8 @@ else
   exit 1
 fi
 
-if [[ -x "$ZGUI_ROOT/target/release/zgui-host" ]]; then
-  ZGUI_HOST="$ZGUI_ROOT/target/release/zgui-host"
-elif [[ -x "$ZGUI_ROOT/target/debug/zgui-host" ]]; then
-  echo "warning: using debug zgui-host (build release with: cargo build --release --manifest-path ../zgui-js/Cargo.toml -p zgui-host --offline)" >&2
-  ZGUI_HOST="$ZGUI_ROOT/target/debug/zgui-host"
-else
-  echo "error: zgui-host binary not found; build with: cargo build --release --manifest-path ../zgui-js/Cargo.toml -p zgui-host --offline" >&2
+if ! ZGUI_HOST="$(bun "$REPO_ROOT/tools/resolve-zgui-host.ts")"; then
+  echo "无法解析 zgui-host；请检查 bun install 和 bunx zgui-js doctor，或设置 ZGUI_JS_HOST_EXECUTABLE。" >&2
   exit 1
 fi
 

@@ -494,7 +494,7 @@ undeclared = true
     }
   });
 
-  test("emits paths and commands accepted by the exact zgui-js schema regexes", () => {
+  test("打包时接受 Composer 生成的宿主能力，并拒绝非法能力", async () => {
     const root = temporaryDirectory();
     const state = temporaryDirectory();
     const registryPath = join(state, "registry.json");
@@ -506,16 +506,33 @@ undeclared = true
     writeApprovedRegistry(registryPath, root);
     composePlugins({ registryPath, outDir, candidateId: "candidate-schema" });
 
-    const schema = JSON.parse(readFileSync(
-      join(import.meta.dir, "../../../../zgui-js/schemas/package.schema.json"),
-      "utf8",
-    ));
-    const capabilities = JSON.parse(readFileSync(join(outDir, "manifest-capabilities.json"), "utf8"));
-    const hostPath = new RegExp(schema.$defs.hostPaths.items.pattern);
-    const command = new RegExp(schema.properties.capabilities.properties.commands.items.pattern);
-    expect(capabilities.imagePrefixes.every((path: string) => hostPath.test(path))).toBe(true);
-    expect(capabilities.unixSockets.every((path: string) => hostPath.test(path))).toBe(true);
-    expect(capabilities.commands.every((name: string) => command.test(name))).toBe(true);
-    expect(Object.hasOwn(capabilities, "sessionLock")).toBe(false);
+    const appDirectory = temporaryDirectory();
+    mkdirSync(join(appDirectory, "src"));
+    symlinkSync(join(import.meta.dir, "../../../node_modules"), join(appDirectory, "node_modules"), "dir");
+    writeFileSync(join(appDirectory, "tsconfig.json"), JSON.stringify({
+      compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler", types: [], skipLibCheck: true },
+      include: ["src"],
+    }));
+    writeFileSync(join(appDirectory, "src/main.tsx"), `
+import { createSignal } from "solid-js";
+export const hostApiVersion = 1;
+export function mount() { createSignal(0); }
+`);
+
+    const capabilitiesFile = join(outDir, "manifest-capabilities.json");
+    const build = () => buildShellApplication({ appDirectory, capabilitiesFile });
+    const { manifest } = await build();
+    expect(normalizeHostCapabilities(manifest.capabilities)).toEqual({
+      commands: ["notify-send"],
+      imagePrefixes: ["/", "/tmp/plugin-images"],
+      unixSockets: ["/run/user/1000/plugin.sock"],
+    });
+
+    for (const invalid of [{ commands: ["bad\ncommand"] }, { unixSockets: ["relative.sock"] }]) {
+      const field = Object.keys(invalid)[0];
+      expect(() => normalizeHostCapabilities(invalid)).toThrow(/schema-compliant/);
+      writeFileSync(capabilitiesFile, JSON.stringify(invalid));
+      await expect(build()).rejects.toThrow(`.${field} contains invalid entries`);
+    }
   });
 });

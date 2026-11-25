@@ -37,28 +37,14 @@ jobs:
     name: Design lint & SDK/plugin unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      ZGUI_JS_REF: e2a98c66de4c1d7ca7838294b9b2253982916c62
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: z-shell
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
-      - name: Checkout pinned sibling zgui-js
-        uses: actions/checkout@v4
-        with:
-          repository: hewel/zgui-js
-          ref: ${{ env.ZGUI_JS_REF }}
-          path: zgui-js
-      - name: Install & run lint/typecheck/tests (requires sibling zgui-js)
-        working-directory: z-shell
+      - name: 安装依赖并运行 lint、类型检查和单元测试
         run: |
-          echo "z-shell: $(git rev-parse HEAD)"
-          echo "zgui-js: $(git -C ../zgui-js rev-parse HEAD)"
-          (cd ../zgui-js && bun install --frozen-lockfile && bun run build:packages)
           bun install --frozen-lockfile
           bun run lint
           bun run typecheck
-          bun test --timeout=30000 packages/sdk/tests/motion.test.ts packages/sdk/tests/zgui.test.ts packages/plugin-api/tests/ apps/shell/tests/topics.test.ts apps/shell/tests/design-lint.test.ts apps/shell/tests/plugin-services.test.ts plugins/
+          bun test --timeout=30000 packages/sdk/tests/motion.test.ts packages/sdk/tests/zgui.test.ts packages/plugin-api/tests/ packages/composer/tests/composer.test.ts apps/shell/tests/topics.test.ts apps/shell/tests/design-lint.test.ts apps/shell/tests/plugin-services.test.ts plugins/

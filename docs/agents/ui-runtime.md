@@ -2,23 +2,18 @@
 
 Reference for agents working on `apps/shell/`, `plugins/*/src/`, or `tools/oxlint-design-plugin.mjs`.
 
-## Sibling `zgui-js` Repository
+## 安装与排查 `zgui-js`
 
-- Local path: `../zgui-js` (linked via `package.json` `link:../zgui-js/packages/*`).
-- Built SDK packages: `zgui-js` exports compiled `dist/` for `@hewel/zgui` and `@hewel/zgui-services`; on fresh sibling checkouts run `(cd ../zgui-js && bun install --frozen-lockfile && bun run build:packages)` before `z-shell` lint/typecheck/tests.
-- Native host binaries:
-  - Release (preferred for live testing): `../zgui-js/target/release/zgui-host`
-  - Debug (used by headless preview tests): `../zgui-js/target/debug/zgui-host`
-- Key upstream locations when diagnosing rendering/style issues:
-  - UA stylesheet (`:focus-visible` ring): `../zgui-js/vendor/zgui-style/src/sheets/ua.rs`
-  - Outline/clip/vector paint lowering: `../zgui-js/vendor/zgui-paint/src/lower/`
-  - CLI flags & `--pure-shell` / `msg`: `../zgui-js/crates/zgui-host/src/main.rs`
-- Control CLI syntax: `zgui-host msg --app-id dev.zshell.shell <command>` (e.g., `ping`, `status`, `settings appearance`, `panel launcher`, `power poweroff`).
+- 在仓库根目录运行 `bun install --frozen-lockfile`。npm 包提供 SDK、构建器和预览字体；`@hewel/zgui-cli` 在 Linux x64 上会安装预编译的 `zgui-host`，无需检出或构建上游仓库。
+- 用 `bunx zgui-js doctor --json` 检查平台包、可执行文件和 ABI。默认安装的宿主来源应为 `platform-package`；`bun tools/resolve-zgui-host.ts` 输出开发与预览实际使用的路径。
+- 调试上游源码时，设置 `ZGUI_JS_HOST_EXECUTABLE` 指向已构建的宿主，或设置 `ZGUI_ROOT` 指向上游 Cargo 工作区（优先 `target/release`，其次 `target/debug`）。二者都设置时，可执行文件优先。仅在未安装预编译宿主且未设置覆盖项时，才尝试使用相邻 `../zgui-js` 中已构建的宿主。
+- 上游排查入口：`vendor/zgui-style/src/sheets/ua.rs`（焦点样式）、`vendor/zgui-paint/src/lower/`（绘制转换）、`crates/zgui-host/src/main.rs`（CLI、`--pure-shell` 和 `msg`）。
+- 控制命令：`zgui-host msg --app-id dev.zshell.shell <command>`，例如 `ping`、`status` 或 `settings appearance`。
 
 ## Fast Local Build & Visual Inspection
 
 - Rebuild shell bundle without running tests (~4s, auto-reloads `--watch`): `bun run build:shell`
-- Launch local Wayland session (prefers `--release` binaries, cleans stale control socket): `bun run dev:local`
+- 启动本地 Wayland 会话（默认使用预编译宿主，并清理残留的控制套接字）：`bun run dev:local`
 - Keep headless preview PNG captures for visual self-inspection via `read_file`:
   ```bash
   PREVIEW_OUT_DIR=/tmp/z-shell-preview bun test apps/shell/tests/design-preview.test.ts
@@ -76,4 +71,4 @@ Rather than brittle full-screen golden snapshots, interaction and motion regress
 - **Plugin UI Bus subscriptions**: `first-party-plugins.test.ts` asserts a strict sequential list of `topic.subscribe` frames (`plugin.*` only). Plugin UIs must read shared motion state via `useGlobalMotionScheme()` from `@z-shell/sdk/zgui` rather than opening extra `settings` or `theme` subscriptions.
 - **QuickJS & `@hewel/zgui` typing**: `tsconfig.quickjs.json` omits global `performance` (guard via `globalThis` + `Date.now()` fallback); `Button` has no `role` prop; host reduced-motion lives on `globalThis.__zgui.getReducedMotion` (use `isHostReducedMotion()` from `@z-shell/sdk/zgui`); Bun unit tests have no global `requestAnimationFrame`.
 - **Solid 2 `<Show keyed>`**: Keyed `<Show>` render callbacks must accept a parameter (`_key => ...`) to remount on truthy-to-truthy key changes, and read non-key retained state inside `untrack(...)` so programmatic exit transitions never remount child surfaces.
-- **Fast UI feedback loop**: Use `bun run test:ui` during UI iteration (~25s); reserve `bun run check` for the final pre-commit gate.
+- UI 迭代时运行 `bun run test:ui`；无头预览在软件渲染下可能耗时更长。提交前运行完整的 `bun run check`。
