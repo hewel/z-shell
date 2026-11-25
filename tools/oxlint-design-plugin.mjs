@@ -92,7 +92,11 @@ const TELEMETRY_CHART_VIEWBOXES = new Set([
   "0 0 30 30",
   "0 0 340 72",
   "0 0 380 88",
-  "0 0 260 64",
+  "0 0 536 88",
+  "0 0 536 112",
+  "0 0 250 64",
+  "0 0 536 64",
+  "0 0 536 96",
 ]);
 
 function propertyName(prop) {

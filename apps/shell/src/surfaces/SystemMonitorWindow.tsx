@@ -17,6 +17,7 @@ import {
   formatRateBytesPerSec,
   formatUptimeCompact,
   selectHeadlineTempCelsius,
+  selectNetworkDisplay,
   selectPrimaryGpu,
   selectTelemetryHistoryWindow,
   type SystemTelemetrySnapshot,
@@ -155,13 +156,19 @@ function MountRow(props: { readonly mount: TelemetryMount; readonly primaryFill:
   );
 }
 
-function OverviewPane(props: {
+interface PaneChartProps {
   readonly snap: Accessor<SystemTelemetrySnapshot | undefined>;
   readonly history: Accessor<TelemetryHistoryWindow | null>;
-}): NativeChild {
+  readonly timeRange: Accessor<TelemetryRangeKey>;
+  readonly sourceBaseline: Accessor<boolean>;
+  readonly revision: Accessor<number>;
+}
+
+function OverviewPane(props: PaneChartProps): NativeChild {
   const snap = props.snap;
   const mem = createMemo(() => computeMemoryBreakdown(snap()?.memory));
   const gpu = createMemo(() => selectPrimaryGpu(snap()?.gpus));
+  const netDisplay = createMemo(() => selectNetworkDisplay(snap()?.network, props.history()));
   const headlineTemp = createMemo(() => selectHeadlineTempCelsius(snap()));
   const cpuCores = () => snap()?.cpu?.per_core_usage_percent ?? [];
   const coreCount = () => snap()?.cpu?.core_count ?? cpuCores().length;
@@ -224,8 +231,14 @@ function OverviewPane(props: {
             <AreaLineChart
               testId="sysmon-win-cpu-chart"
               variant="window"
+              wide={cpuCores().length === 0}
               values={props.history()?.cpu_percent}
               maxValue={100}
+              bucketSeconds={props.history()?.bucket_seconds}
+              latestBucketId={props.history()?.latest_bucket_id}
+              resetKey={props.timeRange()}
+              sourceBaseline={props.sourceBaseline()}
+              revision={props.revision()}
               emptyLabel="Live CPU readout only"
             />
           </box>
@@ -345,38 +358,45 @@ function OverviewPane(props: {
       </row>
 
       {/* Row 3: Network | Disk I/O & Storage */}
-      <Show when={Boolean(snap()?.network || snap()?.storage)}>
+      <Show when={Boolean(netDisplay() || snap()?.storage)}>
         <row style={{ gap: "10px", width: "100%", alignItems: "stretch" }}>
-          <Show when={snap()?.network}>
+          <Show when={netDisplay()}>
             {net => (
               <column style={{ ...cardStyle, ...grow, justifyContent: "space-between" }}>
                 <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", width: "100%" }}>
-                  <text style={{ ...clipped, fontSize: "13px", fontWeight: 600 }}>
-                    {net().active_interface ? `Network · ${net().active_interface}` : "Network"}
+                  <text testId="sysmon-win-net-title" style={{ ...clipped, fontSize: "13px", fontWeight: 600 }}>
+                    {net().label ? `Network · ${net().label}` : "Network"}
                   </text>
-                  <text data-tabular="true" style={{
+                  <text testId="sysmon-win-net-rx" data-tabular="true" style={{
                     fontFamily: "var(--font-mono)", fontSize: "11px", fontWeight: 600, lineHeight: "15px",
                     color: primary, flexShrink: 0, fontVariantNumeric: "tabular-nums",
                   }}>
-                    {`↓ ${formatRateBytesPerSec(net().rx_bytes_per_sec)}`}
+                    {`↓ ${formatRateBytesPerSec(net().rxBytesPerSec)}`}
                   </text>
                 </row>
                 <DualLineChart
                   testId="sysmon-win-net-chart"
-                  primarySeries={props.history()?.net_rx_bytes_per_sec}
-                  secondarySeries={props.history()?.net_tx_bytes_per_sec}
+                  compact
+                  wide={!snap()?.storage}
+                  primarySeries={net().rxHistory}
+                  secondarySeries={net().txHistory}
+                  bucketSeconds={props.history()?.bucket_seconds}
+                  latestBucketId={props.history()?.latest_bucket_id}
+                  resetKey={props.timeRange()}
+                  sourceBaseline={props.sourceBaseline()}
+                  revision={props.revision()}
                   emptyLabel="Live interface counters"
                 />
                 <row style={{ alignItems: "center", justifyContent: "space-between", gap: "6px", width: "100%" }}>
                   <text data-tabular="true" style={{
                     fontFamily: "var(--font-mono)", fontSize: "10px", lineHeight: "14px", color: muted, fontVariantNumeric: "tabular-nums",
                   }}>
-                    {`↑ ${formatRateBytesPerSec(net().tx_bytes_per_sec)}`}
+                    {`↑ ${formatRateBytesPerSec(net().txBytesPerSec)}`}
                   </text>
                   <text data-tabular="true" style={{
                     ...clipped, fontFamily: "var(--font-mono)", fontSize: "10px", lineHeight: "14px", color: muted, fontVariantNumeric: "tabular-nums",
                   }}>
-                    {`Total ↓${formatBytesShort(net().session_rx_bytes, true)} · ↑${formatBytesShort(net().session_tx_bytes, true)}`}
+                    {`Total ↓${formatBytesShort(net().sessionRxBytes, true)} · ↑${formatBytesShort(net().sessionTxBytes, true)}`}
                   </text>
                 </row>
               </column>
@@ -396,8 +416,16 @@ function OverviewPane(props: {
                 </row>
                 <Show when={mounts().length > 0} fallback={
                   <DualLineChart
+                    testId="sysmon-win-disk-chart"
+                    compact
+                    wide={!snap()?.network}
                     primarySeries={props.history()?.disk_read_bytes_per_sec}
                     secondarySeries={props.history()?.disk_write_bytes_per_sec}
+                    bucketSeconds={props.history()?.bucket_seconds}
+                    latestBucketId={props.history()?.latest_bucket_id}
+                    resetKey={props.timeRange()}
+                    sourceBaseline={props.sourceBaseline()}
+                    revision={props.revision()}
                     emptyLabel="No local mount summaries"
                   />
                 }>
@@ -441,10 +469,7 @@ function OverviewPane(props: {
   );
 }
 
-function CpuThermalPane(props: {
-  readonly snap: Accessor<SystemTelemetrySnapshot | undefined>;
-  readonly history: Accessor<TelemetryHistoryWindow | null>;
-}): NativeChild {
+function CpuThermalPane(props: PaneChartProps): NativeChild {
   const snap = props.snap;
   const cpu = () => snap()?.cpu;
   const cores = () => (cpu()?.per_core_usage_percent ?? []).map((val, idx) => ({ idx, val }));
@@ -481,6 +506,11 @@ function CpuThermalPane(props: {
           variant="detail"
           values={props.history()?.cpu_percent}
           maxValue={100}
+          bucketSeconds={props.history()?.bucket_seconds}
+          latestBucketId={props.history()?.latest_bucket_id}
+          resetKey={props.timeRange()}
+          sourceBaseline={props.sourceBaseline()}
+          revision={props.revision()}
         />
         <Show when={cpu()?.load_average}>
           {load => (
@@ -577,10 +607,7 @@ function CpuThermalPane(props: {
   );
 }
 
-function MemoryPane(props: {
-  readonly snap: Accessor<SystemTelemetrySnapshot | undefined>;
-  readonly history: Accessor<TelemetryHistoryWindow | null>;
-}): NativeChild {
+function MemoryPane(props: PaneChartProps): NativeChild {
   const mem = createMemo(() => computeMemoryBreakdown(props.snap()?.memory));
   const rawMem = () => props.snap()?.memory;
   const swap = () => props.snap()?.swap;
@@ -616,6 +643,11 @@ function MemoryPane(props: {
                 variant="detail"
                 values={props.history()?.memory_percent}
                 maxValue={100}
+                bucketSeconds={props.history()?.bucket_seconds}
+                latestBucketId={props.history()?.latest_bucket_id}
+                resetKey={props.timeRange()}
+                sourceBaseline={props.sourceBaseline()}
+                revision={props.revision()}
               />
               <MemorySegmentedBar activePct={breakdown().activePercent} cachePct={breakdown().cachePercent} height={10} />
               <row style={{ gap: "8px", width: "100%" }}>
@@ -692,7 +724,15 @@ function MemoryPane(props: {
   );
 }
 
-function GpuCardDetail(props: { readonly gpu: TelemetryGpuInfo; readonly primaryHistory?: readonly (number | null)[] | undefined }): NativeChild {
+function GpuCardDetail(props: {
+  readonly gpu: TelemetryGpuInfo;
+  readonly primaryHistory?: readonly (number | null)[] | undefined;
+  readonly bucketSeconds?: number | undefined;
+  readonly latestBucketId?: number | null | undefined;
+  readonly resetKey?: TelemetryRangeKey | undefined;
+  readonly sourceBaseline?: boolean | undefined;
+  readonly revision?: number | undefined;
+}): NativeChild {
   const vramPct = () => {
     const u = props.gpu.vram_used_bytes;
     const t = props.gpu.vram_total_bytes;
@@ -723,6 +763,11 @@ function GpuCardDetail(props: { readonly gpu: TelemetryGpuInfo; readonly primary
           variant="detail"
           values={props.primaryHistory}
           maxValue={100}
+          bucketSeconds={props.bucketSeconds}
+          latestBucketId={props.latestBucketId}
+          resetKey={props.resetKey}
+          sourceBaseline={props.sourceBaseline}
+          revision={props.revision}
         />
       </Show>
 
@@ -768,10 +813,7 @@ function GpuCardDetail(props: { readonly gpu: TelemetryGpuInfo; readonly primary
   );
 }
 
-function GpuPane(props: {
-  readonly snap: Accessor<SystemTelemetrySnapshot | undefined>;
-  readonly history: Accessor<TelemetryHistoryWindow | null>;
-}): NativeChild {
+function GpuPane(props: PaneChartProps): NativeChild {
   const gpus = () => props.snap()?.gpus ?? [];
   return (
     <column testId="sysmon-gpu-pane" style={{ gap: "10px", width: "100%" }}>
@@ -780,6 +822,11 @@ function GpuPane(props: {
           <GpuCardDetail
             gpu={gpu()}
             primaryHistory={idx() === 0 ? props.history()?.gpu_percent : undefined}
+            bucketSeconds={props.history()?.bucket_seconds}
+            latestBucketId={props.history()?.latest_bucket_id}
+            resetKey={props.timeRange()}
+            sourceBaseline={props.sourceBaseline()}
+            revision={props.revision()}
           />
         )}
       </For>
@@ -787,35 +834,38 @@ function GpuPane(props: {
   );
 }
 
-function DiskNetworkPane(props: {
-  readonly snap: Accessor<SystemTelemetrySnapshot | undefined>;
-  readonly history: Accessor<TelemetryHistoryWindow | null>;
-}): NativeChild {
+function DiskNetworkPane(props: PaneChartProps): NativeChild {
   const net = () => props.snap()?.network;
+  const netDisplay = createMemo(() => selectNetworkDisplay(net(), props.history()));
   const storage = () => props.snap()?.storage;
 
   return (
     <column testId="sysmon-storage-pane" style={{ gap: "10px", width: "100%" }}>
-      <Show when={net()}>
-        {n => (
+      <Show when={netDisplay()}>
+        {nd => (
           <column style={cardStyle}>
             <row style={{ alignItems: "center", justifyContent: "space-between", width: "100%" }}>
-              <text style={{ fontSize: "14px", fontWeight: 600 }}>
-                {n().active_interface ? `Network · ${n().active_interface}` : "Network"}
+              <text testId="sysmon-detail-net-title" style={{ fontSize: "14px", fontWeight: 600 }}>
+                {nd().label ? `Network · ${nd().label}` : "Network"}
               </text>
-              <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: primary, fontVariantNumeric: "tabular-nums" }}>
-                {`↓ ${formatRateBytesPerSec(n().rx_bytes_per_sec)} · ↑ ${formatRateBytesPerSec(n().tx_bytes_per_sec)}`}
+              <text testId="sysmon-detail-net-rates" data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: primary, fontVariantNumeric: "tabular-nums" }}>
+                {`↓ ${formatRateBytesPerSec(nd().rxBytesPerSec)} · ↑ ${formatRateBytesPerSec(nd().txBytesPerSec)}`}
               </text>
             </row>
             <DualLineChart
               testId="sysmon-detail-net-chart"
               wide
-              primarySeries={props.history()?.net_rx_bytes_per_sec}
-              secondarySeries={props.history()?.net_tx_bytes_per_sec}
+              primarySeries={nd().rxHistory}
+              secondarySeries={nd().txHistory}
+              bucketSeconds={props.history()?.bucket_seconds}
+              latestBucketId={props.history()?.latest_bucket_id}
+              resetKey={props.timeRange()}
+              sourceBaseline={props.sourceBaseline()}
+              revision={props.revision()}
             />
-            <Show when={(n().interfaces?.length ?? 0) > 0}>
+            <Show when={(net()?.interfaces?.length ?? 0) > 0}>
               <column style={{ gap: "6px", width: "100%" }}>
-                <For each={n().interfaces ?? []} keyed={iface => iface.name}>
+                <For each={net()?.interfaces ?? []} keyed={iface => iface.name}>
                   {iface => (
                     <row style={{
                       alignItems: "center", justifyContent: "space-between", gap: "8px",
@@ -858,6 +908,11 @@ function DiskNetworkPane(props: {
               wide
               primarySeries={props.history()?.disk_read_bytes_per_sec}
               secondarySeries={props.history()?.disk_write_bytes_per_sec}
+              bucketSeconds={props.history()?.bucket_seconds}
+              latestBucketId={props.history()?.latest_bucket_id}
+              resetKey={props.timeRange()}
+              sourceBaseline={props.sourceBaseline()}
+              revision={props.revision()}
             />
             <Show when={(st().mounts?.length ?? 0) > 0}>
               <column style={{ gap: "8px", width: "100%", paddingTop: "2px" }}>
@@ -1104,32 +1159,32 @@ function SystemMonitorWindowContent(): NativeChild {
         <scroll testId="sysmon-content-scroll" style={{ ...grow, minHeight: "0px", width: "100%", overflow: "hidden auto" }}>
           <Switch fallback={
             <FadeThroughPane animate={animatePane()}>
-              <OverviewPane snap={snap} history={activeHistory} />
+              <OverviewPane snap={snap} history={activeHistory} timeRange={timeRange} sourceBaseline={telemetry.sourceBaseline} revision={telemetry.revision} />
             </FadeThroughPane>
           }>
             <Match when={effectiveTab() === "overview"}>
               <FadeThroughPane animate={animatePane()}>
-                <OverviewPane snap={snap} history={activeHistory} />
+                <OverviewPane snap={snap} history={activeHistory} timeRange={timeRange} sourceBaseline={telemetry.sourceBaseline} revision={telemetry.revision} />
               </FadeThroughPane>
             </Match>
             <Match when={effectiveTab() === "cpu"}>
               <FadeThroughPane animate={animatePane()}>
-                <CpuThermalPane snap={snap} history={activeHistory} />
+                <CpuThermalPane snap={snap} history={activeHistory} timeRange={timeRange} sourceBaseline={telemetry.sourceBaseline} revision={telemetry.revision} />
               </FadeThroughPane>
             </Match>
             <Match when={effectiveTab() === "memory"}>
               <FadeThroughPane animate={animatePane()}>
-                <MemoryPane snap={snap} history={activeHistory} />
+                <MemoryPane snap={snap} history={activeHistory} timeRange={timeRange} sourceBaseline={telemetry.sourceBaseline} revision={telemetry.revision} />
               </FadeThroughPane>
             </Match>
             <Match when={effectiveTab() === "gpu"}>
               <FadeThroughPane animate={animatePane()}>
-                <GpuPane snap={snap} history={activeHistory} />
+                <GpuPane snap={snap} history={activeHistory} timeRange={timeRange} sourceBaseline={telemetry.sourceBaseline} revision={telemetry.revision} />
               </FadeThroughPane>
             </Match>
             <Match when={effectiveTab() === "storage"}>
               <FadeThroughPane animate={animatePane()}>
-                <DiskNetworkPane snap={snap} history={activeHistory} />
+                <DiskNetworkPane snap={snap} history={activeHistory} timeRange={timeRange} sourceBaseline={telemetry.sourceBaseline} revision={telemetry.revision} />
               </FadeThroughPane>
             </Match>
           </Switch>

@@ -832,12 +832,22 @@ export interface TelemetryNetworkInterface {
   readonly session_tx_bytes: number;
 }
 
+export interface TelemetryNetworkAggregate {
+  readonly active_interface_count: number;
+  readonly active_interfaces?: readonly string[];
+  readonly rx_bytes_per_sec?: number | null;
+  readonly tx_bytes_per_sec?: number | null;
+  readonly session_rx_bytes: number;
+  readonly session_tx_bytes: number;
+}
+
 export interface TelemetryNetwork {
   readonly active_interface?: string | null;
   readonly rx_bytes_per_sec?: number | null;
   readonly tx_bytes_per_sec?: number | null;
   readonly session_rx_bytes: number;
   readonly session_tx_bytes: number;
+  readonly aggregate?: TelemetryNetworkAggregate | null;
   readonly interfaces?: readonly TelemetryNetworkInterface[];
 }
 
@@ -875,11 +885,14 @@ export type TelemetryRangeKey = "60s" | "5m" | "15m";
 
 export interface TelemetryHistoryWindow {
   readonly bucket_seconds: number;
+  readonly latest_bucket_id?: number | null;
   readonly cpu_percent?: readonly (number | null)[];
   readonly memory_percent?: readonly (number | null)[];
   readonly gpu_percent?: readonly (number | null)[];
   readonly net_rx_bytes_per_sec?: readonly (number | null)[];
   readonly net_tx_bytes_per_sec?: readonly (number | null)[];
+  readonly aggregate_net_rx_bytes_per_sec?: readonly (number | null)[];
+  readonly aggregate_net_tx_bytes_per_sec?: readonly (number | null)[];
   readonly disk_read_bytes_per_sec?: readonly (number | null)[];
   readonly disk_write_bytes_per_sec?: readonly (number | null)[];
 }
@@ -1832,6 +1845,62 @@ export function selectHeadlineTempCelsius(snapshot: SystemTelemetrySnapshot | nu
   if (cpuSensor) return Math.round(cpuSensor.temperature_millicelsius / 1000);
   if (sensors.length > 0) return Math.round(sensors[0]!.temperature_millicelsius / 1000);
   return maxThermalCelsius(snapshot.temperatures ?? []);
+}
+
+export interface NetworkDisplaySelection {
+  readonly label: string | null;
+  readonly rxBytesPerSec: number | null;
+  readonly txBytesPerSec: number | null;
+  readonly sessionRxBytes: number;
+  readonly sessionTxBytes: number;
+  readonly rxHistory: readonly (number | null)[] | undefined;
+  readonly txHistory: readonly (number | null)[] | undefined;
+  readonly isAggregate: boolean;
+}
+
+/**
+ * Selects truthful network display metrics and chart series across daemon versions:
+ * - New daemons emitting `net.aggregate`: reports aggregated active-eligible non-loopback
+ *   throughput/totals, formats single active NIC by name, `"N active"` when >1, or `null` when 0,
+ *   and reads `aggregate_net_*` history without mixing single-interface series.
+ * - Older daemons without `net.aggregate`: falls back cleanly to legacy single-interface
+ *   `active_interface`, rates, session totals, and `net_rx/tx_bytes_per_sec` history.
+ */
+export function selectNetworkDisplay(
+  net: TelemetryNetwork | null | undefined,
+  history?: TelemetryHistoryWindow | null,
+): NetworkDisplaySelection | null {
+  if (!net) return null;
+  const agg = net.aggregate;
+  if (agg) {
+    const activeNames = agg.active_interfaces ?? [];
+    const activeCount = agg.active_interface_count;
+    const label = activeCount > 1
+      ? `${activeCount} active`
+      : activeCount === 1
+        ? (activeNames[0] ?? net.active_interface ?? null)
+        : null;
+    return {
+      label,
+      rxBytesPerSec: agg.rx_bytes_per_sec ?? null,
+      txBytesPerSec: agg.tx_bytes_per_sec ?? null,
+      sessionRxBytes: agg.session_rx_bytes,
+      sessionTxBytes: agg.session_tx_bytes,
+      rxHistory: history?.aggregate_net_rx_bytes_per_sec,
+      txHistory: history?.aggregate_net_tx_bytes_per_sec,
+      isAggregate: true,
+    };
+  }
+  return {
+    label: net.active_interface ?? null,
+    rxBytesPerSec: net.rx_bytes_per_sec ?? null,
+    txBytesPerSec: net.tx_bytes_per_sec ?? null,
+    sessionRxBytes: net.session_rx_bytes,
+    sessionTxBytes: net.session_tx_bytes,
+    rxHistory: history?.net_rx_bytes_per_sec,
+    txHistory: history?.net_tx_bytes_per_sec,
+    isAggregate: false,
+  };
 }
 
 export function selectTelemetryHistoryWindow(

@@ -13,7 +13,7 @@ use z_shell_protocol::{
     MAX_FRAME_BYTES, RequestId, ServerMessage, TopicName, TopicSnapshot, TopicUpdate, encode_line,
     methods,
 };
-use z_shell_system::telemetry::{MountStat, Sampler, ThermalCategory};
+use z_shell_system::telemetry::{MountStat, Sampler, ThermalCategory, boottime_now};
 use z_shell_system::{SystemBusAddress, SystemOptions, SystemServices};
 
 #[test]
@@ -794,9 +794,27 @@ fn high_load_full_15m_snapshot_and_update_stay_within_bus_frame_budget() {
 
     let snapshot = latest.unwrap();
     let hist = snapshot.history.as_ref().unwrap();
+    assert_eq!(hist.window_60s.latest_bucket_id, Some(900));
+    assert_eq!(hist.window_5m.latest_bucket_id, Some(180));
+    assert_eq!(hist.window_15m.latest_bucket_id, Some(60));
     assert_eq!(hist.window_60s.cpu_percent.len(), 60);
     assert_eq!(hist.window_5m.cpu_percent.len(), 60);
     assert_eq!(hist.window_15m.cpu_percent.len(), 60);
+    assert_eq!(hist.window_60s.aggregate_net_rx_bytes_per_sec.len(), 60);
+    assert_eq!(hist.window_60s.aggregate_net_tx_bytes_per_sec.len(), 60);
+    assert_eq!(hist.window_5m.aggregate_net_rx_bytes_per_sec.len(), 60);
+    assert_eq!(hist.window_15m.aggregate_net_rx_bytes_per_sec.len(), 60);
+    assert_eq!(
+        snapshot
+            .network
+            .as_ref()
+            .unwrap()
+            .aggregate
+            .as_ref()
+            .unwrap()
+            .active_interface_count,
+        8
+    );
     assert_eq!(
         snapshot.cpu.as_ref().unwrap().per_core_usage_percent.len(),
         64
@@ -853,4 +871,292 @@ fn high_load_full_15m_snapshot_and_update_stay_within_bus_frame_budget() {
         encoded_update.len() * 60,
         limits.max_queued_bytes
     );
+}
+
+#[test]
+fn jittered_1s_bucketing_stays_continuous_while_real_missed_ticks_preserve_none_gaps() {
+    let roots = tempfile::tempdir().unwrap();
+    let proc_root = roots.path().join("proc");
+    let sys_root = roots.path().join("sys");
+    fs::create_dir_all(&proc_root).unwrap();
+    let stat = proc_root.join("stat");
+
+    let t0 = Instant::now();
+    let mut sampler = Sampler::new(&proc_root, &sys_root);
+
+    // Sub-5ms early/late timer wakeups around exact 1s ticks must quantize cleanly without dropping buckets.
+    let offsets_ms: &[i64] = &[
+        0, -2, 3, -1, 4, -3, 1, -2, 2, -4, 3, -1, 0, -3, 2, -2, 4, -1, 1, -2,
+    ];
+    let mut busy = 100_u64;
+    let mut idle = 900_u64;
+    let mut last_snap = None;
+    for (sec, &jitter_ms) in offsets_ms.iter().enumerate() {
+        fs::write(&stat, format!("cpu {busy} 0 0 {idle} 0 0 0 0\n")).unwrap();
+        let target_ms = (sec as i64 * 1000 + jitter_ms).max(0) as u64;
+        last_snap = Some(sampler.sample_at(t0 + Duration::from_millis(target_ms)));
+        busy += 40;
+        idle += 60;
+    }
+
+    let snap = last_snap.unwrap();
+    let win60 = &snap.history.as_ref().unwrap().window_60s;
+    assert_eq!(win60.latest_bucket_id, Some(19));
+    assert_eq!(win60.cpu_percent.len(), 20);
+    assert_eq!(win60.cpu_percent[0], None, "tick 0 has no CPU baseline");
+    assert!(
+        win60.cpu_percent[1..].iter().all(|v| *v == Some(40.0)),
+        "jittered 1s wakeups must produce zero missing buckets: {:?}",
+        win60.cpu_percent
+    );
+
+    // Real missed tick (skipping t=20s and arriving at t=21s) must still leave bucket 20 as None.
+    fs::write(&stat, format!("cpu {busy} 0 0 {idle} 0 0 0 0\n")).unwrap();
+    let after_miss = sampler.sample_at(t0 + Duration::from_millis(21_002));
+    let win_miss = &after_miss.history.as_ref().unwrap().window_60s;
+    assert_eq!(win_miss.latest_bucket_id, Some(21));
+    assert_eq!(win_miss.cpu_percent.len(), 22);
+    assert_eq!(
+        win_miss.cpu_percent[20], None,
+        "real missed tick must stay None"
+    );
+    assert_eq!(win_miss.cpu_percent[21], Some(40.0));
+}
+
+#[test]
+fn zero_and_sub_millisecond_poll_intervals_never_panic() {
+    let roots = tempfile::tempdir().unwrap();
+    let proc_root = roots.path().join("proc");
+    let sys_root = roots.path().join("sys");
+    fs::create_dir_all(&proc_root).unwrap();
+    fs::write(proc_root.join("stat"), "cpu 100 0 0 900 0 0 0 0\n").unwrap();
+
+    for interval in [Duration::ZERO, Duration::from_micros(500)] {
+        fs::write(proc_root.join("stat"), "cpu 100 0 0 900 0 0 0 0\n").unwrap();
+        let t0 = Instant::now();
+        let mut sampler = Sampler::new(&proc_root, &sys_root).with_poll_interval(interval);
+        let s1 = sampler.sample_at(t0);
+        assert!(s1.history.is_some());
+        fs::write(proc_root.join("stat"), "cpu 150 0 0 950 0 0 0 0\n").unwrap();
+        let s2 = sampler.sample_at(t0 + Duration::from_secs(1));
+        assert_eq!(s2.cpu_usage_percent, Some(50.0));
+        assert_eq!(
+            s2.history.as_ref().unwrap().window_60s.latest_bucket_id,
+            Some(1)
+        );
+    }
+}
+
+#[test]
+fn tickless_cpu_iowait_and_idle_retractions_recover_while_busy_resets_emit_none() {
+    let roots = tempfile::tempdir().unwrap();
+    let proc_root = roots.path().join("proc");
+    let sys_root = roots.path().join("sys");
+    fs::create_dir_all(&proc_root).unwrap();
+    let stat = proc_root.join("stat");
+
+    let t0 = Instant::now();
+    let mut sampler = Sampler::new(&proc_root, &sys_root);
+
+    // Tick 0 baseline: aggregate + 2 cores with non-zero idle & iowait.
+    fs::write(
+        &stat,
+        "cpu 200 0 0 800 40 0 0 0\ncpu0 100 0 0 400 20 0 0 0\ncpu1 100 0 0 400 20 0 0 0\n",
+    )
+    .unwrap();
+    let _ = sampler.sample_at(t0);
+
+    // Tick 1: NO_HZ iowait retracts by 1 on aggregate and cpu0; idle retracts by 2 on cpu1 (while busy grows).
+    fs::write(
+        &stat,
+        "cpu 250 0 0 851 39 0 0 0\ncpu0 125 0 0 426 19 0 0 0\ncpu1 140 0 0 398 20 0 0 0\n",
+    )
+    .unwrap();
+    let s1 = sampler.sample_at(t0 + Duration::from_secs(1));
+    // Aggregate: busy delta = 50, combined idle delta = (851+39) - (800+40) = 50 -> 50.0%
+    assert_eq!(s1.cpu_usage_percent, Some(50.0));
+    let cores1 = &s1.cpu.as_ref().unwrap().per_core_usage_percent;
+    // cpu0: busy=25, idle=25 -> 50.0%; cpu1: busy=40, combined idle retracted -> saturated 0 -> 100.0%
+    assert_eq!(cores1, &vec![Some(50.0), Some(100.0)]);
+
+    // Tick 2: genuine busy-counter reset on aggregate and cpu0 must still emit None, while cpu1 remains valid.
+    fs::write(
+        &stat,
+        "cpu 240 0 0 900 39 0 0 0\ncpu0 120 0 0 450 19 0 0 0\ncpu1 160 0 0 418 20 0 0 0\n",
+    )
+    .unwrap();
+    let s2 = sampler.sample_at(t0 + Duration::from_secs(2));
+    assert_eq!(s2.cpu_usage_percent, None);
+    let cores2 = &s2.cpu.as_ref().unwrap().per_core_usage_percent;
+    assert_eq!(cores2, &vec![None, Some(50.0)]);
+}
+
+#[test]
+fn clock_boottime_helper_is_monotonic_and_nonzero() {
+    let a = boottime_now();
+    let b = boottime_now();
+    assert!(
+        !a.is_zero(),
+        "CLOCK_BOOTTIME must be non-zero on a booted host"
+    );
+    assert!(b >= a, "CLOCK_BOOTTIME must be monotonic");
+}
+
+#[test]
+fn aggregate_network_sums_independently_handles_resets_hotplug_all_down_and_preserves_legacy_fields()
+ {
+    let roots = tempfile::tempdir().unwrap();
+    let proc_root = roots.path().join("proc");
+    let sys_root = roots.path().join("sys");
+    fs::create_dir_all(proc_root.join("net")).unwrap();
+
+    let set_link = |iface: &str, state: &str| {
+        let dir = sys_root.join(format!("class/net/{iface}"));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("operstate"), state).unwrap();
+        fs::write(dir.join("type"), if iface == "lo" { "772" } else { "1" }).unwrap();
+    };
+    set_link("lo", "unknown");
+    set_link("enp4s0", "up");
+    set_link("wlan0", "up");
+
+    let write_net = |rows: &[(&str, u64, u64)]| {
+        let mut text = String::from(
+            "Inter-|   Receive                                                |  Transmit\n\
+             face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n",
+        );
+        for &(name, rx, tx) in rows {
+            text.push_str(&format!(
+                "{name}: {rx} 10 0 0 0 0 0 0 {tx} 10 0 0 0 0 0 0\n"
+            ));
+        }
+        fs::write(proc_root.join("net/dev"), text).unwrap();
+    };
+
+    let t0 = Instant::now();
+    let mut sampler = Sampler::new(&proc_root, &sys_root);
+
+    // Tick 0: initial baseline -> all rates None (never fabricated 0).
+    write_net(&[
+        ("lo", 999_999, 999_999),
+        ("enp4s0", 10_000, 2_000),
+        ("wlan0", 5_000, 1_000),
+    ]);
+    let s0 = sampler.sample_at(t0);
+    let n0 = s0.network.as_ref().unwrap();
+    let a0 = n0.aggregate.as_ref().unwrap();
+    assert_eq!(a0.active_interface_count, 2);
+    assert_eq!(a0.active_interfaces, vec!["enp4s0", "wlan0"]);
+    assert_eq!(a0.rx_bytes_per_sec, None);
+    assert_eq!(a0.tx_bytes_per_sec, None);
+    assert_eq!(a0.session_rx_bytes, 0);
+    assert_eq!(a0.session_tx_bytes, 0);
+
+    // Tick 1: both NICs active -> legacy top-level fields keep single active NIC (enp4s0),
+    // while aggregate sums both enp4s0 (+4000/+1000) and wlan0 (+1500/+500).
+    write_net(&[
+        ("lo", 1_500_000, 1_500_000),
+        ("enp4s0", 14_000, 3_000),
+        ("wlan0", 6_500, 1_500),
+    ]);
+    let s1 = sampler.sample_at(t0 + Duration::from_secs(1));
+    let n1 = s1.network.as_ref().unwrap();
+    assert_eq!(n1.active_interface.as_deref(), Some("enp4s0"));
+    assert_eq!(n1.rx_bytes_per_sec, Some(4_000));
+    assert_eq!(n1.tx_bytes_per_sec, Some(1_000));
+    assert_eq!(n1.session_rx_bytes, 4_000);
+    assert_eq!(n1.session_tx_bytes, 1_000);
+    let a1 = n1.aggregate.as_ref().unwrap();
+    assert_eq!(a1.active_interface_count, 2);
+    assert_eq!(a1.rx_bytes_per_sec, Some(5_500));
+    assert_eq!(a1.tx_bytes_per_sec, Some(1_500));
+    assert_eq!(a1.session_rx_bytes, 5_500);
+    assert_eq!(a1.session_tx_bytes, 1_500);
+
+    // Tick 2: enp4s0 resets RX only (14_000 -> 100) while its TX (+800) and wlan0 (+2_000 RX / +400 TX) continue.
+    // Aggregate RX must still report wlan0 (2_000) and aggregate TX must sum both (1_200).
+    // Even though active_interface switches to wlan0 (causing a legacy net_rx None gap), aggregate history stays continuous!
+    write_net(&[
+        ("lo", 1_600_000, 1_600_000),
+        ("enp4s0", 100, 3_800),
+        ("wlan0", 8_500, 1_900),
+    ]);
+    let s2 = sampler.sample_at(t0 + Duration::from_secs(2));
+    let n2 = s2.network.as_ref().unwrap();
+    assert_eq!(n2.active_interface.as_deref(), Some("wlan0"));
+    let a2 = n2.aggregate.as_ref().unwrap();
+    assert_eq!(a2.rx_bytes_per_sec, Some(2_000));
+    assert_eq!(a2.tx_bytes_per_sec, Some(1_200));
+    let h2 = &s2.history.as_ref().unwrap().window_60s;
+    assert_eq!(h2.net_rx_bytes_per_sec, vec![None, Some(4_000), None]);
+    assert_eq!(
+        h2.aggregate_net_rx_bytes_per_sec,
+        vec![None, Some(5_500), Some(2_000)]
+    );
+    assert_eq!(
+        h2.aggregate_net_tx_bytes_per_sec,
+        vec![None, Some(1_500), Some(1_200)]
+    );
+
+    // Tick 3: both active NICs reset RX simultaneously -> aggregate RX must be None (not Some(0)), while TX continues.
+    write_net(&[
+        ("lo", 1_700_000, 1_700_000),
+        ("enp4s0", 10, 4_000),
+        ("wlan0", 20, 2_100),
+    ]);
+    let s3 = sampler.sample_at(t0 + Duration::from_secs(3));
+    let a3 = s3.network.as_ref().unwrap().aggregate.as_ref().unwrap();
+    assert_eq!(a3.rx_bytes_per_sec, None);
+    assert_eq!(a3.tx_bytes_per_sec, Some(400));
+
+    // Tick 4: all observed non-loopback links explicitly down on a valid 1s interval -> aggregate emits Some(0).
+    set_link("enp4s0", "down");
+    set_link("wlan0", "down");
+    write_net(&[
+        ("lo", 1_800_000, 1_800_000),
+        ("enp4s0", 10, 4_000),
+        ("wlan0", 20, 2_100),
+    ]);
+    let s4 = sampler.sample_at(t0 + Duration::from_secs(4));
+    let a4 = s4.network.as_ref().unwrap().aggregate.as_ref().unwrap();
+    assert_eq!(a4.active_interface_count, 0);
+    assert!(a4.active_interfaces.is_empty());
+    assert_eq!(a4.rx_bytes_per_sec, Some(0));
+    assert_eq!(a4.tx_bytes_per_sec, Some(0));
+
+    // Tick 5: suspend/resume gap while all links are down -> must emit None (not Some(0)).
+    let s5 = sampler.sample_at(t0 + Duration::from_secs(40));
+    let a5 = s5.network.as_ref().unwrap().aggregate.as_ref().unwrap();
+    assert_eq!(a5.active_interface_count, 0);
+    assert_eq!(a5.rx_bytes_per_sec, None);
+    assert_eq!(a5.tx_bytes_per_sec, None);
+
+    // Tick 6: remove ALL non-loopback interfaces (only lo remains), then re-add enp4s0 with large counters -> zero spike.
+    write_net(&[("lo", 2_000_000, 2_000_000)]);
+    let s6 = sampler.sample_at(t0 + Duration::from_secs(41));
+    assert!(s6.network.is_none());
+
+    set_link("enp4s0", "up");
+    write_net(&[
+        ("lo", 2_100_000, 2_100_000),
+        ("enp4s0", 99_000_000, 88_000_000),
+    ]);
+    let s7 = sampler.sample_at(t0 + Duration::from_secs(42));
+    let a7 = s7.network.as_ref().unwrap().aggregate.as_ref().unwrap();
+    assert_eq!(a7.active_interface_count, 1);
+    assert_eq!(
+        a7.rx_bytes_per_sec, None,
+        "reappearing NIC must seed baseline with zero spike"
+    );
+    assert_eq!(a7.tx_bytes_per_sec, None);
+
+    // Tick 8: next 1s sample on reappeared NIC produces clean delta.
+    write_net(&[
+        ("lo", 2_200_000, 2_200_000),
+        ("enp4s0", 99_005_000, 88_001_000),
+    ]);
+    let s8 = sampler.sample_at(t0 + Duration::from_secs(43));
+    let a8 = s8.network.as_ref().unwrap().aggregate.as_ref().unwrap();
+    assert_eq!(a8.rx_bytes_per_sec, Some(5_000));
+    assert_eq!(a8.tx_bytes_per_sec, Some(1_000));
 }
