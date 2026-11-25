@@ -7,6 +7,7 @@ import { buildShellPreviewFixture, makeTinyPngBytes } from "./fixture-builder.ts
 import {
   buildPublishedShell,
   createPreviewWorkspace,
+  createVirtualTimeline,
   expectCleanPreview,
   zguiHost,
   pixel,
@@ -1399,6 +1400,160 @@ describe("apps/shell preview", () => {
       expect(previewSurfaces(out, "polkit-hidden-while-locked")).not.toContain("lock-dp-1");
       expect(previewSurfaces(out, "power-dialog-closed")).not.toContain("power-dialog");
       expect(sessionLockTrace(out).unlockCount).toBe(0);
+    } finally {
+      cleanup();
+    }
+  });
+
+  previewTest("toasts, OSD and Polkit stay on their initial output until the next session", () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-pinned-overlays-");
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const monitors = [
+        { id: "dp-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900, scale: 1, refreshRateMilliHz: 60000 },
+        { id: "hdmi-1", name: "HDMI-A-1", x: 1440, y: 0, width: 2560, height: 1440, scale: 2, refreshRateMilliHz: 60000 },
+      ];
+      const outputs = monitors.map((monitor, index) => ({
+        output_instance_id: index + 1, name: monitor.name, x: monitor.x, y: monitor.y,
+        width: monitor.width / monitor.scale, height: monitor.height / monitor.scale,
+        mode_width: monitor.width, mode_height: monitor.height, scale: monitor.scale,
+      }));
+      const windows = (activeId: number) => ({
+        capability: "controllable",
+        windows: [1, 2].map(id => ({
+          window_id: id, title: `Window ${id}`, app_id: "terminal", output_instance_ids: [id],
+          activated: id === activeId, minimized: false, maximized: false, fullscreen: false,
+        })),
+      });
+      const notifications = (...ids: number[]) => ({
+        available: true, dnd: false, history: [],
+        popups: ids.map(id => ({
+          id, revision: 1, app_name: "Preview", summary: `Notification ${id}`, body: "Output pinning",
+          icon: null, attachment: null, actions: [], urgency: 1,
+        })),
+      });
+      const audio = (volume: number) => ({
+        availability: "available", default_sink: "sink", default_source: null,
+        sinks: [{ index: 7, name: "sink", description: "Speakers", channels: 2, volume, muted: false }],
+        sources: [], sink_inputs: [], source_outputs: [],
+      });
+      const polkit = (requestId: number | null) => ({
+        enabled: true, registered: true, locked_suppressed: false, last_error: null,
+        active: requestId === null ? null : {
+          request_id: requestId, action_id: "org.zshell.preview.authorize",
+          message: "Authentication is required to change system settings.", icon_name: "system-lock-screen",
+          details: {}, identities: [{ uid: 1000, username: "preview" }], selected_uid: 1000,
+          prompt: "Password:", echo_on: false, info_message: null, error_message: null, authenticating: false,
+        },
+      });
+      const response = "preview-secret";
+      const toast = "notification-toasts";
+      const osd = "osd-overlay";
+      const dialog = "polkit-dialog";
+      const timeline = createVirtualTimeline();
+      const capture = (surface: string, stage: string) => {
+        const id = `${surface}-${stage}`;
+        timeline.step({ id, op: "capture", surface, captureId: id });
+      };
+      const click = (id: string, surface: string, testId: string) => {
+        timeline.step({ id, op: "pointer.click", target: { surface, testId }, button: "primary" });
+      };
+
+      timeline.step({ id: "outputs", op: "monitors.set", monitors });
+      timeline.advance("daemon-ready", 30);
+      const firstSessionAtMs = timeline.after(10);
+      timeline.advance("open-overlays", 450);
+      const pauseAtMs = timeline.after(20);
+      click("expand-toasts", toast, "toast-expand-toggle");
+      timeline.advance("expanded", 250);
+      capture(toast, "initial");
+      capture(osd, "initial");
+      capture(dialog, "initial");
+      click("focus-auth-input", dialog, "polkit-input");
+      timeline.step({ id: "type-response", op: "text.commit", surface: dialog, text: response });
+
+      const focusAtMs = timeline.after(10);
+      timeline.advance("focus-hdmi", 30);
+      const mergeAtMs = timeline.after(10);
+      timeline.advance("merge-toast-and-volume-update", 450);
+      capture(toast, "pinned");
+      capture(osd, "pinned");
+      capture(dialog, "pinned");
+      const respondAtMs = timeline.after(10);
+      click("submit-response", dialog, "polkit-submit");
+      timeline.advance("response-reply", 20);
+
+      const clearAtMs = timeline.after(10);
+      const resumeAtMs = timeline.after(20);
+      timeline.advance("clear-toasts-and-polkit-and-let-osd-expire", 1800);
+      timeline.step({ id: "between-sessions", op: "monitors.set", monitors });
+      const nextSessionAtMs = timeline.after(10);
+      timeline.advance("open-new-overlays", 450);
+      capture(toast, "next");
+      capture(osd, "next");
+      capture(dialog, "next");
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-pinned-overlays",
+        initialTopics: {
+          "wayland.outputs": { capability: "controllable", outputs },
+          "wayland.windows": windows(1),
+          "system.audio": audio(0.5),
+        },
+        topicUpdates: [
+          { topic: "desktop.notifications", atMs: firstSessionAtMs, revision: 2, data: notifications(2, 1) },
+          { topic: "system.audio", atMs: firstSessionAtMs, revision: 2, data: audio(0.6) },
+          { topic: "session.polkit", atMs: firstSessionAtMs, revision: 2, data: polkit(41) },
+          { topic: "wayland.windows", atMs: focusAtMs, revision: 2, data: windows(2) },
+          { topic: "desktop.notifications", atMs: mergeAtMs, revision: 3, data: notifications(3, 2, 1) },
+          { topic: "system.audio", atMs: mergeAtMs, revision: 3, data: audio(0.7) },
+          { topic: "desktop.notifications", atMs: clearAtMs, revision: 4, data: notifications() },
+          { topic: "session.polkit", atMs: clearAtMs, revision: 3, data: polkit(null) },
+          { topic: "desktop.notifications", atMs: nextSessionAtMs, revision: 5, data: notifications(4) },
+          { topic: "system.audio", atMs: nextSessionAtMs, revision: 4, data: audio(0.8) },
+          { topic: "session.polkit", atMs: nextSessionAtMs, revision: 4, data: polkit(42) },
+        ],
+        commands: [
+          { id: 26, name: "notifications.set-paused", payload: { paused: true }, atMs: pauseAtMs },
+          { id: 27, name: "notifications.set-paused", payload: { paused: false }, atMs: resumeAtMs },
+          {
+            socket: "host", name: "host.polkit-respond", payload: { request_id: 41, response },
+            atMs: respondAtMs,
+          },
+        ],
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-pinned-overlays",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      expectCleanPreview(runPreview(fixture, scenario, out), 9, 0);
+      const between = previewSurfaces(out, "between-sessions");
+      for (const surface of [toast, osd, dialog]) expect(between).not.toContain(surface);
+
+      const checkCapture = (surface: string, stage: string, width: number, height: number) => {
+        const frame = readCapture(out, surface, `${surface}-${stage}`);
+        expect([frame.image.width, frame.image.height], `${surface} ${stage}`).toEqual([width, height]);
+        return frame.tree;
+      };
+      const initialToasts = checkCapture(toast, "initial", 396, 720);
+      expect(treeNode(initialToasts, "toast-expanded-scroll").boundsDevice).toBeDefined();
+      const pinnedToasts = checkCapture(toast, "pinned", 396, 720);
+      for (const id of ["toast-expanded-scroll", "toast-card-1", "toast-card-3"]) {
+        expect(treeNode(pinnedToasts, id).boundsDevice).toBeDefined();
+      }
+      const nextToasts = checkCapture(toast, "next", 792, 912);
+      expect(treeNode(nextToasts, "toast-card-4").boundsDevice).toBeDefined();
+
+      expect(treeNode(checkCapture(osd, "initial", 344, 108), "osd-value").text).toBe("60%");
+      expect(treeNode(checkCapture(osd, "pinned", 344, 108), "osd-value").text).toBe("70%");
+      expect(treeNode(checkCapture(osd, "next", 688, 216), "osd-value").text).toBe("80%");
+      checkCapture(dialog, "initial", 1440, 900);
+      checkCapture(dialog, "pinned", 1440, 900);
+      checkCapture(dialog, "next", 2560, 1440);
     } finally {
       cleanup();
     }

@@ -7,7 +7,7 @@ import {
   useMotionScheme,
   type M3Spring,
 } from "../motion.ts";
-import { useShellStore } from "../store.ts";
+import { usePinnedOutput, useShellStore } from "../store.ts";
 import { formatSurfaceName, resolveMonitorLogicalSize, type OsdPayload, type WarningFade } from "../topics.ts";
 
 const onSurface = "var(--color-on-surface)";
@@ -132,13 +132,14 @@ function IdleWarning({ warning, monitors }: { warning: Accessor<WarningFade>; mo
 }
 
 export function OsdOverlay(): NativeChild {
-  const { activeOsd, activeMonitor, monitors, idle } = useShellStore();
+  const { activeOsd, monitors, idle } = useShellStore();
   const scheme = useMotionScheme();
-  const osdTarget = () => {
+  const pinnedOutput = usePinnedOutput(() => (activeOsd() !== null ? true : null));
+  const osdTarget = createMemo(() => {
     const payload = activeOsd();
-    const output = activeMonitor()?.id;
+    const output = pinnedOutput();
     return payload && output ? { payload, output } : null;
-  };
+  });
   const osdPresence = createRetainedPresence(osdTarget, {
     scheme,
     enterRole: "fastSpatial",

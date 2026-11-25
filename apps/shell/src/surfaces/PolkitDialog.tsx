@@ -10,7 +10,7 @@ import {
   useMotionScheme,
   type M3Spring,
 } from "../motion.ts";
-import { useShellStore } from "../store.ts";
+import { usePinnedOutput, useShellStore } from "../store.ts";
 import { resolveMonitorLogicalSize, type PolkitPromptView } from "../topics.ts";
 
 // An empty native child becomes a text marker that would occupy space in the flex card.
@@ -263,13 +263,13 @@ function PolkitContent(props: {
 }
 
 export function PolkitDialog(): NativeChild {
-  const { activeMonitor, monitors, outputs, polkit, sessionLock } = useShellStore();
+  const { monitors, outputs, polkit, sessionLock } = useShellStore();
   const scheme = useMotionScheme();
   const locked = () => polkit.data()?.locked_suppressed === true || (sessionLock.data()?.phase ?? "unlocked") !== "unlocked";
+  const pinnedOutput = usePinnedOutput(() => (locked() ? null : polkit.data()?.active?.request_id ?? null));
   const target = createMemo(() => {
-    if (locked()) return null;
+    const output = pinnedOutput();
     const prompt = polkit.data()?.active;
-    const output = activeMonitor()?.id;
     return prompt && output ? { prompt, output } : null;
   });
   // ADR-0004: session lock must hide Polkit instantaneously; normal dismissal plays fastEffects exit.

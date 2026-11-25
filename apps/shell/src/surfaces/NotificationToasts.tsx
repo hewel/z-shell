@@ -3,8 +3,8 @@ import { M3CardAction, M3InteractiveCard } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
 import { createEnterProgress, createOpacityEnter, createPresence, createRetainedPresence, useMotionScheme, type M3Spring } from "../motion.ts";
-import { useShellStore } from "../store.ts";
-import { formatNotificationBody, resolveNotificationMediaLayout, splitNotificationActions, type NotificationItem } from "../topics.ts";
+import { usePinnedOutput, useShellStore } from "../store.ts";
+import { formatNotificationBody, resolveMonitorLogicalSize, resolveNotificationMediaLayout, splitNotificationActions, type NotificationItem } from "../topics.ts";
 
 const primary = "var(--color-primary)";
 const primaryContainer = "var(--color-primary-container)";
@@ -490,14 +490,15 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
 }
 
 export function NotificationToasts(): NativeChild {
-  const { activeMonitor, notifications } = useShellStore();
+  const { monitors, notifications, outputs } = useShellStore();
   const scheme = useMotionScheme();
   const dnd = () => notifications.data()?.dnd === true;
+  const hasPopups = createMemo(() => !dnd() && (notifications.data()?.popups.length ?? 0) > 0);
+  const pinnedOutput = usePinnedOutput(() => (hasPopups() ? true : null));
   const target = createMemo(() => {
-    if (dnd()) return null;
-    const popups = notifications.data()?.popups ?? [];
-    const output = activeMonitor()?.id;
-    return popups.length > 0 && output ? { output, popups } : null;
+    const output = pinnedOutput();
+    const popups = notifications.data()?.popups;
+    return output && popups?.length ? { output, popups } : null;
   });
   const presence = createRetainedPresence(target, {
     scheme,
@@ -506,19 +507,24 @@ export function NotificationToasts(): NativeChild {
     exitRole: "fastEffects",
     instantExit: dnd,
   });
-  const monitorHeight = () => activeMonitor()?.height ?? 900;
   return (
     <Show when={presence.value()?.output} keyed>
-      {output => (
-        <ToastSurface
-          output={output}
-          monitorHeight={monitorHeight}
-          popups={() => presence.value()?.popups ?? []}
-          visible={presence.visible}
-          spatial={presence.progress}
-          opacity={presence.opacity}
-        />
-      )}
+      {output => {
+        const monitorHeight = createMemo(() => {
+          const monitor = monitors().find(candidate => candidate.id === output);
+          return monitor ? resolveMonitorLogicalSize(monitor, outputs.data()).height : 900;
+        });
+        return (
+          <ToastSurface
+            output={output}
+            monitorHeight={monitorHeight}
+            popups={() => presence.value()?.popups ?? []}
+            visible={presence.visible}
+            spatial={presence.progress}
+            opacity={presence.opacity}
+          />
+        );
+      }}
     </Show>
   );
 }
