@@ -1,5 +1,13 @@
-import { For, Show, createMemo, type NativeChild } from "@hewel/zgui";
-import { buildSparklinePaths, buildSplitDualArcPaths } from "../charts.ts";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, type NativeChild } from "@hewel/zgui";
+import { useGlobalMotionScheme } from "@z-shell/sdk/zgui";
+import {
+  buildSparklinePaths,
+  buildSplitDualArcPaths,
+  createChartScrollController,
+  formatThroughputAxisLabel,
+  resolveThroughputScale,
+  type ChartScrollFrame,
+} from "../charts.ts";
 import { ShellIcon } from "../icons.tsx";
 
 const primary = "var(--color-primary)";
@@ -9,7 +17,10 @@ const trackColor = "var(--color-surface-container-highest)";
 const surfaceLowest = "var(--color-surface-container-lowest)";
 const muted = "var(--color-on-surface-variant)";
 
-/** Compact 36x16 inline CPU sparkline for the horizontal StatusBar trigger. */
+const ROLLING_SLOT_COUNT = 60;
+const MINI_SPARKLINE_SLOTS = 30;
+
+/** Compact 36x16 inline CPU sparkline for the horizontal StatusBar trigger (right-aligned, zero motion tickers). */
 export function MiniSparkline(props: {
   readonly values: readonly (number | null)[] | null | undefined;
   readonly color?: string;
@@ -23,6 +34,7 @@ export function MiniSparkline(props: {
       paddingBottom: 2.5,
       maxValue: 100,
       smooth: false,
+      slotCount: MINI_SPARKLINE_SLOTS,
     }),
   );
   const strokeColor = () => props.color ?? primary;
@@ -131,35 +143,87 @@ export function SplitDualArcGauge(props: {
   );
 }
 
-/** Smooth area+line rolling chart supporting null gap discontinuities. */
+/** Smooth area+line rolling chart with fixed 60-slot right-aligned timeline, null gap breaks, and sub-second scroll. */
 export function AreaLineChart(props: {
   readonly values: readonly (number | null)[] | null | undefined;
   readonly variant: "popover" | "window" | "detail";
-  readonly color?: string;
-  readonly maxValue?: number;
-  readonly emptyLabel?: string;
-  readonly testId?: string;
+  readonly wide?: boolean | undefined;
+  readonly color?: string | undefined;
+  readonly maxValue?: number | undefined;
+  readonly bucketSeconds?: number | undefined;
+  readonly latestBucketId?: number | null | undefined;
+  readonly resetKey?: string | number | null | undefined;
+  readonly sourceBaseline?: boolean | undefined;
+  readonly revision?: number | undefined;
+  readonly emptyLabel?: string | undefined;
+  readonly testId?: string | undefined;
 }): NativeChild {
   const dims = () => (props.variant === "popover"
-    ? { width: 340, height: 72, boxHeight: 72, viewBox: "0 0 340 72" as const }
+    ? { width: 340, height: 72, boxHeight: 72, paddingX: 8, paddingTop: 10, paddingBottom: 8, viewBox: "0 0 340 72" as const }
     : props.variant === "detail"
-      ? { width: 380, height: 88, boxHeight: 112, viewBox: "0 0 380 88" as const }
-      : { width: 380, height: 88, boxHeight: 88, viewBox: "0 0 380 88" as const });
+      ? { width: 536, height: 112, boxHeight: 112, paddingX: 10, paddingTop: 10, paddingBottom: 8, viewBox: "0 0 536 112" as const }
+      : props.wide
+        ? { width: 536, height: 88, boxHeight: 88, paddingX: 10, paddingTop: 10, paddingBottom: 8, viewBox: "0 0 536 88" as const }
+        : { width: 380, height: 88, boxHeight: 88, paddingX: 8, paddingTop: 10, paddingBottom: 8, viewBox: "0 0 380 88" as const });
+
+  const motionScheme = useGlobalMotionScheme();
+  const [scrollFrame, setScrollFrame] = createSignal<ChartScrollFrame>({
+    shiftSlots: 0,
+    exitingPrimary: undefined,
+    exitingSecondary: undefined,
+  });
+  const scrollController = createChartScrollController({
+    slotCount: ROLLING_SLOT_COUNT,
+    onChange: setScrollFrame,
+  });
+  onCleanup(() => scrollController.dispose());
+
+  createEffect(
+    () => ({
+      values: props.values,
+      latestBucketId: props.latestBucketId,
+      bucketSeconds: props.bucketSeconds,
+      resetKey: props.resetKey,
+      sourceBaseline: props.sourceBaseline,
+      revision: props.revision,
+      reducedMotion: motionScheme() === "reduced",
+    }),
+    input => {
+      scrollController.update({
+        primary: input.values,
+        latestBucketId: input.latestBucketId,
+        bucketSeconds: input.bucketSeconds,
+        resetKey: input.resetKey,
+        sourceBaseline: input.sourceBaseline,
+        revision: input.revision,
+        reducedMotion: input.reducedMotion,
+      });
+    },
+  );
 
   const paths = createMemo(() => {
     const d = dims();
+    const frame = scrollFrame();
     return buildSparklinePaths(props.values, {
       width: d.width,
       height: d.height,
-      paddingX: 8,
-      paddingTop: 10,
-      paddingBottom: 8,
+      paddingX: d.paddingX,
+      paddingTop: d.paddingTop,
+      paddingBottom: d.paddingBottom,
       ...(props.maxValue !== undefined ? { maxValue: props.maxValue } : {}),
       smooth: true,
+      slotCount: ROLLING_SLOT_COUNT,
+      ...(frame.exitingPrimary !== undefined ? { leadingValue: frame.exitingPrimary } : {}),
     });
   });
 
+  const shiftPx = () => scrollFrame().shiftSlots * paths().slotPitch;
   const strokeColor = () => props.color ?? primary;
+  const hairlineY = (fractionFromTop: number): string => {
+    const d = dims();
+    const innerH = d.height - d.paddingTop - d.paddingBottom;
+    return `${(d.paddingTop + innerH * fractionFromTop).toFixed(2)}px`;
+  };
 
   return (
     <box testId={props.testId ?? null} style={{
@@ -170,17 +234,17 @@ export function AreaLineChart(props: {
       backgroundColor: surfaceLowest,
       overflow: "hidden",
     }}>
-      {/* Subtle 25% / 50% / 75% reference hairlines */}
+      {/* Exact 75% / 50% / 25% plot reference hairlines */}
       <box ariaHidden style={{
-        position: "absolute", left: "8px", right: "8px", top: "28%", height: "1px",
+        position: "absolute", left: `${dims().paddingX}px`, right: `${dims().paddingX}px`, top: hairlineY(0.25), height: "1px",
         backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 30%, transparent)",
       }} />
       <box ariaHidden style={{
-        position: "absolute", left: "8px", right: "8px", top: "54%", height: "1px",
+        position: "absolute", left: `${dims().paddingX}px`, right: `${dims().paddingX}px`, top: hairlineY(0.5), height: "1px",
         backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 30%, transparent)",
       }} />
       <box ariaHidden style={{
-        position: "absolute", left: "8px", right: "8px", top: "80%", height: "1px",
+        position: "absolute", left: `${dims().paddingX}px`, right: `${dims().paddingX}px`, top: hairlineY(0.75), height: "1px",
         backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 30%, transparent)",
       }} />
 
@@ -194,89 +258,180 @@ export function AreaLineChart(props: {
           </text>
         </box>
       }>
-        <Show when={paths().areaPath.length > 0}>
-          <vector
-            ariaHidden
-            viewBox={dims().viewBox}
-            d={paths().areaPath}
-            style={{
-              position: "absolute", inset: "0px", width: "100%", height: `${dims().boxHeight}px`,
-              "--zgui-fill": `color-mix(in srgb, ${strokeColor()} 18%, transparent)`,
-              "--zgui-stroke": "transparent",
-            }}
-          />
-        </Show>
-        <vector
-          ariaHidden
-          viewBox={dims().viewBox}
-          d={paths().strokePath}
-          style={{
-            position: "absolute", inset: "0px", width: "100%", height: `${dims().boxHeight}px`,
-            "--zgui-fill": "transparent",
-            "--zgui-stroke": strokeColor(),
-            "--zgui-stroke-width": "2px",
-            "--zgui-stroke-linecap": "round",
-            "--zgui-stroke-linejoin": "round",
-          }}
-        />
+        <box ariaHidden style={{
+          position: "absolute",
+          left: `${dims().paddingX}px`,
+          right: `${dims().paddingX}px`,
+          top: "0px",
+          bottom: "0px",
+          overflow: "hidden",
+        }}>
+          <box ariaHidden style={{
+            position: "absolute",
+            left: `${-dims().paddingX}px`,
+            right: `${-dims().paddingX}px`,
+            top: "0px",
+            bottom: "0px",
+            ...(shiftPx() > 0.01 ? { transform: `translateX(${shiftPx().toFixed(2)}px)` } : {}),
+          }}>
+            <Show when={paths().areaPath.length > 0}>
+              <vector
+                ariaHidden
+                viewBox={dims().viewBox}
+                d={paths().areaPath}
+                style={{
+                  position: "absolute", inset: "0px", width: "100%", height: `${dims().boxHeight}px`,
+                  "--zgui-fill": `color-mix(in srgb, ${strokeColor()} 18%, transparent)`,
+                  "--zgui-stroke": "transparent",
+                }}
+              />
+            </Show>
+            <vector
+              ariaHidden
+              viewBox={dims().viewBox}
+              d={paths().strokePath}
+              style={{
+                position: "absolute", inset: "0px", width: "100%", height: `${dims().boxHeight}px`,
+                "--zgui-fill": "transparent",
+                "--zgui-stroke": strokeColor(),
+                "--zgui-stroke-width": "2px",
+                "--zgui-stroke-linecap": "round",
+                "--zgui-stroke-linejoin": "round",
+              }}
+            />
+          </box>
+        </box>
       </Show>
     </box>
   );
 }
 
-/** Dual-series rolling chart for Network RX/TX or Disk Read/Write with shared auto-scaling and gap breaks. */
+/** Dual-series rolling chart for Network RX/TX or Disk Read/Write with nice-scale hysteresis, Y-axis labels, and smooth scroll. */
 export function DualLineChart(props: {
   readonly primarySeries: readonly (number | null)[] | null | undefined;
   readonly secondarySeries: readonly (number | null)[] | null | undefined;
-  readonly wide?: boolean;
-  readonly primaryColor?: string;
-  readonly secondaryColor?: string;
-  readonly emptyLabel?: string;
-  readonly testId?: string;
+  readonly wide?: boolean | undefined;
+  readonly compact?: boolean | undefined;
+  readonly primaryColor?: string | undefined;
+  readonly secondaryColor?: string | undefined;
+  readonly bucketSeconds?: number | undefined;
+  readonly latestBucketId?: number | null | undefined;
+  readonly resetKey?: string | number | null | undefined;
+  readonly sourceBaseline?: boolean | undefined;
+  readonly revision?: number | undefined;
+  readonly emptyLabel?: string | undefined;
+  readonly testId?: string | undefined;
 }): NativeChild {
-  const dims = () => (props.wide
-    ? { width: 380, height: 88, boxHeight: 96, viewBox: "0 0 380 88" as const }
-    : { width: 260, height: 64, boxHeight: 64, viewBox: "0 0 260 64" as const });
+  const dims = () => (!props.wide
+    ? { width: 250, height: 64, boxHeight: 64, paddingX: 6, paddingTop: 8, paddingBottom: 6, viewBox: "0 0 250 64" as const }
+    : props.compact
+      ? { width: 536, height: 64, boxHeight: 64, paddingX: 10, paddingTop: 8, paddingBottom: 6, viewBox: "0 0 536 64" as const }
+      : { width: 536, height: 96, boxHeight: 96, paddingX: 10, paddingTop: 10, paddingBottom: 8, viewBox: "0 0 536 96" as const });
 
-  const sharedMax = createMemo(() => {
+  const motionScheme = useGlobalMotionScheme();
+  const [scrollFrame, setScrollFrame] = createSignal<ChartScrollFrame>({
+    shiftSlots: 0,
+    exitingPrimary: undefined,
+    exitingSecondary: undefined,
+  });
+  const scrollController = createChartScrollController({
+    slotCount: ROLLING_SLOT_COUNT,
+    onChange: setScrollFrame,
+  });
+  onCleanup(() => scrollController.dispose());
+
+  createEffect(
+    () => ({
+      primary: props.primarySeries,
+      secondary: props.secondarySeries,
+      latestBucketId: props.latestBucketId,
+      bucketSeconds: props.bucketSeconds,
+      resetKey: props.resetKey,
+      sourceBaseline: props.sourceBaseline,
+      revision: props.revision,
+      reducedMotion: motionScheme() === "reduced",
+    }),
+    input => {
+      scrollController.update({
+        primary: input.primary,
+        secondary: input.secondary,
+        latestBucketId: input.latestBucketId,
+        bucketSeconds: input.bucketSeconds,
+        resetKey: input.resetKey,
+        sourceBaseline: input.sourceBaseline,
+        revision: input.revision,
+        reducedMotion: input.reducedMotion,
+      });
+    },
+  );
+
+  const observedMax = createMemo(() => {
     let max = 0;
-    for (const v of props.primarySeries ?? []) {
+    const p = props.primarySeries ?? [];
+    const pSlice = p.length > ROLLING_SLOT_COUNT ? p.slice(p.length - ROLLING_SLOT_COUNT) : p;
+    for (const v of pSlice) {
       if (v !== null && Number.isFinite(v) && v > max) max = v;
     }
-    for (const v of props.secondarySeries ?? []) {
+    const s = props.secondarySeries ?? [];
+    const sSlice = s.length > ROLLING_SLOT_COUNT ? s.slice(s.length - ROLLING_SLOT_COUNT) : s;
+    for (const v of sSlice) {
       if (v !== null && Number.isFinite(v) && v > max) max = v;
     }
-    return Math.max(1, max * 1.15);
+    return max;
+  });
+
+  let previousCeiling: number | null = null;
+  let lastScaleResetKey: string | number | null | undefined = undefined;
+  const scaleCeiling = createMemo(() => {
+    const key = props.resetKey;
+    if (key !== lastScaleResetKey) {
+      lastScaleResetKey = key;
+      previousCeiling = null;
+    }
+    const next = resolveThroughputScale(observedMax(), previousCeiling);
+    previousCeiling = next;
+    return next;
   });
 
   const primaryPaths = createMemo(() => {
     const d = dims();
+    const frame = scrollFrame();
     return buildSparklinePaths(props.primarySeries, {
       width: d.width,
       height: d.height,
-      paddingX: 6,
-      paddingTop: 8,
-      paddingBottom: 6,
-      maxValue: sharedMax(),
+      paddingX: d.paddingX,
+      paddingTop: d.paddingTop,
+      paddingBottom: d.paddingBottom,
+      maxValue: scaleCeiling(),
       smooth: false,
+      slotCount: ROLLING_SLOT_COUNT,
+      ...(frame.exitingPrimary !== undefined ? { leadingValue: frame.exitingPrimary } : {}),
     });
   });
   const secondaryPaths = createMemo(() => {
     const d = dims();
+    const frame = scrollFrame();
     return buildSparklinePaths(props.secondarySeries, {
       width: d.width,
       height: d.height,
-      paddingX: 6,
-      paddingTop: 8,
-      paddingBottom: 6,
-      maxValue: sharedMax(),
+      paddingX: d.paddingX,
+      paddingTop: d.paddingTop,
+      paddingBottom: d.paddingBottom,
+      maxValue: scaleCeiling(),
       smooth: false,
+      slotCount: ROLLING_SLOT_COUNT,
+      ...(frame.exitingSecondary !== undefined ? { leadingValue: frame.exitingSecondary } : {}),
     });
   });
 
   const hasAny = () => primaryPaths().hasData || secondaryPaths().hasData;
+  const shiftPx = () => scrollFrame().shiftSlots * primaryPaths().slotPitch;
   const pColor = () => props.primaryColor ?? primary;
   const sColor = () => props.secondaryColor ?? tertiary;
+  const midLineY = (): number => {
+    const d = dims();
+    return d.paddingTop + (d.height - d.paddingTop - d.paddingBottom) * 0.5;
+  };
 
   return (
     <box testId={props.testId ?? null} style={{
@@ -287,12 +442,13 @@ export function DualLineChart(props: {
       backgroundColor: surfaceLowest,
       overflow: "hidden",
     }}>
+      {/* Exact 100% ceiling & 50% mid-scale reference hairlines */}
       <box ariaHidden style={{
-        position: "absolute", left: "6px", right: "6px", top: "35%", height: "1px",
+        position: "absolute", left: `${dims().paddingX}px`, right: `${dims().paddingX}px`, top: `${dims().paddingTop}px`, height: "1px",
         backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 28%, transparent)",
       }} />
       <box ariaHidden style={{
-        position: "absolute", left: "6px", right: "6px", top: "70%", height: "1px",
+        position: "absolute", left: `${dims().paddingX}px`, right: `${dims().paddingX}px`, top: `${midLineY().toFixed(2)}px`, height: "1px",
         backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 28%, transparent)",
       }} />
       <Show when={hasAny()} fallback={
@@ -305,47 +461,123 @@ export function DualLineChart(props: {
           </text>
         </box>
       }>
-        <Show when={primaryPaths().areaPath.length > 0}>
-          <vector
-            ariaHidden
-            viewBox={dims().viewBox}
-            d={primaryPaths().areaPath}
+        <box ariaHidden style={{
+          position: "absolute",
+          left: `${dims().paddingX}px`,
+          right: `${dims().paddingX}px`,
+          top: "0px",
+          bottom: "0px",
+          overflow: "hidden",
+        }}>
+          <box ariaHidden style={{
+            position: "absolute",
+            left: `${-dims().paddingX}px`,
+            right: `${-dims().paddingX}px`,
+            top: "0px",
+            bottom: "0px",
+            ...(shiftPx() > 0.01 ? { transform: `translateX(${shiftPx().toFixed(2)}px)` } : {}),
+          }}>
+            <Show when={primaryPaths().areaPath.length > 0}>
+              <vector
+                ariaHidden
+                viewBox={dims().viewBox}
+                d={primaryPaths().areaPath}
+                style={{
+                  position: "absolute", inset: "0px", width: "100%", height: `${dims().boxHeight}px`,
+                  "--zgui-fill": `color-mix(in srgb, ${pColor()} 15%, transparent)`,
+                  "--zgui-stroke": "transparent",
+                }}
+              />
+            </Show>
+            <Show when={secondaryPaths().strokePath.length > 0}>
+              <vector
+                ariaHidden
+                viewBox={dims().viewBox}
+                d={secondaryPaths().strokePath}
+                style={{
+                  position: "absolute", inset: "0px", width: "100%", height: `${dims().boxHeight}px`,
+                  "--zgui-fill": "transparent",
+                  "--zgui-stroke": sColor(),
+                  "--zgui-stroke-width": "1.6px",
+                  "--zgui-stroke-linecap": "round",
+                  "--zgui-stroke-linejoin": "round",
+                }}
+              />
+            </Show>
+            <Show when={primaryPaths().strokePath.length > 0}>
+              <vector
+                ariaHidden
+                viewBox={dims().viewBox}
+                d={primaryPaths().strokePath}
+                style={{
+                  position: "absolute", inset: "0px", width: "100%", height: `${dims().boxHeight}px`,
+                  "--zgui-fill": "transparent",
+                  "--zgui-stroke": pColor(),
+                  "--zgui-stroke-width": "1.8px",
+                  "--zgui-stroke-linecap": "round",
+                  "--zgui-stroke-linejoin": "round",
+                }}
+              />
+            </Show>
+          </box>
+        </box>
+
+        {/* Opaque Y-axis ceiling label */}
+        <box style={{
+          position: "absolute",
+          left: `${dims().paddingX}px`,
+          top: `${Math.max(2, dims().paddingTop - 6)}px`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "0 4px",
+          borderRadius: "4px",
+          backgroundColor: surfaceLowest,
+          pointerEvents: "none",
+        }}>
+          <text
+            testId={props.testId ? `${props.testId}-scale-max` : null}
+            data-tabular="true"
             style={{
-              position: "absolute", inset: "0px", width: "100%", height: `${dims().boxHeight}px`,
-              "--zgui-fill": `color-mix(in srgb, ${pColor()} 15%, transparent)`,
-              "--zgui-stroke": "transparent",
+              fontFamily: "var(--font-mono)",
+              fontSize: "9px",
+              lineHeight: "12px",
+              color: muted,
+              fontVariantNumeric: "tabular-nums",
             }}
-          />
-        </Show>
-        <Show when={secondaryPaths().strokePath.length > 0}>
-          <vector
-            ariaHidden
-            viewBox={dims().viewBox}
-            d={secondaryPaths().strokePath}
-            style={{
-              position: "absolute", inset: "0px", width: "100%", height: `${dims().boxHeight}px`,
-              "--zgui-fill": "transparent",
-              "--zgui-stroke": sColor(),
-              "--zgui-stroke-width": "1.6px",
-              "--zgui-stroke-linecap": "round",
-              "--zgui-stroke-linejoin": "round",
-            }}
-          />
-        </Show>
-        <Show when={primaryPaths().strokePath.length > 0}>
-          <vector
-            ariaHidden
-            viewBox={dims().viewBox}
-            d={primaryPaths().strokePath}
-            style={{
-              position: "absolute", inset: "0px", width: "100%", height: `${dims().boxHeight}px`,
-              "--zgui-fill": "transparent",
-              "--zgui-stroke": pColor(),
-              "--zgui-stroke-width": "1.8px",
-              "--zgui-stroke-linecap": "round",
-              "--zgui-stroke-linejoin": "round",
-            }}
-          />
+          >
+            {formatThroughputAxisLabel(scaleCeiling())}
+          </text>
+        </box>
+
+        {/* Opaque 50% mid-scale label on wide charts */}
+        <Show when={props.wide}>
+          <box style={{
+            position: "absolute",
+            left: `${dims().paddingX}px`,
+            top: `${Math.round(midLineY() - 6)}px`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "0 4px",
+            borderRadius: "4px",
+            backgroundColor: surfaceLowest,
+            pointerEvents: "none",
+          }}>
+            <text
+              testId={props.testId ? `${props.testId}-scale-mid` : null}
+              data-tabular="true"
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: "9px",
+                lineHeight: "12px",
+                color: muted,
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {formatThroughputAxisLabel(scaleCeiling() / 2)}
+            </text>
+          </box>
         </Show>
       </Show>
     </box>

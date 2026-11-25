@@ -3,7 +3,12 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
 import type { PublishedApplication } from "@hewel/zgui-build";
-import { buildShellPreviewFixture, makeSampleTelemetrySnapshot, makeSolidPngBytes } from "./fixture-builder.ts";
+import {
+  buildShellPreviewFixture,
+  makeSampleTelemetrySnapshot,
+  makeSolidPngBytes,
+  makeTwoActiveNicTelemetrySnapshot,
+} from "./fixture-builder.ts";
 import {
   assertRoundedBlurStrips,
   assertSameBounds,
@@ -3496,11 +3501,18 @@ describe("apps/shell design geometry & pixel lint", () => {
         "switching 5m -> 15m visibly changes rendered CPU history curve pixels",
       ).toBeGreaterThan(40);
 
-      // 5. All 4 hardware subviews & single-instance reopen
+      // 5. All 4 hardware subviews, DualLineChart Y-axis scale labels & single-instance reopen
+      expect(treeNode(winOverview.tree, "sysmon-win-net-chart-scale-max").text).toBe("5 MB/s");
       expect(treeNode(readCapture(out, "system-monitor-window", "sysmon-window-cpu").tree, "sysmon-cpu-pane").boundsLogical).toBeDefined();
       expect(treeNode(readCapture(out, "system-monitor-window", "sysmon-window-memory").tree, "sysmon-memory-pane").boundsLogical).toBeDefined();
       expect(treeNode(readCapture(out, "system-monitor-window", "sysmon-window-gpu").tree, "sysmon-gpu-pane").boundsLogical).toBeDefined();
-      expect(treeNode(readCapture(out, "system-monitor-window", "sysmon-window-storage").tree, "sysmon-storage-pane").boundsLogical).toBeDefined();
+      const winStorage = readCapture(out, "system-monitor-window", "sysmon-window-storage");
+      expect(treeNode(winStorage.tree, "sysmon-storage-pane").boundsLogical).toBeDefined();
+      expect(treeNode(winStorage.tree, "sysmon-detail-net-chart-scale-max").text).toBe("5 MB/s");
+      expect(treeNode(winStorage.tree, "sysmon-detail-net-chart-scale-mid").text).toBe("2.5 MB/s");
+      // Active range at this step is 15m (diskRead15m peak 50e6 B/s <= 50 MiB/s -> 50 MB/s / 25 MB/s).
+      expect(treeNode(winStorage.tree, "sysmon-detail-disk-chart-scale-max").text).toBe("50 MB/s");
+      expect(treeNode(winStorage.tree, "sysmon-detail-disk-chart-scale-mid").text).toBe("25 MB/s");
       const winReopened = readCapture(out, "system-monitor-window", "sysmon-window-reopened");
       expect(treeNode(winReopened.tree, "sysmon-overview-pane").boundsLogical).toBeDefined();
     } finally {
@@ -3712,6 +3724,266 @@ describe("apps/shell design geometry & pixel lint", () => {
       expect(treeNode(degWin.tree, "sysmon-sidebar-status").text).toBe("Live snapshot");
     } finally {
       dRun.cleanup();
+    }
+  }, 30_000);
+
+  previewTest("L4 System Monitor Smooth Scroll Motion, Wide Single-Card Layouts, Reduced-Motion Snap & Mixed-Version Two-Active-NICs", () => {
+    const monitor = { id: "DP-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900, scale: 1 };
+    const outputsTopic = {
+      capability: "connected",
+      outputs: [{
+        output_instance_id: 1, name: "DP-1", description: "Primary", make: "Test", model: "1440x900",
+        x: 0, y: 0, width: 1440, height: 900, mode_width: 1440, mode_height: 900, refresh_mhz: 60000, scale: 1,
+        physical_width_mm: null, physical_height_mm: null,
+      }],
+    };
+    const makeHighContrast60 = (offset: number): number[] =>
+      Array.from({ length: 60 }, (_, idx) => {
+        const k = idx + offset;
+        return k % 2 === 0 ? 88 : 14;
+      });
+    const makeHighContrastNet60 = (offset: number): number[] =>
+      Array.from({ length: 60 }, (_, idx) => {
+        const k = idx + offset;
+        return k % 2 === 0 ? 4_500_000 : 400_000;
+      });
+    const makeMotionSnapshot = (bucketId: number, offset: number, baseSnap?: Record<string, unknown>) => {
+      const snap = (baseSnap ? structuredClone(baseSnap) : makeSampleTelemetrySnapshot()) as Record<string, unknown>;
+      const hist = snap.history as Record<string, Record<string, unknown>>;
+      const cpu = makeHighContrast60(offset);
+      const netRx = makeHighContrastNet60(offset);
+      const netTx = makeHighContrastNet60(offset).map(v => Math.round(v * 0.25));
+      snap.cpu_usage_percent = cpu[59];
+      hist.window_60s = {
+        ...hist.window_60s!,
+        latest_bucket_id: bucketId,
+        cpu_percent: cpu,
+        net_rx_bytes_per_sec: netRx,
+        net_tx_bytes_per_sec: netTx,
+        aggregate_net_rx_bytes_per_sec: netRx,
+        aggregate_net_tx_bytes_per_sec: netTx,
+      };
+      return snap;
+    };
+
+    const edgeStrip = (bounds: DeviceBounds, side: "left" | "right", insetPx: number, stripWidthPx: number): DeviceBounds => ({
+      x: side === "left" ? bounds.x + insetPx : bounds.x + bounds.width - insetPx - stripWidthPx,
+      y: bounds.y + 4,
+      width: stripWidthPx,
+      height: Math.max(8, bounds.height - 8),
+    });
+
+    // --- Sub-run 1: Live 1-bucket advance smooth scroll (before / mid-flight / settled on both plot edges) ---
+    const mRun = createPreviewWorkspace("z-shell-preview-design-sysmon-motion-");
+    try {
+      const fixture = join(mRun.workspace, "fixture.json");
+      const scenario = join(mRun.workspace, "scenario.json");
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+      timeline.step({
+        id: "open-win", op: "service.emit", channel: "control.message",
+        value: { args: ["monitor", "overview"], reply: { text: "{\"systemMonitorWindowOpen\":true,\"systemMonitorWindowTab\":\"overview\"}" } },
+      });
+      timeline.advance("win-open-settle", 450);
+      timeline.step({ id: "cap-overview-before", op: "capture", surface: "system-monitor-window", captureId: "motion-overview-before" });
+
+      const overviewUpdateAtMs = timeline.after(20);
+      timeline.advance("overview-midflight", 500);
+      timeline.step({ id: "cap-overview-mid", op: "capture", surface: "system-monitor-window", captureId: "motion-overview-mid" });
+      timeline.advance("overview-settled", 650);
+      timeline.step({ id: "cap-overview-settled", op: "capture", surface: "system-monitor-window", captureId: "motion-overview-settled" });
+
+      // Navigate to wide CPU detail chart (536x112) and verify live smooth scroll on both edges.
+      timeline.step({ id: "nav-cpu", op: "pointer.click", target: { surface: "system-monitor-window", testId: "sysmon-nav-cpu" }, button: "primary" });
+      timeline.advance("nav-cpu-settle", 350);
+      timeline.step({ id: "cap-detail-before", op: "capture", surface: "system-monitor-window", captureId: "motion-detail-before" });
+
+      const detailUpdateAtMs = timeline.after(20);
+      timeline.advance("detail-midflight", 500);
+      timeline.step({ id: "cap-detail-mid", op: "capture", surface: "system-monitor-window", captureId: "motion-detail-mid" });
+      timeline.advance("detail-settled", 650);
+      timeline.step({ id: "cap-detail-settled", op: "capture", surface: "system-monitor-window", captureId: "motion-detail-settled" });
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-design-sysmon-motion",
+        initialTopics: {
+          "wayland.outputs": outputsTopic,
+          "system.telemetry": makeMotionSnapshot(120, 0),
+        },
+        topicUpdates: [
+          { topic: "system.telemetry", atMs: overviewUpdateAtMs, revision: 2, data: makeMotionSnapshot(121, 1) },
+          { topic: "system.telemetry", atMs: detailUpdateAtMs, revision: 3, data: makeMotionSnapshot(122, 2) },
+        ],
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-sysmon-motion",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(published.dist, fixture, scenario, mRun.out);
+      expectCleanPreview(result, 6, 0);
+
+      const ovBefore = readCapture(mRun.out, "system-monitor-window", "motion-overview-before");
+      const ovMid = readCapture(mRun.out, "system-monitor-window", "motion-overview-mid");
+      const ovSettled = readCapture(mRun.out, "system-monitor-window", "motion-overview-settled");
+
+      const cpuBounds = treeNode(ovBefore.tree, "sysmon-win-cpu-chart").boundsDevice!;
+      const netBounds = treeNode(ovBefore.tree, "sysmon-win-net-chart").boundsDevice!;
+      for (const [label, bounds, pad] of [
+        ["overview CPU", cpuBounds, 8],
+        ["overview Network", netBounds, 6],
+      ] as const) {
+        expect(diffRegionPixels(ovBefore.image, ovMid.image, bounds), `${label}: before -> mid-flight changes`).toBeGreaterThan(20);
+        expect(diffRegionPixels(ovMid.image, ovSettled.image, bounds), `${label}: mid-flight -> settled continues moving`).toBeGreaterThan(20);
+        const leftStrip = edgeStrip(bounds, "left", pad, 26);
+        const rightStrip = edgeStrip(bounds, "right", pad, 26);
+        expect(diffRegionPixels(ovBefore.image, ovMid.image, leftStrip), `${label}: left edge moves in motion`).toBeGreaterThan(0);
+        expect(diffRegionPixels(ovMid.image, ovSettled.image, leftStrip), `${label}: left edge settles after mid-flight`).toBeGreaterThan(0);
+        expect(diffRegionPixels(ovBefore.image, ovMid.image, rightStrip), `${label}: right edge enters in motion`).toBeGreaterThan(0);
+        expect(diffRegionPixels(ovMid.image, ovSettled.image, rightStrip), `${label}: right edge settles after mid-flight`).toBeGreaterThan(0);
+      }
+
+      const detBefore = readCapture(mRun.out, "system-monitor-window", "motion-detail-before");
+      const detMid = readCapture(mRun.out, "system-monitor-window", "motion-detail-mid");
+      const detSettled = readCapture(mRun.out, "system-monitor-window", "motion-detail-settled");
+      const detBounds = treeNode(detBefore.tree, "sysmon-detail-cpu-chart").boundsDevice!;
+      expect(detBounds.width, "wide detail CPU chart renders at ~536px").toBeGreaterThan(500);
+      expect(diffRegionPixels(detBefore.image, detMid.image, detBounds), "detail CPU: before -> mid-flight changes").toBeGreaterThan(30);
+      expect(diffRegionPixels(detMid.image, detSettled.image, detBounds), "detail CPU: mid-flight -> settled continues moving").toBeGreaterThan(30);
+      expect(diffRegionPixels(detBefore.image, detMid.image, edgeStrip(detBounds, "left", 10, 32)), "detail CPU: left edge moves").toBeGreaterThan(0);
+      expect(diffRegionPixels(detMid.image, detSettled.image, edgeStrip(detBounds, "right", 10, 32)), "detail CPU: right edge settles").toBeGreaterThan(0);
+    } finally {
+      mRun.cleanup();
+    }
+
+    // --- Sub-run 2: Reduced-Motion Immediate Snap + Single-Card Wide Layouts + New-Daemon Two-Active-NIC Aggregate ---
+    const rRun = createPreviewWorkspace("z-shell-preview-design-sysmon-reduced-agg-");
+    try {
+      const fixture = join(rRun.workspace, "fixture.json");
+      const scenario = join(rRun.workspace, "scenario.json");
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+      timeline.step({
+        id: "open-win", op: "service.emit", channel: "control.message",
+        value: { args: ["monitor", "overview"], reply: { text: "{\"systemMonitorWindowOpen\":true,\"systemMonitorWindowTab\":\"overview\"}" } },
+      });
+      timeline.advance("win-open-settle", 450);
+      timeline.step({ id: "cap-reduced-before", op: "capture", surface: "system-monitor-window", captureId: "reduced-before" });
+
+      const reducedUpdateAtMs = timeline.after(20);
+      timeline.advance("reduced-early", 120);
+      timeline.step({ id: "cap-reduced-early", op: "capture", surface: "system-monitor-window", captureId: "reduced-early" });
+      timeline.advance("reduced-later", 1000);
+      timeline.step({ id: "cap-reduced-later", op: "capture", surface: "system-monitor-window", captureId: "reduced-later" });
+
+      const twoNicWideBase = makeTwoActiveNicTelemetrySnapshot({ legacyDaemon: false, singleCardLayout: true });
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-design-sysmon-reduced-agg",
+        initialTopics: {
+          "wayland.outputs": outputsTopic,
+          settings: {
+            general: { offline_mode: false, log_level: "info" },
+            bar: {
+              position: "top", gaps: 14,
+              edge_overrides: { top: null, right: null, bottom: null, left: null },
+              launcher_enabled: true, dock_enabled: true, clock_24h: true, clock_seconds: false,
+            },
+            theme: { mode: "dark", variant: "tonal", seed_color: null, backend: "builtin", motion_scheme: "reduced", gtk_linking: false },
+            ime: { mode: "indicator_only", candidate_layout: "auto", switch_osd: true },
+            polkit: { enabled: true },
+            wallpaper: { directories: [], fit: "cover", sync_theme: true, slideshow_seconds: 300 },
+            pre_action_fade_seconds: 0,
+            configured_plugins: [],
+          },
+          "system.telemetry": makeMotionSnapshot(120, 0, twoNicWideBase),
+        },
+        topicUpdates: [
+          { topic: "system.telemetry", atMs: reducedUpdateAtMs, revision: 2, data: makeMotionSnapshot(121, 1, twoNicWideBase) },
+        ],
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-sysmon-reduced-agg",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(published.dist, fixture, scenario, rRun.out);
+      expectCleanPreview(result, 3, 0);
+
+      const redBefore = readCapture(rRun.out, "system-monitor-window", "reduced-before");
+      const redEarly = readCapture(rRun.out, "system-monitor-window", "reduced-early");
+      const redLater = readCapture(rRun.out, "system-monitor-window", "reduced-later");
+
+      expect(treeNode(redBefore.tree, "sysmon-win-net-title").text).toBe("Network · 2 active");
+      expect(treeNode(redBefore.tree, "sysmon-win-net-rx").text).toBe("↓ 5.0 MB/s");
+      expect(treeNode(redBefore.tree, "sysmon-win-net-chart-scale-max").text).toBe("5 MB/s");
+      expect(treeNode(redBefore.tree, "sysmon-win-net-chart-scale-mid").text).toBe("2.5 MB/s");
+
+      const wideCpuBounds = treeNode(redBefore.tree, "sysmon-win-cpu-chart").boundsDevice!;
+      const wideNetBounds = treeNode(redBefore.tree, "sysmon-win-net-chart").boundsDevice!;
+      expect(wideCpuBounds.width, "single-column CPU chart spans wide card (~536px)").toBeGreaterThan(500);
+      expect(wideNetBounds.width, "single-column Network chart spans wide card (~536px)").toBeGreaterThan(500);
+
+      expect(diffRegionPixels(redBefore.image, redEarly.image, wideCpuBounds), "reduced motion applies live update immediately").toBeGreaterThan(20);
+      expect(diffRegionPixels(redEarly.image, redLater.image, wideCpuBounds), "reduced motion snaps with zero mid-flight scroll").toBe(0);
+      expect(diffRegionPixels(redBefore.image, redEarly.image, wideNetBounds), "reduced motion applies net update immediately").toBeGreaterThan(20);
+      expect(diffRegionPixels(redEarly.image, redLater.image, wideNetBounds), "reduced motion net chart has zero mid-flight scroll").toBe(0);
+    } finally {
+      rRun.cleanup();
+    }
+
+    // --- Sub-run 3: Old-Daemon Two-Active-NIC Compatibility (NO aggregate field) ---
+    const oldRun = createPreviewWorkspace("z-shell-preview-design-sysmon-old-daemon-");
+    try {
+      const fixture = join(oldRun.workspace, "fixture.json");
+      const scenario = join(oldRun.workspace, "scenario.json");
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+      timeline.step({
+        id: "open-win-overview", op: "service.emit", channel: "control.message",
+        value: { args: ["monitor", "overview"], reply: { text: "{\"systemMonitorWindowOpen\":true,\"systemMonitorWindowTab\":\"overview\"}" } },
+      });
+      timeline.advance("old-overview-settle", 450);
+      timeline.step({ id: "cap-old-overview", op: "capture", surface: "system-monitor-window", captureId: "old-daemon-overview" });
+      timeline.step({ id: "nav-old-storage", op: "pointer.click", target: { surface: "system-monitor-window", testId: "sysmon-nav-storage" }, button: "primary" });
+      timeline.advance("old-storage-settle", 350);
+      timeline.step({ id: "cap-old-storage", op: "capture", surface: "system-monitor-window", captureId: "old-daemon-storage" });
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-design-sysmon-old-daemon",
+        initialTopics: {
+          "wayland.outputs": outputsTopic,
+          "system.telemetry": makeTwoActiveNicTelemetrySnapshot({ legacyDaemon: true }),
+        },
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-sysmon-old-daemon",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(published.dist, fixture, scenario, oldRun.out);
+      expectCleanPreview(result, 2, 0);
+
+      const oldOverview = readCapture(oldRun.out, "system-monitor-window", "old-daemon-overview");
+      expect(treeNode(oldOverview.tree, "sysmon-win-net-title").text).toBe("Network · enp4s0");
+      expect(treeNode(oldOverview.tree, "sysmon-win-net-rx").text).toBe("↓ 3.0 MB/s");
+
+      const oldStorage = readCapture(oldRun.out, "system-monitor-window", "old-daemon-storage");
+      expect(treeNode(oldStorage.tree, "sysmon-detail-net-title").text).toBe("Network · enp4s0");
+      expect(treeNode(oldStorage.tree, "sysmon-detail-net-rates").text).toBe("↓ 3.0 MB/s · ↑ 500 KB/s");
+    } finally {
+      oldRun.cleanup();
     }
   }, 30_000);
 

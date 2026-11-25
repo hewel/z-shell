@@ -2,6 +2,7 @@
 
 use crate::Topic;
 use rustix::fs::{Mode, OFlags, open};
+use rustix::time::{ClockId, clock_gettime};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
@@ -171,9 +172,45 @@ pub struct NetworkTelemetry {
     pub session_rx_bytes: u64,
     /// Session-accumulated transmitted bytes on the active interface since sampler start.
     pub session_tx_bytes: u64,
+    /// Aggregated throughput and session totals across all active-eligible non-loopback interfaces.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aggregate: Option<NetworkAggregateTelemetry>,
     /// All observed non-loopback interfaces sorted by name.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub interfaces: Vec<NetworkInterfaceTelemetry>,
+}
+
+/// Aggregated raw non-loopback network throughput and session totals across active-eligible
+/// interfaces (`up != Some(false)`).
+///
+/// Reports raw per-interface traffic summed across all active-eligible non-loopback links
+/// (not deduplicated internet traffic: e.g., a VPN tunnel interface and its underlying physical
+/// NIC are both summed).
+///
+/// Deliberate divergences from GNOME System Monitor's `load-graph.cpp`:
+/// - Per-interface baselines in `Sampler::net_state` prevent hotplug spikes and interface-switch
+///   gaps without discarding the aggregate when another link appears or disappears.
+/// - Links explicitly reported down (`up == Some(false)`) are excluded from active aggregation.
+/// - Initial samples, suspend/resume gaps, unreadable `/proc/net/dev`, empty interface sets, and
+///   all-active counter resets emit `None` (`null`) truthfully rather than fabricating `0`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct NetworkAggregateTelemetry {
+    /// Number of observed active-eligible (`up != Some(false)`) non-loopback interfaces.
+    pub active_interface_count: u32,
+    /// Sorted names of active-eligible non-loopback interfaces included in the aggregate.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub active_interfaces: Vec<String>,
+    /// Summed receive throughput in bytes/sec across active-eligible interfaces with valid RX deltas.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rx_bytes_per_sec: Option<u64>,
+    /// Summed transmit throughput in bytes/sec across active-eligible interfaces with valid TX deltas.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tx_bytes_per_sec: Option<u64>,
+    /// Monotonic session-accumulated received bytes summed across all valid active-eligible deltas.
+    pub session_rx_bytes: u64,
+    /// Monotonic session-accumulated transmitted bytes summed across all valid active-eligible deltas.
+    pub session_tx_bytes: u64,
 }
 
 /// Telemetry for one non-loopback network interface.
@@ -305,6 +342,9 @@ pub struct TelemetryHistory {
 pub struct HistoryWindow {
     /// Duration of each bucket in seconds (`1`, `5`, or `15`).
     pub bucket_seconds: u32,
+    /// Monotonic bucket index of the rightmost slot in this window.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_bucket_id: Option<u64>,
     /// Aggregate CPU busy utilization (%) series.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub cpu_percent: Vec<Option<f64>>,
@@ -320,12 +360,27 @@ pub struct HistoryWindow {
     /// Active network interface TX throughput (bytes/sec) series.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub net_tx_bytes_per_sec: Vec<Option<u64>>,
+    /// Aggregated non-loopback RX throughput (bytes/sec) series across active-eligible interfaces.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub aggregate_net_rx_bytes_per_sec: Vec<Option<u64>>,
+    /// Aggregated non-loopback TX throughput (bytes/sec) series across active-eligible interfaces.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub aggregate_net_tx_bytes_per_sec: Vec<Option<u64>>,
     /// Aggregate block device read throughput (bytes/sec) series.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub disk_read_bytes_per_sec: Vec<Option<u64>>,
     /// Aggregate block device write throughput (bytes/sec) series.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub disk_write_bytes_per_sec: Vec<Option<u64>>,
+}
+
+/// Reads the suspend-aware Linux `CLOCK_BOOTTIME` monotonic clock as a `Duration`.
+#[must_use]
+pub fn boottime_now() -> Duration {
+    let ts = clock_gettime(ClockId::Boottime);
+    let secs = u64::try_from(ts.tv_sec).unwrap_or(0);
+    let nanos = u32::try_from(ts.tv_nsec).unwrap_or(0);
+    Duration::new(secs, nanos)
 }
 
 type MountStatProvider = Box<dyn Fn(&Path) -> Option<MountStat> + Send>;
@@ -337,13 +392,17 @@ pub struct Sampler {
     poll_interval: Duration,
     max_sample_gap: Duration,
     mount_stat_provider: MountStatProvider,
-    epoch: Option<Instant>,
-    last_sample_at: Option<Instant>,
+    boottime_epoch: Option<Duration>,
+    instant_epoch: Option<Instant>,
+    last_sample_elapsed: Option<Duration>,
     previous_cpu: Option<CpuTicks>,
     previous_cores: BTreeMap<u32, CpuTicks>,
     cached_cpu_model: Option<String>,
     previous_primary_gpu_id: Option<String>,
     previous_active_net_iface: Option<String>,
+    last_net_sample_elapsed: Option<Duration>,
+    aggregate_net_session_rx: u64,
+    aggregate_net_session_tx: u64,
     net_state: HashMap<String, NetInterfaceState>,
     previous_disk: Option<DiskState>,
     history_60s: RollingWindowState,
@@ -381,13 +440,17 @@ impl Sampler {
             poll_interval: POLL_INTERVAL,
             max_sample_gap: Duration::from_secs(10),
             mount_stat_provider: provider,
-            epoch: None,
-            last_sample_at: None,
+            boottime_epoch: None,
+            instant_epoch: None,
+            last_sample_elapsed: None,
             previous_cpu: None,
             previous_cores: BTreeMap::new(),
             cached_cpu_model: None,
             previous_primary_gpu_id: None,
             previous_active_net_iface: None,
+            last_net_sample_elapsed: None,
+            aggregate_net_session_rx: 0,
+            aggregate_net_session_tx: 0,
             net_state: HashMap::new(),
             previous_disk: None,
             history_60s: RollingWindowState::new(1, HISTORY_BUCKETS),
@@ -414,17 +477,26 @@ impl Sampler {
         self
     }
 
-    /// Reads a fresh snapshot at the current monotonic instant.
+    /// Reads a fresh snapshot using the suspend-aware Linux `CLOCK_BOOTTIME` clock so
+    /// suspend/resume jumps are accurately detected even when `CLOCK_MONOTONIC` pauses during sleep.
     pub fn sample(&mut self) -> Snapshot {
-        self.sample_at(Instant::now())
+        let now = boottime_now();
+        let epoch = *self.boottime_epoch.get_or_insert(now);
+        let elapsed_since_epoch = now.saturating_sub(epoch);
+        self.sample_at_elapsed(elapsed_since_epoch)
     }
 
     /// Reads a fresh snapshot at an explicit monotonic timestamp, enabling deterministic
     /// rate, bucketing, suspend/resume gap, and history eviction tests.
     pub fn sample_at(&mut self, now: Instant) -> Snapshot {
-        let epoch = *self.epoch.get_or_insert(now);
-        let prev_at = self.last_sample_at.replace(now);
-        let elapsed = prev_at.and_then(|previous| now.checked_duration_since(previous));
+        let epoch = *self.instant_epoch.get_or_insert(now);
+        let elapsed_since_epoch = now.saturating_duration_since(epoch);
+        self.sample_at_elapsed(elapsed_since_epoch)
+    }
+
+    fn sample_at_elapsed(&mut self, elapsed_since_epoch: Duration) -> Snapshot {
+        let prev_elapsed = self.last_sample_elapsed.replace(elapsed_since_epoch);
+        let elapsed = prev_elapsed.and_then(|previous| elapsed_since_epoch.checked_sub(previous));
         let gap_exceeded = elapsed.is_some_and(|dt| dt > self.max_sample_gap);
 
         // 1. CPU & system load/uptime
@@ -510,8 +582,8 @@ impl Sampler {
         };
         self.previous_primary_gpu_id = current_primary_gpu_id;
 
-        // 5. Network (non-loopback rates + per-interface session totals)
-        let network = self.sample_network(now, gap_exceeded);
+        // 5. Network (non-loopback rates + per-interface session totals + active aggregate)
+        let network = self.sample_network(elapsed_since_epoch, gap_exceeded);
         let current_active_iface = network
             .as_ref()
             .and_then(|net| net.active_interface.clone());
@@ -522,7 +594,7 @@ impl Sampler {
         self.previous_active_net_iface = current_active_iface;
 
         // 6. Single-layer block Disk I/O + isolated local mounts
-        let storage = self.sample_storage(now, gap_exceeded);
+        let storage = self.sample_storage(elapsed_since_epoch, gap_exceeded);
 
         let has_any_source = self.previous_cpu.is_some()
             || cpu_usage_percent.is_some()
@@ -563,6 +635,22 @@ impl Sampler {
             } else {
                 network.as_ref().and_then(|net| net.tx_bytes_per_sec)
             },
+            aggregate_net_rx_bytes_per_sec: if gap_exceeded {
+                None
+            } else {
+                network
+                    .as_ref()
+                    .and_then(|net| net.aggregate.as_ref())
+                    .and_then(|agg| agg.rx_bytes_per_sec)
+            },
+            aggregate_net_tx_bytes_per_sec: if gap_exceeded {
+                None
+            } else {
+                network
+                    .as_ref()
+                    .and_then(|net| net.aggregate.as_ref())
+                    .and_then(|agg| agg.tx_bytes_per_sec)
+            },
             disk_read_bytes_per_sec: if gap_exceeded {
                 None
             } else {
@@ -575,18 +663,26 @@ impl Sampler {
             },
         };
 
-        let elapsed_since_epoch_ms = now.saturating_duration_since(epoch).as_millis() as u64;
-        self.history_60s
-            .record(elapsed_since_epoch_ms, history_sample);
-        self.history_5m
-            .record(elapsed_since_epoch_ms, history_sample);
-        self.history_15m
-            .record(elapsed_since_epoch_ms, history_sample);
+        // Quantize elapsed history timestamps to the nearest poll grid tick so sub-period
+        // timer jitter (e.g. 999ms / 2001ms on a 1s interval) never drops adjacent buckets,
+        // while keeping unquantized `elapsed_since_epoch` for all rate calculations and gap checks.
+        let elapsed_since_epoch_ms =
+            u64::try_from(elapsed_since_epoch.as_millis()).unwrap_or(u64::MAX);
+        let poll_ms = u64::try_from(self.poll_interval.as_millis()).unwrap_or(u64::MAX);
+        let history_elapsed_ms = elapsed_since_epoch_ms
+            .saturating_add(poll_ms / 2)
+            .checked_div(poll_ms)
+            .map_or(elapsed_since_epoch_ms, |ticks| {
+                ticks.saturating_mul(poll_ms)
+            });
+        self.history_60s.record(history_elapsed_ms, history_sample);
+        self.history_5m.record(history_elapsed_ms, history_sample);
+        self.history_15m.record(history_elapsed_ms, history_sample);
 
         let history = Some(TelemetryHistory {
-            window_60s: self.history_60s.materialize(elapsed_since_epoch_ms),
-            window_5m: self.history_5m.materialize(elapsed_since_epoch_ms),
-            window_15m: self.history_15m.materialize(elapsed_since_epoch_ms),
+            window_60s: self.history_60s.materialize(history_elapsed_ms),
+            window_5m: self.history_5m.materialize(history_elapsed_ms),
+            window_15m: self.history_15m.materialize(history_elapsed_ms),
         });
 
         Snapshot {
@@ -608,11 +704,16 @@ impl Sampler {
         self.previous_cpu.is_some()
     }
 
-    fn sample_network(&mut self, now: Instant, gap_exceeded: bool) -> Option<NetworkTelemetry> {
+    fn sample_network(
+        &mut self,
+        now_elapsed: Duration,
+        gap_exceeded: bool,
+    ) -> Option<NetworkTelemetry> {
         let Some(readings) = parse_net_dev(&self.proc_root.join("net/dev")) else {
             for state in self.net_state.values_mut() {
                 state.prev = None;
             }
+            self.last_net_sample_elapsed = None;
             return None;
         };
 
@@ -631,39 +732,73 @@ impl Sampler {
         }
 
         if seen.is_empty() {
+            self.last_net_sample_elapsed = None;
             return None;
         }
 
+        let prev_net_elapsed = self.last_net_sample_elapsed.replace(now_elapsed);
+        let valid_net_interval = !gap_exceeded
+            && prev_net_elapsed
+                .and_then(|previous| now_elapsed.checked_sub(previous))
+                .is_some_and(|dt| !dt.is_zero() && dt <= self.max_sample_gap);
+
         let mut interfaces = Vec::with_capacity(seen.len());
         let mut raw_totals: HashMap<String, u64> = HashMap::with_capacity(seen.len());
+        let mut active_interfaces = Vec::with_capacity(seen.len());
+        let mut agg_rx_sum: u64 = 0;
+        let mut agg_rx_valid: u32 = 0;
+        let mut agg_tx_sum: u64 = 0;
+        let mut agg_tx_valid: u32 = 0;
 
         for (name, (rx, tx)) in seen {
             let up = read_interface_up(&self.sys_root.join("class/net").join(&name));
+            let active_eligible = up != Some(false);
             let entry = self.net_state.entry(name.clone()).or_default();
-            let (rx_bps, tx_bps) = if gap_exceeded {
-                (None, None)
+            let (rx_delta, rx_bps, tx_delta, tx_bps) = if gap_exceeded {
+                (None, None, None, None)
             } else if let Some((prev_rx, prev_tx, prev_at)) = entry.prev {
-                let dt = now
-                    .checked_duration_since(prev_at)
+                let dt = now_elapsed
+                    .checked_sub(prev_at)
                     .filter(|dt| !dt.is_zero() && *dt <= self.max_sample_gap);
                 if let Some(dt) = dt {
                     let secs = dt.as_secs_f64();
-                    let rx_rate = rx.checked_sub(prev_rx).map(|delta| {
+                    let rx_delta = rx.checked_sub(prev_rx);
+                    let rx_rate = rx_delta.map(|delta| {
                         entry.session_rx = entry.session_rx.saturating_add(delta);
                         (delta as f64 / secs).round() as u64
                     });
-                    let tx_rate = tx.checked_sub(prev_tx).map(|delta| {
+                    let tx_delta = tx.checked_sub(prev_tx);
+                    let tx_rate = tx_delta.map(|delta| {
                         entry.session_tx = entry.session_tx.saturating_add(delta);
                         (delta as f64 / secs).round() as u64
                     });
-                    (rx_rate, tx_rate)
+                    (rx_delta, rx_rate, tx_delta, tx_rate)
                 } else {
-                    (None, None)
+                    (None, None, None, None)
                 }
             } else {
-                (None, None)
+                (None, None, None, None)
             };
-            entry.prev = Some((rx, tx, now));
+            entry.prev = Some((rx, tx, now_elapsed));
+            if active_eligible {
+                active_interfaces.push(name.clone());
+                if let Some(delta) = rx_delta {
+                    self.aggregate_net_session_rx =
+                        self.aggregate_net_session_rx.saturating_add(delta);
+                }
+                if let Some(rate) = rx_bps {
+                    agg_rx_sum = agg_rx_sum.saturating_add(rate);
+                    agg_rx_valid += 1;
+                }
+                if let Some(delta) = tx_delta {
+                    self.aggregate_net_session_tx =
+                        self.aggregate_net_session_tx.saturating_add(delta);
+                }
+                if let Some(rate) = tx_bps {
+                    agg_tx_sum = agg_tx_sum.saturating_add(rate);
+                    agg_tx_valid += 1;
+                }
+            }
             raw_totals.insert(name.clone(), rx.saturating_add(tx));
             interfaces.push(NetworkInterfaceTelemetry {
                 name,
@@ -676,6 +811,29 @@ impl Sampler {
         }
 
         interfaces.sort_by(|a, b| a.name.cmp(&b.name));
+        active_interfaces.sort();
+
+        let all_known_down = active_interfaces.is_empty();
+        let aggregate = Some(NetworkAggregateTelemetry {
+            active_interface_count: active_interfaces.len() as u32,
+            active_interfaces,
+            rx_bytes_per_sec: if agg_rx_valid > 0 {
+                Some(agg_rx_sum)
+            } else if all_known_down && valid_net_interval {
+                Some(0)
+            } else {
+                None
+            },
+            tx_bytes_per_sec: if agg_tx_valid > 0 {
+                Some(agg_tx_sum)
+            } else if all_known_down && valid_net_interval {
+                Some(0)
+            } else {
+                None
+            },
+            session_rx_bytes: self.aggregate_net_session_rx,
+            session_tx_bytes: self.aggregate_net_session_tx,
+        });
 
         let active = interfaces
             .iter()
@@ -726,11 +884,16 @@ impl Sampler {
             tx_bytes_per_sec,
             session_rx_bytes,
             session_tx_bytes,
+            aggregate,
             interfaces,
         })
     }
 
-    fn sample_storage(&mut self, now: Instant, gap_exceeded: bool) -> Option<StorageTelemetry> {
+    fn sample_storage(
+        &mut self,
+        now_elapsed: Duration,
+        gap_exceeded: bool,
+    ) -> Option<StorageTelemetry> {
         let disk_readings = parse_diskstats(
             &self.proc_root.join("diskstats"),
             &self.sys_root.join("class/block"),
@@ -739,14 +902,14 @@ impl Sampler {
         let (read_bytes_per_sec, write_bytes_per_sec) = match disk_readings {
             Some(current_devices) if !current_devices.is_empty() => {
                 let prev = self.previous_disk.replace(DiskState {
-                    at: now,
+                    at: now_elapsed,
                     devices: current_devices.clone(),
                 });
                 if gap_exceeded {
                     (None, None)
                 } else if let Some(prev) = prev {
-                    let dt = now
-                        .checked_duration_since(prev.at)
+                    let dt = now_elapsed
+                        .checked_sub(prev.at)
                         .filter(|dt| !dt.is_zero() && *dt <= self.max_sample_gap);
                     if let Some(dt) = dt {
                         compute_disk_rates(&prev.devices, &current_devices, dt)
@@ -782,14 +945,14 @@ impl Sampler {
 
 #[derive(Debug, Default)]
 struct NetInterfaceState {
-    prev: Option<(u64, u64, Instant)>,
+    prev: Option<(u64, u64, Duration)>,
     session_rx: u64,
     session_tx: u64,
 }
 
 #[derive(Debug)]
 struct DiskState {
-    at: Instant,
+    at: Duration,
     devices: BTreeMap<String, (u64, u64)>,
 }
 
@@ -828,6 +991,8 @@ struct HistorySample {
     gpu_percent: Option<f64>,
     net_rx_bytes_per_sec: Option<u64>,
     net_tx_bytes_per_sec: Option<u64>,
+    aggregate_net_rx_bytes_per_sec: Option<u64>,
+    aggregate_net_tx_bytes_per_sec: Option<u64>,
     disk_read_bytes_per_sec: Option<u64>,
     disk_write_bytes_per_sec: Option<u64>,
 }
@@ -845,6 +1010,10 @@ struct BucketAccumulator {
     net_rx_count: u32,
     net_tx_sum: u128,
     net_tx_count: u32,
+    agg_net_rx_sum: u128,
+    agg_net_rx_count: u32,
+    agg_net_tx_sum: u128,
+    agg_net_tx_count: u32,
     disk_r_sum: u128,
     disk_r_count: u32,
     disk_w_sum: u128,
@@ -880,6 +1049,14 @@ impl BucketAccumulator {
             self.net_tx_sum += u128::from(v);
             self.net_tx_count += 1;
         }
+        if let Some(v) = sample.aggregate_net_rx_bytes_per_sec {
+            self.agg_net_rx_sum += u128::from(v);
+            self.agg_net_rx_count += 1;
+        }
+        if let Some(v) = sample.aggregate_net_tx_bytes_per_sec {
+            self.agg_net_tx_sum += u128::from(v);
+            self.agg_net_tx_count += 1;
+        }
         if let Some(v) = sample.disk_read_bytes_per_sec {
             self.disk_r_sum += u128::from(v);
             self.disk_r_count += 1;
@@ -908,6 +1085,16 @@ impl BucketAccumulator {
 
     fn net_tx(&self) -> Option<u64> {
         (self.net_tx_count > 0).then(|| (self.net_tx_sum / u128::from(self.net_tx_count)) as u64)
+    }
+
+    fn aggregate_net_rx(&self) -> Option<u64> {
+        (self.agg_net_rx_count > 0)
+            .then(|| (self.agg_net_rx_sum / u128::from(self.agg_net_rx_count)) as u64)
+    }
+
+    fn aggregate_net_tx(&self) -> Option<u64> {
+        (self.agg_net_tx_count > 0)
+            .then(|| (self.agg_net_tx_sum / u128::from(self.agg_net_tx_count)) as u64)
     }
 
     fn disk_read(&self) -> Option<u64> {
@@ -974,11 +1161,14 @@ impl RollingWindowState {
         let mut gpu_percent = vec![None; len];
         let mut net_rx_bytes_per_sec = vec![None; len];
         let mut net_tx_bytes_per_sec = vec![None; len];
+        let mut aggregate_net_rx_bytes_per_sec = vec![None; len];
+        let mut aggregate_net_tx_bytes_per_sec = vec![None; len];
         let mut disk_read_bytes_per_sec = vec![None; len];
         let mut disk_write_bytes_per_sec = vec![None; len];
 
         let mut has_gpu = false;
         let mut has_net = false;
+        let mut has_agg_net = false;
         let mut has_disk = false;
 
         for bucket in &self.buckets {
@@ -1003,6 +1193,13 @@ impl RollingWindowState {
             }
             net_rx_bytes_per_sec[idx] = rx;
             net_tx_bytes_per_sec[idx] = tx;
+            let agg_rx = bucket.aggregate_net_rx();
+            let agg_tx = bucket.aggregate_net_tx();
+            if agg_rx.is_some() || agg_tx.is_some() {
+                has_agg_net = true;
+            }
+            aggregate_net_rx_bytes_per_sec[idx] = agg_rx;
+            aggregate_net_tx_bytes_per_sec[idx] = agg_tx;
             let dr = bucket.disk_read();
             let dw = bucket.disk_write();
             if dr.is_some() || dw.is_some() {
@@ -1019,6 +1216,10 @@ impl RollingWindowState {
             net_rx_bytes_per_sec.clear();
             net_tx_bytes_per_sec.clear();
         }
+        if !has_agg_net {
+            aggregate_net_rx_bytes_per_sec.clear();
+            aggregate_net_tx_bytes_per_sec.clear();
+        }
         if !has_disk {
             disk_read_bytes_per_sec.clear();
             disk_write_bytes_per_sec.clear();
@@ -1026,11 +1227,14 @@ impl RollingWindowState {
 
         HistoryWindow {
             bucket_seconds: self.bucket_seconds,
+            latest_bucket_id: Some(cur_bucket),
             cpu_percent,
             memory_percent,
             gpu_percent,
             net_rx_bytes_per_sec,
             net_tx_bytes_per_sec,
+            aggregate_net_rx_bytes_per_sec,
+            aggregate_net_tx_bytes_per_sec,
             disk_read_bytes_per_sec,
             disk_write_bytes_per_sec,
         }
@@ -1046,16 +1250,19 @@ struct CpuTicks([u64; 8]);
 
 impl CpuTicks {
     fn usage_since(self, previous: Self) -> Option<f64> {
-        let mut total = 0_u128;
-        let mut idle = 0_u128;
-        for (index, (current, previous)) in self.0.into_iter().zip(previous.0).enumerate() {
-            let delta = u128::from(current.checked_sub(previous)?);
-            total += delta;
-            if matches!(index, 3 | 4) {
-                idle += delta;
-            }
+        let mut busy = 0_u128;
+        for index in [0, 1, 2, 5, 6, 7] {
+            busy += u128::from(self.0[index].checked_sub(previous.0[index])?);
         }
-        (total != 0).then(|| (total - idle) as f64 * 100.0 / total as f64)
+        // Tickless Linux kernels (`CONFIG_NO_HZ_IDLE`) can briefly retract `idle` or `iowait`
+        // by 1–2 ticks between adjacent `/proc/stat` reads. Combine them with saturating
+        // subtraction so benign NO_HZ jitter never discards a valid busy interval while genuine
+        // busy-counter resets still yield `None`.
+        let curr_idle = u128::from(self.0[3]) + u128::from(self.0[4]);
+        let prev_idle = u128::from(previous.0[3]) + u128::from(previous.0[4]);
+        let idle = curr_idle.saturating_sub(prev_idle);
+        let total = busy + idle;
+        (total != 0).then(|| busy as f64 * 100.0 / total as f64)
     }
 }
 

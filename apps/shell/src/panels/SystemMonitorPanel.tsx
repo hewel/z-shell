@@ -13,6 +13,7 @@ import {
   formatRateBytesPerSec,
   formatUptimeCompact,
   selectHeadlineTempCelsius,
+  selectNetworkDisplay,
   selectPrimaryGpu,
   selectTelemetryHistoryWindow,
 } from "../topics.ts";
@@ -121,17 +122,17 @@ export function SystemMonitorPanel(): NativeChild {
       });
     }
 
-    const net = current?.network;
-    if (net) {
-      const rxLabel = net.rx_bytes_per_sec != null ? `↓ ${formatRateBytesPerSec(net.rx_bytes_per_sec)}` : "—";
+    const netDisplay = selectNetworkDisplay(current?.network, history60s());
+    if (netDisplay) {
+      const rxLabel = netDisplay.rxBytesPerSec != null ? `↓ ${formatRateBytesPerSec(netDisplay.rxBytesPerSec)}` : "—";
       const detailParts: string[] = [];
-      if (net.tx_bytes_per_sec != null) detailParts.push(`↑ ${formatRateBytesPerSec(net.tx_bytes_per_sec)}`);
-      if (net.active_interface) detailParts.push(net.active_interface);
+      if (netDisplay.txBytesPerSec != null) detailParts.push(`↑ ${formatRateBytesPerSec(netDisplay.txBytesPerSec)}`);
+      if (netDisplay.label) detailParts.push(netDisplay.label);
       tiles.push({
         id: "network",
         title: "Network",
         value: rxLabel,
-        accentValue: net.rx_bytes_per_sec != null,
+        accentValue: netDisplay.rxBytesPerSec != null,
         detail: detailParts.join(" · ") || "Waiting for interval",
       });
     }
@@ -266,6 +267,10 @@ export function SystemMonitorPanel(): NativeChild {
                 variant="popover"
                 values={series()}
                 maxValue={100}
+                bucketSeconds={history60s()?.bucket_seconds}
+                latestBucketId={history60s()?.latest_bucket_id}
+                sourceBaseline={telemetry.sourceBaseline()}
+                revision={telemetry.revision()}
               />
             )}
           </Show>

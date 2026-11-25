@@ -1,8 +1,15 @@
 import { describe, expect, test } from "bun:test";
 
+import { activeMotionTickerCount } from "@z-shell/sdk/zgui";
 import {
+  THROUGHPUT_SCALE_FLOOR_BPS,
   buildSparklinePaths,
   buildSplitDualArcPaths,
+  classifyHistoryTransition,
+  createChartScrollController,
+  formatThroughputAxisLabel,
+  niceThroughputCeiling,
+  resolveThroughputScale,
 } from "../src/charts.ts";
 import {
   DEFAULT_BAR_SETTINGS,
@@ -45,6 +52,7 @@ import {
   resolvePinnedOutput,
   selectActiveMediaPlayer,
   selectHeadlineTempCelsius,
+  selectNetworkDisplay,
   selectPrimaryGpu,
   selectTelemetryHistoryWindow,
   splitNotificationActions,
@@ -56,6 +64,8 @@ import {
   type EdgeOverrides,
   type MediaPlayer,
   type SystemTelemetrySnapshot,
+  type TelemetryHistoryWindow,
+  type TelemetryNetwork,
   type WallpaperSnapshot,
   type WaylandOutput,
   type WaylandOutputsSnapshot,
@@ -1141,5 +1151,362 @@ describe("System Monitor telemetry helpers, chart paths & backwards compatibilit
     expect(formatBytesGiB(extendedSnapshot.memory!.used_bytes)).toBe("11.4 GiB");
     expect(maxThermalCelsius(extendedSnapshot.temperatures)).toBe(46);
     expect(selectHeadlineTempCelsius(extendedSnapshot)).toBe(52);
+  });
+
+  test("right-aligned 60-slot geometry keeps all vertices (including slot -1 overhang) inside [0, width] across all chart viewBoxes", () => {
+    const extractPathXs = (d: string): number[] => {
+      const xs: number[] = [];
+      const tokens = d.match(/[MLC]|-?\d+(?:\.\d+)?/g) ?? [];
+      let i = 0;
+      while (i < tokens.length) {
+        const cmd = tokens[i]!;
+        if (cmd === "M" || cmd === "L") {
+          xs.push(Number(tokens[i + 1]));
+          i += 3;
+        } else if (cmd === "C") {
+          xs.push(Number(tokens[i + 1]), Number(tokens[i + 3]), Number(tokens[i + 5]));
+          i += 7;
+        } else {
+          i += 1;
+        }
+      }
+      return xs;
+    };
+
+    const full60 = Array.from({ length: 60 }, (_, idx) => 20 + ((idx * 17) % 70));
+    const variants = [
+      { label: "area-popover", width: 340, height: 72, paddingX: 8, smooth: true },
+      { label: "area-window", width: 380, height: 88, paddingX: 8, smooth: true },
+      { label: "area-window-wide", width: 536, height: 88, paddingX: 10, smooth: true },
+      { label: "area-detail", width: 536, height: 112, paddingX: 10, smooth: true },
+      { label: "dual-compact", width: 250, height: 64, paddingX: 6, smooth: false },
+      { label: "dual-compact-wide", width: 536, height: 64, paddingX: 10, smooth: false },
+      { label: "dual-detail", width: 536, height: 96, paddingX: 10, smooth: false },
+    ] as const;
+
+    for (const v of variants) {
+      const res = buildSparklinePaths(full60, {
+        width: v.width,
+        height: v.height,
+        paddingX: v.paddingX,
+        paddingTop: 10,
+        paddingBottom: 8,
+        maxValue: 100,
+        smooth: v.smooth,
+        slotCount: 60,
+        leadingValue: 65,
+      });
+      expect(res.hasData, v.label).toBe(true);
+      expect(res.slotPitch, `${v.label}: paddingX >= slotPitch`).toBeLessThanOrEqual(v.paddingX);
+
+      const xs = extractPathXs(res.strokePath);
+      expect(xs.length, v.label).toBeGreaterThan(60);
+      expect(xs[0], `${v.label}: slot -1 overhang sits at paddingX - slotPitch`).toBeCloseTo(
+        v.paddingX - res.slotPitch,
+        1,
+      );
+      expect(xs[xs.length - 1], `${v.label}: rightmost slot sits at width - paddingX`).toBeCloseTo(
+        v.width - v.paddingX,
+        1,
+      );
+      for (const x of xs) {
+        expect(x, `${v.label}: vertex x=${x} >= 0`).toBeGreaterThanOrEqual(0);
+        expect(x, `${v.label}: vertex x=${x} <= width`).toBeLessThanOrEqual(v.width);
+      }
+
+      // Leading null must break cleanly at slot 0 instead of connecting to slot -1.
+      const nullLeading = buildSparklinePaths(full60, {
+        width: v.width,
+        height: v.height,
+        paddingX: v.paddingX,
+        paddingTop: 10,
+        paddingBottom: 8,
+        maxValue: 100,
+        smooth: v.smooth,
+        slotCount: 60,
+        leadingValue: null,
+      });
+      const nullXs = extractPathXs(nullLeading.strokePath);
+      expect(nullXs[0], `${v.label}: leading null starts cleanly at paddingX`).toBeCloseTo(v.paddingX, 1);
+    }
+
+    // Partial series right-aligns to the right edge (slot 59 = width - paddingX).
+    const partial = buildSparklinePaths([20, 40, 60], {
+      width: 340,
+      height: 72,
+      paddingX: 8,
+      maxValue: 100,
+      slotCount: 60,
+      smooth: false,
+    });
+    const partialXs = extractPathXs(partial.strokePath);
+    expect(partialXs[0]).toBeCloseTo(8 + 57 * partial.slotPitch, 1);
+    expect(partialXs[partialXs.length - 1]).toBeCloseTo(332, 1);
+
+    // MiniSparkline right-aligns to the latest 30 slots of a 60-slot buffer.
+    const mini = buildSparklinePaths(full60, {
+      width: 36,
+      height: 16,
+      paddingX: 1.5,
+      paddingTop: 2.5,
+      paddingBottom: 2.5,
+      maxValue: 100,
+      smooth: false,
+      slotCount: 30,
+    });
+    const miniXs = extractPathXs(mini.strokePath);
+    expect(miniXs.length).toBe(30);
+    expect(miniXs[0]).toBeCloseTo(1.5, 1);
+    expect(miniXs[miniXs.length - 1]).toBeCloseTo(34.5, 1);
+  });
+
+  test("niceThroughputCeiling, resolveThroughputScale 0.8x hysteresis (including multi-tier drops), and axis labels", () => {
+    const KiB = 1024;
+    const MiB = 1024 ** 2;
+    const GiB = 1024 ** 3;
+
+    expect(niceThroughputCeiling(0)).toBe(THROUGHPUT_SCALE_FLOOR_BPS);
+    expect(niceThroughputCeiling(1024)).toBe(10 * KiB);
+    expect(niceThroughputCeiling(10 * KiB)).toBe(10 * KiB);
+    expect(niceThroughputCeiling(10 * KiB + 1)).toBe(20 * KiB);
+    expect(niceThroughputCeiling(450 * KiB)).toBe(500 * KiB);
+    expect(niceThroughputCeiling(501 * KiB)).toBe(1 * MiB);
+    expect(niceThroughputCeiling(4.2 * MiB)).toBe(5 * MiB);
+    expect(niceThroughputCeiling(52 * MiB)).toBe(100 * MiB);
+    expect(niceThroughputCeiling(600 * MiB)).toBe(1 * GiB);
+
+    // Initial scale snaps cleanly.
+    expect(resolveThroughputScale(4.2 * MiB, null)).toBe(5 * MiB);
+    // Immediate upward jump.
+    expect(resolveThroughputScale(10.1 * MiB, 10 * MiB)).toBe(20 * MiB);
+    // Downward 0.8x hysteresis prevents oscillation near lower rung boundary.
+    expect(resolveThroughputScale(4.5 * MiB, 10 * MiB)).toBe(10 * MiB);
+    expect(resolveThroughputScale(4.0 * MiB, 10 * MiB)).toBe(5 * MiB);
+    // Multi-tier drop never stalls at 100 MB/s even when peak sits at 90% of 500 KB/s (450 KB/s -> 1 MB/s).
+    expect(resolveThroughputScale(450 * KiB, 100 * MiB)).toBe(1 * MiB);
+    expect(resolveThroughputScale(380 * KiB, 100 * MiB)).toBe(500 * KiB);
+    expect(resolveThroughputScale(0, 100 * MiB)).toBe(10 * KiB);
+
+    expect(formatThroughputAxisLabel(10 * KiB)).toBe("10 KB/s");
+    expect(formatThroughputAxisLabel(512 * KiB)).toBe("512 KB/s");
+    expect(formatThroughputAxisLabel(2.5 * MiB)).toBe("2.5 MB/s");
+    expect(formatThroughputAxisLabel(5 * MiB)).toBe("5 MB/s");
+    expect(formatThroughputAxisLabel(1 * GiB)).toBe("1 GB/s");
+  });
+
+  test("classifyHistoryTransition animates only on proven deltaBuckets === 1 and preserves in_place on delta === 0", () => {
+    const snapA = { latestBucketId: 100, resetKey: "60s", seriesLength: 60, firstValue: 22, secondaryFirstValue: 11 };
+    const snapB = { latestBucketId: 101, resetKey: "60s", seriesLength: 60, firstValue: 25, secondaryFirstValue: 13 };
+
+    expect(classifyHistoryTransition({ previous: null, next: snapA, slotCount: 60 })).toEqual({ kind: "snap" });
+    expect(classifyHistoryTransition({ previous: snapA, next: snapB, slotCount: 60, revision: 2, previousRevision: 1 }))
+      .toEqual({ kind: "advance", exitingValue: 22, secondaryExitingValue: 11 });
+
+    // Partial buffer (< 60) advances without an exiting slot -1 value.
+    expect(classifyHistoryTransition({
+      previous: { latestBucketId: 10, resetKey: "60s", seriesLength: 11, firstValue: 22, secondaryFirstValue: 11 },
+      next: { latestBucketId: 11, resetKey: "60s", seriesLength: 12, firstValue: 22, secondaryFirstValue: 11 },
+      slotCount: 60,
+    })).toEqual({ kind: "advance", exitingValue: null, secondaryExitingValue: null });
+
+    // delta === 0 (e.g. 5m/15m mid-bucket live tick) preserves any active scroll in place.
+    expect(classifyHistoryTransition({ previous: snapB, next: snapB, slotCount: 60, revision: 3, previousRevision: 2 }))
+      .toEqual({ kind: "in_place" });
+
+    // Multi-bucket jump, missing metadata (legacy daemon), sourceBaseline, resetKey change, or reconnect revision reset all snap.
+    expect(classifyHistoryTransition({
+      previous: snapA,
+      next: { ...snapB, latestBucketId: 103 },
+      slotCount: 60,
+    })).toEqual({ kind: "snap" });
+    expect(classifyHistoryTransition({
+      previous: { ...snapA, latestBucketId: undefined },
+      next: { ...snapB, latestBucketId: undefined },
+      slotCount: 60,
+    })).toEqual({ kind: "snap" });
+    expect(classifyHistoryTransition({
+      previous: snapA,
+      next: snapB,
+      slotCount: 60,
+      sourceBaseline: true,
+    })).toEqual({ kind: "snap" });
+    expect(classifyHistoryTransition({
+      previous: snapA,
+      next: { ...snapB, resetKey: "5m" },
+      slotCount: 60,
+    })).toEqual({ kind: "snap" });
+    expect(classifyHistoryTransition({
+      previous: snapA,
+      next: snapB,
+      slotCount: 60,
+      revision: 1,
+      previousRevision: 5,
+    })).toEqual({ kind: "snap" });
+  });
+
+  test("selectNetworkDisplay handles two active NICs truthfully in both mixed-version directions", () => {
+    const legacyHistory: TelemetryHistoryWindow = {
+      bucket_seconds: 1,
+      net_rx_bytes_per_sec: [3_000_000, 3_100_000],
+      net_tx_bytes_per_sec: [500_000, 520_000],
+    };
+    const oldDaemonNet: TelemetryNetwork = {
+      active_interface: "enp4s0",
+      rx_bytes_per_sec: 3_100_000,
+      tx_bytes_per_sec: 520_000,
+      session_rx_bytes: 1_200_000_000,
+      session_tx_bytes: 180_000_000,
+      interfaces: [
+        { name: "enp4s0", up: true, rx_bytes_per_sec: 3_100_000, tx_bytes_per_sec: 520_000, session_rx_bytes: 1_200_000_000, session_tx_bytes: 180_000_000 },
+        { name: "wlan0", up: true, rx_bytes_per_sec: 2_000_000, tx_bytes_per_sec: 300_000, session_rx_bytes: 800_000_000, session_tx_bytes: 100_000_000 },
+      ],
+    };
+    const legacySel = selectNetworkDisplay(oldDaemonNet, legacyHistory)!;
+    expect(legacySel.isAggregate).toBe(false);
+    expect(legacySel.label).toBe("enp4s0");
+    expect(legacySel.rxBytesPerSec).toBe(3_100_000);
+    expect(legacySel.txBytesPerSec).toBe(520_000);
+    expect(legacySel.rxHistory).toEqual([3_000_000, 3_100_000]);
+
+    const newHistory: TelemetryHistoryWindow = {
+      ...legacyHistory,
+      latest_bucket_id: 120,
+      aggregate_net_rx_bytes_per_sec: [5_000_000, 5_100_000],
+      aggregate_net_tx_bytes_per_sec: [800_000, 820_000],
+    };
+    const newDaemonNet: TelemetryNetwork = {
+      ...oldDaemonNet,
+      aggregate: {
+        active_interface_count: 2,
+        active_interfaces: ["enp4s0", "wlan0"],
+        rx_bytes_per_sec: 5_100_000,
+        tx_bytes_per_sec: 820_000,
+        session_rx_bytes: 2_000_000_000,
+        session_tx_bytes: 280_000_000,
+      },
+    };
+    const aggSel = selectNetworkDisplay(newDaemonNet, newHistory)!;
+    expect(aggSel.isAggregate).toBe(true);
+    expect(aggSel.label).toBe("2 active");
+    expect(aggSel.rxBytesPerSec).toBe(5_100_000);
+    expect(aggSel.txBytesPerSec).toBe(820_000);
+    expect(aggSel.sessionRxBytes).toBe(2_000_000_000);
+    expect(aggSel.rxHistory).toEqual([5_000_000, 5_100_000]);
+
+    // Single active NIC and all-down (0 active) labels under aggregate daemon.
+    const oneActive = selectNetworkDisplay({
+      ...oldDaemonNet,
+      aggregate: {
+        active_interface_count: 1,
+        active_interfaces: ["enp4s0"],
+        rx_bytes_per_sec: 3_100_000,
+        tx_bytes_per_sec: 520_000,
+        session_rx_bytes: 1_200_000_000,
+        session_tx_bytes: 180_000_000,
+      },
+    }, newHistory)!;
+    expect(oneActive.label).toBe("enp4s0");
+
+    const zeroActive = selectNetworkDisplay({
+      ...oldDaemonNet,
+      aggregate: {
+        active_interface_count: 0,
+        active_interfaces: [],
+        rx_bytes_per_sec: 0,
+        tx_bytes_per_sec: 0,
+        session_rx_bytes: 2_000_000_000,
+        session_tx_bytes: 280_000_000,
+      },
+    }, newHistory)!;
+    expect(zeroActive.label).toBeNull();
+    expect(zeroActive.rxBytesPerSec).toBe(0);
+  });
+
+  test("chart scroll controller lifecycle guarantees activeMotionTickerCount() === 0 after settle, unmount, and reduced motion", () => {
+    let clockMs = 1000;
+    let nextRafId = 1;
+    const pendingFrames = new Map<number, (ts: number) => void>();
+    const g = globalThis as unknown as {
+      requestAnimationFrame?: (cb: (ts: number) => void) => number;
+      cancelAnimationFrame?: (id: number) => void;
+    };
+    const origRaf = g.requestAnimationFrame;
+    const origCaf = g.cancelAnimationFrame;
+    g.requestAnimationFrame = cb => {
+      const id = nextRafId++;
+      pendingFrames.set(id, cb);
+      return id;
+    };
+    g.cancelAnimationFrame = id => {
+      pendingFrames.delete(id);
+    };
+
+    const tick = (advanceMs: number) => {
+      clockMs += advanceMs;
+      const batch = [...pendingFrames.entries()];
+      pendingFrames.clear();
+      for (const [, cb] of batch) cb(clockMs);
+    };
+
+    try {
+      const s1 = Array.from({ length: 60 }, (_, i) => i + 1);
+      const s2 = Array.from({ length: 60 }, (_, i) => i + 2);
+      const observedShifts: number[] = [];
+
+      const ctrl = createChartScrollController({
+        slotCount: 60,
+        nowMs: () => clockMs,
+        onChange: frame => observedShifts.push(frame.shiftSlots),
+      });
+
+      // Initial render snaps with zero tickers.
+      ctrl.update({ primary: s1, latestBucketId: 100, bucketSeconds: 1, resetKey: "60s", revision: 1, reducedMotion: false });
+      expect(activeMotionTickerCount()).toBe(0);
+      expect(ctrl.state().shiftSlots).toBe(0);
+
+      // Proven delta === 1 starts scroll ticker and captures exitingValue (1).
+      ctrl.update({ primary: s2, latestBucketId: 101, bucketSeconds: 1, resetKey: "60s", revision: 2, reducedMotion: false });
+      expect(activeMotionTickerCount()).toBe(1);
+      expect(ctrl.state().shiftSlots).toBe(1);
+      expect(ctrl.state().exitingPrimary).toBe(1);
+
+      tick(400);
+      expect(ctrl.state().shiftSlots).toBeCloseTo(0.6, 4);
+      expect(activeMotionTickerCount()).toBe(1);
+
+      // delta === 0 in-place update must NOT restart the active scroll back to 1.
+      ctrl.update({ primary: s2, latestBucketId: 101, bucketSeconds: 1, resetKey: "60s", revision: 3, reducedMotion: false });
+      expect(ctrl.state().shiftSlots).toBeCloseTo(0.6, 4);
+      expect(activeMotionTickerCount()).toBe(1);
+
+      // Settle unregisters ticker -> zero idle CPU.
+      tick(650);
+      expect(ctrl.state().shiftSlots).toBe(0);
+      expect(ctrl.state().exitingPrimary).toBeUndefined();
+      expect(activeMotionTickerCount()).toBe(0);
+      expect(observedShifts.length).toBeGreaterThanOrEqual(3);
+
+      // Unmount (dispose) while mid-flight unregisters cleanly.
+      const s3 = Array.from({ length: 60 }, (_, i) => i + 3);
+      ctrl.update({ primary: s3, latestBucketId: 102, bucketSeconds: 1, resetKey: "60s", revision: 4, reducedMotion: false });
+      expect(activeMotionTickerCount()).toBe(1);
+      ctrl.dispose();
+      expect(activeMotionTickerCount()).toBe(0);
+
+      // Reduced motion snaps immediately with zero tickers registered.
+      const reducedCtrl = createChartScrollController({
+        slotCount: 60,
+        nowMs: () => clockMs,
+        onChange: () => {},
+      });
+      reducedCtrl.update({ primary: s1, latestBucketId: 100, bucketSeconds: 1, resetKey: "60s", revision: 1, reducedMotion: true });
+      reducedCtrl.update({ primary: s2, latestBucketId: 101, bucketSeconds: 1, resetKey: "60s", revision: 2, reducedMotion: true });
+      expect(reducedCtrl.state().shiftSlots).toBe(0);
+      expect(activeMotionTickerCount()).toBe(0);
+      reducedCtrl.dispose();
+    } finally {
+      g.requestAnimationFrame = origRaf;
+      g.cancelAnimationFrame = origCaf;
+    }
   });
 });

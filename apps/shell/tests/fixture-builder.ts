@@ -120,10 +120,33 @@ export function makeSampleThemeSnapshot(primaryHex = "#7CD4FF") {
   };
 }
 
+function expandCurveTo60(pattern: readonly (number | null)[]): (number | null)[] {
+  const out: (number | null)[] = [];
+  for (let i = 0; i < 60; i += 1) {
+    const pos = (i / 59) * (pattern.length - 1);
+    const lo = Math.floor(pos);
+    const hi = Math.min(pattern.length - 1, Math.ceil(pos));
+    const a = pattern[lo] ?? null;
+    const b = pattern[hi] ?? null;
+    if (a === null || b === null) {
+      out.push(null);
+    } else {
+      const t = pos - lo;
+      out.push(Math.round((a + (b - a) * t) * 10) / 10);
+    }
+  }
+  return out;
+}
+
+function expandIntCurveTo60(pattern: readonly (number | null)[]): (number | null)[] {
+  return expandCurveTo60(pattern).map(v => (v === null ? null : Math.round(v)));
+}
+
 /**
- * Rich hardware telemetry fixture matching Paper `04C` & `22J` with distinctly shaped
- * `60s`, `5m`, and `15m` history curves (including an explicit `null` gap in `15m`)
- * so L4 tests can verify both visual parity and pixel-level time-range curve switching.
+ * Rich hardware telemetry fixture matching Paper `04C` & `22J` with full 60-slot
+ * `60s`, `5m`, and `15m` history curves (`latest_bucket_id`, additive `network.aggregate`
+ * + `aggregate_net_*` history, and an explicit `null` gap in `15m`) so L4 tests can verify
+ * visual parity, nice Y-axis scaling, smooth scrolling, and time-range curve switching.
  */
 export function makeSampleTelemetrySnapshot(options: {
   readonly includeGpu?: boolean;
@@ -151,20 +174,36 @@ export function makeSampleTelemetrySnapshot(options: {
     return base;
   }
 
-  // Distinct curves across time windows:
+  // Distinct 60-slot curves across time windows:
   // 60s: calm low wave (18..34%), 5m: steep high load plateau (68..96%), 15m: dual-phase with explicit null gap.
-  const cpu60s = [18, 21, 22, 24, 29, 31, 34, 32, 27, 25, 29, 31, 26, 24];
-  const cpu5m = [72, 78, 84, 88, 92, 95, 91, 86, 89, 94, 96, 90, 84, 88];
-  const cpu15m = [42, 46, 52, 48, null, null, 18, 22, 35, 60, 74, 68, 45, 24];
-  const mem60s = [34, 34, 35, 35, 36, 36, 36, 36, 35, 36, 36, 36, 36, 36];
-  const mem5m = [58, 60, 63, 66, 70, 74, 76, 75, 72, 71, 70, 68, 64, 62];
-  const mem15m = [30, 32, 35, 38, null, null, 45, 48, 52, 50, 44, 40, 37, 36];
-  const netRx60s = [420_000, 950_000, 1_400_000, 2_800_000, 2_100_000, 3_600_000, 4_800_000, 3_900_000, 4_400_000, 3_200_000, 4_200_000];
-  const netTx60s = [120_000, 180_000, 220_000, 310_000, 260_000, 400_000, 350_000, 290_000, 330_000, 280_000, 310_000];
-  const netRx5m = [8_200_000, 9_100_000, 7_600_000, 8_800_000, 9_500_000, 8_400_000, 7_900_000, 9_200_000, 8_600_000, 8_100_000, 8_900_000];
-  const netTx5m = [1_200_000, 1_500_000, 1_800_000, 1_600_000, 1_900_000, 1_700_000, 1_400_000, 1_600_000, 1_500_000, 1_300_000, 1_400_000];
+  const cpu60s = expandCurveTo60([18, 21, 22, 24, 29, 31, 34, 32, 27, 25, 29, 31, 26, 24]);
+  const cpu5m = expandCurveTo60([72, 78, 84, 88, 92, 95, 91, 86, 89, 94, 96, 90, 84, 88]);
+  const cpu15m = expandCurveTo60([42, 46, 52, 48, null, null, 18, 22, 35, 60, 74, 68, 45, 24]);
+  const mem60s = expandCurveTo60([34, 34, 35, 35, 36, 36, 36, 36, 35, 36, 36, 36, 36, 36]);
+  const mem5m = expandCurveTo60([58, 60, 63, 66, 70, 74, 76, 75, 72, 71, 70, 68, 64, 62]);
+  const mem15m = expandCurveTo60([30, 32, 35, 38, null, null, 45, 48, 52, 50, 44, 40, 37, 36]);
+  const gpu60s = expandCurveTo60([12, 14, 15, 18, 22, 19, 17, 18, 20, 18, 17, 16, 18, 18]);
+  const gpu5m = expandCurveTo60([68, 72, 76, 80, 82, 78, 74, 79, 85, 81, 77, 74, 72, 70]);
+  const gpu15m = expandCurveTo60([30, 34, 38, 36, null, null, 14, 16, 22, 28, 25, 20, 18, 18]);
+  const netRx60s = expandIntCurveTo60([420_000, 950_000, 1_400_000, 2_800_000, 2_100_000, 3_600_000, 4_800_000, 3_900_000, 4_400_000, 3_200_000, 4_200_000]);
+  const netTx60s = expandIntCurveTo60([120_000, 180_000, 220_000, 310_000, 260_000, 400_000, 350_000, 290_000, 330_000, 280_000, 310_000]);
+  const netRx5m = expandIntCurveTo60([8_200_000, 9_100_000, 7_600_000, 8_800_000, 9_500_000, 8_400_000, 7_900_000, 9_200_000, 8_600_000, 8_100_000, 8_900_000]);
+  const netTx5m = expandIntCurveTo60([1_200_000, 1_500_000, 1_800_000, 1_600_000, 1_900_000, 1_700_000, 1_400_000, 1_600_000, 1_500_000, 1_300_000, 1_400_000]);
+  const netRx15m = expandIntCurveTo60([2e6, 3e6, null, null, 1e6, 4e6, 5e6, 3e6]);
+  const netTx15m = expandIntCurveTo60([200e3, 300e3, null, null, 150e3, 320e3, 360e3, 310e3]);
+  const diskRead60s = expandIntCurveTo60([22e6, 36e6, 48e6, 32e6, 28e6, 44e6, 52e6, 48e6]);
+  const diskWrite60s = expandIntCurveTo60([8e6, 12e6, 10e6, 14e6, 9e6, 11e6, 13e6, 12e6]);
+  const diskRead5m = expandIntCurveTo60([90e6, 110e6, 105e6, 98e6, 120e6, 115e6, 108e6, 102e6]);
+  const diskWrite5m = expandIntCurveTo60([40e6, 48e6, 52e6, 46e6, 55e6, 50e6, 44e6, 42e6]);
+  const diskRead15m = expandIntCurveTo60([30e6, 40e6, null, null, 20e6, 50e6, 48e6, 44e6]);
+  const diskWrite15m = expandIntCurveTo60([10e6, 14e6, null, null, 8e6, 12e6, 11e6, 12e6]);
 
   const includeGpu = options.includeGpu !== false;
+  const rxBps = Math.round(4.2 * 1024 ** 2);
+  const txBps = 310 * 1024;
+  const sessionRx = Math.round(1.8 * GiB);
+  const sessionTx = 240 * 1024 ** 2;
+
   return {
     ...base,
     poll_interval_ms: 1000,
@@ -197,18 +236,26 @@ export function makeSampleTelemetrySnapshot(options: {
       : [],
     network: {
       active_interface: "enp4s0",
-      rx_bytes_per_sec: Math.round(4.2 * 1024 ** 2),
-      tx_bytes_per_sec: 310 * 1024,
-      session_rx_bytes: Math.round(1.8 * GiB),
-      session_tx_bytes: 240 * 1024 ** 2,
+      rx_bytes_per_sec: rxBps,
+      tx_bytes_per_sec: txBps,
+      session_rx_bytes: sessionRx,
+      session_tx_bytes: sessionTx,
+      aggregate: {
+        active_interface_count: 1,
+        active_interfaces: ["enp4s0"],
+        rx_bytes_per_sec: rxBps,
+        tx_bytes_per_sec: txBps,
+        session_rx_bytes: sessionRx,
+        session_tx_bytes: sessionTx,
+      },
       interfaces: [
         {
           name: "enp4s0",
           up: true,
-          rx_bytes_per_sec: Math.round(4.2 * 1024 ** 2),
-          tx_bytes_per_sec: 310 * 1024,
-          session_rx_bytes: Math.round(1.8 * GiB),
-          session_tx_bytes: 240 * 1024 ** 2,
+          rx_bytes_per_sec: rxBps,
+          tx_bytes_per_sec: txBps,
+          session_rx_bytes: sessionRx,
+          session_tx_bytes: sessionTx,
         },
         {
           name: "wlan0",
@@ -251,35 +298,144 @@ export function makeSampleTelemetrySnapshot(options: {
     history: {
       window_60s: {
         bucket_seconds: 1,
+        latest_bucket_id: 120,
         cpu_percent: cpu60s,
         memory_percent: mem60s,
-        ...(includeGpu ? { gpu_percent: [12, 14, 15, 18, 22, 19, 17, 18, 20, 18, 17, 16, 18, 18] } : {}),
+        ...(includeGpu ? { gpu_percent: gpu60s } : {}),
         net_rx_bytes_per_sec: netRx60s,
         net_tx_bytes_per_sec: netTx60s,
-        disk_read_bytes_per_sec: [22e6, 36e6, 48e6, 32e6, 28e6, 44e6, 52e6, 48e6],
-        disk_write_bytes_per_sec: [8e6, 12e6, 10e6, 14e6, 9e6, 11e6, 13e6, 12e6],
+        aggregate_net_rx_bytes_per_sec: netRx60s,
+        aggregate_net_tx_bytes_per_sec: netTx60s,
+        disk_read_bytes_per_sec: diskRead60s,
+        disk_write_bytes_per_sec: diskWrite60s,
       },
       window_5m: {
         bucket_seconds: 5,
+        latest_bucket_id: 24,
         cpu_percent: cpu5m,
         memory_percent: mem5m,
-        ...(includeGpu ? { gpu_percent: [68, 72, 76, 80, 82, 78, 74, 79, 85, 81, 77, 74, 72, 70] } : {}),
+        ...(includeGpu ? { gpu_percent: gpu5m } : {}),
         net_rx_bytes_per_sec: netRx5m,
         net_tx_bytes_per_sec: netTx5m,
-        disk_read_bytes_per_sec: [90e6, 110e6, 105e6, 98e6, 120e6, 115e6, 108e6, 102e6],
-        disk_write_bytes_per_sec: [40e6, 48e6, 52e6, 46e6, 55e6, 50e6, 44e6, 42e6],
+        aggregate_net_rx_bytes_per_sec: netRx5m,
+        aggregate_net_tx_bytes_per_sec: netTx5m,
+        disk_read_bytes_per_sec: diskRead5m,
+        disk_write_bytes_per_sec: diskWrite5m,
       },
       window_15m: {
         bucket_seconds: 15,
+        latest_bucket_id: 8,
         cpu_percent: cpu15m,
         memory_percent: mem15m,
-        ...(includeGpu ? { gpu_percent: [30, 34, 38, 36, null, null, 14, 16, 22, 28, 25, 20, 18, 18] } : {}),
-        net_rx_bytes_per_sec: [2e6, 3e6, null, null, 1e6, 4e6, 5e6, 3e6],
-        net_tx_bytes_per_sec: [200e3, 300e3, null, null, 150e3, 320e3, 360e3, 310e3],
-        disk_read_bytes_per_sec: [30e6, 40e6, null, null, 20e6, 50e6, 48e6, 44e6],
-        disk_write_bytes_per_sec: [10e6, 14e6, null, null, 8e6, 12e6, 11e6, 12e6],
+        ...(includeGpu ? { gpu_percent: gpu15m } : {}),
+        net_rx_bytes_per_sec: netRx15m,
+        net_tx_bytes_per_sec: netTx15m,
+        aggregate_net_rx_bytes_per_sec: netRx15m,
+        aggregate_net_tx_bytes_per_sec: netTx15m,
+        disk_read_bytes_per_sec: diskRead15m,
+        disk_write_bytes_per_sec: diskWrite15m,
       },
     },
+  };
+}
+
+/**
+ * Two-active-NIC telemetry fixture for mixed-version verification:
+ * - `legacyDaemon: true` simulates an older daemon with 2 active interfaces (`enp4s0` + `wlan0`)
+ *   but NO `network.aggregate`, NO `aggregate_net_*`, and NO `latest_bucket_id`.
+ * - `legacyDaemon: false` (default) emits both legacy single-NIC top-level fields and additive
+ *   `network.aggregate` + `aggregate_net_*` summed across both active NICs.
+ */
+export function makeTwoActiveNicTelemetrySnapshot(options: {
+  readonly legacyDaemon?: boolean;
+  readonly singleCardLayout?: boolean;
+} = {}) {
+  const base = makeSampleTelemetrySnapshot({ includeGpu: true }) as Record<string, unknown>;
+  const MiB = 1024 ** 2;
+  const GiB = 1024 ** 3;
+  const enpRx = 3 * MiB;
+  const enpTx = 500 * 1024;
+  const wlanRx = 2 * MiB;
+  const wlanTx = 300 * 1024;
+  const aggRx = enpRx + wlanRx;
+  const aggTx = enpTx + wlanTx;
+
+  const enpRxSeries = expandIntCurveTo60([1e6, 2e6, 3e6, 2.5e6, 3e6, 2.8e6, 3e6]);
+  const enpTxSeries = expandIntCurveTo60([200e3, 300e3, 500e3, 400e3, 500e3, 450e3, 500e3]);
+  const aggRxSeries = expandIntCurveTo60([2e6, 4e6, 5e6, 4.5e6, 5.2e6, 4.8e6, 5e6]);
+  const aggTxSeries = expandIntCurveTo60([350e3, 550e3, 800e3, 700e3, 820e3, 760e3, 800e3]);
+
+  const cpu = base.cpu as Record<string, unknown>;
+  const history = base.history as Record<string, Record<string, unknown>>;
+  const stripNewWindowFields = (win: Record<string, unknown>) => {
+    const { latest_bucket_id: _id, aggregate_net_rx_bytes_per_sec: _arx, aggregate_net_tx_bytes_per_sec: _atx, ...rest } = win;
+    return {
+      ...rest,
+      net_rx_bytes_per_sec: enpRxSeries,
+      net_tx_bytes_per_sec: enpTxSeries,
+    };
+  };
+
+  return {
+    ...base,
+    cpu: options.singleCardLayout
+      ? { ...cpu, per_core_usage_percent: [] }
+      : cpu,
+    ...(options.singleCardLayout ? { storage: null } : {}),
+    network: {
+      active_interface: "enp4s0",
+      rx_bytes_per_sec: enpRx,
+      tx_bytes_per_sec: enpTx,
+      session_rx_bytes: Math.round(1.2 * GiB),
+      session_tx_bytes: 180 * MiB,
+      ...(options.legacyDaemon
+        ? {}
+        : {
+            aggregate: {
+              active_interface_count: 2,
+              active_interfaces: ["enp4s0", "wlan0"],
+              rx_bytes_per_sec: aggRx,
+              tx_bytes_per_sec: aggTx,
+              session_rx_bytes: Math.round(2.0 * GiB),
+              session_tx_bytes: 280 * MiB,
+            },
+          }),
+      interfaces: [
+        {
+          name: "enp4s0",
+          up: true,
+          rx_bytes_per_sec: enpRx,
+          tx_bytes_per_sec: enpTx,
+          session_rx_bytes: Math.round(1.2 * GiB),
+          session_tx_bytes: 180 * MiB,
+        },
+        {
+          name: "wlan0",
+          up: true,
+          rx_bytes_per_sec: wlanRx,
+          tx_bytes_per_sec: wlanTx,
+          session_rx_bytes: Math.round(0.8 * GiB),
+          session_tx_bytes: 100 * MiB,
+        },
+      ],
+    },
+    history: options.legacyDaemon
+      ? {
+          window_60s: stripNewWindowFields(history.window_60s!),
+          window_5m: stripNewWindowFields(history.window_5m!),
+          window_15m: stripNewWindowFields(history.window_15m!),
+        }
+      : {
+          window_60s: {
+            ...history.window_60s!,
+            net_rx_bytes_per_sec: enpRxSeries,
+            net_tx_bytes_per_sec: enpTxSeries,
+            aggregate_net_rx_bytes_per_sec: aggRxSeries,
+            aggregate_net_tx_bytes_per_sec: aggTxSeries,
+          },
+          window_5m: history.window_5m!,
+          window_15m: history.window_15m!,
+        },
   };
 }
 
