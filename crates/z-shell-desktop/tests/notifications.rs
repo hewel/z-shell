@@ -665,3 +665,187 @@ async fn sanitizes_dbus_notify_body_markup_for_popups_and_history_without_advert
 
     desktop.shutdown().await;
 }
+
+#[tokio::test]
+async fn publishes_app_key_and_dismiss_popups_checks_revisions_atomically() {
+    let bus = TestBus::new();
+    let client = bus.connection().await;
+    let root = tempfile::tempdir().unwrap();
+    let paths = paths(root.path());
+    let hub = BusHub::new("test", paths.media_dir());
+    let desktop = DesktopServices::install_with_options(
+        &hub,
+        &paths,
+        DesktopOptions {
+            session_bus: SessionBusAddress::Address(bus.address().to_owned()),
+            tray: false,
+            xdg_data_dirs: Vec::new(),
+            ..DesktopOptions::default()
+        },
+    );
+    let (initial, stream) = subscribe(&hub, TOPIC).await;
+    assert_eq!(ready(initial, &stream).await["available"], true);
+    let proxy = dbus_proxy(&client).await;
+    let mut closed = proxy.receive_signal("NotificationClosed").await.unwrap();
+
+    // Two notifications sharing identical app_name ("Slack") but distinct desktop-entry hints must yield distinct app_keys.
+    let id1: u32 = proxy
+        .call(
+            "Notify",
+            &(
+                "Slack",
+                0_u32,
+                "",
+                "Work 1",
+                "body",
+                Vec::<String>::new(),
+                HashMap::from([(
+                    "desktop-entry",
+                    OwnedValue::try_from(DbusValue::from("  Slack-Work.desktop  ")).unwrap(),
+                )]),
+                0_i32,
+            ),
+        )
+        .await
+        .unwrap();
+    let s1 = next_update(&stream).await;
+    assert_eq!(s1["popups"][0]["app_key"], "desktop:slack-work");
+    let rev1 = s1["popups"][0]["revision"].as_u64().unwrap();
+
+    let id2: u32 = proxy
+        .call(
+            "Notify",
+            &(
+                "Slack",
+                0_u32,
+                "",
+                "Personal 1",
+                "body",
+                Vec::<String>::new(),
+                HashMap::from([(
+                    "desktop-entry",
+                    OwnedValue::try_from(DbusValue::from("slack-personal")).unwrap(),
+                )]),
+                0_i32,
+            ),
+        )
+        .await
+        .unwrap();
+    let s2 = next_update(&stream).await;
+    assert_eq!(s2["popups"][0]["app_key"], "desktop:slack-personal");
+    let rev2 = s2["popups"][0]["revision"].as_u64().unwrap();
+
+    // Unnamed notification falls back to unnamed:<id>
+    let id3: u32 = proxy
+        .call(
+            "Notify",
+            &(
+                "   ",
+                0_u32,
+                "",
+                "Anon",
+                "body",
+                Vec::<String>::new(),
+                HashMap::<String, OwnedValue>::new(),
+                0_i32,
+            ),
+        )
+        .await
+        .unwrap();
+    let s3 = next_update(&stream).await;
+    assert_eq!(s3["popups"][0]["app_key"], format!("unnamed:{id3}"));
+    let rev3 = s3["popups"][0]["revision"].as_u64().unwrap();
+
+    // Replace id2 in-flight before calling dismiss-popups with stale rev2.
+    let _: u32 = proxy
+        .call(
+            "Notify",
+            &(
+                "Slack",
+                id2,
+                "",
+                "Personal replaced",
+                "new body",
+                Vec::<String>::new(),
+                HashMap::from([(
+                    "desktop-entry",
+                    OwnedValue::try_from(DbusValue::from("slack-personal")).unwrap(),
+                )]),
+                0_i32,
+            ),
+        )
+        .await
+        .unwrap();
+    let _ = next_update(&stream).await;
+
+    // Atomically dismiss id1 (matching rev1) and stale (id2, rev2) plus id3 (matching rev3).
+    // Stale id2 must remain a popup; id1 & id3 leave popups but stay in history!
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "notifications.dismiss-popups",
+        json!({
+            "items": [
+                { "id": id1, "revision": rev1 },
+                { "id": id2, "revision": rev2 },
+                { "id": id3, "revision": rev3 }
+            ]
+        }),
+    )
+    .await
+    .unwrap();
+
+    let after = next_update(&stream).await;
+    assert_eq!(after["popups"].as_array().unwrap().len(), 1);
+    assert_eq!(after["popups"][0]["id"], id2);
+    assert_eq!(after["popups"][0]["summary"], "Personal replaced");
+    assert_eq!(
+        after["history"].as_array().unwrap().len(),
+        3,
+        "dismiss-popups must leave history intact"
+    );
+
+    // Collect NotificationClosed signals for id1 and id3 (DISMISSED = 2).
+    let mut dismissed_signals = Vec::new();
+    for _ in 0..2 {
+        let sig = tokio::time::timeout(
+            Duration::from_secs(2),
+            poll_fn(|cx| Pin::new(&mut closed).poll_next(cx)),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        dismissed_signals.push(sig.body().deserialize::<(u32, u32)>().unwrap());
+    }
+    assert!(dismissed_signals.contains(&(id1, 2)));
+    assert!(dismissed_signals.contains(&(id3, 2)));
+
+    // Reject unknown fields and oversized batches (> 100).
+    assert_eq!(
+        invoke(
+            &hub,
+            ClientRole::Public,
+            "notifications.dismiss-popups",
+            json!({ "items": [], "extra": true }),
+        )
+        .await
+        .unwrap_err()
+        .code,
+        ErrorCode::InvalidParams
+    );
+    let oversized: Vec<Value> = (1..=101).map(|i| json!({"id": i, "revision": 1})).collect();
+    assert_eq!(
+        invoke(
+            &hub,
+            ClientRole::Public,
+            "notifications.dismiss-popups",
+            json!({ "items": oversized }),
+        )
+        .await
+        .unwrap_err()
+        .code,
+        ErrorCode::InvalidParams
+    );
+
+    desktop.shutdown().await;
+}

@@ -33,6 +33,7 @@ const TOPIC: &str = "desktop.notifications";
 pub(crate) const NAME: &str = "org.freedesktop.Notifications";
 const PATH: &str = "/org/freedesktop/Notifications";
 const HISTORY_LIMIT: usize = 100;
+const MAX_DISMISS_POPUPS_BATCH: usize = 100;
 const MAX_BODY_BYTES: usize = 2048;
 const MAX_BODY_SCAN_BYTES: usize = 16 * 1024;
 const DEFAULT_TIMEOUT_MS: u64 = 5000;
@@ -102,6 +103,7 @@ struct Notification {
     id: u32,
     revision: u64,
     app_name: String,
+    app_key: String,
     summary: String,
     body: String,
     icon: Option<NotificationMedia>,
@@ -169,6 +171,13 @@ impl Notifications {
             "notifications.dismiss",
             "Dismiss a notification",
             Self::dismiss,
+        );
+        register(
+            hub,
+            &service,
+            "notifications.dismiss-popups",
+            "Atomically dismiss a revision-checked batch of live notification popups",
+            Self::dismiss_popups,
         );
         register(
             hub,
@@ -354,6 +363,7 @@ impl Notifications {
         };
         let popup = !state.dnd;
         let paused = state.paused;
+        let app_key = compute_app_key(incoming.desktop_entry.as_deref(), &incoming.app_name, id);
         state.history.push_front(Entry {
             popup,
             lifetime: incoming.timeout.map_or(Lifetime::Persistent, |duration| {
@@ -373,6 +383,7 @@ impl Notifications {
                 id,
                 revision,
                 app_name: incoming.app_name,
+                app_key,
                 summary: incoming.summary,
                 body: incoming.body,
                 icon: incoming.icon,
@@ -436,6 +447,59 @@ impl Notifications {
         let Dismiss { id } = payload(&call)?;
         if let Some(connection) = self.remove(id, None)? {
             emit_closed(&connection, id, DISMISSED).await;
+        }
+        Ok(ok())
+    }
+
+    async fn dismiss_popups(
+        self: Arc<Self>,
+        call: CommandCall,
+    ) -> Result<CommandInvokeResult, RpcError> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Item {
+            id: u32,
+            revision: u64,
+        }
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Params {
+            items: Vec<Item>,
+        }
+        let Params { items } = payload(&call)?;
+        if items.len() > MAX_DISMISS_POPUPS_BATCH {
+            return Err(RpcError::new(
+                ErrorCode::InvalidParams,
+                format!("at most {MAX_DISMISS_POPUPS_BATCH} popups can be dismissed per batch"),
+            ));
+        }
+
+        let (dismissed_ids, connection) = {
+            let mut state = self.state();
+            let mut dismissed_ids = Vec::new();
+            for item in items {
+                if let Some(entry) = state.history.iter_mut().find(|entry| {
+                    entry.popup
+                        && entry.notification.id == item.id
+                        && entry.notification.revision == item.revision
+                }) {
+                    entry.popup = false;
+                    if entry.lifetime.is_open() {
+                        entry.lifetime = Lifetime::Closed;
+                        dismissed_ids.push(entry.notification.id);
+                    }
+                }
+            }
+            if !dismissed_ids.is_empty() {
+                self.publish(&state, UpdateKind::Live);
+                self.timer_changed.notify_one();
+            }
+            (dismissed_ids, state.connection.clone())
+        };
+        if let Some(connection) = connection {
+            for id in dismissed_ids {
+                emit_closed(&connection, id, DISMISSED).await;
+            }
         }
         Ok(ok())
     }
@@ -596,6 +660,7 @@ impl State {
 struct Incoming {
     replaces: u32,
     app_name: String,
+    desktop_entry: Option<String>,
     summary: String,
     body: String,
     icon: Option<NotificationMedia>,
@@ -681,6 +746,7 @@ impl Interface {
             let icon_theme = service.icon_theme.clone();
             let launcher = Arc::clone(&service.launcher);
             let app_name_for_icon = app_name.clone();
+            let desktop_entry_for_icon = desktop_entry.clone();
             tokio::task::spawn_blocking(move || {
                 let _permit = permit;
                 let icon = resolve_notification_icon(
@@ -690,7 +756,7 @@ impl Interface {
                     &launcher,
                     icon_path.as_deref(),
                     &app_icon,
-                    desktop_entry.as_deref(),
+                    desktop_entry_for_icon.as_deref(),
                     &app_name_for_icon,
                 );
                 let attachment = if has_image {
@@ -710,6 +776,7 @@ impl Interface {
                 Incoming {
                     replaces: replaces_id,
                     app_name,
+                    desktop_entry,
                     summary: clip_text(&summary, 256),
                     body: sanitize_notification_body(&body, MAX_BODY_BYTES),
                     icon,
@@ -765,6 +832,23 @@ async fn emit_closed(connection: &Connection, id: u32, reason: u32) {
     {
         tracing::debug!(%error, id, reason, "failed to emit NotificationClosed");
     }
+}
+
+fn normalize_desktop_entry(entry: &str) -> Option<String> {
+    let trimmed = entry.trim().to_ascii_lowercase();
+    let stripped = trimmed.strip_suffix(".desktop").unwrap_or(&trimmed);
+    (!stripped.is_empty()).then(|| stripped.to_owned())
+}
+
+fn compute_app_key(desktop_entry: Option<&str>, app_name: &str, id: u32) -> String {
+    if let Some(normalized) = desktop_entry.and_then(normalize_desktop_entry) {
+        return format!("desktop:{normalized}");
+    }
+    let name = app_name.trim();
+    if !name.is_empty() {
+        return format!("name:{name}");
+    }
+    format!("unnamed:{id}")
 }
 
 fn source_unavailable() -> fdo::Error {
