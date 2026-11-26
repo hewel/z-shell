@@ -630,7 +630,7 @@ const rules = {
     },
     create(context) {
       const basename = path.basename(context.filename ?? "");
-      if (basename === "shapes.ts") return {};
+      if (basename === "shapes.ts" || basename === "tabler-icons.generated.ts") return {};
       const checkNamedValue = (name, valueNode) => {
         if (!name || !EXPRESSIVE_PATH_NAME_RE.test(name)) return;
         const text = staticString(valueNode);
@@ -665,7 +665,7 @@ const rules = {
   "material-icon-grid": {
     meta: {
       type: "problem",
-      docs: { description: "Enforce The Material-First Icon Rule: 24x24 viewBox for system UI glyphs and centralized ShellIcon usage" },
+      docs: { description: "Enforce The Tabler-First System UI Icon Rule: 24x24 viewBox for system UI glyphs and centralized ShellIcon usage" },
       schema: [],
     },
     create(context) {
@@ -679,7 +679,7 @@ const rules = {
 
       return {
         Property(node) {
-          if (basename !== "icons.tsx") return;
+          if (basename !== "icons.tsx" && basename !== "tabler-icons.generated.ts") return;
           if (propertyName(node) !== "viewBox") return;
           const parentProp = node.parent?.type === "ObjectExpression" ? node.parent.parent : null;
           const iconName = parentProp?.type === "Property" ? propertyName(parentProp) : null;
@@ -694,7 +694,7 @@ const rules = {
           if (value !== "0 0 24 24") {
             context.report({
               node: node.value,
-              message: `Material-First Icon Rule: system UI icon "${iconName ?? "unknown"}" must use Material 24x24 grid (viewBox="0 0 24 24"), got "${value}".`,
+              message: `System UI Icon Rule: icon "${iconName ?? "unknown"}" must use 24x24 grid (viewBox="0 0 24 24"), got "${value}".`,
             });
           }
         },
@@ -717,14 +717,14 @@ const rules = {
             ) {
               context.report({
                 node: attr.value,
-                message: `Material-First Icon Rule: <vector> viewBox must be "0 0 24 24" (Material grid) or "0 0 64 64" (expressive shape), got "${attrValue}".`,
+                message: `System UI Icon Rule: <vector> viewBox must be "0 0 24 24" (24x24 grid) or "0 0 64 64" (expressive shape), got "${attrValue}".`,
               });
             }
             if (isShellSurfaceOrPanel && attr.name.name === "d" && attrValue !== null) {
               context.report({
                 node: attr.value,
                 message:
-                  "Material-First Icon Rule: do not inline ad-hoc SVG path literals in panels/surfaces; register Material Icons in icons.tsx or analytical shapes in shapes.ts.",
+                  "System UI Icon Rule: do not inline ad-hoc SVG path literals in panels/surfaces; register Tabler icons in icons.tsx via icons:sync or analytical shapes in shapes.ts.",
               });
             }
           }

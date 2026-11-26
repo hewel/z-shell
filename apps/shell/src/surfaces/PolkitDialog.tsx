@@ -147,7 +147,7 @@ function PolkitContent(props: {
             display: "flex", width: "46px", height: "46px", flexShrink: 0, borderRadius: "14px",
             alignItems: "center", justifyContent: "center", backgroundColor: primaryContainer,
           }}>
-            <ShellIcon name="lock" size={22} color={onPrimaryContainer} />
+            <ShellIcon name="lock" filled size={22} color={onPrimaryContainer} />
           </box>
           <column style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "2px" }}>
             <text role="heading" style={{ fontSize: "16px", fontWeight: 600, lineHeight: "22px" }}>Authentication required</text>
@@ -183,7 +183,7 @@ function PolkitContent(props: {
                     display: "flex", width: "24px", height: "24px", borderRadius: "999px", "--zgui-corner-shape": "none", flexShrink: 0,
                     alignItems: "center", justifyContent: "center", backgroundColor: containerHighest,
                   }}>
-                    <ShellIcon name="person" size={14} color={primary} />
+                    <ShellIcon name="person" filled size={14} color={primary} />
                   </box>
                   <text style={{ ...clipped, flexGrow: 1, fontSize: "13px", fontWeight: 500 }}>{identity().username}</text>
                   <text style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: muted }}>{`uid ${identity().uid}`}</text>
@@ -205,7 +205,7 @@ function PolkitContent(props: {
                         color: selected() ? onPrimaryContainer : muted,
                         fontSize: "12px", fontWeight: selected() ? 600 : 500,
                       }}>
-                      <ShellIcon name="person" size={13} color={selected() ? onPrimaryContainer : muted} />
+                      <ShellIcon name="person" filled={selected()} size={13} color={selected() ? onPrimaryContainer : muted} />
                       <text>{identity().username}</text>
                     </Button>
                   );

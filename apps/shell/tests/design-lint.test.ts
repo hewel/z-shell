@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 import { M3_EASINGS, M3_SPRINGS } from "@z-shell/sdk/zgui";
+import { buildTablerIconsModule } from "../../../tools/sync-tabler-icons.ts";
 import { LOCK_MORPH_SHAPES, SHELL_ROSETTE_PATH } from "../src/shapes.ts";
+import { TABLER_ICON_PATHS } from "../src/tabler-icons.generated.ts";
 import { SHELL_DEFAULT_SCHEME, buildThemeStylesheet } from "../src/theme.ts";
 import {
   DEFAULT_BAR_SETTINGS,
@@ -851,21 +853,26 @@ describe("Exact-Geometry Shape & Material-First Icon contracts", () => {
     }
   });
 
-  test("all Tier 1 system UI icons in SHELL_ICON_PATHS use the 24x24 Material grid", () => {
+  test("all Tier 1 system UI icons in SHELL_ICON_PATHS use the 24x24 grid and stay synced with Tabler", () => {
     const iconsSource = readFileSync(join(shellDir, "src/icons.tsx"), "utf8");
-    const entries = [...iconsSource.matchAll(/^\s{2}([a-zA-Z0-9_]+):\s*\{\s*\n\s*viewBox:\s*"([^"]+)"/gm)];
-    expect(entries.length).toBeGreaterThanOrEqual(30);
-    const names = new Set(entries.map(([, name]) => name));
-    expect(names.has("apps")).toBe(true);
-    expect(names.has("overview")).toBe(true);
-    for (const [, name, viewBox] of entries) {
-      if (name === "shellEmblem") {
-        expect(viewBox).toBe("0 0 64 64");
-      } else {
-        expect(viewBox, `SHELL_ICON_PATHS.${name}`).toBe("0 0 24 24");
-      }
-    }
+    expect(iconsSource).toContain("shellEmblem:");
+    expect(iconsSource).toContain(`viewBox: "0 0 64 64"`);
     expect(iconsSource).toContain("d: SHELL_ROSETTE_PATH");
+    expect(iconsSource).toContain("...TABLER_ICON_PATHS");
+
+    const entries = Object.entries(TABLER_ICON_PATHS) as [string, { readonly viewBox: string; readonly d: string; readonly filledD?: string }][];
+    expect(entries.length).toBe(79);
+    const names = new Set(entries.map(([name]) => name));
+    for (const required of ["apps", "overview", "ethernet", "mediaEq", "gpu", "memory", "wifiLock"]) {
+      expect(names.has(required), `missing TABLER_ICON_PATHS.${required}`).toBe(true);
+    }
+    for (const [name, def] of entries) {
+      expect(def.viewBox, `TABLER_ICON_PATHS.${name}`).toBe("0 0 24 24");
+      expect(def.d.trim().length, `TABLER_ICON_PATHS.${name}.d`).toBeGreaterThan(0);
+    }
+    expect(TABLER_ICON_PATHS.wifiLock.d).toContain("M17 19a1 1 0 0 1 1 -1h3a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-3a1 1 0 0 1 -1 -1v-2");
+    const generated = readFileSync(join(shellDir, "src/tabler-icons.generated.ts"), "utf8");
+    expect(generated).toBe(buildTablerIconsModule(repoRoot));
   });
 });
 

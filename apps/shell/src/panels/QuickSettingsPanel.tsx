@@ -167,7 +167,7 @@ function QuickTile(props: {
             backgroundColor: props.active ? "color-mix(in srgb, var(--color-primary) 18%, transparent)" : containerHighest,
             transform: scheme() === "reduced" ? "none" : `scale(${Math.max(0.8, Math.min(1.12, iconPop())).toFixed(4)})`,
           }}>
-            <ShellIcon name={props.icon} size={16} color={props.active ? primary : muted} />
+            <ShellIcon name={props.icon} filled={props.active} size={16} color={props.active ? primary : muted} />
           </box>
           <column style={{ ...grow, gap: "1px" }}>
             <text style={{ ...clipped, fontSize: "13px", fontWeight: 500, lineHeight: "17px" }}>{props.label}</text>
@@ -508,7 +508,7 @@ function MainPage(props: {
             <box testId={props.outgoing ? null : "qs-avatar-fallback"} ariaHidden style={{
               position: "relative", zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center",
             }}>
-              <ShellIcon name="person" size={18} color={onPrimaryContainer} />
+              <ShellIcon name="person" filled size={18} color={onPrimaryContainer} />
             </box>
           }>
             {src => <Image ariaHidden src={src()} style={{

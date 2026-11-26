@@ -208,7 +208,7 @@ function TrackControls(props: { player: Accessor<MediaPlayer> }) {
         </Button>
         <Button testId="media-prev" ariaLabel="Previous track" disabled={!player().capabilities.can_go_previous} style={skipBtn}
           onClick={() => { void invokePublic("media.previous", { player_id: player().id }); }}>
-          <ShellIcon name="skipPrev" size={24} color={onSurface} />
+          <ShellIcon name="skipPrev" filled size={24} color={onSurface} />
         </Button>
         <Button testId="media-play-pause" ariaLabel={playing() ? "Pause" : "Play"} disabled={!canPlayPause()}
           style={{
@@ -216,11 +216,11 @@ function TrackControls(props: { player: Accessor<MediaPlayer> }) {
             alignItems: "center", justifyContent: "center", backgroundColor: primary,
           }}
           onClick={() => { void invokePublic("media.play-pause", { player_id: player().id }); }}>
-          <ShellIcon name={playing() ? "pause" : "play"} size={26} color={onPrimary} />
+          <ShellIcon name={playing() ? "pause" : "play"} filled size={26} color={onPrimary} />
         </Button>
         <Button testId="media-next" ariaLabel="Next track" disabled={!player().capabilities.can_go_next} style={skipBtn}
           onClick={() => { void invokePublic("media.next", { player_id: player().id }); }}>
-          <ShellIcon name="skipNext" size={24} color={onSurface} />
+          <ShellIcon name="skipNext" filled size={24} color={onSurface} />
         </Button>
         <Button testId="media-seek-forward" ariaLabel="Seek forward 10 seconds" disabled={!canSeek()}
           onClick={() => seek(tenSecondsUs)} style={{ ...subTransportBtn, opacity: canSeek() ? 1 : 0.45 }}>

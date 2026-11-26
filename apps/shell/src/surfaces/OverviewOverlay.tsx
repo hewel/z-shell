@@ -323,7 +323,7 @@ function OverviewContent(props: {
             width: "40px", height: "40px", borderRadius: "14px", flexShrink: 0,
             backgroundColor: primaryContainer,
           }}>
-            <ShellIcon name="overview" size={22} color={onPrimaryContainer} />
+            <ShellIcon name="overview" filled size={22} color={onPrimaryContainer} />
           </box>
           <column style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "2px" }}>
             <text role="heading" style={{

@@ -207,7 +207,7 @@ export function ApprovalReviewDialog(props: {
           alignItems: "center", gap: "8px", padding: "8px 10px", borderRadius: "10px",
           backgroundColor: "var(--color-primary-container)",
         }}>
-          <ShellIcon name="shield" size={16} color={onPrimaryContainer} />
+          <ShellIcon name="shield" filled size={16} color={onPrimaryContainer} />
           <text style={{ ...grow, fontSize: "11px", lineHeight: "15px", color: onPrimaryContainer }}>
             Plugins compose directly into the shared shell bundle and share host trust once enabled and built.
           </text>

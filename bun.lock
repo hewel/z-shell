@@ -9,6 +9,7 @@
         "@hewel/zgui-build": "0.1.0",
         "@hewel/zgui-cli": "0.1.0",
         "@hewel/zgui-services": "0.1.0",
+        "@tabler/icons": "3.53.0",
         "@z-shell/composer": "workspace:*",
         "@z-shell/plugin-api": "workspace:*",
         "@z-shell/sdk": "workspace:*",
@@ -178,6 +179,8 @@
     "@solidjs/universal": ["@solidjs/universal@2.0.1", "", { "peerDependencies": { "solid-js": "^2.0.1" } }, "sha512-bokfZ7zVjvzGHLibwa3ozQ6ApsiXDuzrlRndDn5uHbGQ98f7XcIErW4BzPH4Lj1YlOLHQc8zhcWp9shxmyUe4A=="],
 
     "@stylexjs/stylex": ["@stylexjs/stylex@0.19.2", "", { "dependencies": { "styleq": "0.2.1" } }, "sha512-l0fRhOBZ4rFiZ0GntYSlp4lYO5dPT11F3mLb7O4ShK6eE1WOjHtv9GHGQZuzHJbQkjcEaRjPSpBn6itI7yXc3Q=="],
+
+    "@tabler/icons": ["@tabler/icons@3.53.0", "", {}, "sha512-7V77PESErZob7+Ie4ibDs9tjRoMmZyjr3RpxRK3KLJejwggzxrkhVunbQ7xGYewjwdUyPc6dHpMvvft0prkkzQ=="],
 
     "@tsrs/darwin-arm64": ["@tsrs/darwin-arm64@7.1.0-beta.tsrs2", "", { "os": "darwin", "cpu": "arm64" }, "sha512-VMsXBPFD0SO5p7XrXhLutPmnpHc4kMIt7uztBJoHr/5Jd6qC8eH/TomobdPGugw27U3uiW2wJDqYjqYq5fxoCA=="],
 

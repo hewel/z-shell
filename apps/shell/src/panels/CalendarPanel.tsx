@@ -221,7 +221,7 @@ export function CalendarPanel() {
               border: dnd() ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
               color: dnd() ? "var(--color-on-primary-container)" : onSurface, fontSize: "12px", fontWeight: 500,
             }}>
-            <ShellIcon name="sleep" size={14} color="currentColor" />
+            <ShellIcon name="sleep" size={14} filled={dnd()} color={dnd() ? "var(--color-on-primary-container)" : onSurface} />
             <text>Do Not Disturb</text>
           </Button>
         </row>

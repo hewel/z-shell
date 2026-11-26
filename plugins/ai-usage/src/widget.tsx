@@ -14,9 +14,9 @@ function compactReset(reset: string): string {
 }
 
 const TRACK_RING_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>`;
-// Material Icons 24x24 `auto_awesome` glyph (DESIGN.md Material-First Icon Rule).
-const MATERIAL_AUTO_AWESOME_PATH =
-  "M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z";
+// Tabler Icons v3.53 Filled `sparkles` glyph (Col C Hybrid crisp center badge).
+const TABLER_SPARKLES_FILLED_PATH =
+  "M16 19a1 1 0 0 1 0 -2a1 1 0 0 0 1 -1c0 -1.333 2 -1.333 2 0a1 1 0 0 0 1 1c1.333 0 1.333 2 0 2a1 1 0 0 0 -1 1c0 1.333 -2 1.333 -2 0a1 1 0 0 0 -1 -1 M3 11a5 5 0 0 0 5 -5c0 -1.333 2 -1.333 2 0a5 5 0 0 0 5 5c1.333 0 1.333 2 0 2a5 5 0 0 0 -5 5a1 1 0 0 1 -2 0a5 5 0 0 0 -5 -5c-1.333 0 -1.333 -2 0 -2 M16 7a1 1 0 0 1 0 -2a1 1 0 0 0 1 -1c0 -1.333 2 -1.333 2 0a1 1 0 0 0 1 1c1.333 0 1.333 2 0 2a1 1 0 0 0 -1 1c0 1.333 -2 1.333 -2 0a1 1 0 0 0 -1 -1";
 
 function buildQuotaArcSvg(percent: number | null): string {
   const clamped = Math.max(0, Math.min(100, percent ?? 0));
@@ -31,7 +31,7 @@ function buildQuotaArcSvg(percent: number | null): string {
     const largeArc = clamped > 50 ? 1 : 0;
     arc = `<path d="M12 2.8A${r} ${r} 0 ${largeArc} 1 ${x} ${y}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>`;
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">${arc}<g transform="translate(6 6) scale(0.5)"><path d="${MATERIAL_AUTO_AWESOME_PATH}" fill="currentColor"/></g></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">${arc}<g transform="translate(6 6) scale(0.5)"><path d="${TABLER_SPARKLES_FILLED_PATH}" fill="currentColor"/></g></svg>`;
 }
 
 export default function Widget(props: {

@@ -486,7 +486,7 @@ function NotificationBadgePill(props: { count: number; dnd: boolean; vertical: b
         : {}),
       transform: scheme() === "reduced" ? "none" : `scale(${(0.7 + pop() * 0.3).toFixed(4)})`,
     }}>
-      <ShellIcon name={props.dnd ? "bellOff" : "bell"} size={props.vertical ? 10 : props.docked ? 11 : 12} color={onPrimaryContainer} />
+      <ShellIcon name={props.dnd ? "bellOff" : "bell"} filled={!props.dnd} size={props.vertical ? 10 : props.docked ? 11 : 12} color={onPrimaryContainer} />
       <text style={{ ...tabular, ...(props.vertical ? { fontSize: props.docked ? "10px" : "9px", lineHeight: props.docked ? "12px" : "10px" } : {}) }}>{props.count}</text>
     </box>
   );
@@ -908,7 +908,7 @@ function SystemPill(props: {
           });
         }}>
         <box data-press-visual="compact" ariaHidden style={{ ...center, pointerEvents: "none" }}>
-          <ShellIcon name="tune" size={15} color={mainQsActive() ? onPrimaryContainer : onSurface} />
+          <ShellIcon name="tune" filled={mainQsActive()} size={15} color={mainQsActive() ? onPrimaryContainer : onSurface} />
         </box>
       </Button>
     </box>
@@ -1087,7 +1087,7 @@ function BarContent(props: {
               togglePanel("overview", { monitorId: props.monitor.id });
             }}>
             <box data-press-visual="compact" ariaHidden style={center}>
-              <ShellIcon name="overview" size={docked() ? 14 : 15} color={activePanel() === "overview" ? primary : muted} />
+              <ShellIcon name="overview" filled={activePanel() === "overview"} size={docked() ? 14 : 15} color={activePanel() === "overview" ? primary : muted} />
             </box>
           </Button>
         </box>

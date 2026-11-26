@@ -1075,7 +1075,7 @@ function SystemMonitorWindowContent(): NativeChild {
                         fontWeight: 500,
                       }}
                     >
-                      <ShellIcon name={item().icon} size={15} color={active() ? onPrimaryContainer : muted} />
+                      <ShellIcon name={item().icon} filled={active()} size={15} color={active() ? onPrimaryContainer : muted} />
                       <text style={{ ...grow, ...clipped }}>{item().label}</text>
                       <Show when={item().readout}>
                         {val => (

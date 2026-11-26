@@ -130,7 +130,7 @@ function LockScreen(props: {
             position: "absolute", zIndex: 2, top: "28px", right: "36px", alignItems: "center", gap: "6px",
             borderRadius: "16px", "--zgui-corner-shape": "none", backgroundColor: "color-mix(in srgb, var(--color-on-surface) 10%, transparent)", padding: "5px 10px",
           }}>
-            <ShellIcon name={battery().state === "charging" ? "batteryCharging" : "battery"} size={18} color="inherit" />
+            <ShellIcon name={battery().state === "charging" ? "batteryCharging" : "battery"} size={18} color="var(--color-on-surface)" />
             <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "14px", fontWeight: 500, fontVariantNumeric: "tabular-nums" }}>
               {label()}
             </text>
@@ -156,7 +156,7 @@ function LockScreen(props: {
           <vector ariaHidden d={SHELL_ROSETTE_PATH} viewBox="0 0 64 64"
             style={{ ...cover, zIndex: 0, color: "var(--color-primary-container)" }} />
           <Show when={props.avatar()} fallback={
-            <ShellIcon name="person" size={46} color="var(--color-on-primary-container)" />
+            <ShellIcon name="person" filled size={46} color="var(--color-on-primary-container)" />
           }>{src => <Image ariaHidden src={src()} style={{
             position: "relative", zIndex: 1, width: "104px", height: "104px", objectFit: "cover", clipPath: SHELL_ROSETTE_CLIP_104,
           }} />}</Show>
@@ -255,7 +255,7 @@ function LockScreen(props: {
         </Show>
         <Show when={playing()}>{player => (
           <row style={{ gap: "6px", alignItems: "center", maxWidth: "320px", opacity: 0.8 }}>
-            <ShellIcon name="play" size={14} color="inherit" />
+            <ShellIcon name="play" filled size={14} color="var(--color-on-surface)" />
             <text style={{ fontSize: "12px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {player().metadata.title ?? player().identity}
               {player().metadata.artists.length > 0 ? ` · ${player().metadata.artists.join(", ")}` : ""}

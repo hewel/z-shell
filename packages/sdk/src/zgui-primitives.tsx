@@ -20,7 +20,7 @@ import { SPRING_EPSILON } from "./motion.ts";
 import { createM3Spring, createPresence, useGlobalMotionScheme } from "./zgui-motion.ts";
 import styles from "./zgui-primitives.module.css";
 
-const CHECK_ICON_PATH = "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z";
+const CHECK_ICON_PATH = "M5 12l5 5l10 -10";
 
 export type M3ButtonVariant = "filled" | "accent-tonal" | "neutral-tonal" | "outlined" | "text" | "destructive";
 export type M3ButtonSize = "md" | "sm";
@@ -185,7 +185,11 @@ export function M3Switch(props: M3SwitchProps): NativeChild {
               width: "11px",
               height: "11px",
               opacity: checkOpacity(),
-              "--zgui-fill": checkColor(),
+              "--zgui-fill": "transparent",
+              "--zgui-stroke": checkColor(),
+              "--zgui-stroke-width": "2.6px",
+              "--zgui-stroke-linecap": "round",
+              "--zgui-stroke-linejoin": "round",
             }}
           />
         </Show>
@@ -519,7 +523,11 @@ export function M3FilterChip(props: M3FilterChipProps): NativeChild {
             style={{
               width: "14px",
               height: "14px",
-              "--zgui-fill": "var(--color-on-primary-container)",
+              "--zgui-fill": "transparent",
+              "--zgui-stroke": "var(--color-on-primary-container)",
+              "--zgui-stroke-width": "2.2px",
+              "--zgui-stroke-linecap": "round",
+              "--zgui-stroke-linejoin": "round",
               transform: scheme() === "reduced" ? "none" : `scale(${(0.75 + Math.max(0, Math.min(1.12, checkPop())) * 0.25).toFixed(4)})`,
             }}
           />

@@ -85,8 +85,16 @@ function WorkspaceCard(props: {
       }}>
         <Show when={windows().length > 0} fallback={
           <column style={{ alignItems: "center", justifyContent: "center", gap: "6px" }}>
-            <vector ariaHidden viewBox="0 0 24 24" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
-              style={{ width: "24px", height: "24px", "--zgui-fill": outline }} />
+            <vector ariaHidden viewBox="0 0 24 24" d={"M12 5l0 14\nM5 12l14 0"}
+              style={{
+                width: "24px",
+                height: "24px",
+                "--zgui-fill": "transparent",
+                "--zgui-stroke": outline,
+                "--zgui-stroke-width": "2px",
+                "--zgui-stroke-linecap": "round",
+                "--zgui-stroke-linejoin": "round",
+              }} />
             <text style={{ fontSize: "12px", lineHeight: "16px", color: outline }}>Empty workspace</text>
           </column>
         }>
@@ -202,7 +210,7 @@ function OverviewCard(props: {
             backgroundColor: primaryContainer,
           }}>
             <vector ariaHidden viewBox="0 0 24 24"
-              d="M4 5a1 1 0 011-1h5a1 1 0 011 1v5a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm9 0a1 1 0 011-1h5a1 1 0 011 1v5a1 1 0 01-1 1h-5a1 1 0 01-1-1V5zM4 14a1 1 0 011-1h5a1 1 0 011 1v5a1 1 0 01-1 1H5a1 1 0 01-1-1v-5zm9 0a1 1 0 011-1h5a1 1 0 011 1v5a1 1 0 01-1 1h-5a1 1 0 01-1-1v-5z"
+              d={"M9 3a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-4a2 2 0 0 1 -2 -2v-6a2 2 0 0 1 2 -2zm0 12a2 2 0 0 1 2 2v2a2 2 0 0 1 -2 2h-4a2 2 0 0 1 -2 -2v-2a2 2 0 0 1 2 -2zm10 -4a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-4a2 2 0 0 1 -2 -2v-6a2 2 0 0 1 2 -2zm0 -8a2 2 0 0 1 2 2v2a2 2 0 0 1 -2 2h-4a2 2 0 0 1 -2 -2v-2a2 2 0 0 1 2 -2z"}
               style={{ width: "22px", height: "22px", "--zgui-fill": onPrimaryContainer }} />
           </box>
           <column style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "2px" }}>
@@ -221,8 +229,16 @@ function OverviewCard(props: {
                 backgroundColor: containerHigh, color: onSurface,
               }}>
               <vector ariaHidden viewBox="0 0 24 24"
-                d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"
-                style={{ width: "18px", height: "18px", "--zgui-fill": onSurface }} />
+                d={"M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4\nM4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"}
+                style={{
+                  width: "18px",
+                  height: "18px",
+                  "--zgui-fill": "transparent",
+                  "--zgui-stroke": onSurface,
+                  "--zgui-stroke-width": "2px",
+                  "--zgui-stroke-linecap": "round",
+                  "--zgui-stroke-linejoin": "round",
+                }} />
             </Button>
             <Button testId="niri-overview-close" ariaLabel="Close overview" ref={node => focus(node)}
               onClick={close} style={{
@@ -231,8 +247,16 @@ function OverviewCard(props: {
                 backgroundColor: containerHigh, color: onSurface,
               }}>
               <vector ariaHidden viewBox="0 0 24 24"
-                d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"
-                style={{ width: "18px", height: "18px", "--zgui-fill": onSurface }} />
+                d={"M18 6l-12 12\nM6 6l12 12"}
+                style={{
+                  width: "18px",
+                  height: "18px",
+                  "--zgui-fill": "transparent",
+                  "--zgui-stroke": onSurface,
+                  "--zgui-stroke-width": "2px",
+                  "--zgui-stroke-linecap": "round",
+                  "--zgui-stroke-linejoin": "round",
+                }} />
             </Button>
           </row>
         </row>

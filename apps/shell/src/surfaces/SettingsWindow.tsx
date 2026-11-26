@@ -169,7 +169,7 @@ function SettingsWindowContent(): NativeChild {
                       backgroundColor: "transparent", border: "1px solid transparent",
                       color: active() ? onPrimaryContainer : muted, fontSize: "13px", fontWeight: 500,
                     }}>
-                      <ShellIcon name={tab().icon} size={15} color={active() ? onPrimaryContainer : muted} />
+                      <ShellIcon name={tab().icon} filled={active()} size={15} color={active() ? onPrimaryContainer : muted} />
                       <text style={{ ...grow, ...clipped }}>{tab().label}</text>
                       <Show when={tab().id === "plugins" && pluginUpdatesCount() > 0}>
                         <box style={{
@@ -210,7 +210,7 @@ function SettingsWindowContent(): NativeChild {
                         backgroundColor: "transparent", border: "1px solid transparent",
                         color: active() ? onPrimaryContainer : muted, fontSize: "13px", fontWeight: 500,
                       }}>
-                        <ShellIcon name="layers" size={15} color={active() ? onPrimaryContainer : muted} />
+                        <ShellIcon name="layers" filled={active()} size={15} color={active() ? onPrimaryContainer : muted} />
                         <text style={{ ...grow, ...clipped }}>{page().title}</text>
                         <box ariaHidden style={{ width: "6px", height: "6px", borderRadius: "3px", flexShrink: 0, backgroundColor: active() ? onPrimaryContainer : primary }} />
                       </Button>

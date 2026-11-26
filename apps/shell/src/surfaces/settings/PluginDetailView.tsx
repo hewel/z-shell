@@ -200,7 +200,7 @@ export function PluginDetailView(props: {
           alignItems: "center", gap: "8px", padding: "10px 12px", borderRadius: "12px",
           backgroundColor: "var(--color-primary-container)",
         }}>
-          <ShellIcon name="shield" size={16} color={onPrimaryContainer} />
+          <ShellIcon name="shield" filled size={16} color={onPrimaryContainer} />
           <text style={{ ...grow, fontSize: "11px", lineHeight: "15px", color: onPrimaryContainer }}>
             Enabled plugins compile directly into the host shell bundle (`bun run build:shell`). Review capabilities before approving.
           </text>
@@ -284,7 +284,7 @@ export function PluginDetailView(props: {
                 alignItems: "center", gap: "8px", padding: "10px 12px", borderRadius: "12px",
                 backgroundColor: "var(--color-error-container)", color: "var(--color-on-error-container)",
               }}>
-                <ShellIcon name="warning" size={16} color="var(--color-on-error-container)" />
+                <ShellIcon name="warning" filled size={16} color="var(--color-on-error-container)" />
                 <text style={{ ...grow, fontSize: "12px", lineHeight: "16px" }}>{err()}</text>
               </row>
             )}

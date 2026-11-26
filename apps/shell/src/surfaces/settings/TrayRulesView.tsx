@@ -215,7 +215,7 @@ export function TrayRulesView(props: { readonly onBack: () => void }): NativeChi
             backgroundColor: "var(--color-error-container)", color: "var(--color-on-error-container)",
             flexShrink: 0,
           }}>
-            <ShellIcon name="warning" size={16} color="var(--color-on-error-container)" />
+            <ShellIcon name="warning" filled size={16} color="var(--color-on-error-container)" />
             <text style={{ ...grow, fontSize: "12px", lineHeight: "16px" }}>{msg()}</text>
           </row>
         )}
