@@ -5,7 +5,15 @@ import { dirname, join, resolve } from "node:path";
 
 const repoRoot = resolve(import.meta.dir, "..");
 
-function resolveBuiltHost(cargoRoot: string): ResolvedNativeHost | null {
+export interface ResolvedZguiHost {
+  readonly executable: string;
+  readonly source: ResolvedNativeHost["source"];
+  readonly runRoot?: string | undefined;
+  readonly cargoRoot?: string | undefined;
+  readonly abi?: ResolvedNativeHost["abi"];
+}
+
+function resolveBuiltHost(cargoRoot: string): ResolvedZguiHost | null {
   for (const profile of ["release", "debug"]) {
     const executable = join(cargoRoot, "target", profile, "zgui-host");
     try {
@@ -13,12 +21,12 @@ function resolveBuiltHost(cargoRoot: string): ResolvedNativeHost | null {
     } catch {
       continue;
     }
-    return { executable, source: "cargo", cargoRoot, abi: probeNativeHost(executable) };
+    return { executable, source: "cargo", runRoot: cargoRoot, cargoRoot, abi: probeNativeHost(executable) };
   }
   return null;
 }
 
-export async function resolveZguiHost(): Promise<ResolvedNativeHost | null> {
+export async function resolveZguiHost(): Promise<ResolvedZguiHost | null> {
   const options = { allowCargoBuild: false, verifyAbi: true };
   if (process.env.ZGUI_JS_HOST_EXECUTABLE?.trim()) return resolveNativeHost(options);
 
