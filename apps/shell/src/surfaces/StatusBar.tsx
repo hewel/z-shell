@@ -945,11 +945,13 @@ function PluginSlotIsland(props: {
             width: props.docked ? "32px" : "40px",
             minHeight: props.docked ? "32px" : "40px",
             padding: "0px",
+            overflow: "hidden",
           }
         : {
             ...segmentChrome(false, props.docked, active()),
             height: props.docked ? "28px" : "32px",
             padding: "0px",
+            overflow: "hidden",
           }}
     >
       {props.slot.render({ vertical: props.vertical })}

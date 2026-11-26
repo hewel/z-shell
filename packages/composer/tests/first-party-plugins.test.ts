@@ -34,8 +34,12 @@ import { createPluginContext } from "@z-shell/plugin-api";
 import { ZShellClient, type InhibitorEntry } from "@z-shell/sdk";
 import { connectUnixSocket } from "@z-shell/sdk/bun";
 
-import { INITIAL_SNAPSHOT_AT_MS, buildShellPreviewFixture } from "../../../apps/shell/tests/fixture-builder.ts";
-import { expectCleanPreview, runPreview, zguiHost } from "../../../apps/shell/tests/preview-harness.ts";
+import {
+  DEFAULT_FIXTURE_BAR_SETTINGS,
+  INITIAL_SNAPSHOT_AT_MS,
+  buildShellPreviewFixture,
+} from "../../../apps/shell/tests/fixture-builder.ts";
+import { expectCleanPreview, readCapture, runPreview, zguiHost } from "../../../apps/shell/tests/preview-harness.ts";
 import {
   THEME_BRIDGES_DEFAULTS,
   createThemeBridgesPlugin,
@@ -307,7 +311,7 @@ describe("First-party reference plugins end-to-end", () => {
       }));
       publicSocket.events.push({
         kind: "message",
-        atMs: 35,
+        atMs: 185,
         text: JSON.stringify({
           jsonrpc: "2.0",
           id: 28,
@@ -322,7 +326,7 @@ describe("First-party reference plugins end-to-end", () => {
       });
       publicSocket.events.push({
         kind: "message",
-        atMs: 50,
+        atMs: 200,
         text: JSON.stringify({
           jsonrpc: "2.0",
           method: "topic.update",
@@ -348,10 +352,81 @@ describe("First-party reference plugins end-to-end", () => {
       }));
       publicSocket.events.push({
         kind: "message",
-        atMs: 65,
+        atMs: 215,
         text: JSON.stringify({ jsonrpc: "2.0", id: 29, result: {} }),
       });
-      publicSocket.events.push({ kind: "close", atMs: 70, error: null });
+      publicSocket.events.push({
+        kind: "message",
+        atMs: 225,
+        text: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "topic.update",
+          params: {
+            daemon_instance_id: "preview-daemon",
+            topic_instance_id: 2,
+            topic: "settings",
+            revision: 2,
+            source_baseline: false,
+            data: {
+              general: { offline_mode: false, log_level: "info" },
+              bar: {
+                ...DEFAULT_FIXTURE_BAR_SETTINGS,
+                position: "left",
+                style: "docked",
+                gaps: 6,
+                launcher_enabled: false,
+                workspace_numbers: false,
+                dock_enabled: false,
+              },
+              theme: {
+                mode: "dark",
+                variant: "tonal",
+                seed_color: null,
+                backend: "builtin",
+                gtk_linking: false,
+              },
+              ime: { mode: "indicator_only", candidate_layout: "auto", switch_osd: true },
+              polkit: { enabled: true },
+              wallpaper: { directories: [], fit: "cover", sync_theme: true, slideshow_seconds: 300 },
+              pre_action_fade_seconds: 0,
+              configured_plugins: [],
+            },
+          },
+        }),
+      });
+      publicSocket.send.push(JSON.stringify({
+        jsonrpc: "2.0",
+        id: 30,
+        method: "topic.unsubscribe",
+        params: { topic: "plugin.z-shell.ai-usage.quotas" },
+      }));
+      publicSocket.events.push({
+        kind: "message",
+        atMs: 226,
+        text: JSON.stringify({ jsonrpc: "2.0", id: 30, result: {} }),
+      });
+      publicSocket.send.push(JSON.stringify({
+        jsonrpc: "2.0",
+        id: 31,
+        method: "topic.subscribe",
+        params: { topic: "plugin.z-shell.ai-usage.quotas" },
+      }));
+      publicSocket.events.push({
+        kind: "message",
+        atMs: 227,
+        text: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 31,
+          result: {
+            daemon_instance_id: "preview-daemon",
+            topic_instance_id: 26,
+            topic: "plugin.z-shell.ai-usage.quotas",
+            revision: 1,
+            data: aiUsageSnapshot,
+          },
+        }),
+      });
+      publicSocket.events.push({ kind: "close", atMs: 600, error: null });
 
       const fixture = join(tempDir, "fixture.json");
       const scenario = join(tempDir, "scenario.json");
@@ -396,6 +471,15 @@ describe("First-party reference plugins end-to-end", () => {
             target: { surface: "bar-dp-1", testId: "plugin-ai-usage-widget" },
             check: { property: "text", equals: "84%" },
           },
+          { id: "capture-floating-idle", op: "capture", surface: "bar-dp-1", captureId: "floating-idle" },
+          {
+            id: "hover-floating-ai",
+            op: "pointer.move",
+            target: { surface: "bar-dp-1", testId: "plugin-ai-usage-widget" },
+          },
+          { id: "hover-floating-anim", op: "clock.advance", byMs: 150 },
+          { id: "hover-floating-settled", op: "settle" },
+          { id: "capture-floating-hover", op: "capture", surface: "bar-dp-1", captureId: "floating-hover" },
           {
             id: "open-ai-panel",
             op: "pointer.click",
@@ -424,15 +508,76 @@ describe("First-party reference plugins end-to-end", () => {
             check: { property: "exists", equals: true },
           },
           { id: "escape-overview", op: "key.press", surface: "niri-overview-dp-1", key: "Escape" },
-          { id: "toggle-reply", op: "clock.advance", byMs: 5 },
-          { id: "daemon-disconnect", op: "clock.advance", byMs: 5 },
+          { id: "toggle-reply", op: "clock.advance", byMs: 10 },
+          { id: "apply-docked-left-bar", op: "clock.advance", byMs: 30 },
+          { id: "docked-left-settled", op: "settle" },
+          {
+            id: "clear-docked-hover",
+            op: "pointer.move",
+            target: { surface: "bar-dp-1", testId: "bar-clock" },
+          },
+          { id: "clear-docked-anim", op: "clock.advance", byMs: 150 },
+          { id: "clear-docked-settled", op: "settle" },
+          { id: "capture-docked-idle", op: "capture", surface: "bar-dp-1", captureId: "docked-idle" },
+          {
+            id: "hover-docked-ai",
+            op: "pointer.move",
+            target: { surface: "bar-dp-1", testId: "plugin-ai-usage-widget" },
+          },
+          { id: "hover-docked-anim", op: "clock.advance", byMs: 150 },
+          { id: "hover-docked-settled", op: "settle" },
+          { id: "capture-docked-hover", op: "capture", surface: "bar-dp-1", captureId: "docked-hover" },
+          { id: "daemon-disconnect", op: "clock.advance", byMs: 50 },
           { id: "finished", op: "settle" },
         ],
       }, null, 2));
 
       expect(zguiHost && Bun.which(zguiHost)).not.toBeNull();
       const result = runPreview(published.dist, fixture, scenario, previewOut);
-      expectCleanPreview(result, 0, 6);
+      expectCleanPreview(result, 4, 6);
+
+      const pixelRgba = (image: ReturnType<typeof readCapture>["image"], x: number, y: number) => {
+        const index = (y * image.width + x) * 4;
+        return [image.data[index]!, image.data[index + 1]!, image.data[index + 2]!, image.data[index + 3]!];
+      };
+      for (const [mode, idleId, hoverId] of [
+        ["floating", "floating-idle", "floating-hover"],
+        ["docked", "docked-idle", "docked-hover"],
+      ] as const) {
+        const idle = readCapture(previewOut, "bar-dp-1", idleId);
+        const hovered = readCapture(previewOut, "bar-dp-1", hoverId);
+        const slot = hovered.tree.nodes.find(n => n.testId === "bar-plugin-slot-ai-quota-bar")!.boundsDevice!;
+        const btn = hovered.tree.nodes.find(n => n.testId === "plugin-ai-usage-widget")!.boundsDevice!;
+        expect(btn.x, `${mode} btn.x`).toBe(slot.x + 1);
+        expect(btn.y, `${mode} btn.y`).toBe(slot.y + 1);
+        expect(btn.width, `${mode} btn.width`).toBe(slot.width - 2);
+        expect(btn.height, `${mode} btn.height`).toBe(slot.height - 2);
+        if (mode === "docked") {
+          expect(slot.width).toBe(32);
+          expect(slot.height).toBe(32);
+          expect(btn.width).toBe(30);
+          expect(btn.height).toBe(30);
+        }
+
+        const innerX = Math.round(btn.x + btn.width / 2);
+        const innerY = Math.round(btn.y + 2);
+        expect(
+          pixelRgba(hovered.image, innerX, innerY),
+          `${mode} hover highlight visible near top interior edge`,
+        ).not.toEqual(pixelRgba(idle.image, innerX, innerY));
+
+        for (const [corner, cx, cy] of [
+          ["top-left", Math.round(btn.x), Math.round(btn.y)],
+          ["top-right", Math.round(btn.x + btn.width - 1), Math.round(btn.y)],
+          ["bottom-left", Math.round(btn.x), Math.round(btn.y + btn.height - 1)],
+          ["bottom-right", Math.round(btn.x + btn.width - 1), Math.round(btn.y + btn.height - 1)],
+        ] as const) {
+          expect(
+            pixelRgba(hovered.image, cx, cy),
+            `${mode} ${corner} corner must remain clipped (not sharp 90deg rect)`,
+          ).toEqual(pixelRgba(idle.image, cx, cy));
+        }
+      }
     } finally {
       removeTempTree(tempDir);
     }

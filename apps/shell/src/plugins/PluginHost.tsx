@@ -253,7 +253,17 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
                 render: ({ vertical }) => (
                   <box
                     ref={node => { slotNode = node; }}
-                    style={{ display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+                    style={{
+                      display: "flex",
+                      flexDirection: vertical ? "column" : "row",
+                      alignItems: "stretch",
+                      justifyContent: "center",
+                      flexGrow: 1,
+                      flexShrink: 0,
+                      width: vertical ? "100%" : "auto",
+                      height: vertical ? "auto" : "100%",
+                      borderRadius: "inherit",
+                    }}
                   >
                     <WidgetComponent client={publicClient} vertical={vertical} onOpenPanel={onOpenPanel} />
                   </box>

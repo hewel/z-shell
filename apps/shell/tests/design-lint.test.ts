@@ -1220,6 +1220,26 @@ export function Track() { return <box><box data-active-indicator="true" style={{
     );
     expect(goodIndicatorFlush.status, goodIndicatorFlush.output).toBe(0);
 
+    const badPluginWrapper = lintSnippet(
+      "PluginHost.tsx",
+      `declare function registerPluginBarWidget(spec: unknown): () => void;
+export function mount() {
+  return registerPluginBarWidget({ render: () => <box style={{ display: "flex" }}><WidgetComponent /></box> });
+}`,
+      "zshell/consistent-active-hover-shape",
+    );
+    expect(badPluginWrapper.status).not.toBe(0);
+
+    const goodPluginWrapper = lintSnippet(
+      "PluginHost.tsx",
+      `declare function registerPluginBarWidget(spec: unknown): () => void;
+export function mount() {
+  return registerPluginBarWidget({ render: () => <box style={{ display: "flex", borderRadius: "inherit" }}><WidgetComponent /></box> });
+}`,
+      "zshell/consistent-active-hover-shape",
+    );
+    expect(goodPluginWrapper.status, goodPluginWrapper.output).toBe(0);
+
     // zshell/no-child-control-overflow catches child <Button> wider/taller than its enclosing capsule.
     const badOverflow = lintSnippet(
       "StatusBar.tsx",

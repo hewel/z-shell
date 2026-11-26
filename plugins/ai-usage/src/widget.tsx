@@ -62,11 +62,11 @@ export default function Widget(props: {
         else void props.client()?.invokeCommand("plugin.z-shell.ai-usage.refresh").catch(() => undefined);
       }}
       style={{
-        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, gap: "6px",
+        display: "flex", alignItems: "center", justifyContent: "center", flexGrow: 1, flexShrink: 0, gap: "6px",
         width: props.vertical ? "100%" : "auto",
-        minWidth: props.vertical ? "30px" : "24px",
-        height: "100%",
-        minHeight: props.vertical ? "30px" : "28px",
+        minWidth: "24px",
+        height: props.vertical ? "auto" : "100%",
+        minHeight: "24px",
         borderRadius: "inherit",
         padding: props.vertical ? "0px" : "0 8px",
         backgroundColor: "transparent", color: "inherit",

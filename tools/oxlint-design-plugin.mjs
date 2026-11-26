@@ -2188,18 +2188,45 @@ const rules = {
             }
           }
         },
+        CallExpression(callNode) {
+          if (callNode.callee?.type !== "Identifier" || callNode.callee.name !== "registerPluginBarWidget") return;
+          const arg = callNode.arguments?.[0];
+          if (!arg || arg.type !== "ObjectExpression") return;
+          const renderProp = arg.properties.find(p => propertyName(p) === "render");
+          if (!renderProp || renderProp.type !== "Property") return;
+          collectJsxElements(renderProp.value, desc => {
+            const descTag = desc.openingElement?.name?.name;
+            if (descTag !== "box" && descTag !== "row" && descTag !== "column") return;
+            const wrapsChildElement = (desc.children ?? []).some(ch => ch.type === "JSXElement");
+            if (!wrapsChildElement) return;
+            const descStyle = findPropExpr(desc.openingElement, "style");
+            if (descStyle && hasNonZeroPadding(descStyle)) {
+              context.report({
+                node: descStyle,
+                message: "Consistent Active/Hover Shape Rule: registerPluginBarWidget wrapper must use zero padding so plugin hover fills the full host slot.",
+              });
+            }
+            const radii = descStyle ? collectRadiusStrings(descStyle) : [];
+            if (radii.length === 0 || radii.some(r => r !== "inherit")) {
+              context.report({
+                node: descStyle ?? desc.openingElement,
+                message: `Consistent Active/Hover Shape Rule: registerPluginBarWidget wrapper <${descTag}> must use borderRadius: "inherit" so plugin widgets inherit the host slot contour (found ${radii.length > 0 ? radii.join(", ") : "none"}).`,
+              });
+            }
+          });
+        },
         JSXElement(element) {
           const opening = element.openingElement;
           if (opening?.name?.type !== "JSXIdentifier") return;
           const tag = opening.name.name;
           const styleExpr = findPropExpr(opening, "style");
 
-          if (isPluginWidget && tag === "Button" && styleExpr) {
-            const radii = collectRadiusStrings(styleExpr);
-            if (radii.some(r => r !== "inherit")) {
+          if (isPluginWidget && (tag === "Button" || tag === "control")) {
+            const radii = styleExpr ? collectRadiusStrings(styleExpr) : [];
+            if (radii.length === 0 || radii.some(r => r !== "inherit")) {
               context.report({
-                node: styleExpr,
-                message: `Consistent Active/Hover Shape Rule: plugin widget root <Button> must use borderRadius: "inherit" so its hover highlight matches the host slot active capsule (found ${radii.join(", ")}).`,
+                node: styleExpr ?? opening,
+                message: `Consistent Active/Hover Shape Rule: plugin widget root <${tag}> must use borderRadius: "inherit" so its hover highlight matches the host slot active capsule (found ${radii.length > 0 ? radii.join(", ") : "none"}).`,
               });
             }
           }
@@ -2218,10 +2245,10 @@ const rules = {
                 const btnStyle = findPropExpr(desc.openingElement, "style");
                 if (!btnStyle) return;
                 const radii = collectRadiusStrings(btnStyle);
-                if (radii.some(r => r !== "inherit")) {
+                if (radii.length === 0 || radii.some(r => r !== "inherit")) {
                   context.report({
                     node: btnStyle,
-                    message: `Consistent Active/Hover Shape Rule: <${descTag}> inside [data-active] wrapper must use borderRadius: "inherit" so hover and active shapes match (found ${radii.join(", ")}).`,
+                    message: `Consistent Active/Hover Shape Rule: <${descTag}> inside [data-active] wrapper must use borderRadius: "inherit" so hover and active shapes match (found ${radii.length > 0 ? radii.join(", ") : "none"}).`,
                   });
                 }
               });
