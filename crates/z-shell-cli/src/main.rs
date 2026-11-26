@@ -23,7 +23,8 @@ const EXIT_CONNECT: u8 = 3;
 const EXIT_RPC: u8 = 4;
 const EXIT_PLUGIN: u8 = 1;
 const BUS_CONVERGENCE_TIMEOUT: Duration = Duration::from_millis(150);
-const PENDING_APPLY_NOTE: &str = "No active z-shelld instance detected; changes are persisted to desired state and will be applied when a session starts.";
+const PENDING_APPLY_NO_DAEMON_NOTE: &str = "No active z-shelld instance detected; changes are persisted to desired state. Recompose/rebuild the shell (`bun run build:shell`) and start a session to apply them.";
+const PENDING_APPLY_STATIC_BUILD_NOTE: &str = "Desired plugin state updated in z-shelld, but runtime overlay hot-reload is inactive (runtime_overlay_supported=false). Recompose/rebuild the shell (`bun run build:shell`) to apply or unload plugin code.";
 
 enum ParsedCommand {
     Help,
@@ -1321,17 +1322,34 @@ async fn observe_convergence_rev(
     allow_session_socket_fallback: bool,
 ) -> ConvergenceReport {
     let Some(bus_socket) = resolve_public_bus_socket(allow_session_socket_fallback) else {
-        return pending_apply_report(target_plugin, desired_revision, None);
+        return pending_apply_report(
+            target_plugin,
+            desired_revision,
+            None,
+            PENDING_APPLY_NO_DAEMON_NOTE,
+        );
     };
 
     let observed = tokio::time::timeout(BUS_CONVERGENCE_TIMEOUT, async {
         let mut client = BusClient::connect(&bus_socket).await.ok()?;
         let plugins_topic = TopicName::try_new("plugins").ok()?;
         let snapshot = client.subscribe(plugins_topic).await.ok()?;
+        if snapshot
+            .data
+            .get("runtime_overlay_supported")
+            .and_then(Value::as_bool)
+            == Some(false)
+        {
+            return Some((
+                "pending_apply".to_owned(),
+                extract_applied_revision(&snapshot.data),
+                true,
+            ));
+        }
         let mut applied_revision = extract_applied_revision(&snapshot.data);
         if applied_revision.is_some_and(|rev| rev >= desired_revision) {
             let status = extract_plugin_runtime_state(&snapshot.data, target_plugin);
-            return Some((status, applied_revision));
+            return Some((status, applied_revision, true));
         }
 
         while let Some(notif) = client.next_notification().await {
@@ -1339,23 +1357,35 @@ async fn observe_convergence_rev(
                 && method == methods::TOPIC_UPDATE
                 && params.get("topic").and_then(Value::as_str) == Some("plugins")
                 && let Some(data) = params.get("data")
-                && let Some(rev) = extract_applied_revision(data)
             {
-                applied_revision = Some(rev);
-                if rev >= desired_revision {
-                    let status = extract_plugin_runtime_state(data, target_plugin);
-                    return Some((status, applied_revision));
+                if data
+                    .get("runtime_overlay_supported")
+                    .and_then(Value::as_bool)
+                    == Some(false)
+                {
+                    return Some((
+                        "pending_apply".to_owned(),
+                        extract_applied_revision(data),
+                        true,
+                    ));
+                }
+                if let Some(rev) = extract_applied_revision(data) {
+                    applied_revision = Some(rev);
+                    if rev >= desired_revision {
+                        let status = extract_plugin_runtime_state(data, target_plugin);
+                        return Some((status, applied_revision, true));
+                    }
                 }
             }
         }
-        Some(("pending_apply".to_owned(), applied_revision))
+        Some(("pending_apply".to_owned(), applied_revision, true))
     })
     .await
     .ok()
     .flatten();
 
     match observed {
-        Some((apply_status, applied_desired_revision)) if apply_status != "pending_apply" => {
+        Some((apply_status, applied_desired_revision, _)) if apply_status != "pending_apply" => {
             ConvergenceReport {
                 plugin_id: target_plugin.cloned(),
                 apply_status,
@@ -1364,10 +1394,24 @@ async fn observe_convergence_rev(
                 note: None,
             }
         }
-        Some((_, applied_desired_revision)) => {
-            pending_apply_report(target_plugin, desired_revision, applied_desired_revision)
-        }
-        None => pending_apply_report(target_plugin, desired_revision, None),
+        Some((_, applied_desired_revision, true)) => pending_apply_report(
+            target_plugin,
+            desired_revision,
+            applied_desired_revision,
+            PENDING_APPLY_STATIC_BUILD_NOTE,
+        ),
+        Some((_, applied_desired_revision, false)) => pending_apply_report(
+            target_plugin,
+            desired_revision,
+            applied_desired_revision,
+            PENDING_APPLY_NO_DAEMON_NOTE,
+        ),
+        None => pending_apply_report(
+            target_plugin,
+            desired_revision,
+            None,
+            PENDING_APPLY_NO_DAEMON_NOTE,
+        ),
     }
 }
 
@@ -1378,29 +1422,46 @@ fn extract_applied_revision(data: &Value) -> Option<u64> {
 }
 
 fn extract_plugin_runtime_state(data: &Value, target_plugin: Option<&PluginId>) -> String {
-    if let Some(target_id) = target_plugin
-        && let Some(plugins) = data.get("plugins").and_then(Value::as_array)
-        && let Some(entry) = plugins
+    if data
+        .get("runtime_overlay_supported")
+        .and_then(Value::as_bool)
+        == Some(false)
+    {
+        return "unknown".to_owned();
+    }
+    let Some(plugins) = data.get("plugins").and_then(Value::as_array) else {
+        return "unknown".to_owned();
+    };
+    if let Some(target_id) = target_plugin {
+        return plugins
             .iter()
             .find(|item| item.get("id").and_then(Value::as_str) == Some(target_id.as_str()))
-        && let Some(state) = entry.get("runtime_state").and_then(Value::as_str)
-    {
-        return state.to_owned();
+            .and_then(|entry| entry.get("runtime_state").and_then(Value::as_str))
+            .unwrap_or("unknown")
+            .to_owned();
     }
-    "active".to_owned()
+    if !plugins.is_empty()
+        && plugins
+            .iter()
+            .all(|entry| entry.get("runtime_state").and_then(Value::as_str) == Some("active"))
+    {
+        return "active".to_owned();
+    }
+    "unknown".to_owned()
 }
 
 fn pending_apply_report(
     target_plugin: Option<&PluginId>,
     desired_revision: u64,
     applied_desired_revision: Option<u64>,
+    note: &'static str,
 ) -> ConvergenceReport {
     ConvergenceReport {
         plugin_id: target_plugin.cloned(),
         apply_status: "pending_apply".to_owned(),
         desired_revision,
         applied_desired_revision,
-        note: Some(PENDING_APPLY_NOTE),
+        note: Some(note),
     }
 }
 

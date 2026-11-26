@@ -5,8 +5,10 @@ use std::fs::{self, DirBuilder};
 use std::io::{self, Write};
 use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 use thiserror::Error;
 use z_shell_config::{PluginSourceKind, PluginSourceSettings, ShellPaths};
@@ -15,9 +17,11 @@ use z_shell_protocol::PluginId;
 use super::digest::content_digest;
 use super::git;
 use super::manifest::{Manifest, SharedRuntimeAbi, StoreCategory};
+use super::net::{self, CancelToken};
 use super::registry::OfflinePolicy;
 
 const CATALOG_SCHEMA_VERSION: u32 = 1;
+const MAX_CATALOG_INDEX_BYTES: usize = 8 * 1024 * 1024;
 
 /// Security advisory published inside a static catalog index.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -309,9 +313,30 @@ impl CatalogStore {
         sources: &[PluginSourceSettings],
         policy: OfflinePolicy,
     ) -> Result<Vec<CatalogRefreshResult>, CatalogError> {
+        self.refresh_with_cancel(sources, policy, None)
+    }
+
+    /// Refreshes all enabled catalog sources with cooperative cancellation support.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CatalogError`] if a source index is malformed, offline with no local cache/seed,
+    /// cancelled, or unreachable when online.
+    pub fn refresh_with_cancel(
+        &self,
+        sources: &[PluginSourceSettings],
+        policy: OfflinePolicy,
+        cancel: Option<&Arc<CancelToken>>,
+    ) -> Result<Vec<CatalogRefreshResult>, CatalogError> {
         let mut results = Vec::new();
         for source in sources.iter().filter(|s| s.enabled) {
-            let loaded = self.load_source(source, policy, true)?;
+            if cancel.is_some_and(|token| token.is_cancelled()) {
+                return Err(CatalogError::Fetch {
+                    source_id: source.id.clone(),
+                    reason: "catalog refresh cancelled".to_owned(),
+                });
+            }
+            let loaded = self.load_source(source, policy, true, false, cancel)?;
             results.push(CatalogRefreshResult {
                 source_id: source.id.clone(),
                 cached: loaded.cached,
@@ -335,30 +360,26 @@ impl CatalogStore {
         source_filter: Option<&str>,
         policy: OfflinePolicy,
     ) -> Result<Vec<AggregatedCatalogEntry>, CatalogError> {
-        let needle = query.trim().to_ascii_lowercase();
-        let aggregated = self.aggregate_sources(sources, source_filter, policy)?;
-        Ok(aggregated
-            .into_iter()
-            .filter(|entry| {
-                if let Some(cat) = category
-                    && entry.category != cat
-                {
-                    return false;
-                }
-                if needle.is_empty() {
-                    return true;
-                }
-                entry.id.as_str().to_ascii_lowercase().contains(&needle)
-                    || entry.name.to_ascii_lowercase().contains(&needle)
-                    || entry.summary.to_ascii_lowercase().contains(&needle)
-                    || entry.available_sources.iter().any(|off| {
-                        off.plugin
-                            .tags
-                            .iter()
-                            .any(|t| t.to_ascii_lowercase().contains(&needle))
-                    })
-            })
-            .collect())
+        let aggregated = self.aggregate_sources(sources, source_filter, policy, false)?;
+        Ok(filter_aggregated_entries(aggregated, query, category))
+    }
+
+    /// Searches and aggregates plugins strictly from local seeds, local files, and existing
+    /// provenance-keyed caches without ever making network requests or failing on uncached remotes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CatalogError`] if `source_filter` is unknown or a cached/local index is malformed.
+    pub fn search_cached(
+        &self,
+        sources: &[PluginSourceSettings],
+        query: &str,
+        category: Option<StoreCategory>,
+        source_filter: Option<&str>,
+    ) -> Result<Vec<AggregatedCatalogEntry>, CatalogError> {
+        let aggregated =
+            self.aggregate_sources(sources, source_filter, OfflinePolicy::Offline, true)?;
+        Ok(filter_aggregated_entries(aggregated, query, category))
     }
 
     /// Returns aggregated metadata and all source offerings for a single [`PluginId`].
@@ -372,7 +393,24 @@ impl CatalogStore {
         id: &PluginId,
         policy: OfflinePolicy,
     ) -> Result<AggregatedCatalogEntry, CatalogError> {
-        let mut entries = self.aggregate_sources(sources, None, policy)?;
+        let mut entries = self.aggregate_sources(sources, None, policy, false)?;
+        entries
+            .drain(..)
+            .find(|entry| &entry.id == id)
+            .ok_or_else(|| CatalogError::PluginNotFound(id.clone()))
+    }
+
+    /// Returns aggregated metadata strictly from local seeds, local files, and existing caches.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CatalogError::PluginNotFound`] if no cached/local source offers `id`.
+    pub fn detail_cached(
+        &self,
+        sources: &[PluginSourceSettings],
+        id: &PluginId,
+    ) -> Result<AggregatedCatalogEntry, CatalogError> {
+        let mut entries = self.aggregate_sources(sources, None, OfflinePolicy::Offline, true)?;
         entries
             .drain(..)
             .find(|entry| &entry.id == id)
@@ -455,6 +493,7 @@ impl CatalogStore {
         sources: &[PluginSourceSettings],
         source_filter: Option<&str>,
         policy: OfflinePolicy,
+        allow_uncached_remote: bool,
     ) -> Result<Vec<AggregatedCatalogEntry>, CatalogError> {
         if let Some(src_id) = source_filter
             && !sources.iter().any(|s| s.enabled && s.id == src_id)
@@ -466,7 +505,7 @@ impl CatalogStore {
             .iter()
             .filter(|s| s.enabled && source_filter.is_none_or(|f| s.id == f))
         {
-            let loaded = self.load_source(source, policy, false)?;
+            let loaded = self.load_source(source, policy, false, allow_uncached_remote, None)?;
             let source_identity = canonical_catalog_source_identity(source, None);
             for plugin in loaded.plugins {
                 by_id
@@ -511,6 +550,8 @@ impl CatalogStore {
         source: &PluginSourceSettings,
         policy: OfflinePolicy,
         force_fetch_when_online: bool,
+        allow_uncached_remote: bool,
+        cancel: Option<&Arc<CancelToken>>,
     ) -> Result<LoadedSource, CatalogError> {
         let mut loaded = match source.kind {
             PluginSourceKind::LocalFile => {
@@ -528,8 +569,7 @@ impl CatalogStore {
             }
             PluginSourceKind::HttpsJson | PluginSourceKind::GitJson => {
                 let cache_dir = self.paths.plugin_catalog_cache_dir();
-                let cache_path = cache_dir.join(format!("{}.json", source.id));
-                let etag_path = cache_dir.join(format!("{}.etag", source.id));
+                let (cache_path, etag_path) = catalog_cache_paths(&self.paths, source);
                 let has_seed = source
                     .local_seed_dir
                     .as_ref()
@@ -545,7 +585,10 @@ impl CatalogStore {
                                 plugins: index.plugins,
                             }
                         }
-                        Err(err) if err.kind() == io::ErrorKind::NotFound && has_seed => {
+                        Err(err)
+                            if err.kind() == io::ErrorKind::NotFound
+                                && (has_seed || allow_uncached_remote) =>
+                        {
                             LoadedSource {
                                 cached: true,
                                 stale: true,
@@ -580,6 +623,7 @@ impl CatalogStore {
                                 &cache_dir,
                                 &cache_path,
                                 &etag_path,
+                                cancel,
                             )?
                         }
                     }
@@ -609,6 +653,7 @@ impl CatalogStore {
         cache_dir: &Path,
         cache_path: &Path,
         etag_path: &Path,
+        cancel: Option<&Arc<CancelToken>>,
     ) -> Result<LoadedSource, CatalogError> {
         ensure_dir(cache_dir)?;
         match source.kind {
@@ -617,12 +662,12 @@ impl CatalogStore {
                     .ok()
                     .map(|s| s.trim().to_owned())
                     .filter(|s| !s.is_empty());
-                let resp = super::net::get_validated(&source.url, etag_header.as_deref()).map_err(
-                    |reason| CatalogError::Fetch {
-                        source_id: source.id.clone(),
-                        reason,
-                    },
-                )?;
+                let resp =
+                    net::get_validated_cancellable(&source.url, etag_header.as_deref(), cancel)
+                        .map_err(|reason| CatalogError::Fetch {
+                            source_id: source.id.clone(),
+                            reason,
+                        })?;
                 if resp.status().as_u16() == 304 && cache_path.is_file() {
                     let bytes = fs::read(cache_path).map_err(|err| CatalogError::Io {
                         path: cache_path.to_path_buf(),
@@ -640,13 +685,12 @@ impl CatalogStore {
                     .get("ETag")
                     .and_then(|v| v.to_str().ok())
                     .map(ToOwned::to_owned);
-                let bytes = resp
-                    .into_body()
-                    .read_to_vec()
-                    .map_err(|err| CatalogError::Fetch {
+                let bytes = net::read_body_bounded(resp, MAX_CATALOG_INDEX_BYTES, cancel).map_err(
+                    |reason| CatalogError::Fetch {
                         source_id: source.id.clone(),
-                        reason: err.to_string(),
-                    })?;
+                        reason,
+                    },
+                )?;
                 let index = parse_catalog_index(&source.id, &bytes)?;
                 atomic_write(cache_path, &bytes)?;
                 if let Some(etag) = etag {
@@ -659,6 +703,12 @@ impl CatalogStore {
                 })
             }
             PluginSourceKind::GitJson => {
+                if cancel.is_some_and(|token| token.is_cancelled()) {
+                    return Err(CatalogError::Fetch {
+                        source_id: source.id.clone(),
+                        reason: "catalog refresh cancelled".to_owned(),
+                    });
+                }
                 let rel_path = source.index_path.as_deref().unwrap_or("catalog-v1.json");
                 let ref_name = source.ref_name.as_deref().unwrap_or("HEAD");
                 let bytes = git::read_file_at_ref(
@@ -688,6 +738,93 @@ struct LoadedSource {
     cached: bool,
     stale: bool,
     plugins: Vec<CatalogPlugin>,
+}
+
+fn filter_aggregated_entries(
+    aggregated: Vec<AggregatedCatalogEntry>,
+    query: &str,
+    category: Option<StoreCategory>,
+) -> Vec<AggregatedCatalogEntry> {
+    let needle = query.trim().to_ascii_lowercase();
+    aggregated
+        .into_iter()
+        .filter(|entry| {
+            if let Some(cat) = category
+                && entry.category != cat
+            {
+                return false;
+            }
+            if needle.is_empty() {
+                return true;
+            }
+            entry.id.as_str().to_ascii_lowercase().contains(&needle)
+                || entry.name.to_ascii_lowercase().contains(&needle)
+                || entry.summary.to_ascii_lowercase().contains(&needle)
+                || entry.available_sources.iter().any(|off| {
+                    off.plugin
+                        .tags
+                        .iter()
+                        .any(|t| t.to_ascii_lowercase().contains(&needle))
+                })
+        })
+        .collect()
+}
+
+/// Computes a deterministic provenance hash key for a configured catalog source based on its
+/// transport kind, normalized URL/canonical path, Git ref/index path, and seed root.
+#[must_use]
+pub fn source_provenance_key(source: &PluginSourceSettings) -> String {
+    let kind_label = match source.kind {
+        PluginSourceKind::HttpsJson => "https_json",
+        PluginSourceKind::GitJson => "git_json",
+        PluginSourceKind::LocalFile => "local_file",
+        _ => "unknown",
+    };
+    let origin = match source.kind {
+        PluginSourceKind::LocalFile => fs::canonicalize(&source.url)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| source.url.trim().to_owned()),
+        PluginSourceKind::GitJson => {
+            git::normalize_url(&source.url).unwrap_or_else(|_| source.url.trim().to_owned())
+        }
+        PluginSourceKind::HttpsJson | _ => source.url.trim().to_owned(),
+    };
+    let seed = source
+        .local_seed_dir
+        .as_ref()
+        .map(|p| {
+            fs::canonicalize(p)
+                .unwrap_or_else(|_| p.clone())
+                .to_string_lossy()
+                .into_owned()
+        })
+        .unwrap_or_default();
+
+    let mut hasher = Sha256::new();
+    hasher.update(kind_label.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(origin.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(source.ref_name.as_deref().unwrap_or("").as_bytes());
+    hasher.update(b"\0");
+    hasher.update(source.index_path.as_deref().unwrap_or("").as_bytes());
+    hasher.update(b"\0");
+    hasher.update(seed.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+/// Returns the `(index_json_path, etag_path)` inside `catalog-cache` keyed by source provenance.
+#[must_use]
+pub fn catalog_cache_paths(
+    paths: &ShellPaths,
+    source: &PluginSourceSettings,
+) -> (PathBuf, PathBuf) {
+    let key = source_provenance_key(source);
+    let cache_dir = paths.plugin_catalog_cache_dir();
+    (
+        cache_dir.join(format!("{key}.json")),
+        cache_dir.join(format!("{key}.etag")),
+    )
 }
 
 /// Computes the canonical `source_identity` string for a catalog plugin release.
@@ -734,17 +871,33 @@ fn parse_catalog_index(source_id: &str, bytes: &[u8]) -> Result<CatalogIndex, Ca
 }
 
 fn scan_local_seed_dir(seed_root: &Path) -> Result<Vec<CatalogPlugin>, CatalogError> {
-    let mut plugins = Vec::new();
-    let entries = fs::read_dir(seed_root).map_err(|err| CatalogError::Io {
+    let canon_root = fs::canonicalize(seed_root).map_err(|err| CatalogError::Io {
         path: seed_root.to_path_buf(),
+        source: err,
+    })?;
+    let mut plugins = Vec::new();
+    let entries = fs::read_dir(&canon_root).map_err(|err| CatalogError::Io {
+        path: canon_root.clone(),
         source: err,
     })?;
     for entry in entries {
         let entry = entry.map_err(|err| CatalogError::Io {
-            path: seed_root.to_path_buf(),
+            path: canon_root.clone(),
             source: err,
         })?;
-        let path = entry.path();
+        let raw_path = entry.path();
+        let Ok(path) = fs::canonicalize(&raw_path) else {
+            continue;
+        };
+        if !path.starts_with(&canon_root) || path == canon_root {
+            return Err(CatalogError::Io {
+                path: raw_path,
+                source: io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "local_seed_dir entry escapes configured root",
+                ),
+            });
+        }
         if !path.is_dir() || !path.join("plugin.toml").is_file() {
             continue;
         }
@@ -770,6 +923,36 @@ fn scan_local_seed_dir(seed_root: &Path) -> Result<Vec<CatalogPlugin>, CatalogEr
             .map(|s| s.tags.clone())
             .unwrap_or_default();
         let homepage = manifest.store.as_ref().and_then(|s| s.homepage.clone());
+        let (icon_url, icon_sha256) = manifest
+            .store
+            .as_ref()
+            .and_then(|s| s.icon.as_ref())
+            .and_then(|rel| {
+                let full = path.join(rel);
+                let bytes = fs::read(&full).ok()?;
+                let sha = format!("sha256:{:x}", Sha256::digest(&bytes));
+                Some((full.to_string_lossy().into_owned(), sha))
+            })
+            .map_or((None, None), |(u, s)| (Some(u), Some(s)));
+        let screenshots = manifest
+            .store
+            .as_ref()
+            .map(|s| {
+                s.screenshots
+                    .iter()
+                    .filter_map(|rel| {
+                        let full = path.join(rel);
+                        let bytes = fs::read(&full).ok()?;
+                        let sha256 = format!("sha256:{:x}", Sha256::digest(&bytes));
+                        Some(CatalogScreenshot {
+                            url: full.to_string_lossy().into_owned(),
+                            sha256,
+                            caption: None,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let release = CatalogRelease {
             version: manifest.version.clone(),
             plugin_api: manifest.plugin_api,
@@ -788,9 +971,9 @@ fn scan_local_seed_dir(seed_root: &Path) -> Result<Vec<CatalogPlugin>, CatalogEr
             category,
             tags,
             homepage,
-            icon_url: None,
-            icon_sha256: None,
-            screenshots: Vec::new(),
+            icon_url,
+            icon_sha256,
+            screenshots,
             latest_version: release.version.clone(),
             yanked: false,
             advisories: Vec::new(),

@@ -4,10 +4,11 @@ pub mod archive;
 pub mod bundle;
 pub mod capabilities;
 pub mod catalog;
+pub mod catalog_media;
 pub mod digest;
 mod git;
 mod manifest;
-mod net;
+pub mod net;
 pub mod registry;
 
 pub use git::GitError;

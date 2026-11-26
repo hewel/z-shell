@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use rustix::fs::{FlockOperation, flock};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 use thiserror::Error;
 use z_shell_config::{ConfigError, ConfigStore, ShellPaths};
@@ -170,6 +171,9 @@ pub enum PluginError {
     /// Plugin lacks valid non-revoked approval covering its requested capabilities.
     #[error("plugin {0} requires explicit capability approval before enabling")]
     ApprovalRequired(PluginId),
+    /// Plugin approval was explicitly revoked and cannot be implicitly restored.
+    #[error("plugin {0} approval was revoked")]
+    Revoked(PluginId),
     /// On-disk bundle or `--path` source drifted from the pinned digest.
     #[error("plugin {0} content digest has drifted; sync and audit the source first")]
     DigestDrift(PluginId),
@@ -206,6 +210,27 @@ pub struct PluginSummary {
     pub approved: bool,
 }
 
+impl PluginSummary {
+    /// Returns a public-bus-safe projection that redacts raw local filesystem paths from
+    /// `source_identity` while preserving deterministic provenance hashes for comparison.
+    #[must_use]
+    pub fn redacted_for_public(&self) -> Self {
+        let mut copy = self.clone();
+        copy.source_identity = redact_source_identity(&self.source_identity);
+        copy
+    }
+}
+
+/// Consistent single-read snapshot of `desired_revision` and installed plugin summaries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct PluginRegistrySnapshot {
+    /// Monotonic desired registry revision read atomically with `plugins`.
+    pub desired_revision: u64,
+    /// Installed plugin summaries at `desired_revision`.
+    pub plugins: Vec<PluginSummary>,
+}
+
 /// Audit breakdown of installed authority, net host expansion, and bundle integrity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
@@ -220,6 +245,49 @@ pub struct AuditReport {
     pub current_content_digest: String,
     /// True when the on-disk bundle (and `--path` source, if applicable) matches the pinned digest.
     pub digest_matches: bool,
+}
+
+impl AuditReport {
+    /// Returns a public-bus-safe projection with redacted `plugin.source_identity`.
+    #[must_use]
+    pub fn redacted_for_public(&self) -> Self {
+        Self {
+            plugin: self.plugin.redacted_for_public(),
+            diff: self.diff.clone(),
+            net_added_host_capabilities: self.net_added_host_capabilities.clone(),
+            current_content_digest: self.current_content_digest.clone(),
+            digest_matches: self.digest_matches,
+        }
+    }
+}
+
+/// Prepared candidate new installation awaiting explicit user confirmation via
+/// [`PluginManager::commit_install`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct StagedInstall {
+    /// Target plugin identifier.
+    pub id: PluginId,
+    /// Display name from manifest.
+    pub name: String,
+    /// Candidate package version.
+    pub version: String,
+    /// Candidate `plugin_api` level.
+    pub plugin_api: u32,
+    /// Candidate `shared_runtime_abi`.
+    pub shared_runtime_abi: SharedRuntimeAbi,
+    /// Verified bundle content digest.
+    pub content_digest: String,
+    /// Canonical `source_identity` bound at install.
+    pub source_identity: String,
+    /// Requested capabilities declared by the staged manifest.
+    pub requested_capabilities: CapabilityBundle,
+    /// Net host capabilities added relative to currently enabled plugins.
+    pub net_added_host_capabilities: HostCapabilities,
+    /// Provenance of the staged candidate bundle.
+    pub resolved_from: ResolvedFrom,
+    #[serde(skip)]
+    source: Source,
 }
 
 /// Result of installing a plugin from a catalog source.
@@ -278,6 +346,8 @@ pub struct StagedUpgrade {
     new_source: Source,
     #[serde(skip)]
     requested_capabilities: CapabilityBundle,
+    #[serde(skip)]
+    was_revoked: bool,
 }
 
 /// Diagnostic severity reported by [`PluginManager::doctor`].
@@ -308,6 +378,36 @@ pub struct DoctorFinding {
     pub message: String,
 }
 
+impl DoctorFinding {
+    /// Returns a public-bus-safe projection that strips raw filesystem paths from diagnostic messages.
+    #[must_use]
+    pub fn redacted_for_public(&self) -> Self {
+        let message = match self.code.as_str() {
+            "path_source_drifted" => self.plugin_id.as_ref().map_or_else(
+                || "local path source changed since pinned digest".to_owned(),
+                |id| {
+                    format!(
+                        "local path source changed since pinned digest; run `z-shell plugin sync {id}`"
+                    )
+                },
+            ),
+            "path_source_unreadable" => self.plugin_id.as_ref().map_or_else(
+                || "local path source is missing or unreadable".to_owned(),
+                |id| format!("local path source for {id} is missing or unreadable"),
+            ),
+            "orphan_bundle" => "unreferenced bundle directory on disk".to_owned(),
+            "stale_staging_dir" => "leftover staging entry on disk".to_owned(),
+            _ => self.message.clone(),
+        };
+        Self {
+            code: self.code.clone(),
+            severity: self.severity,
+            plugin_id: self.plugin_id.clone(),
+            message,
+        }
+    }
+}
+
 /// Manages v2 static plugin bundles, catalog installs, upgrades, and durable approvals.
 #[derive(Debug, Clone)]
 pub struct PluginManager {
@@ -330,8 +430,20 @@ impl PluginManager {
     ///
     /// Returns [`PluginError`] if loading or migrating the registry fails.
     pub fn list(&self) -> Result<Vec<PluginSummary>, PluginError> {
+        Ok(self.snapshot()?.plugins)
+    }
+
+    /// Reads `desired_revision` and all plugin summaries in a single atomic registry load.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError`] if loading or migrating the registry fails.
+    pub fn snapshot(&self) -> Result<PluginRegistrySnapshot, PluginError> {
         let registry = self.load_with_migration()?;
-        Ok(registry.plugins.values().map(Record::summary).collect())
+        Ok(PluginRegistrySnapshot {
+            desired_revision: registry.desired_revision,
+            plugins: registry.plugins.values().map(Record::summary).collect(),
+        })
     }
 
     /// Returns the monotonic `desired_revision` counter of the current registry.
@@ -555,6 +667,271 @@ impl PluginManager {
         })
     }
 
+    /// Stages a catalog plugin installation without mutating `registry.json` until [`Self::commit_install`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError`] on already-installed conflict, offline block, digest mismatch, or
+    /// compatibility errors.
+    pub fn stage_install_from_catalog(
+        &self,
+        resolved: &ResolvedCatalogRelease,
+        policy: OfflinePolicy,
+    ) -> Result<StagedInstall, PluginError> {
+        let registry = self.load_with_migration()?;
+        if let Some(existing) = registry.plugins.get(&resolved.plugin.id) {
+            return Err(conflict_or_already_installed(
+                existing,
+                &resolved.source_identity,
+            ));
+        }
+        let (manifest, source, content_digest, resolved_from) =
+            self.materialize_catalog_release(&registry, resolved, policy)?;
+        build_staged_install(
+            &registry,
+            manifest,
+            source,
+            resolved.source_identity.clone(),
+            content_digest,
+            resolved_from,
+        )
+    }
+
+    /// Stages a local directory installation without mutating `registry.json` until [`Self::commit_install`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError`] on invalid manifest, compatibility failure, or existing plugin conflict.
+    pub fn stage_install_path(&self, root: impl AsRef<Path>) -> Result<StagedInstall, PluginError> {
+        let registry = self.load_with_migration()?;
+        let root = at(root.as_ref(), fs::canonicalize(root.as_ref()))?;
+        let manifest = Manifest::load(&root)?;
+        manifest.check_runtime_compatibility(HOST_SHARED_RUNTIME_ABI)?;
+        let digest = content_digest(&root)?;
+        let source_identity = format!("path:{}", root.display());
+        if let Some(existing) = registry.plugins.get(&manifest.id) {
+            return Err(conflict_or_already_installed(existing, &source_identity));
+        }
+        let bundle_path = materialize_bundle(
+            &self.paths.plugins_bundles_dir(),
+            &manifest.id,
+            &root,
+            &digest,
+        )?;
+        build_staged_install(
+            &registry,
+            manifest,
+            Source::Path { root, bundle_path },
+            source_identity,
+            digest,
+            ResolvedFrom::LocalArtifact,
+        )
+    }
+
+    /// Stages a Git source installation without mutating `registry.json` until [`Self::commit_install`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError`] on offline policy, fetch/export failure, compatibility failure, or
+    /// existing plugin conflict.
+    pub fn stage_install_git(
+        &self,
+        url: &str,
+        ref_name: &str,
+        subdir: Option<&str>,
+        policy: OfflinePolicy,
+    ) -> Result<StagedInstall, PluginError> {
+        let validated_subdir = subdir.map(git::validate_subdir).transpose()?;
+        let registry = self.load_with_migration()?;
+        let plugins_dir = self.paths.plugins_dir();
+        at(
+            &plugins_dir,
+            DirBuilder::new()
+                .mode(0o700)
+                .recursive(true)
+                .create(&plugins_dir),
+        )?;
+        let plugins_canon = at(&plugins_dir, fs::canonicalize(&plugins_dir))?;
+        let bundles_dir = self.paths.plugins_bundles_dir();
+        let staging_dir = self.paths.plugins_staging_dir();
+        let prepared = git::prepare_bundle(
+            git::GitWorkspace {
+                plugins_dir: &plugins_canon,
+                bundles_dir: &bundles_dir,
+                staging_dir: &staging_dir,
+            },
+            url,
+            ref_name,
+            validated_subdir.as_deref(),
+            policy,
+            None,
+        )
+        .map_err(|err| match err {
+            git::GitError::Offline => PluginError::OfflineModeBlocked,
+            other => PluginError::Git(other),
+        })?;
+        let source_identity = format!(
+            "git:{}|{}",
+            prepared.url,
+            prepared.subdir.as_deref().unwrap_or("")
+        );
+        if let Err(err) = prepared
+            .manifest
+            .check_runtime_compatibility(HOST_SHARED_RUNTIME_ABI)
+        {
+            cleanup_unreferenced_bundle(&bundles_dir, &registry, &prepared.root);
+            return Err(err.into());
+        }
+        if let Some(existing) = registry.plugins.get(&prepared.manifest.id) {
+            cleanup_unreferenced_bundle(&bundles_dir, &registry, &prepared.root);
+            return Err(conflict_or_already_installed(existing, &source_identity));
+        }
+        let resolved_from = if prepared.url.starts_with("http://")
+            || prepared.url.starts_with("https://")
+            || prepared.url.starts_with("ssh://")
+            || prepared.url.starts_with("git://")
+        {
+            ResolvedFrom::Remote
+        } else {
+            ResolvedFrom::LocalArtifact
+        };
+        let source = Source::Git {
+            url: prepared.url,
+            ref_name: ref_name.to_owned(),
+            subdir: prepared.subdir,
+            rev: prepared.rev,
+            bundle_path: prepared.root,
+        };
+        build_staged_install(
+            &registry,
+            prepared.manifest,
+            source,
+            source_identity,
+            prepared.content_digest,
+            resolved_from,
+        )
+    }
+
+    /// Stages a `.tar.gz`/`.tar.zst` archive installation without mutating `registry.json` until
+    /// [`Self::commit_install`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError`] on offline policy, archive verification error, compatibility failure,
+    /// or existing plugin conflict.
+    pub fn stage_install_archive(
+        &self,
+        source: &str,
+        expected_sha256: &str,
+        policy: OfflinePolicy,
+    ) -> Result<StagedInstall, PluginError> {
+        let registry = self.load_with_migration()?;
+        let bundles_dir = self.paths.plugins_bundles_dir();
+        let unpacked = archive::unpack_archive_bundle(
+            &self.paths.plugins_staging_dir(),
+            &bundles_dir,
+            source,
+            expected_sha256,
+            policy,
+        )
+        .map_err(|err| match err {
+            ArchiveError::Offline => PluginError::OfflineModeBlocked,
+            other => PluginError::Archive(other),
+        })?;
+        let source_identity = format!("archive:{}", unpacked.source);
+        if let Err(err) = unpacked
+            .manifest
+            .check_runtime_compatibility(HOST_SHARED_RUNTIME_ABI)
+        {
+            cleanup_unreferenced_bundle(&bundles_dir, &registry, &unpacked.bundle_root);
+            return Err(err.into());
+        }
+        if let Some(existing) = registry.plugins.get(&unpacked.manifest.id) {
+            cleanup_unreferenced_bundle(&bundles_dir, &registry, &unpacked.bundle_root);
+            return Err(conflict_or_already_installed(existing, &source_identity));
+        }
+        let resolved_from =
+            if unpacked.source.starts_with("http://") || unpacked.source.starts_with("https://") {
+                ResolvedFrom::Remote
+            } else {
+                ResolvedFrom::LocalArtifact
+            };
+        let digest = unpacked.content_digest;
+        let rec_source = Source::Archive {
+            url: unpacked.source,
+            archive_sha256: unpacked.archive_sha256,
+            bundle_path: unpacked.bundle_root,
+        };
+        build_staged_install(
+            &registry,
+            unpacked.manifest,
+            rec_source,
+            source_identity,
+            digest,
+            resolved_from,
+        )
+    }
+
+    /// Atomically commits a staged installation under exclusive `plugins.lock`, verifying reviewed
+    /// source identity, content digest, and requested capabilities.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError`] on TOCTOU/capability mismatch, concurrent conflict, bundle verification
+    /// error, or persistence failure.
+    pub fn commit_install(
+        &self,
+        staged: &StagedInstall,
+        expected_source_identity: &str,
+        expected_content_digest: &str,
+        expected_capabilities: &CapabilityBundle,
+        approve_on_commit: bool,
+    ) -> Result<InstallOutcome, PluginError> {
+        if staged.source_identity != expected_source_identity
+            || staged.content_digest != expected_content_digest
+            || &staged.requested_capabilities != expected_capabilities
+        {
+            return Err(PluginError::ToctouMismatch);
+        }
+        let _lock = self.lock()?;
+        let mut registry = self.load_migrated_locked()?;
+        if let Some(existing) = registry.plugins.get(&staged.id) {
+            return Err(conflict_or_already_installed(
+                existing,
+                &staged.source_identity,
+            ));
+        }
+        verify_bundle(staged.source.bundle_path(), &staged.content_digest)?;
+        let approval = approve_on_commit.then(|| ApprovalRecord {
+            content_digest: staged.content_digest.clone(),
+            source_identity: staged.source_identity.clone(),
+            capabilities: staged.requested_capabilities.clone(),
+        });
+        let record = Record {
+            id: staged.id.clone(),
+            name: staged.name.clone(),
+            version: staged.version.clone(),
+            plugin_api: staged.plugin_api,
+            shared_runtime_abi: staged.shared_runtime_abi,
+            source: staged.source.clone(),
+            source_identity: staged.source_identity.clone(),
+            content_digest: staged.content_digest.clone(),
+            enabled: false,
+            revoked: false,
+            migration_reapproval_required: false,
+            requested_capabilities: staged.requested_capabilities.clone(),
+            approval,
+        };
+        let summary = record.summary();
+        registry.plugins.insert(staged.id.clone(), record);
+        registry.desired_revision = registry.desired_revision.saturating_add(1);
+        self.save(&registry)?;
+        Ok(InstallOutcome {
+            summary,
+            resolved_from: staged.resolved_from,
+        })
+    }
+
     /// Stages a catalog upgrade without mutating `registry.json` or live approvals.
     ///
     /// Rejects cross-source switches with [`PluginError::SourceConflict`] and computes capability
@@ -606,6 +983,8 @@ impl PluginManager {
         let net_added_host_capabilities =
             net_added_host_capabilities(&baseline, &manifest.capabilities.host);
 
+        let was_revoked = existing.revoked;
+
         Ok(StagedUpgrade {
             id: id.clone(),
             name: manifest.name,
@@ -622,19 +1001,21 @@ impl PluginManager {
             resolved_from,
             new_source,
             requested_capabilities: manifest.capabilities,
+            was_revoked,
         })
     }
 
     /// Commits a previously staged upgrade atomically under exclusive registry lock.
     ///
     /// Enforces TOCTOU verification (`expected_from_digest` & `expected_to_digest`), rejects
-    /// unapproved capability expansion under [`UpgradeApprovalMode::KeepExistingOnly`], and cleans
-    /// up replaced immutable bundles that are no longer referenced.
+    /// concurrent revocation between staging and commit, rejects unapproved capability expansion
+    /// under [`UpgradeApprovalMode::KeepExistingOnly`], and cleans up replaced immutable bundles
+    /// that are no longer referenced.
     ///
     /// # Errors
     ///
-    /// Returns [`PluginError`] on TOCTOU mismatch, missing plugin, source conflict, unapproved
-    /// capability expansion, corrupted staged bundle, or persistence failure.
+    /// Returns [`PluginError`] on TOCTOU mismatch, missing plugin, source conflict, revocation,
+    /// unapproved capability expansion, corrupted staged bundle, or persistence failure.
     pub fn commit_upgrade(
         &self,
         staged: &StagedUpgrade,
@@ -642,6 +1023,37 @@ impl PluginManager {
         expected_to_digest: &str,
         approval_mode: UpgradeApprovalMode,
     ) -> Result<PluginSummary, PluginError> {
+        let allow_unrevoke =
+            staged.was_revoked && matches!(approval_mode, UpgradeApprovalMode::ApproveExpanded);
+        self.commit_upgrade_reviewed(
+            staged,
+            expected_from_digest,
+            expected_to_digest,
+            &staged.requested_capabilities,
+            approval_mode,
+            allow_unrevoke,
+        )
+    }
+
+    /// Commits a staged upgrade under exclusive lock while additionally verifying the reviewed
+    /// capability bundle and explicit `allow_unrevoke` flag.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError`] on TOCTOU/capability mismatch, revocation when `allow_unrevoke` is
+    /// false, source conflict, missing plugin, or persistence failure.
+    pub fn commit_upgrade_reviewed(
+        &self,
+        staged: &StagedUpgrade,
+        expected_from_digest: &str,
+        expected_to_digest: &str,
+        expected_capabilities: &CapabilityBundle,
+        approval_mode: UpgradeApprovalMode,
+        allow_unrevoke: bool,
+    ) -> Result<PluginSummary, PluginError> {
+        if &staged.requested_capabilities != expected_capabilities {
+            return Err(PluginError::ToctouMismatch);
+        }
         let _lock = self.lock()?;
         let mut registry = self.load_migrated_locked()?;
         let bundles_dir = self.paths.plugins_bundles_dir();
@@ -657,6 +1069,9 @@ impl PluginManager {
                 || staged.to_digest != expected_to_digest
             {
                 return Err(PluginError::ToctouMismatch);
+            }
+            if record.revoked && (!staged.was_revoked || !allow_unrevoke) {
+                return Err(PluginError::Revoked(staged.id.clone()));
             }
             if record.source_identity != staged.source_identity {
                 return Err(PluginError::SourceConflict {
@@ -717,6 +1132,23 @@ impl PluginManager {
         Ok(summary)
     }
 
+    /// Returns the summary and requested capabilities of one installed plugin.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError::NotFound`] if `id` is not installed.
+    pub fn plugin_capabilities(
+        &self,
+        id: &PluginId,
+    ) -> Result<(PluginSummary, CapabilityBundle), PluginError> {
+        let registry = self.load_with_migration()?;
+        let record = registry
+            .plugins
+            .get(id)
+            .ok_or_else(|| PluginError::NotFound(id.clone()))?;
+        Ok((record.summary(), record.requested_capabilities.clone()))
+    }
+
     /// Audits an installed plugin's capabilities, net host expansion, and pinned bundle integrity.
     ///
     /// # Errors
@@ -753,6 +1185,45 @@ impl PluginManager {
     /// Returns [`PluginError`] on missing plugin, digest drift, corrupted bundle, or save failure.
     pub fn approve(&self, id: &PluginId) -> Result<PluginSummary, PluginError> {
         self.change(id, |record| {
+            record.verify_digest()?;
+            record.approval = Some(ApprovalRecord {
+                content_digest: record.content_digest.clone(),
+                source_identity: record.source_identity.clone(),
+                capabilities: record.requested_capabilities.clone(),
+            });
+            record.revoked = false;
+            record.migration_reapproval_required = false;
+            Ok(())
+        })
+    }
+
+    /// Grants reviewed capability approval under exclusive `plugins.lock` only when the plugin's
+    /// live `source_identity`, `content_digest`, requested capabilities, and revocation policy match.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError::Revoked`] if revoked and `allow_unrevoke` is false,
+    /// [`PluginError::ToctouMismatch`] if source/digest/capabilities changed since preview, or
+    /// [`PluginError`] on missing plugin, digest drift, or save failure.
+    pub fn approve_reviewed(
+        &self,
+        id: &PluginId,
+        expected_source_identity: &str,
+        expected_content_digest: &str,
+        expected_capabilities: &CapabilityBundle,
+        allow_unrevoke: bool,
+    ) -> Result<PluginSummary, PluginError> {
+        self.change(id, |record| {
+            if record.revoked && !allow_unrevoke {
+                return Err(PluginError::Revoked(id.clone()));
+            }
+            if (record.source_identity != expected_source_identity
+                && redact_source_identity(&record.source_identity) != expected_source_identity)
+                || record.content_digest != expected_content_digest
+                || &record.requested_capabilities != expected_capabilities
+            {
+                return Err(PluginError::ToctouMismatch);
+            }
             record.verify_digest()?;
             record.approval = Some(ApprovalRecord {
                 content_digest: record.content_digest.clone(),
@@ -1523,6 +1994,71 @@ impl PluginManager {
         at(&target, temp.persist(&target).map_err(|err| err.error))?;
         at(&dir, dir_handle.sync_all())
     }
+}
+
+impl StagedUpgrade {
+    /// Returns the requested capability bundle declared by the staged upgrade manifest.
+    #[must_use]
+    pub const fn requested_capabilities(&self) -> &CapabilityBundle {
+        &self.requested_capabilities
+    }
+}
+
+fn build_staged_install(
+    registry: &Registry,
+    manifest: Manifest,
+    source: Source,
+    source_identity: String,
+    content_digest: String,
+    resolved_from: ResolvedFrom,
+) -> Result<StagedInstall, PluginError> {
+    let shared_runtime_abi = manifest
+        .build
+        .as_ref()
+        .map_or(HOST_SHARED_RUNTIME_ABI, |b| b.shared_runtime_abi);
+    let baseline = merged_enabled_host_baseline(registry, None)?;
+    let net_added_host_capabilities =
+        net_added_host_capabilities(&baseline, &manifest.capabilities.host);
+    Ok(StagedInstall {
+        id: manifest.id,
+        name: manifest.name,
+        version: manifest.version,
+        plugin_api: manifest.plugin_api,
+        shared_runtime_abi,
+        content_digest,
+        source_identity,
+        requested_capabilities: manifest.capabilities,
+        net_added_host_capabilities,
+        resolved_from,
+        source,
+    })
+}
+
+fn redact_source_identity(source_identity: &str) -> String {
+    if let Some(rest) = source_identity.strip_prefix("path:") {
+        let hash = format!("{:x}", Sha256::digest(rest.as_bytes()));
+        return format!("path:sha256:{hash}");
+    }
+    if let Some(rest) = source_identity.strip_prefix("archive:")
+        && rest.starts_with('/')
+    {
+        let hash = format!("{:x}", Sha256::digest(rest.as_bytes()));
+        return format!("archive:sha256:{hash}");
+    }
+    if let Some(rest) = source_identity.strip_prefix("git:")
+        && rest.starts_with('/')
+    {
+        let hash = format!("{:x}", Sha256::digest(rest.as_bytes()));
+        return format!("git:sha256:{hash}");
+    }
+    if let Some(rest) = source_identity.strip_prefix("catalog:")
+        && let Some((src_id, tail)) = rest.split_once('|')
+        && tail.starts_with('/')
+    {
+        let hash = format!("{:x}", Sha256::digest(tail.as_bytes()));
+        return format!("catalog:{src_id}|local:sha256:{hash}|");
+    }
+    source_identity.to_owned()
 }
 
 fn conflict_or_already_installed(existing: &Record, incoming_source: &str) -> PluginError {

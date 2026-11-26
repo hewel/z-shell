@@ -512,4 +512,65 @@ priority = 10
 
     shutdown.shutdown();
     let _ = server_thread.join();
+
+    // When a live z-shelld reports runtime_overlay_supported = false and applied_desired_revision = null,
+    // CLI must honestly report pending_apply with static build guidance rather than claiming active.
+    let static_bus_sock = root.join("static-public-bus.sock");
+    let static_hub = BusHub::new("test-static-daemon", root.join("static-media"));
+    static_hub.publish_core_topic(
+        TopicName::try_new("plugins").unwrap(),
+        json!({
+            "desired_revision": 200,
+            "applied_desired_revision": null,
+            "runtime_overlay_supported": false,
+            "plugins": [{
+                "id": "z-shell/store-demo",
+                "runtime_state": "unknown"
+            }]
+        }),
+        UpdateKind::SourceBaseline,
+    );
+    let (s_ready_tx, s_ready_rx) = std::sync::mpsc::channel();
+    let s_bind_sock = static_bus_sock.clone();
+    let s_host_sock = root.join("static-host.sock");
+    let s_lock_file = root.join("static-daemon.lock");
+    let s_server_thread = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _guard = rt.enter();
+        let server = BusServer::bind(s_bind_sock, s_host_sock, s_lock_file, static_hub).unwrap();
+        s_ready_tx.send(server.shutdown_handle()).unwrap();
+        let _ = rt.block_on(server.serve());
+    });
+    let s_shutdown = s_ready_rx.recv().unwrap();
+
+    let static_disable = run(
+        &["plugin", "disable", "z-shell/store-demo"],
+        &cfg,
+        &state,
+        &cache,
+        Some(&static_bus_sock),
+        None,
+    );
+    assert!(
+        static_disable.status.success(),
+        "disable failed: {}",
+        String::from_utf8_lossy(&static_disable.stderr)
+    );
+    let disable_json = parse_stdout(&static_disable);
+    assert_eq!(disable_json["convergence"]["apply_status"], "pending_apply");
+    assert_eq!(
+        disable_json["convergence"]["applied_desired_revision"],
+        json!(null)
+    );
+    let note = disable_json["convergence"]["note"].as_str().unwrap();
+    assert!(
+        note.contains("bun run build:shell"),
+        "convergence note must state rebuild is required: {note}"
+    );
+
+    s_shutdown.shutdown();
+    let _ = s_server_thread.join();
 }

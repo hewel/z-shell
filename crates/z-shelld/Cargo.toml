@@ -18,7 +18,9 @@ z-shell-theme = { workspace = true }
 z-shell-wallpaper = { workspace = true }
 z-shell-wayland = { workspace = true }
 anyhow = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
 tracing = { workspace = true }

@@ -18,23 +18,58 @@ function resolveXdgPath(envVar: string, fallbackSubdir: string, ...parts: string
   return join(base && base.length > 0 ? base : join(homedir(), fallbackSubdir), ...parts);
 }
 
-interface RegistryFile {
-  readonly plugins?: Readonly<Record<string, {
-    readonly id: string;
-    readonly enabled?: boolean;
-    readonly revoked?: boolean;
-    readonly source?: { readonly root?: string };
-  }>>;
+interface RegistryPluginEntry {
+  readonly id: string;
+  readonly enabled?: boolean;
+  readonly revoked?: boolean;
+  readonly source?: {
+    readonly kind?: string;
+    readonly root?: string;
+    readonly bundle_path?: string;
+  };
 }
 
-function collectDefaultEntryInstances(registryPath: string): ComposeEntryInstance[] {
+interface RegistryFile {
+  readonly plugins?: Readonly<Record<string, RegistryPluginEntry>>;
+  [key: string]: unknown;
+}
+
+function pluginSourceDir(plugin: RegistryPluginEntry): string | undefined {
+  if (plugin.source?.kind === "path" && typeof plugin.source.root === "string") {
+    return plugin.source.root;
+  }
+  if (typeof plugin.source?.bundle_path === "string") {
+    return plugin.source.bundle_path;
+  }
+  if (typeof plugin.source?.root === "string") {
+    return plugin.source.root;
+  }
+  return undefined;
+}
+
+function inspectEnabledPlugins(registryPath: string): {
+  instances: ComposeEntryInstance[];
+  missingIds: Set<string>;
+  hasAnyEnabled: boolean;
+} {
   const raw = JSON.parse(readFileSync(registryPath, "utf8")) as RegistryFile;
   const entries = Object.values(raw.plugins ?? {}).filter(
-    plugin => plugin.enabled === true && plugin.revoked !== true && typeof plugin.source?.root === "string",
+    plugin => plugin.enabled === true && plugin.revoked !== true,
   );
   const instances: ComposeEntryInstance[] = [];
+  const missingIds = new Set<string>();
+  let hasAnyEnabled = false;
   for (const plugin of entries) {
-    const manifest = parsePluginManifest(plugin.source!.root!);
+    const root = pluginSourceDir(plugin);
+    if (!root || !existsSync(root) || !existsSync(join(root, "plugin.toml"))) {
+      missingIds.add(plugin.id);
+      console.warn(
+        `[z-shell build] Skipping enabled plugin "${plugin.id}": bundle root is missing at ${root ?? "<unspecified>"}. Run \`z-shell plugin remove ${plugin.id}\` to clean up your registry.`,
+      );
+      continue;
+    }
+    hasAnyEnabled = true;
+    const manifest = parsePluginManifest(root);
     const slug = manifest.id.replace(/[^a-zA-Z0-9_-]+/g, "-");
     for (const entry of manifest.entries) {
       if (entry.kind === "service") continue;
@@ -45,7 +80,25 @@ function collectDefaultEntryInstances(registryPath: string): ComposeEntryInstanc
       });
     }
   }
-  return instances;
+  return { instances, missingIds, hasAnyEnabled };
+}
+
+function writeFilteredRegistry(
+  registryPath: string,
+  missingIds: ReadonlySet<string>,
+  destPath: string,
+): string {
+  if (missingIds.size === 0) return registryPath;
+  const raw = JSON.parse(readFileSync(registryPath, "utf8")) as RegistryFile;
+  const plugins = { ...(raw.plugins ?? {}) };
+  for (const id of missingIds) {
+    const entry = plugins[id];
+    if (entry) {
+      plugins[id] = { ...entry, enabled: false };
+    }
+  }
+  writeFileSync(destPath, JSON.stringify({ ...raw, plugins }, null, 2));
+  return destPath;
 }
 
 function publishComposedDist(targetAppDir: string, sourceDist: string): string {
@@ -82,9 +135,11 @@ function publishComposedDist(targetAppDir: string, sourceDist: string): string {
 const t0 = performance.now();
 const registryPath = resolveXdgPath("XDG_STATE_HOME", ".local/state", "z-shell", "plugins", "registry.json");
 const settingsPath = resolveXdgPath("XDG_CONFIG_HOME", ".config", "z-shell", "settings.toml");
-const enabledInstances = !standalone && existsSync(registryPath) ? collectDefaultEntryInstances(registryPath) : [];
+const inspected = !standalone && existsSync(registryPath)
+  ? inspectEnabledPlugins(registryPath)
+  : { instances: [], missingIds: new Set<string>(), hasAnyEnabled: false };
 
-if (enabledInstances.length === 0) {
+if (!inspected.hasAnyEnabled) {
   const published = await buildShellApplication({ app: "shell", appDirectory });
   const ms = Math.round(performance.now() - t0);
   console.log(`Built ${published.manifest.id} (standalone) -> ${published.dist} (${ms}ms)`);
@@ -93,12 +148,17 @@ if (enabledInstances.length === 0) {
   const composeOutDir = join(stageRoot, "composed");
   const stagedShellDir = join(stageRoot, "shell");
   try {
-    const report = composePlugins({
+    const effectiveRegistryPath = writeFilteredRegistry(
       registryPath,
+      inspected.missingIds,
+      join(stageRoot, "registry.filtered.json"),
+    );
+    const report = composePlugins({
+      registryPath: effectiveRegistryPath,
       ...(existsSync(settingsPath) ? { settingsPath } : {}),
       outDir: composeOutDir,
       candidateId: `local-${Date.now()}`,
-      entryInstances: enabledInstances,
+      entryInstances: inspected.instances,
     });
 
     mkdirSync(stagedShellDir, { recursive: true });

@@ -827,7 +827,7 @@ async fn settings_patch_and_patch_plugin_require_host_socket_preserve_comments_a
             name: CommandName::try_new("settings.patch-plugin").unwrap(),
             args: Vec::new(),
             payload: Some(json!({
-                "plugin_id": "z-shell/nosleep",
+                "plugin_id": "z-shell/sample-plugin",
                 "settings": { "inhibit_scope": "idle", "poll_interval_ms": 5000 }
             })),
         })
@@ -841,7 +841,7 @@ async fn settings_patch_and_patch_plugin_require_host_socket_preserve_comments_a
     let plugin_read = host_client
         .invoke_command(CommandInvokeParams {
             name: CommandName::try_new("settings.get-plugin").unwrap(),
-            args: vec!["z-shell/nosleep".to_owned()],
+            args: vec!["z-shell/sample-plugin".to_owned()],
             payload: None,
         })
         .await
@@ -881,6 +881,364 @@ async fn settings_patch_and_patch_plugin_require_host_socket_preserve_comments_a
         .unwrap();
     assert_eq!(cleared_theme.data["source"]["kind"], json!("seed"));
     assert_eq!(cleared_theme.data["source"]["value"], json!("#6750a4"));
+
+    host_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("quit").unwrap(),
+            args: Vec::new(),
+            payload: None,
+        })
+        .await
+        .unwrap();
+    timeout(Duration::from_secs(3), server_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn plugin_store_trust_redaction_blobs_revocation_watcher_and_offline() {
+    use image::{ImageBuffer, ImageFormat, Rgba};
+    use sha2::{Digest, Sha256};
+    use std::io::Cursor;
+    use z_shell_plugins::catalog_media;
+    use z_shell_plugins::registry::PluginManager;
+    use z_shell_protocol::PluginId;
+
+    let dir = TempDir::new().unwrap();
+    let paths = ShellPaths::from_roots(
+        dir.path().join("config"),
+        dir.path().join("state"),
+        dir.path().join("runtime"),
+        dir.path().join("runtime/bus.sock"),
+    );
+    paths.ensure_dirs().unwrap();
+
+    // Build a local catalog seed plugin + PNG icon asset.
+    let seed_dir = dir.path().join("seed");
+    let bundle_dir = seed_dir.join("sample-plugin");
+    std::fs::create_dir_all(bundle_dir.join("dist/entries")).unwrap();
+    let svc_js = b"export default () => {};\n";
+    let svc_sha = format!("sha256:{:x}", Sha256::digest(svc_js));
+    std::fs::write(bundle_dir.join("dist/entries/service.mjs"), svc_js).unwrap();
+    std::fs::write(
+        bundle_dir.join("dist/manifest.build.json"),
+        serde_json::to_vec(&json!({
+            "schema_version": 1,
+            "shared_runtime_abi": "1.0",
+            "files": { "dist/entries/service.mjs": svc_sha }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        bundle_dir.join("plugin.toml"),
+        r#"
+id = "z-shell/sample-plugin"
+name = "Sample Plugin"
+version = "0.1.0"
+plugin_api = 2
+[build]
+manifest = "dist/manifest.build.json"
+shared_runtime_abi = "1.0"
+[host_capabilities]
+commands = ["sample.ping"]
+[[service]]
+id = "svc"
+bundle = "dist/entries/service.mjs"
+"#,
+    )
+    .unwrap();
+
+    let mut png_bytes = Vec::new();
+    let img = ImageBuffer::from_pixel(16, 16, Rgba([103u8, 80, 164, 255]));
+    img.write_to(&mut Cursor::new(&mut png_bytes), ImageFormat::Png)
+        .unwrap();
+    let icon_path = seed_dir.join("icon.png");
+    std::fs::write(&icon_path, &png_bytes).unwrap();
+    let icon_sha = format!("sha256:{:x}", Sha256::digest(&png_bytes));
+
+    let catalog_path = dir.path().join("catalog.json");
+    let digest = z_shell_plugins::digest::content_digest(&bundle_dir).unwrap();
+    std::fs::write(
+        &catalog_path,
+        serde_json::to_vec_pretty(&json!({
+            "schema_version": 1,
+            "source_id": "local-seed",
+            "updated_at": "2026-11-26T00:00:00Z",
+            "plugins": [{
+                "id": "z-shell/sample-plugin",
+                "name": "Sample Plugin",
+                "author": "z-shell",
+                "summary": "Local seed plugin",
+                "category": "system",
+                "tags": ["sample"],
+                "icon_url": "icon.png",
+                "icon_sha256": icon_sha,
+                "latest_version": "0.1.0",
+                "releases": [{
+                    "version": "0.1.0",
+                    "plugin_api": 2,
+                    "shared_runtime_abi": "1.0",
+                    "content_digest": digest,
+                    "artifact": {
+                        "kind": "local_seed",
+                        "bundle_dir": bundle_dir.to_str().unwrap()
+                    }
+                }]
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    std::fs::write(
+        paths.settings_file(),
+        format!(
+            r#"
+[[plugins.sources]]
+id = "local-seed"
+name = "Local Seed"
+kind = "local_file"
+url = "{}"
+local_seed_dir = "{}"
+enabled = true
+priority = 10
+"#,
+            catalog_path.display(),
+            seed_dir.display()
+        ),
+    )
+    .unwrap();
+
+    let app = DaemonApp::bootstrap(paths.clone()).unwrap();
+    let server_task = tokio::spawn(async move { app.run().await });
+
+    let mut public_client = BusClient::connect(paths.socket_path()).await.unwrap();
+    let host_client = BusClient::connect(paths.host_socket_path()).await.unwrap();
+
+    let initial_topic = public_client
+        .subscribe(TopicName::try_new("plugins").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        initial_topic.data["runtime_overlay_supported"],
+        json!(false)
+    );
+    assert_eq!(initial_topic.data["applied_desired_revision"], json!(null));
+    assert!(
+        initial_topic.data["sources"][0]["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("local:sha256:"),
+        "public topic must redact local file catalog source URL"
+    );
+
+    // Unprivileged public client must be denied all host-only plugin store commands.
+    for (cmd, payload) in [
+        ("plugins.sources.list", None),
+        ("plugins.catalog.refresh", Some(json!({}))),
+        (
+            "plugins.catalog.fetch-blob",
+            Some(json!({ "token": "abc" })),
+        ),
+        (
+            "plugins.stage-install",
+            Some(json!({ "kind": "catalog", "id": "z-shell/sample-plugin" })),
+        ),
+        (
+            "plugins.enable",
+            Some(json!({ "id": "z-shell/sample-plugin" })),
+        ),
+        (
+            "plugins.revoke",
+            Some(json!({ "id": "z-shell/sample-plugin" })),
+        ),
+        (
+            "plugins.remove",
+            Some(json!({ "id": "z-shell/sample-plugin" })),
+        ),
+    ] {
+        let err = public_client
+            .invoke_command(CommandInvokeParams {
+                name: CommandName::try_new(cmd).unwrap(),
+                args: Vec::new(),
+                payload,
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ClientError::Rpc(ref rpc) if rpc.code == ErrorCode::PermissionDenied),
+            "{cmd} must deny public callers: {err:?}"
+        );
+    }
+
+    // Refresh local seed source via privileged host.
+    host_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("plugins.catalog.refresh").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({ "source_id": "local-seed" })),
+        })
+        .await
+        .unwrap();
+
+    // Public catalog.list and catalog.detail are cache-only & return redacted identity + MediaRef token.
+    let list_res = public_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("plugins.catalog.list").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({ "query": "sample", "limit": 10 })),
+        })
+        .await
+        .unwrap()
+        .data
+        .unwrap();
+    assert_eq!(list_res["total"], json!(1));
+    assert_eq!(list_res["items"][0]["id"], json!("z-shell/sample-plugin"));
+
+    let detail_res = public_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("plugins.catalog.detail").unwrap(),
+            args: vec!["z-shell/sample-plugin".to_owned()],
+            payload: None,
+        })
+        .await
+        .unwrap()
+        .data
+        .unwrap();
+    let offering = &detail_res["offerings"][0];
+    assert!(
+        offering["source_identity"]
+            .as_str()
+            .unwrap()
+            .contains("local:sha256:"),
+        "catalog detail must redact local path in source_identity"
+    );
+    let icon_token = offering["icon"]["token"].as_str().unwrap().to_owned();
+
+    // Host client fetches preview PNG bytes through plugins.catalog.fetch-blob.
+    let blob_res = host_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("plugins.catalog.fetch-blob").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({ "token": icon_token })),
+        })
+        .await
+        .unwrap()
+        .data
+        .unwrap();
+    assert_eq!(blob_res["mime"], json!("image/png"));
+    let byte_len = blob_res["byte_len"].as_u64().unwrap() as usize;
+    assert!(byte_len > 8 && byte_len <= catalog_media::MAX_PREVIEW_PNG_BYTES);
+    let fetched_bytes: Vec<u8> = blob_res["bytes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_u64().unwrap() as u8)
+        .collect();
+    assert_eq!(fetched_bytes.len(), byte_len);
+    assert_eq!(&fetched_bytes[..4], b"\x89PNG");
+
+    // Stage install + commit install + audit + cross-process revocation rejection.
+    let staged = host_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("plugins.stage-install").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({ "kind": "catalog", "id": "z-shell/sample-plugin" })),
+        })
+        .await
+        .unwrap()
+        .data
+        .unwrap();
+    let stage_token = staged["stage_token"].as_str().unwrap().to_owned();
+    let staged_obj = &staged["staged"];
+    host_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("plugins.commit-install").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({
+                "stage_token": stage_token,
+                "expected_source_identity": staged_obj["source_identity"],
+                "expected_content_digest": staged_obj["content_digest"],
+                "expected_capabilities": staged_obj["requested_capabilities"],
+                "approve_on_commit": false,
+            })),
+        })
+        .await
+        .unwrap();
+
+    // External CLI/manager revocation must cause host plugins.approve (with allow_unrevoke=false) to fail,
+    // AND the registry watcher must publish a live `plugins` topic update!
+    let manager = PluginManager::new(paths.clone());
+    let sample_id = PluginId::try_new("z-shell/sample-plugin").unwrap();
+    let audit_before = manager.audit(&sample_id).unwrap();
+    manager.revoke(&sample_id).unwrap();
+
+    // Wait for watcher to emit live topic update showing revoked=true.
+    let mut saw_revoked = false;
+    for _ in 0..10 {
+        let Ok(Some(ServerMessage::Notification { method, params, .. })) =
+            timeout(Duration::from_secs(2), public_client.next_notification()).await
+        else {
+            break;
+        };
+        if method == methods::TOPIC_UPDATE {
+            let update: TopicUpdate = serde_json::from_value(params).unwrap();
+            if update.topic.as_str() == "plugins"
+                && update.data["plugins"][0]["revoked"] == json!(true)
+            {
+                saw_revoked = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        saw_revoked,
+        "registry watcher must publish live update on external revoke"
+    );
+
+    let approve_err = host_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("plugins.approve").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({
+                "id": "z-shell/sample-plugin",
+                "expected_source_identity": audit_before.plugin.source_identity,
+                "expected_content_digest": audit_before.current_content_digest,
+                "expected_capabilities": staged_obj["requested_capabilities"],
+                "allow_unrevoke": false,
+            })),
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(approve_err, ClientError::Rpc(ref rpc) if rpc.code == ErrorCode::InvalidParams),
+        "revoked plugin approval with allow_unrevoke=false must fail: {approve_err:?}"
+    );
+
+    // Turning on offline_mode blocks online catalog.refresh.
+    host_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("settings.patch").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({ "general": { "offline_mode": true } })),
+        })
+        .await
+        .unwrap();
+    let offline_refresh = host_client
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("plugins.catalog.refresh").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({})),
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(offline_refresh, ClientError::Rpc(ref rpc) if rpc.code == ErrorCode::Disabled),
+        "offline_mode=true must block catalog refresh: {offline_refresh:?}"
+    );
 
     host_client
         .invoke_command(CommandInvokeParams {

@@ -264,7 +264,7 @@ fn cross_source_conflict_safe_remove_bundled_upgrade_offline_cache_and_toctou_up
     use tar::{Builder, Header};
     use z_shell_config::{ConfigStore, PluginSourceKind, PluginSourceSettings};
     use z_shell_plugins::StoreCategory;
-    use z_shell_plugins::catalog::CatalogStore;
+    use z_shell_plugins::catalog::{CatalogStore, catalog_cache_paths};
     use z_shell_plugins::registry::{
         PluginError, RemoveSettingsPolicy, ResolvedFrom, UpgradeApprovalMode,
     };
@@ -279,9 +279,9 @@ fn cross_source_conflict_safe_remove_bundled_upgrade_offline_cache_and_toctou_up
     )
     .with_cache_dir(root.join("cache"));
 
-    // Prepare official bundled local seed v0.1.0 for z-shell/nosleep
+    // Prepare official bundled local seed v0.1.0 for z-shell/sample-keep
     let seed_dir = root.join("bundled-plugins");
-    let nosleep_v1 = seed_dir.join("nosleep");
+    let nosleep_v1 = seed_dir.join("sample-keep");
     fs::create_dir_all(nosleep_v1.join("dist/entries")).unwrap();
     let svc1 = b"export default { v: 1, setup() {} };\n";
     let svc1_sha = format!("sha256:{:x}", Sha256::digest(svc1));
@@ -299,8 +299,8 @@ fn cross_source_conflict_safe_remove_bundled_upgrade_offline_cache_and_toctou_up
     fs::write(
         nosleep_v1.join("plugin.toml"),
         r#"
-id = "z-shell/nosleep"
-name = "NoSleep"
+id = "z-shell/sample-keep"
+name = "SampleKeep"
 version = "0.1.0"
 plugin_api = 2
 [build]
@@ -332,7 +332,7 @@ bundle = "dist/entries/service.mjs"
     let resolved_seed = catalog
         .resolve_install(
             &sources,
-            &"z-shell/nosleep".parse().unwrap(),
+            &"z-shell/sample-keep".parse().unwrap(),
             None,
             Some("official"),
             OfflinePolicy::Offline,
@@ -356,7 +356,7 @@ bundle = "dist/entries/service.mjs"
         rogue_path.join("plugin.toml"),
         fs::read_to_string(rogue_path.join("plugin.toml"))
             .unwrap()
-            .replace("demo/hello", "z-shell/nosleep"),
+            .replace("demo/hello", "z-shell/sample-keep"),
     )
     .unwrap();
     let err = manager.add_path(&rogue_path).unwrap_err();
@@ -374,8 +374,8 @@ bundle = "dist/entries/service.mjs"
     }))
     .unwrap();
     let toml2 = br#"
-id = "z-shell/nosleep"
-name = "NoSleep"
+id = "z-shell/sample-keep"
+name = "SampleKeep"
 version = "0.2.0"
 plugin_api = 2
 [build]
@@ -415,14 +415,15 @@ bundle = "dist/entries/service.mjs"
     // Populate the official catalog cache on disk so CatalogStore::resolve_install produces v0.2.0.
     let cat_cache = paths.plugin_catalog_cache_dir();
     fs::create_dir_all(&cat_cache).unwrap();
+    let official_cache_path = catalog_cache_paths(&paths, &sources[0]).0;
     fs::write(
-        cat_cache.join("official.json"),
+        &official_cache_path,
         serde_json::to_vec_pretty(&serde_json::json!({
             "schema_version": 1,
             "source_id": "official",
             "updated_at": "2026-11-25T00:00:00Z",
             "plugins": [{
-                "id": "z-shell/nosleep",
+                "id": "z-shell/sample-keep",
                 "name": "NoSleep",
                 "author": "z-shell",
                 "summary": "Keep display awake",
@@ -499,13 +500,13 @@ bundle = "dist/entries/service.mjs"
         priority: 200,
     }];
     fs::write(
-        cat_cache.join("remote-test.json"),
+        catalog_cache_paths(&paths, &remote_sources[0]).0,
         serde_json::to_vec_pretty(&serde_json::json!({
             "schema_version": 1,
             "source_id": "remote-test",
             "updated_at": "2026-11-25T00:00:00Z",
             "plugins": [{
-                "id": "z-shell/nosleep",
+                "id": "z-shell/sample-keep",
                 "name": "NoSleep",
                 "author": "z-shell",
                 "summary": "Keep display awake",
@@ -562,13 +563,13 @@ bundle = "dist/entries/service.mjs"
         .unwrap();
     assert_eq!(reseed.resolved_from, ResolvedFrom::BundledOfficialSeed);
     fs::write(
-        cat_cache.join("official.json"),
+        &official_cache_path,
         serde_json::to_vec_pretty(&serde_json::json!({
             "schema_version": 1,
             "source_id": "official",
             "updated_at": "2026-11-25T00:00:00Z",
             "plugins": [{
-                "id": "z-shell/nosleep",
+                "id": "z-shell/sample-keep",
                 "name": "NoSleep",
                 "author": "z-shell",
                 "summary": "Keep display awake",
@@ -609,13 +610,13 @@ bundle = "dist/entries/service.mjs"
         .unwrap();
 
     fs::write(
-        cat_cache.join("official.json"),
+        &official_cache_path,
         serde_json::to_vec_pretty(&serde_json::json!({
             "schema_version": 1,
             "source_id": "official",
             "updated_at": "2026-11-25T00:00:00Z",
             "plugins": [{
-                "id": "z-shell/nosleep",
+                "id": "z-shell/sample-keep",
                 "name": "NoSleep",
                 "author": "z-shell",
                 "summary": "Keep display awake",
@@ -667,8 +668,8 @@ bundle = "dist/entries/service.mjs"
     }))
     .unwrap();
     let toml3 = br#"
-id = "z-shell/nosleep"
-name = "NoSleep"
+id = "z-shell/sample-keep"
+name = "SampleKeep"
 version = "0.3.0"
 plugin_api = 2
 [build]
@@ -703,13 +704,13 @@ bundle = "dist/entries/service.mjs"
     }
     let tgz3_sha = format!("sha256:{:x}", Sha256::digest(fs::read(&tgz3_path).unwrap()));
     fs::write(
-        cat_cache.join("official.json"),
+        &official_cache_path,
         serde_json::to_vec_pretty(&serde_json::json!({
             "schema_version": 1,
             "source_id": "official",
             "updated_at": "2026-11-25T00:00:00Z",
             "plugins": [{
-                "id": "z-shell/nosleep",
+                "id": "z-shell/sample-keep",
                 "name": "NoSleep",
                 "author": "z-shell",
                 "summary": "Keep display awake",
@@ -808,4 +809,254 @@ bundle = "dist/entries/service.mjs"
             .plugin_settings
             .contains_key(&dev_summary.id)
     );
+}
+
+#[test]
+fn revocation_between_preview_and_confirmation_fails_without_mutating_registry_and_redacts_paths() {
+    let work = tempdir().unwrap();
+    let state = tempdir().unwrap();
+    let root = work.path();
+    let paths = ShellPaths::from_roots(
+        state.path().join("config"),
+        state.path().to_owned(),
+        state.path().join("run"),
+        state.path().join("run/bus.sock"),
+    )
+    .with_cache_dir(state.path().join("cache"));
+    let manager = PluginManager::new(paths.clone());
+
+    let local_dir = root.join("secret-local-plugin");
+    fs::create_dir_all(&local_dir).unwrap();
+    fs::write(local_dir.join("worker.ts"), "export default 0").unwrap();
+    manifest(&local_dir, r#""local-tool""#);
+
+    let staged = manager.stage_install_path(&local_dir).unwrap();
+    let outcome = manager
+        .commit_install(
+            &staged,
+            &staged.source_identity,
+            &staged.content_digest,
+            &staged.requested_capabilities,
+            false,
+        )
+        .unwrap();
+    let redacted = outcome.summary.redacted_for_public();
+    assert!(
+        !redacted.source_identity.contains("secret-local-plugin"),
+        "public summary must redact raw filesystem path: {}",
+        redacted.source_identity
+    );
+
+    let (preview_summary, preview_caps) = manager.plugin_capabilities(&outcome.summary.id).unwrap();
+    manager.revoke(&outcome.summary.id).unwrap();
+    let reg_before = fs::read(paths.plugins_registry_file()).unwrap();
+
+    // Concurrent revocation before approve_reviewed must fail cleanly without mutating registry.json.
+    let err = manager
+        .approve_reviewed(
+            &preview_summary.id,
+            &preview_summary.source_identity,
+            &preview_summary.content_digest,
+            &preview_caps,
+            false,
+        )
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        z_shell_plugins::registry::PluginError::Revoked(_)
+    ));
+    assert_eq!(fs::read(paths.plugins_registry_file()).unwrap(), reg_before);
+
+    // Concurrent revocation between stage_upgrade and commit_upgrade must also fail without mutating registry.json.
+    let seed_dir = root.join("seed");
+    fs::create_dir_all(seed_dir.join("demo/dist/entries")).unwrap();
+    let svc1 = b"export default { v: 1, setup() {} };\n";
+    let svc1_sha = format!("sha256:{:x}", <sha2::Sha256 as sha2::Digest>::digest(svc1));
+    fs::write(seed_dir.join("demo/dist/entries/service.mjs"), svc1).unwrap();
+    fs::write(
+        seed_dir.join("demo/dist/manifest.build.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "schema_version": 1,
+            "shared_runtime_abi": "1.0",
+            "files": { "dist/entries/service.mjs": svc1_sha }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        seed_dir.join("demo/plugin.toml"),
+        r#"
+id = "acme/demo"
+name = "Demo"
+version = "0.1.0"
+plugin_api = 2
+[build]
+manifest = "dist/manifest.build.json"
+shared_runtime_abi = "1.0"
+[[service]]
+id = "service"
+bundle = "dist/entries/service.mjs"
+"#,
+    )
+    .unwrap();
+
+    let v2_dir = root.join("v2");
+    fs::create_dir_all(v2_dir.join("dist/entries")).unwrap();
+    let svc2 = b"export default { v: 2, setup() {} };\n";
+    let svc2_sha = format!("sha256:{:x}", <sha2::Sha256 as sha2::Digest>::digest(svc2));
+    let bm2 = serde_json::to_vec(&serde_json::json!({
+        "schema_version": 1,
+        "shared_runtime_abi": "1.0",
+        "files": { "dist/entries/service.mjs": svc2_sha }
+    }))
+    .unwrap();
+    let toml2 = br#"
+id = "acme/demo"
+name = "Demo"
+version = "0.2.0"
+plugin_api = 2
+[build]
+manifest = "dist/manifest.build.json"
+shared_runtime_abi = "1.0"
+[[service]]
+id = "service"
+bundle = "dist/entries/service.mjs"
+"#;
+    fs::write(v2_dir.join("dist/entries/service.mjs"), svc2).unwrap();
+    fs::write(v2_dir.join("dist/manifest.build.json"), &bm2).unwrap();
+    fs::write(v2_dir.join("plugin.toml"), toml2).unwrap();
+    let v2_digest = z_shell_plugins::digest::content_digest(&v2_dir).unwrap();
+
+    let tgz2 = root.join("demo-0.2.0.tar.gz");
+    {
+        let gz = flate2::write::GzEncoder::new(
+            fs::File::create(&tgz2).unwrap(),
+            flate2::Compression::default(),
+        );
+        let mut builder = tar::Builder::new(gz);
+        for (rel, data) in [
+            ("plugin.toml", toml2.as_slice()),
+            ("dist/entries/service.mjs", svc2.as_slice()),
+            ("dist/manifest.build.json", bm2.as_slice()),
+        ] {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(data.len() as u64);
+            h.set_mode(0o644);
+            h.set_cksum();
+            builder.append_data(&mut h, rel, data).unwrap();
+        }
+        builder.finish().unwrap();
+    }
+    let tgz2_sha = format!(
+        "sha256:{:x}",
+        <sha2::Sha256 as sha2::Digest>::digest(fs::read(&tgz2).unwrap())
+    );
+
+    let index_path = root.join("catalog-v1.json");
+    fs::write(
+        &index_path,
+        serde_json::to_vec(&serde_json::json!({
+            "schema_version": 1,
+            "source_id": "official",
+            "updated_at": "2026-11-26T00:00:00Z",
+            "plugins": [{
+                "id": "acme/demo",
+                "name": "Demo",
+                "author": "acme",
+                "summary": "Demo",
+                "category": "system",
+                "tags": [],
+                "latest_version": "0.2.0",
+                "releases": [{
+                    "version": "0.2.0",
+                    "plugin_api": 2,
+                    "shared_runtime_abi": "1.0",
+                    "content_digest": v2_digest,
+                    "artifact": {
+                        "kind": "archive",
+                        "url": tgz2.to_string_lossy(),
+                        "archive_sha256": tgz2_sha,
+                        "size_bytes": fs::metadata(&tgz2).unwrap().len()
+                    }
+                }]
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let sources = vec![z_shell_config::PluginSourceSettings {
+        id: "official".to_owned(),
+        name: "Official".to_owned(),
+        kind: z_shell_config::PluginSourceKind::LocalFile,
+        url: index_path.to_string_lossy().into_owned(),
+        ref_name: None,
+        index_path: None,
+        local_seed_dir: Some(seed_dir),
+        enabled: true,
+        priority: 100,
+    }];
+    let catalog = z_shell_plugins::catalog::CatalogStore::new(paths.clone());
+    let rel_v1 = catalog
+        .resolve_install(
+            &sources,
+            &"acme/demo".parse().unwrap(),
+            Some("0.1.0"),
+            Some("official"),
+            OfflinePolicy::Offline,
+        )
+        .unwrap();
+    manager
+        .install_from_catalog(&rel_v1, OfflinePolicy::Offline)
+        .unwrap();
+    manager.approve(&"acme/demo".parse().unwrap()).unwrap();
+
+    let rel_v2 = catalog
+        .resolve_install(
+            &sources,
+            &"acme/demo".parse().unwrap(),
+            Some("0.2.0"),
+            Some("official"),
+            OfflinePolicy::Offline,
+        )
+        .unwrap();
+    let staged_upgrade = manager
+        .stage_upgrade(
+            &"acme/demo".parse().unwrap(),
+            &rel_v2,
+            OfflinePolicy::Offline,
+        )
+        .unwrap();
+
+    // Concurrent revocation after staging!
+    manager.revoke(&"acme/demo".parse().unwrap()).unwrap();
+    let reg_after_revoke = fs::read(paths.plugins_registry_file()).unwrap();
+    let upgrade_err = manager
+        .commit_upgrade_reviewed(
+            &staged_upgrade,
+            &staged_upgrade.from_digest,
+            &staged_upgrade.to_digest,
+            staged_upgrade.requested_capabilities(),
+            z_shell_plugins::registry::UpgradeApprovalMode::ApproveExpanded,
+            true,
+        )
+        .unwrap_err();
+    assert!(matches!(
+        upgrade_err,
+        z_shell_plugins::registry::PluginError::Revoked(_)
+    ));
+    assert_eq!(
+        fs::read(paths.plugins_registry_file()).unwrap(),
+        reg_after_revoke
+    );
+
+    // Missing Source::Path root is cleanly reported by doctor() without panicking.
+    fs::remove_dir_all(&local_dir).unwrap();
+    let findings = manager.doctor().unwrap();
+    assert!(findings.iter().any(|f| f.code == "path_source_unreadable"));
+    let redacted_finding = findings
+        .iter()
+        .find(|f| f.code == "path_source_unreadable")
+        .unwrap()
+        .redacted_for_public();
+    assert!(!redacted_finding.message.contains("secret-local-plugin"));
 }
