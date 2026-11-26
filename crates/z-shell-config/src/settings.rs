@@ -304,6 +304,9 @@ pub struct BarSettings {
     pub clock_24h: bool,
     /// Displays seconds in the bar clock when true.
     pub clock_seconds: bool,
+    /// Displays workspace numbers instead of custom workspace names in the bar pill when true.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub workspace_numbers: bool,
     /// Declarative left/center/right/hidden plugin widget placement (`[bar.plugins]`).
     pub plugins: BarPluginsSettings,
     /// Declarative system tray visibility and overflow rules (`[bar.tray]`).
@@ -322,6 +325,7 @@ impl BarSettings {
             dock_enabled: self.dock_enabled,
             clock_24h: self.clock_24h,
             clock_seconds: self.clock_seconds,
+            workspace_numbers: self.workspace_numbers,
             plugins: self.plugins.redacted_for_public(),
             tray: self.tray.clone(),
         }
@@ -339,6 +343,7 @@ impl Default for BarSettings {
             dock_enabled: true,
             clock_24h: true,
             clock_seconds: false,
+            workspace_numbers: true,
             plugins: BarPluginsSettings::default(),
             tray: BarTraySettings::default(),
         }
@@ -562,6 +567,11 @@ pub enum PluginSourceKind {
 
 const fn default_true() -> bool {
     true
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+const fn is_true(value: &bool) -> bool {
+    *value
 }
 
 const fn default_source_priority() -> u32 {

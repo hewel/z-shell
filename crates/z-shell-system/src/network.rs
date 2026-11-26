@@ -45,12 +45,16 @@ const NM_PATH: &str = "/org/freedesktop/NetworkManager";
 const DEVICE: &str = "org.freedesktop.NetworkManager.Device";
 const WIRELESS: &str = "org.freedesktop.NetworkManager.Device.Wireless";
 const WIRED: &str = "org.freedesktop.NetworkManager.Device.Wired";
+const IP4_CONFIG: &str = "org.freedesktop.NetworkManager.IP4Config";
 const ACCESS_POINT: &str = "org.freedesktop.NetworkManager.AccessPoint";
 const ACTIVE_CONNECTION: &str = "org.freedesktop.NetworkManager.Connection.Active";
 const SETTINGS: &str = "org.freedesktop.NetworkManager.Settings";
 const SETTINGS_PATH: &str = "/org/freedesktop/NetworkManager/Settings";
 const SETTINGS_CONNECTION: &str = "org.freedesktop.NetworkManager.Settings.Connection";
 const WIFI_SETTING: &str = "802-11-wireless";
+const WIRED_SETTING: &str = "802-3-ethernet";
+const VPN_SETTING: &str = "vpn";
+const WIREGUARD_SETTING: &str = "wireguard";
 const SECURITY_SETTING: &str = "802-11-wireless-security";
 const ROOT: ObjectPath<'static> = ObjectPath::from_static_str_unchecked("/");
 const SECRET_AGENT_PATH: &str = "/org/freedesktop/NetworkManager/SecretAgent";
@@ -88,6 +92,7 @@ struct Network {
     wifi: Wifi,
     ethernet: Vec<Ethernet>,
     vpn: Vec<ActiveConnection>,
+    vpn_profiles: Vec<VpnProfile>,
 }
 
 #[derive(Default, PartialEq, Serialize)]
@@ -199,7 +204,23 @@ struct Ethernet {
     id: OwnedObjectPath,
     interface: String,
     carrier: bool,
+    speed_mbps: Option<u32>,
+    ipv4: Option<String>,
+    available_profiles: Vec<ConnectionProfile>,
     active_connection: Option<ActiveConnection>,
+}
+
+#[derive(PartialEq, Serialize)]
+struct ConnectionProfile {
+    id: String,
+    name: String,
+}
+
+#[derive(PartialEq, Serialize)]
+struct VpnProfile {
+    id: String,
+    name: String,
+    kind: String,
 }
 
 #[derive(PartialEq, Serialize)]
@@ -262,6 +283,51 @@ impl Profile {
     }
 }
 
+impl ConnectionProfile {
+    fn from_settings(mut settings: Settings) -> Option<Self> {
+        let mut connection = settings.remove("connection")?;
+        Some(Self {
+            id: take(&mut connection, "uuid")?,
+            name: take(&mut connection, "id")?,
+        })
+    }
+}
+
+impl VpnProfile {
+    fn from_settings(mut settings: Settings) -> Option<Self> {
+        let mut connection = settings.remove("connection")?;
+        let kind = take::<String>(&mut connection, "type")?;
+        if kind != VPN_SETTING && kind != WIREGUARD_SETTING {
+            return None;
+        }
+        Some(Self {
+            id: take(&mut connection, "uuid")?,
+            name: take(&mut connection, "id")?,
+            kind,
+        })
+    }
+}
+
+fn extract_ipv4_cidr(properties: &mut Properties) -> Option<String> {
+    let entries: Vec<OwnedValue> = take(properties, "AddressData")?;
+    for entry in entries {
+        let Ok(mut map) = Properties::try_from(entry) else {
+            continue;
+        };
+        let Some(address) = take::<String>(&mut map, "address") else {
+            continue;
+        };
+        if address.is_empty() {
+            continue;
+        }
+        return Some(match take::<u32>(&mut map, "prefix") {
+            Some(prefix) => format!("{address}/{prefix}"),
+            None => address,
+        });
+    }
+    None
+}
+
 fn take<T: TryFrom<OwnedValue>>(properties: &mut Properties, key: &str) -> Option<T> {
     T::try_from(properties.remove(key)?).ok()
 }
@@ -311,16 +377,24 @@ impl Nm {
         AccessPoint::from_properties(path, properties)
     }
 
-    async fn profile(&self, path: &OwnedObjectPath) -> Option<Profile> {
+    async fn connection_settings(&self, path: &OwnedObjectPath) -> Option<Settings> {
         // GetSettings cannot return secrets; do not query GetSecrets.
-        let settings = self
-            .proxy(path.as_str(), SETTINGS_CONNECTION)
+        self.proxy(path.as_str(), SETTINGS_CONNECTION)
             .await
             .ok()?
             .call("GetSettings", &())
             .await
-            .ok()?;
-        Profile::from_settings(settings)
+            .ok()
+    }
+
+    async fn ipv4_address(&self, path: Option<OwnedObjectPath>) -> Option<String> {
+        let path = path.filter(|p| p.as_str() != "/")?;
+        let mut properties = self.properties(path.as_str(), IP4_CONFIG).await.ok()?;
+        extract_ipv4_cidr(&mut properties)
+    }
+
+    async fn connection_profile(&self, path: &OwnedObjectPath) -> Option<ConnectionProfile> {
+        ConnectionProfile::from_settings(self.connection_settings(path).await?)
     }
 
     async fn snapshot(&self) -> zbus::Result<Snapshot> {
@@ -383,16 +457,32 @@ impl Nm {
                     });
                 }
                 Some(ETHERNET) => {
-                    let carrier = self
-                        .properties(path.as_str(), WIRED)
-                        .await
-                        .ok()
-                        .and_then(|mut wired| take(&mut wired, "Carrier"))
-                        .unwrap_or_default();
+                    let wired_props = self.properties(path.as_str(), WIRED).await.ok();
+                    let (carrier, speed_mbps) = match wired_props {
+                        Some(mut wired) => (
+                            take(&mut wired, "Carrier").unwrap_or_default(),
+                            take::<u32>(&mut wired, "Speed").filter(|&s| s > 0),
+                        ),
+                        None => (false, None),
+                    };
+                    let ip4_path: Option<OwnedObjectPath> = take(&mut properties, "Ip4Config");
+                    let ipv4 = self.ipv4_address(ip4_path).await;
+                    let mut avail_paths: Vec<OwnedObjectPath> =
+                        take(&mut properties, "AvailableConnections").unwrap_or_default();
+                    avail_paths.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
+                    let mut available_profiles = Vec::new();
+                    for conn_path in avail_paths {
+                        if let Some(prof) = self.connection_profile(&conn_path).await {
+                            available_profiles.push(prof);
+                        }
+                    }
                     network.ethernet.push(Ethernet {
                         id: path,
                         interface,
                         carrier,
+                        speed_mbps,
+                        ipv4,
+                        available_profiles,
                         active_connection: match active {
                             Some(path) => self.active_connection(path).await,
                             None => None,
@@ -437,13 +527,21 @@ impl Nm {
             .await
         {
             for path in paths {
-                if let Some(profile) = self.profile(&path).await {
+                let Some(conn_settings) = self.connection_settings(&path).await else {
+                    continue;
+                };
+                if let Some(profile) = Profile::from_settings(conn_settings.clone()) {
                     network.wifi.profiles.push(profile);
+                } else if let Some(vpn) = VpnProfile::from_settings(conn_settings) {
+                    network.vpn_profiles.push(vpn);
                 }
             }
             network
                 .wifi
                 .profiles
+                .sort_unstable_by(|a, b| a.id.cmp(&b.id));
+            network
+                .vpn_profiles
                 .sort_unstable_by(|a, b| a.id.cmp(&b.id));
         }
         Ok(Snapshot {
@@ -540,6 +638,26 @@ struct Forget {
     profile_id: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EthernetConnect {
+    device_id: OwnedObjectPath,
+    profile_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VpnConnect {
+    profile_id: String,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VpnDisconnect {
+    id: Option<OwnedObjectPath>,
+    profile_id: Option<String>,
+}
+
 #[derive(Clone, Copy)]
 enum Command {
     SetEnabled,
@@ -547,6 +665,10 @@ enum Command {
     Connect,
     Disconnect,
     Forget,
+    EthernetConnect,
+    EthernetDisconnect,
+    VpnConnect,
+    VpnDisconnect,
 }
 
 enum Action {
@@ -555,16 +677,29 @@ enum Action {
     Connect(Connect),
     Disconnect(DeviceTarget),
     Forget(Forget),
+    EthernetConnect(EthernetConnect),
+    EthernetDisconnect(DeviceTarget),
+    VpnConnect(VpnConnect),
+    VpnDisconnect(VpnDisconnect),
 }
 
 impl Command {
     fn parse(self, call: &CommandCall) -> Result<Action, RpcError> {
         if !call.params.args.is_empty() {
-            return Err(invalid("Wi-Fi commands do not accept positional arguments"));
+            return Err(invalid(
+                "network commands do not accept positional arguments",
+            ));
         }
         let target = || {
             if call.params.payload.is_none() {
                 Ok(DeviceTarget::default())
+            } else {
+                payload(call)
+            }
+        };
+        let vpn_target = || {
+            if call.params.payload.is_none() {
+                Ok(VpnDisconnect::default())
             } else {
                 payload(call)
             }
@@ -579,6 +714,10 @@ impl Command {
             }
             Self::Disconnect => Action::Disconnect(target()?),
             Self::Forget => Action::Forget(payload(call)?),
+            Self::EthernetConnect => Action::EthernetConnect(payload(call)?),
+            Self::EthernetDisconnect => Action::EthernetDisconnect(target()?),
+            Self::VpnConnect => Action::VpnConnect(payload(call)?),
+            Self::VpnDisconnect => Action::VpnDisconnect(vpn_target()?),
         })
     }
 }
@@ -608,11 +747,15 @@ impl Action {
                 Self::Connect(connect) => nm.connect(connect).await,
                 Self::Disconnect(target) => nm.disconnect(target).await,
                 Self::Forget(Forget { profile_id }) => nm.forget(&profile_id).await,
+                Self::EthernetConnect(connect) => nm.connect_ethernet(connect).await,
+                Self::EthernetDisconnect(target) => nm.disconnect_ethernet(target).await,
+                Self::VpnConnect(connect) => nm.connect_vpn(connect).await,
+                Self::VpnDisconnect(target) => nm.disconnect_vpn(target).await,
             }
         })
         .await;
         control.refresh.notify_one();
-        result.map_err(|_| RpcError::new(ErrorCode::Timeout, "Wi-Fi operation timed out"))?
+        result.map_err(|_| RpcError::new(ErrorCode::Timeout, "network operation timed out"))?
     }
 }
 
@@ -631,8 +774,11 @@ impl Nm {
             .map_err(|_| failed("NetworkManager could not change Wi-Fi radio state"))
     }
 
-    async fn wifi_targets(
+    async fn device_targets(
         &self,
+        device_type: u32,
+        unknown_err: &'static str,
+        unavail_err: &'static str,
         id: Option<&OwnedObjectPath>,
     ) -> Result<Vec<WifiTarget>, RpcError> {
         let devices: Vec<OwnedObjectPath> = self
@@ -650,7 +796,7 @@ impl Nm {
             let Ok(mut properties) = self.properties(path.as_str(), DEVICE).await else {
                 continue;
             };
-            if take(&mut properties, "DeviceType") == Some(WIFI) {
+            if take(&mut properties, "DeviceType") == Some(device_type) {
                 let active = take::<OwnedObjectPath>(&mut properties, "ActiveConnection")
                     .is_some_and(|path| path.as_str() != "/");
                 targets.push(WifiTarget { id: path, active });
@@ -658,12 +804,25 @@ impl Nm {
         }
         if targets.is_empty() {
             return Err(if id.is_some() {
-                invalid("unknown Wi-Fi device ID")
+                invalid(unknown_err)
             } else {
-                unavailable("no Wi-Fi devices available")
+                unavailable(unavail_err)
             });
         }
         Ok(targets)
+    }
+
+    async fn wifi_targets(
+        &self,
+        id: Option<&OwnedObjectPath>,
+    ) -> Result<Vec<WifiTarget>, RpcError> {
+        self.device_targets(
+            WIFI,
+            "unknown Wi-Fi device ID",
+            "no Wi-Fi devices available",
+            id,
+        )
+        .await
     }
 
     async fn scan(&self, target: DeviceTarget, control: &Control) -> Result<(), RpcError> {
@@ -711,36 +870,158 @@ impl Nm {
         }
     }
 
-    async fn disconnect(&self, target: DeviceTarget) -> Result<(), RpcError> {
-        let devices = self.wifi_targets(target.device_id.as_ref()).await?;
+    async fn disconnect_targets(
+        &self,
+        devices: Vec<WifiTarget>,
+        fail_err: &'static str,
+    ) -> Result<(), RpcError> {
         let mut disconnected_all = true;
         for device in devices.into_iter().filter(|device| device.active) {
             let proxy = self
                 .proxy(device.id.as_str(), DEVICE)
                 .await
                 .map_err(nm_failure)?;
-            // Device.Disconnect blocks immediate autoconnect on this radio.
+            // Device.Disconnect blocks immediate autoconnect on this interface.
             disconnected_all &= proxy.call::<_, _, ()>("Disconnect", &()).await.is_ok();
         }
         if disconnected_all {
             Ok(())
         } else {
-            Err(failed("NetworkManager could not disconnect Wi-Fi"))
+            Err(failed(fail_err))
         }
     }
 
-    async fn wifi_profile(&self, id: &str) -> Result<(OwnedObjectPath, Profile), RpcError> {
-        let path = self
+    async fn disconnect(&self, target: DeviceTarget) -> Result<(), RpcError> {
+        let devices = self.wifi_targets(target.device_id.as_ref()).await?;
+        self.disconnect_targets(devices, "NetworkManager could not disconnect Wi-Fi")
+            .await
+    }
+
+    async fn disconnect_ethernet(&self, target: DeviceTarget) -> Result<(), RpcError> {
+        let devices = self
+            .device_targets(
+                ETHERNET,
+                "unknown Ethernet device ID",
+                "no Ethernet devices available",
+                target.device_id.as_ref(),
+            )
+            .await?;
+        self.disconnect_targets(devices, "NetworkManager could not disconnect Ethernet")
+            .await
+    }
+
+    async fn connection_by_uuid(&self, id: &str) -> Result<(OwnedObjectPath, Settings), RpcError> {
+        let path: OwnedObjectPath = self
             .proxy(SETTINGS_PATH, SETTINGS)
             .await
             .map_err(nm_failure)?
             .call("GetConnectionByUuid", &(id,))
             .await
-            .map_err(|_| invalid("unknown Wi-Fi profile ID"))?;
-        let profile = self
-            .profile(&path)
+            .map_err(|_| invalid("unknown network profile ID"))?;
+        let settings = self
+            .connection_settings(&path)
             .await
-            .ok_or_else(|| invalid("unknown Wi-Fi profile ID"))?;
+            .ok_or_else(|| invalid("unknown network profile ID"))?;
+        Ok((path, settings))
+    }
+
+    async fn connect_ethernet(&self, connect: EthernetConnect) -> Result<(), RpcError> {
+        self.device_targets(
+            ETHERNET,
+            "unknown Ethernet device ID",
+            "no Ethernet devices available",
+            Some(&connect.device_id),
+        )
+        .await?;
+        let conn_path = if let Some(profile_id) = connect.profile_id.as_deref() {
+            let (path, mut settings) = self.connection_by_uuid(profile_id).await?;
+            let is_wired = settings
+                .get_mut("connection")
+                .and_then(|conn| take::<String>(conn, "type"))
+                .as_deref()
+                == Some(WIRED_SETTING);
+            if !is_wired {
+                return Err(invalid("profile is not an Ethernet connection"));
+            }
+            path.into_inner()
+        } else {
+            ROOT
+        };
+        let manager = self.proxy(NM_PATH, NM).await.map_err(nm_failure)?;
+        let _: OwnedObjectPath = manager
+            .call(
+                "ActivateConnection",
+                &(conn_path, connect.device_id.as_ref(), ROOT),
+            )
+            .await
+            .map_err(|_| failed("NetworkManager could not connect Ethernet"))?;
+        Ok(())
+    }
+
+    async fn connect_vpn(&self, connect: VpnConnect) -> Result<(), RpcError> {
+        let (path, settings) = self.connection_by_uuid(&connect.profile_id).await?;
+        if VpnProfile::from_settings(settings).is_none() {
+            return Err(invalid("profile is not a VPN connection"));
+        }
+        let manager = self.proxy(NM_PATH, NM).await.map_err(nm_failure)?;
+        let _: OwnedObjectPath = manager
+            .call("ActivateConnection", &(path, ROOT, ROOT))
+            .await
+            .map_err(|_| failed("NetworkManager could not connect VPN"))?;
+        Ok(())
+    }
+
+    async fn disconnect_vpn(&self, target: VpnDisconnect) -> Result<(), RpcError> {
+        let manager_props = self.properties(NM_PATH, NM).await.map_err(nm_failure)?;
+        let active: Vec<OwnedObjectPath> = {
+            let mut props = manager_props;
+            take(&mut props, "ActiveConnections").unwrap_or_default()
+        };
+        let manager = self.proxy(NM_PATH, NM).await.map_err(nm_failure)?;
+        let mut matched = false;
+        let mut deactivated_all = true;
+        for path in active {
+            if target.id.as_ref().is_some_and(|id| id != &path) {
+                continue;
+            }
+            let Ok(mut props) = self.properties(path.as_str(), ACTIVE_CONNECTION).await else {
+                continue;
+            };
+            let is_vpn = take::<bool>(&mut props, "Vpn").unwrap_or_default()
+                || take::<String>(&mut props, "Type").as_deref() == Some(WIREGUARD_SETTING);
+            if !is_vpn {
+                continue;
+            }
+            let Some(conn) = ActiveConnection::from_properties(path.clone(), &mut props) else {
+                continue;
+            };
+            if target
+                .profile_id
+                .as_deref()
+                .is_some_and(|pid| pid != conn.profile_id)
+            {
+                continue;
+            }
+            matched = true;
+            deactivated_all &= manager
+                .call::<_, _, ()>("DeactivateConnection", &(path,))
+                .await
+                .is_ok();
+        }
+        if !matched && (target.id.is_some() || target.profile_id.is_some()) {
+            return Err(invalid("unknown active VPN connection"));
+        }
+        if deactivated_all {
+            Ok(())
+        } else {
+            Err(failed("NetworkManager could not disconnect VPN"))
+        }
+    }
+
+    async fn wifi_profile(&self, id: &str) -> Result<(OwnedObjectPath, Profile), RpcError> {
+        let (path, settings) = self.connection_by_uuid(id).await?;
+        let profile =
+            Profile::from_settings(settings).ok_or_else(|| invalid("unknown Wi-Fi profile ID"))?;
         Ok((path, profile))
     }
 
@@ -983,7 +1264,7 @@ impl SecretAgent {
     }
 }
 
-/// Installs the NetworkManager Topic and Wi-Fi control commands.
+/// Installs the NetworkManager Topic and network control commands.
 pub(crate) fn install(hub: &BusHub, commands: &Commands, bus: SystemBus) -> JoinHandle<()> {
     let mut topic = Topic::new(hub, "system.network", Network::default());
     let control = Arc::new(Control::default());
@@ -1012,6 +1293,26 @@ pub(crate) fn install(hub: &BusHub, commands: &Commands, bus: SystemBus) -> Join
             Command::Forget,
             "network.wifi.forget",
             "Delete a Wi-Fi profile",
+        ),
+        (
+            Command::EthernetConnect,
+            "network.ethernet.connect",
+            "Connect an Ethernet interface",
+        ),
+        (
+            Command::EthernetDisconnect,
+            "network.ethernet.disconnect",
+            "Disconnect an Ethernet interface",
+        ),
+        (
+            Command::VpnConnect,
+            "network.vpn.connect",
+            "Connect a VPN or WireGuard profile",
+        ),
+        (
+            Command::VpnDisconnect,
+            "network.vpn.disconnect",
+            "Disconnect an active VPN connection",
         ),
     ] {
         let control = Arc::clone(&control);
@@ -1289,5 +1590,57 @@ mod tests {
         assert!(!pending.pending_at(&owner, false, &[(device.clone(), -1)], sampled));
         assert!(!pending.pending_at(&owner, true, &[], sampled));
         assert!(!pending.pending_at(&owner, true, &[(device, -1)], started + SCAN_TIMEOUT,));
+    }
+
+    #[test]
+    fn extracts_ipv4_cidr_and_vpn_profile_from_networkmanager_properties() {
+        let mut ip4 = Properties::from([(
+            "AddressData".into(),
+            OwnedValue::try_from(Value::from(vec![HashMap::from([
+                ("address", Value::new("192.168.1.42")),
+                ("prefix", Value::new(24u32)),
+            ])]))
+            .unwrap(),
+        )]);
+        assert_eq!(
+            extract_ipv4_cidr(&mut ip4).as_deref(),
+            Some("192.168.1.42/24")
+        );
+
+        let text = |value| OwnedValue::try_from(Value::new(value)).unwrap();
+        let wg = Settings::from([(
+            "connection".into(),
+            Properties::from([
+                ("type".into(), text("wireguard")),
+                ("uuid".into(), text("wg-1")),
+                ("id".into(), text("Home WireGuard")),
+            ]),
+        )]);
+        let parsed = VpnProfile::from_settings(wg).unwrap();
+        assert_eq!(parsed.id, "wg-1");
+        assert_eq!(parsed.name, "Home WireGuard");
+        assert_eq!(parsed.kind, "wireguard");
+
+        let eth = Ethernet {
+            id: "/org/freedesktop/NetworkManager/Devices/2"
+                .try_into()
+                .unwrap(),
+            interface: "enp18s0".into(),
+            carrier: true,
+            speed_mbps: Some(2500),
+            ipv4: Some("192.168.1.42/24".into()),
+            available_profiles: vec![ConnectionProfile {
+                id: "eth-uuid".into(),
+                name: "Wired connection 1".into(),
+            }],
+            active_connection: None,
+        };
+        let encoded = serde_json::to_value(eth).unwrap();
+        assert_eq!(encoded["speed_mbps"], 2500);
+        assert_eq!(encoded["ipv4"], "192.168.1.42/24");
+        assert_eq!(
+            encoded["available_profiles"][0]["name"],
+            "Wired connection 1"
+        );
     }
 }

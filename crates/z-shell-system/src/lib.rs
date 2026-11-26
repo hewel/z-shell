@@ -24,6 +24,10 @@
 //!   `network.wifi.disconnect` accept an optional `{device_id}`. Connect with
 //!   `{ap_id, password?}` or `{profile_id, ap_id?, device_id?}`; forget with
 //!   `{profile_id}`. Passwords require the privileged host control channel.
+//! - `network.ethernet.connect`: `{device_id, profile_id?}`;
+//!   `network.ethernet.disconnect`: optional `{device_id}`.
+//! - `network.vpn.connect`: `{profile_id}`; `network.vpn.disconnect`:
+//!   optional `{id}` or `{profile_id}`.
 //! - `bluetooth.set-power`: `{adapter, powered}`; `bluetooth.set-discovery`:
 //!   `{adapter, discovering}`. `bluetooth.connect`, `bluetooth.disconnect`,
 //!   `bluetooth.pair`, and `bluetooth.remove` take `{device}`.

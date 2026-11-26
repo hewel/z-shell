@@ -205,15 +205,21 @@ fn bar_tray_omits_defaults_for_rollback_and_patches_with_plugins_sources() {
     );
     let store = ConfigStore::new(paths);
 
-    // Default UserSettings must omit [bar.tray] in TOML and PublicSettingsSummary JSON.
+    // Default UserSettings must omit [bar.tray] and workspace_numbers in TOML and PublicSettingsSummary JSON.
     let defaults = UserSettings::default();
+    assert!(defaults.bar.workspace_numbers);
     let toml_text = toml::to_string_pretty(&defaults).unwrap();
     assert!(
         !toml_text.contains("tray"),
         "unexpected tray in default TOML:\n{toml_text}"
     );
+    assert!(
+        !toml_text.contains("workspace_numbers"),
+        "unexpected workspace_numbers in default TOML:\n{toml_text}"
+    );
     let summary_json = serde_json::to_value(defaults.public_summary()).unwrap();
     assert!(summary_json["bar"].get("tray").is_none());
+    assert!(summary_json["bar"].get("workspace_numbers").is_none());
 
     // Patch [bar.tray] and [plugins.sources] losslessly.
     let patch: JsonMap<String, JsonValue> = serde_json::from_value(json!({
@@ -287,4 +293,23 @@ fn bar_tray_omits_defaults_for_rollback_and_patches_with_plugins_sources() {
         store.patch_settings(&bad_secret),
         Err(ConfigError::Validation(_))
     ));
+
+    // bar.workspace_numbers patches to false and restores cleanly to omitted default true.
+    let ws_off: JsonMap<String, JsonValue> = serde_json::from_value(json!({
+        "bar": { "workspace_numbers": false }
+    }))
+    .unwrap();
+    let patched_ws_off = store.patch_settings(&ws_off).unwrap();
+    assert!(!patched_ws_off.bar.workspace_numbers);
+    let summary_ws_off = serde_json::to_value(patched_ws_off.public_summary()).unwrap();
+    assert_eq!(summary_ws_off["bar"]["workspace_numbers"], json!(false));
+
+    let ws_on: JsonMap<String, JsonValue> = serde_json::from_value(json!({
+        "bar": { "workspace_numbers": true }
+    }))
+    .unwrap();
+    let patched_ws_on = store.patch_settings(&ws_on).unwrap();
+    assert!(patched_ws_on.bar.workspace_numbers);
+    let summary_ws_on = serde_json::to_value(patched_ws_on.public_summary()).unwrap();
+    assert!(summary_ws_on["bar"].get("workspace_numbers").is_none());
 }
