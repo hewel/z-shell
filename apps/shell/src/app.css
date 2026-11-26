@@ -215,3 +215,38 @@ control:not(:disabled):active > [data-press-visual="card"] {
   white-space: pre-line;
   overflow-wrap: anywhere;
 }
+
+.clipboard-search {
+  position: relative;
+}
+
+.clipboard-search:empty::before {
+  content: "Search the clipboard";
+  position: absolute;
+  inset: 0;
+  padding: inherit;
+  display: flex;
+  align-items: center;
+  color: var(--color-on-surface-variant);
+  pointer-events: none;
+}
+
+.toast-deck-layer-1 {
+  width: 92%;
+  height: 8px;
+  border-radius: 0 0 16px 16px;
+  background-color: var(--color-surface-container);
+  border-left: 1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent);
+}
+
+.toast-deck-layer-2 {
+  width: 84%;
+  height: 6px;
+  border-radius: 0 0 14px 14px;
+  background-color: var(--color-surface-container-low);
+  border-left: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
+}

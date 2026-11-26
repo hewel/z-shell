@@ -1,0 +1,388 @@
+.panel {
+  width: 100%;
+  overflow: hidden;
+  padding: 14px;
+  gap: 12px;
+  flex-direction: column;
+  background-color: transparent;
+  color: var(--color-on-surface);
+  font-family: var(--font-sans);
+  font-size: 13px;
+}
+
+.topSection {
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.clockHeaderRow {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.clockCol {
+  gap: 2px;
+}
+
+.clockRow {
+  align-items: baseline;
+  gap: 4px;
+}
+
+.clockHm {
+  font-size: 44px;
+  font-weight: 400;
+  line-height: 50px;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-primary);
+}
+
+.clockSeconds {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  color: var(--color-on-surface-variant);
+  font-variant-numeric: tabular-nums;
+}
+
+.dateText {
+  color: var(--color-on-surface-variant);
+  font-size: 13px;
+}
+
+.dndToggle {
+  display: flex;
+  flex-direction: row;
+  min-height: 30px;
+  padding: 5px 11px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background-color: var(--color-surface-container-high);
+  border: 1px solid transparent;
+  color: var(--color-on-surface);
+  font-size: 12px;
+  font-weight: 500;
+
+  &[data-active="true"] {
+    background-color: var(--color-primary-container);
+    border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+    color: var(--color-on-primary-container);
+  }
+}
+
+.calendarCard {
+  border-radius: 16px;
+  background-color: var(--color-surface-container-high);
+  padding: 12px;
+  gap: 8px;
+}
+
+.monthHeaderRow {
+  align-items: center;
+  gap: 6px;
+}
+
+.monthTitle {
+  flex-grow: 1;
+  min-width: 0px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.pill {
+  display: flex;
+  border-radius: 10px;
+  min-height: 30px;
+  padding: 4px 10px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-surface-container-highest);
+}
+
+.todayBtn {
+  background-color: var(--color-secondary-container);
+  color: var(--color-on-secondary-container);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.iconBtn {
+  width: 28px;
+  padding: 0px;
+}
+
+.calendarGrid {
+  gap: 2px;
+}
+
+.gridCell {
+  display: flex;
+  flex-basis: 0px;
+  flex-grow: 1;
+  min-width: 0px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+
+  &[data-muted="true"] {
+    opacity: 0.38;
+  }
+}
+
+.weekdayLabel {
+  color: var(--color-on-surface-variant);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.dayBadge {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  align-items: center;
+  justify-content: center;
+  background-color: transparent;
+  color: var(--color-on-surface);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+
+  &[data-today="true"] {
+    background-color: var(--color-primary);
+    color: var(--color-on-primary);
+    font-weight: 600;
+  }
+}
+
+.divider {
+  width: 100%;
+  height: 1px;
+  background-color: color-mix(in srgb, var(--color-outline-variant) 50%, transparent);
+}
+
+.notifHeaderRow {
+  align-items: center;
+  gap: 8px;
+}
+
+.notifHeading {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.notifCount {
+  display: flex;
+  align-items: center;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  background-color: var(--color-secondary-container);
+  color: var(--color-on-secondary-container);
+}
+
+.clearAllBtn {
+  margin-left: auto;
+}
+
+.notifScroll {
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-height: 0px;
+  width: 100%;
+  overflow: hidden auto;
+}
+
+.notifList {
+  gap: 8px;
+  padding-bottom: 2px;
+}
+
+.notifEmpty {
+  width: 100%;
+  border-radius: 14px;
+  background-color: var(--color-surface-container-high);
+  padding: 24px 16px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.notifEmptyTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-on-surface);
+}
+
+.notifEmptySubtitle {
+  font-size: 12px;
+  color: var(--color-on-surface-variant);
+}
+
+.notifCard {
+  border-radius: 14px;
+  background-color: var(--color-surface-container-high);
+  padding: 10px;
+  gap: 8px;
+}
+
+.notifRow {
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.notifBodyMain {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.notifLeadingWrap {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+}
+
+.imageTile {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.notifFallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-surface-container-highest);
+
+  &[data-kind="image"] {
+    background-color: var(--color-primary-container);
+  }
+}
+
+.notifAvatarWrap {
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notifAvatarImg {
+  width: 100%;
+  height: 100%;
+  min-width: 0px;
+  min-height: 0px;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 10px;
+  object-fit: cover;
+}
+
+.notifAppBadge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+  background-color: var(--color-surface-container-high);
+  border: 2px solid var(--color-surface-container-high);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notifAppBadgeImg {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+  object-fit: cover;
+}
+
+.notifTextCol {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  gap: 3px;
+}
+
+.notifAppName {
+  color: var(--color-on-surface-variant);
+  font-size: 11px;
+}
+
+.notifSummary {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.notifBody {
+  color: var(--color-on-surface-variant);
+  font-size: 12px;
+  line-height: 17px;
+  max-height: 52px;
+  overflow: hidden;
+}
+
+.notifActionWrap {
+  flex-shrink: 0;
+}
+
+.notifPreviewFrame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 104px;
+  border-radius: 10px;
+  overflow: hidden;
+  background-color: var(--color-surface-container-lowest);
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 42%, transparent);
+
+  &[data-fit="contain"] {
+    height: 132px;
+  }
+}
+
+.notifPreviewImg {
+  width: 100%;
+  height: 100%;
+  min-width: 0px;
+  min-height: 0px;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 10px;
+  object-fit: cover;
+
+  &[data-fit="contain"] {
+    object-fit: contain;
+  }
+}
+
+.notifActionsRow {
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: 46px;
+}
+
+.notifActionBtn {
+  background-color: var(--color-secondary-container);
+  color: var(--color-on-secondary-container);
+  font-size: 11px;
+}

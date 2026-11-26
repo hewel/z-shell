@@ -1,0 +1,161 @@
+.targetCard {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius-tile);
+  background-color: var(--color-surface-container);
+}
+
+.targetHeader {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.targetName {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.targetControls {
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.statusBadge {
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  --zgui-corner-shape: none;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 14px;
+  background-color: var(--color-surface-container-highest);
+  color: var(--color-on-surface-variant);
+
+  &[data-state="applied"] {
+    background-color: var(--color-primary-container);
+    color: var(--color-on-primary-container);
+  }
+
+  &[data-state="failed"] {
+    background-color: var(--color-error-container);
+    color: var(--color-on-error-container);
+  }
+}
+
+.targetPath {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.compositeInput {
+  gap: 4px;
+  align-items: center;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  padding: 2px 3px 2px 8px;
+  background-color: var(--color-surface-container-high);
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent);
+
+  &[data-focused="true"] {
+    border: 2px solid var(--color-primary);
+  }
+
+  & > .saveBtn {
+    height: 26px;
+    min-height: 26px;
+  }
+}
+
+.pathInput {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  height: 28px;
+  padding: 2px;
+  background-color: transparent;
+  color: var(--color-on-surface);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.saveBtn {
+  height: 26px;
+}
+
+.hidden {
+  display: none;
+}
+
+.statusMessage {
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.page {
+  gap: 12px;
+  width: 100%;
+  color: var(--color-on-surface);
+  font-family: var(--font-sans);
+}
+
+.headerCard {
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-container-high);
+  padding: 14px;
+}
+
+.growCol {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  gap: 2px;
+}
+
+.cardTitle {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.headerSubtitle {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.headerActions {
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.errorText {
+  color: var(--color-error);
+  font-size: 12px;
+}
+
+.targetsCard {
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-container-high);
+  padding: 14px;
+  gap: 10px;
+}
+
+.targetsRow {
+  gap: 10px;
+  width: 100%;
+}

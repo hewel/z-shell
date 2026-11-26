@@ -9,17 +9,7 @@ import {
 } from "../motion.ts";
 import { usePinnedOutput, useShellStore } from "../store.ts";
 import { formatSurfaceName, resolveMonitorLogicalSize, type OsdPayload, type WarningFade } from "../topics.ts";
-
-const onSurface = "var(--color-on-surface)";
-const muted = "var(--color-on-surface-variant)";
-const capsule = {
-  backgroundColor: "var(--surface-popover)",
-  border: "1px solid var(--border-popover)",
-  boxShadow: "var(--shadow-level-2)",
-  borderRadius: "999px",
-  "--zgui-corner-shape": "none",
-  color: onSurface,
-} as const;
+import styles from "./OsdOverlay.module.css";
 
 function OsdPill({ osd, spatial, opacity, pillRef }: {
   osd: Accessor<OsdPayload>;
@@ -36,36 +26,34 @@ function OsdPill({ osd, spatial, opacity, pillRef }: {
   onCleanup(() => pillRef?.(null));
 
   return (
-    <row ref={node => pillRef?.(node)} testId="osd-pill" role="status" ariaLabel={osd().label} style={{
-      ...capsule, width: "280px", height: "48px", padding: "0 12px 0 8px", gap: "10px", alignItems: "center",
-      opacity: Math.max(0, Math.min(1, opacity())),
-      transform: scheme() === "reduced"
-        ? "none"
-        : `translateY(${((1 - spatial()) * 12).toFixed(2)}px) scale(${(0.94 + spatial() * 0.06).toFixed(4)})`,
-      transformOrigin: "bottom center",
-    }}>
-      <box style={{
-        display: "flex", width: "32px", height: "32px", borderRadius: "10px", flexShrink: 0,
-        alignItems: "center", justifyContent: "center", backgroundColor: "var(--color-primary-container)",
-      }}>
+    <row
+      ref={node => pillRef?.(node)}
+      testId="osd-pill"
+      role="status"
+      ariaLabel={osd().label}
+      class={styles.osdPill}
+      style={{
+        opacity: Math.max(0, Math.min(1, opacity())),
+        transform: scheme() === "reduced"
+          ? "none"
+          : `translateY(${((1 - spatial()) * 12).toFixed(2)}px) scale(${(0.94 + spatial() * 0.06).toFixed(4)})`,
+      }}
+    >
+      <box class={styles.iconWell}>
         <ShellIcon name={icon()} size={18} color="var(--color-on-primary-container)" />
       </box>
       <Show when={osd().kind === "ime"} fallback={
         <>
           <M3Slider label={osd().label} value={value()} readOnly compact />
-          <row style={{ width: "36px", flexShrink: 0, justifyContent: "flex-end" }}>
-            <text testId="osd-value" data-tabular="true" style={{
-              fontFamily: "var(--font-mono)", fontSize: "12px", fontWeight: 600, fontVariantNumeric: "tabular-nums",
-            }}>
+          <row class={styles.valueRow}>
+            <text testId="osd-value" data-tabular="true" class={styles.valueText}>
               {value()}%
             </text>
           </row>
         </>
       }>
-        <text testId="osd-label" style={{
-          flexGrow: 1, minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: "14px", fontWeight: 600,
-        }}>{osd().label}</text>
-        <text style={{ flexShrink: 0, paddingRight: "4px", color: muted, fontSize: "11px" }}>Input Method</text>
+        <text testId="osd-label" class={styles.imeLabel}>{osd().label}</text>
+        <text class={styles.imeSubtitle}>Input Method</text>
       </Show>
     </row>
   );
@@ -80,16 +68,10 @@ function IdleScrim({ monitorId, warning, seconds }: {
   const ramp = createLinearProgress(() => warning().fade_seconds * 1000, scheme);
   const opacity = () => Math.max(0.25, Math.min(1, ramp()));
   return (
-    <box style={{
-      position: "fixed", top: "0px", left: "0px", width: "100%", height: "100%",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      backgroundColor: "color-mix(in srgb, var(--color-scrim) 55%, transparent)", opacity: opacity(),
-    }}>
-      <row testId={`idle-warning-${monitorId}`} style={{
-        ...capsule, padding: "10px 16px", gap: "10px", maxWidth: "90%", alignItems: "center",
-      }}>
-        <text style={{ fontSize: "13px" }}>{warning().rules.join(", ")}</text>
-        <text data-tabular="true" style={{ color: muted, flexShrink: 0, fontFamily: "var(--font-mono)", fontSize: "12px", lineHeight: "16px", fontVariantNumeric: "tabular-nums" }}>
+    <box class={styles.idleScrim} style={{ opacity: opacity() }}>
+      <row testId={`idle-warning-${monitorId}`} class={styles.idleWarning}>
+        <text class={styles.idleRules}>{warning().rules.join(", ")}</text>
+        <text data-tabular="true" class={styles.idleSeconds}>
           {seconds()}s
         </text>
       </row>
@@ -159,11 +141,7 @@ export function OsdOverlay(): NativeChild {
           return (
             <LayerSurface name="osd-overlay" output={output} layer="overlay" anchor={["bottom"]}
               margin={{ bottom: 52 }} width={344} height={108} keyboard="none" inputRegion="empty" blurRegion={pillNode() ? [pillNode()!] : "none"}>
-              <box style={{
-                position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
-                display: "flex", alignItems: "flex-end", justifyContent: "center",
-                paddingBottom: "36px",
-              }}>
+              <box class={styles.osdContainer}>
                 <Show when={osdPresence.value()}>
                   {entry => <OsdPill osd={() => entry().payload} spatial={osdPresence.progress} opacity={osdPresence.opacity} pillRef={bindPillRef} />}
                 </Show>

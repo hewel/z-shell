@@ -1,5 +1,5 @@
 import {
-  For, PopupSurface, Show, createEffect, createMemo, createSignal, getWindowRect, onCleanup, onSettled, untrack,
+  For, PopupSurface, Show, createEffect, createMemo, createSignal, cx, getWindowRect, onCleanup, onSettled, untrack,
   type Component, type NativeChild, type NativeNode, type NativeWindowRect,
 } from "@hewel/zgui";
 import { type PluginSettingsProps } from "@z-shell/sdk/zgui";
@@ -10,11 +10,12 @@ import {
   useMotionScheme,
   type M3Spring,
 } from "../motion.ts";
-import { POPOVER_BLEED_STYLE, POPOVER_FRAME_STYLE, POPOVER_SHADOW_INSETS, resolvePopoverGeometry } from "../panels/ShellPanels.tsx";
+import { POPOVER_SHADOW_INSETS, resolvePopoverGeometry, shellPanelsStyles } from "../panels/ShellPanels.tsx";
 import { useShellStore, type ShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import { PANEL_MAX_HEIGHTS, formatSurfaceName, resolveBarLayout, resolveBarPopupAnchor, type BarPosition, type BarStyle } from "../topics.ts";
 import { composedPlugins, type ComposedEntryInstanceDescriptor, type ComposedServiceDescriptor } from "./composed.ts";
+import styles from "./PluginHost.module.css";
 import { createComposedServiceController, type ComposedServiceController } from "./services.ts";
 
 // The generated module exports the descriptors but does not need to know the host's bundle type.
@@ -56,26 +57,23 @@ function PluginPanelFrame(props: {
   useShellTheme(props.theme.data);
   const scheme = useMotionScheme();
   return (
-    <box inert={props.inert} style={POPOVER_BLEED_STYLE}>
+    <box inert={props.inert} class={shellPanelsStyles.popoverBleed}>
       <box
         ref={props.cardRef}
         testId="plugin-panel-root"
         data-theme-rev={String(props.theme.revision())}
+        class={cx(shellPanelsStyles.popoverFrame, styles.pluginPanelFrame)}
         style={{
-          ...POPOVER_FRAME_STYLE,
-          maxHeight: `${PANEL_MAX_HEIGHTS.plugin}px`,
           ...panelMotionStyle(props.spatial(), props.position, false, {
             opacity: props.opacity(),
             reduced: scheme() === "reduced",
           }),
         }}
       >
-        <scroll style={{
-          width: "100%",
-          maxHeight: `${PANEL_MAX_HEIGHTS.plugin}px`,
-          overflow: "hidden auto",
-          ...popoverContentMotionStyle(props.spatial(), props.opacity(), scheme() === "reduced"),
-        }}>
+        <scroll
+          class={styles.pluginPanelScroll}
+          style={popoverContentMotionStyle(props.spatial(), props.opacity(), scheme() === "reduced")}
+        >
           {props.children}
         </scroll>
       </box>
@@ -253,17 +251,8 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
                 render: ({ vertical }) => (
                   <box
                     ref={node => { slotNode = node; }}
-                    style={{
-                      display: "flex",
-                      flexDirection: vertical ? "column" : "row",
-                      alignItems: "stretch",
-                      justifyContent: "center",
-                      flexGrow: 1,
-                      flexShrink: 0,
-                      width: vertical ? "100%" : "auto",
-                      height: vertical ? "auto" : "100%",
-                      borderRadius: "inherit",
-                    }}
+                    class={styles.widgetSlot}
+                    data-vertical={vertical ? "true" : null}
                   >
                     <WidgetComponent client={publicClient} vertical={vertical} onOpenPanel={onOpenPanel} />
                   </box>

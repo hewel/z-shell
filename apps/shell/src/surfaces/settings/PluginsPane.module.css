@@ -1,0 +1,244 @@
+.root {
+  position: relative;
+  width: 100%;
+  min-height: 500px;
+}
+
+.pane {
+  gap: 10px;
+  width: 100%;
+}
+
+.toolbar {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.toolbarActions {
+  align-items: center;
+  gap: 6px;
+}
+
+.toolbarButton {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-container-high);
+  color: var(--color-on-surface);
+  font-size: 11px;
+  font-weight: 500;
+
+  &:disabled {
+    opacity: 0.5;
+  }
+}
+
+.toolbarButtonPrimary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  background-color: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.searchRow {
+  align-items: center;
+  gap: 8px;
+}
+
+.searchInput {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  padding: 6px 10px;
+  background-color: var(--color-surface-container-high);
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent);
+  color: var(--color-on-surface);
+  font-size: 12px;
+}
+
+.categoryRow {
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.categoryButton {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-container-high);
+  color: var(--color-on-surface-variant);
+  font-size: 11px;
+  font-weight: 500;
+
+  &[data-active="true"] {
+    background-color: var(--color-primary-container);
+    color: var(--color-on-primary-container);
+  }
+}
+
+.runtimeBanner {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background-color: var(--color-surface-container-high);
+}
+
+.runtimeBannerText {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.offlineBadge {
+  display: flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--radius-xs);
+  background-color: var(--color-surface-container-highest);
+}
+
+.offlineBadgeText {
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--color-on-surface-variant);
+}
+
+.errorText {
+  font-size: 12px;
+  color: var(--color-error);
+}
+
+.cardList {
+  gap: 8px;
+  width: 100%;
+}
+
+.emptyCard {
+  padding: 24px;
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-container-high);
+  align-items: center;
+  gap: 6px;
+}
+
+.emptyTitle {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.emptySubtitle {
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.cardRow {
+  gap: 8px;
+  width: 100%;
+}
+
+.pluginCard {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  border-radius: var(--radius-tile);
+  padding: 10px 12px;
+  align-items: center;
+  gap: 10px;
+  background-color: var(--color-surface-container-high);
+}
+
+.cardIcon {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-surface-container-highest);
+  flex-shrink: 0;
+}
+
+.cardIconImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cardTextGroup {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  gap: 2px;
+}
+
+.cardTitle {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cardSubtitle {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.cardAction {
+  flex-shrink: 0;
+}
+
+.statusBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-container);
+  color: var(--color-on-surface-variant);
+
+  &[data-accent="true"] {
+    background-color: var(--color-primary-container);
+    color: var(--color-on-primary-container);
+  }
+}
+
+.statusBadgeText {
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 600;
+}
+
+.spacer {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+}

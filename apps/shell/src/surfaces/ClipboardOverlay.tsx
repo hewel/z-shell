@@ -3,6 +3,7 @@ import { createRetainedPresence, dialogMotionStyle, scrimBackdrop, useMotionSche
 import { ClipboardPanel } from "../panels/ClipboardPanel.tsx";
 import { useShellStore } from "../store.ts";
 import { resolveActiveMonitor, resolveMonitorLogicalSize } from "../topics.ts";
+import styles from "./ClipboardOverlay.module.css";
 
 function ClipboardOverlayContent(props: {
   readonly inert: boolean;
@@ -14,20 +15,22 @@ function ClipboardOverlayContent(props: {
   const scheme = useMotionScheme();
 
   return (
-    <box testId="clipboard-backdrop" inert={props.inert} onClick={closePanels} style={{
-      position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
-      display: "flex", alignItems: "center", justifyContent: "center", padding: "14px",
-      backgroundColor: scrimBackdrop(45, props.opacity(), dark()),
-    }}>
-      <box testId="clipboard-card" role="dialog" ariaLabel="Clipboard" ariaModal onClick={event => event.stopPropagation()} style={{
-        display: "flex", flexDirection: "column", width: "560px", maxWidth: "100%", borderRadius: "22px",
-        overflow: "hidden",
-        backgroundColor: "var(--color-surface-container)",
-        border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
-        boxShadow: "var(--shadow-level-3)",
-        fontFamily: "var(--font-sans)", color: "var(--color-on-surface)",
-        ...dialogMotionStyle(props.spatial(), { opacity: props.opacity(), reduced: scheme() === "reduced", fromScale: 0.95, fromY: 10 }),
-      }}>
+    <box
+      testId="clipboard-backdrop"
+      inert={props.inert}
+      onClick={closePanels}
+      class={styles.backdrop}
+      style={{ backgroundColor: scrimBackdrop(45, props.opacity(), dark()) }}
+    >
+      <box
+        testId="clipboard-card"
+        role="dialog"
+        ariaLabel="Clipboard"
+        ariaModal
+        onClick={event => event.stopPropagation()}
+        class={styles.card}
+        style={{ ...dialogMotionStyle(props.spatial(), { opacity: props.opacity(), reduced: scheme() === "reduced", fromScale: 0.95, fromY: 10 }) }}
+      >
         <ClipboardPanel />
       </box>
     </box>

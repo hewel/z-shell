@@ -1,6 +1,6 @@
 import {
-  Button, For, Image, LayerSurface, Show, createEffect, createMemo, createSignal, onCleanup,
-  type Accessor, type Monitor, type NativeChild, type NativeNode, type NativeStyle, type NativeWindowRect,
+  Button, For, Image, LayerSurface, Show, createEffect, createMemo, createSignal, cx, onCleanup,
+  type Accessor, type Monitor, type NativeChild, type NativeNode, type NativeWindowRect,
 } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
@@ -8,10 +8,8 @@ import { SPRING_EPSILON, createM3Spring, useMotionScheme, type M3Spring } from "
 import { useShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import { buildDockItems, formatSurfaceName, resolveMonitorLogicalSize, type DockEntry } from "../topics.ts";
+import styles from "./DockSurface.module.css";
 
-const primary = "var(--color-primary)";
-const outline = "var(--color-outline-variant)";
-const onSurfaceVariant = "var(--color-on-surface-variant)";
 const tileSize = 46;
 const dockGap = 8;
 const dockPadding = 10;
@@ -21,26 +19,6 @@ const dockLayerHeight = 112;
 const triggerStripHeight = 8;
 const autoHideDelayMs = 500;
 const hiddenSlideOffset = dockHeight + dockBottomMargin + 18;
-const capsule = {
-  height: `${dockHeight}px`, alignItems: "center", gap: `${dockGap}px`, padding: `0 ${dockPadding}px`,
-  borderRadius: "22px",
-  backgroundColor: "var(--surface-dock)",
-  border: "1px solid var(--border-dock)",
-  boxShadow: "var(--shadow-level-2)",
-  overflow: "visible",
-} satisfies NativeStyle;
-const tile = {
-  display: "flex", width: `${tileSize}px`, height: `${tileSize}px`, flexShrink: 0, alignItems: "center", justifyContent: "center",
-} satisfies NativeStyle;
-const tileVisual = {
-  display: "flex", width: "38px", height: "38px", flexShrink: 0, alignItems: "center", justifyContent: "center",
-} satisfies NativeStyle;
-const tileIcon = { width: "34px", height: "34px", borderRadius: "10px", "object-fit": "contain" } as const;
-const tileStack = {
-  position: "relative", width: `${tileSize}px`, height: `${dockHeight}px`, flexShrink: 0,
-  alignItems: "center", justifyContent: "center",
-} as const;
-const dot = { width: "4px", height: "4px", flexShrink: 0, borderRadius: "2px", "--zgui-corner-shape": "none", backgroundColor: "color-mix(in srgb, var(--color-on-surface) 84%, transparent)" } as const;
 const tints = ["primary", "secondary", "tertiary"] as const;
 
 function DockApp(props: { entry: Accessor<DockEntry> }) {
@@ -68,7 +46,7 @@ function DockApp(props: { entry: Accessor<DockEntry> }) {
     void invokeHost("apps.pin", { id: appId, pinned: !pinned });
   }
   return (
-    <column style={tileStack}>
+    <column class={styles.tileStack}>
       <Button testId={`dock-${entry().pinned ? "app" : "running"}-${entry().appId}`} ariaLabel={entry().title}
         data-dock-item="true"
         onClick={activate}
@@ -82,31 +60,26 @@ function DockApp(props: { entry: Accessor<DockEntry> }) {
           event.preventDefault();
           togglePin();
         }}
-        style={{ ...tile, borderRadius: "12px", backgroundColor: "transparent", overflow: "visible" }}>
-        <box data-dock-visual="true" ariaHidden style={{
-          ...tileVisual,
-          pointerEvents: "none",
-          marginBottom: "2px",
-          borderRadius: "10px",
-          backgroundColor: src() ? "transparent" : `var(--color-${tint()}-container)`,
-          color: `var(--color-on-${tint()}-container)`,
-        }}>
+        class={styles.tileButton}>
+        <box
+          data-dock-visual="true"
+          ariaHidden
+          class={styles.tileVisual}
+          data-tint={src() ? null : tint()}
+        >
           <Show when={src()} fallback={
-            <text style={{ fontFamily: "var(--font-sans)", fontSize: "16px", fontWeight: 700 }}>
+            <text class={styles.fallbackInitial}>
               {initial()}
             </text>
           }>
-            {image => <Image ariaHidden src={image()} style={tileIcon} />}
+            {image => <Image ariaHidden src={image()} class={styles.tileIcon} />}
           </Show>
         </box>
       </Button>
-      <row ariaHidden style={{
-        position: "absolute", bottom: "2px", height: "4px", maxWidth: `${tileSize}px`,
-        alignItems: "center", justifyContent: "center", gap: "2px", overflow: "hidden", pointerEvents: "none",
-      }}>
+      <row ariaHidden class={styles.dotsRow}>
         <Show when={!entry().focused}>
-          <Show when={entry().pinned} fallback={<box style={{ ...dot, backgroundColor: onSurfaceVariant }} />}>
-            <For each={entry().windows} keyed={window => window.window_id}>{() => <box style={dot} />}</For>
+          <Show when={entry().pinned} fallback={<box class={cx(styles.dot, styles.dotUnpinned)} />}>
+            <For each={entry().windows} keyed={window => window.window_id}>{() => <box class={styles.dot} />}</For>
           </Show>
         </Show>
       </row>
@@ -155,44 +128,48 @@ function DockCapsule(props: {
   const focusBarOpacity = createM3Spring(() => (focusedOffset() !== null ? 1 : 0), "fastEffects", { scheme });
 
   return (
-    <row ref={props.capsuleRef} testId={`dock-root-${props.monitorId}`} role="toolbar" ariaLabel="Dock" onClick={() => dismissOverlay()} style={{
-      ...capsule,
-      width: `${Math.round(props.animatedWidth())}px`,
-      transform: `translateY(${(props.slideProgress() * hiddenSlideOffset).toFixed(2)}px)`,
-      opacity: Math.max(0, Math.min(1, 1 - props.slideProgress() * 0.45)),
-    }}>
-      <column style={tileStack}>
-        <Button testId="dock-launcher" ariaLabel="Open launcher" data-dock-trigger="true" onClick={event => {
-          event.stopPropagation();
-          togglePanel("launcher", { monitorId: props.monitorId });
-        }}
-          style={{ ...tile, borderRadius: "12px", backgroundColor: "transparent" }}>
-          <box data-press-visual="compact" ariaHidden style={{
-            ...tileVisual, marginBottom: "2px", borderRadius: "10px",
-            backgroundColor: "var(--color-surface-container-high)",
-          }}>
-            <ShellIcon name="apps" size={20} color={primary} />
+    <row
+      ref={props.capsuleRef}
+      testId={`dock-root-${props.monitorId}`}
+      role="toolbar"
+      ariaLabel="Dock"
+      onClick={() => dismissOverlay()}
+      class={styles.capsule}
+      style={{
+        width: `${Math.round(props.animatedWidth())}px`,
+        transform: `translateY(${(props.slideProgress() * hiddenSlideOffset).toFixed(2)}px)`,
+        opacity: Math.max(0, Math.min(1, 1 - props.slideProgress() * 0.45)),
+      }}
+    >
+      <column class={styles.tileStack}>
+        <Button
+          testId="dock-launcher"
+          ariaLabel="Open launcher"
+          data-dock-trigger="true"
+          onClick={event => {
+            event.stopPropagation();
+            togglePanel("launcher", { monitorId: props.monitorId });
+          }}
+          class={styles.tileButton}
+        >
+          <box data-press-visual="compact" ariaHidden class={styles.launcherVisual}>
+            <ShellIcon name="apps" size={20} color="var(--color-primary)" />
           </box>
         </Button>
       </column>
-      <scroll style={{ flexGrow: 1, flexShrink: 1, minWidth: "0px", height: `${dockHeight}px`, overflow: "auto hidden" }}>
-        <row style={{ position: "relative", height: `${dockHeight}px`, alignItems: "center", gap: `${dockGap}px` }}>
-          <box ariaHidden style={{
-            position: "absolute",
-            left: "0px",
-            bottom: "3px",
-            width: "16px",
-            height: "3px",
-            borderRadius: "2px",
-            "--zgui-corner-shape": "none",
-            backgroundColor: primary,
-            pointerEvents: "none",
-            opacity: Math.max(0, Math.min(1, focusBarOpacity())),
-            transform: `translateX(${focusBarX().toFixed(2)}px)`,
-          }} />
+      <scroll class={styles.itemsScroll}>
+        <row class={styles.itemsRow}>
+          <box
+            ariaHidden
+            class={styles.focusPill}
+            style={{
+              opacity: Math.max(0, Math.min(1, focusBarOpacity())),
+              transform: `translateX(${focusBarX().toFixed(2)}px)`,
+            }}
+          />
           <For each={slots()} keyed={slot => slot.key}>
             {slot => slot().kind === "divider"
-              ? <box ariaHidden style={{ width: "1px", height: "30px", flexShrink: 0, backgroundColor: outline }} />
+              ? <box ariaHidden class={styles.divider} />
               : <DockApp entry={() => (slot() as Extract<DockSlot, { readonly kind: "app" }>).entry} />}
           </For>
         </row>
@@ -263,23 +240,12 @@ function MonitorDock(props: {
     <LayerSurface name={formatSurfaceName("dock", props.monitor().id)} output={props.monitor().id} layer="top"
       anchor={["bottom", "left", "right"]} margin={{ bottom: 0 }} width={layerWidth()} height={dockLayerHeight}
       exclusiveZone={0} keyboard="none" inputRegion={inputRegion()} blurRegion={capsuleNode() ? [capsuleNode()!] : "none"}>
-      <box testId={`dock-surface-${props.monitor().id}`} style={{
-        // Fill the full LayerSurface viewport (including the bottom-edge trigger strip) instead of
-        // shrinking to the content-sized :root height.
-        position: "fixed",
-        left: "0px",
-        top: "0px",
-        width: "100%",
-        height: `${dockLayerHeight}px`,
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "flex-end",
-        alignItems: "center",
-        paddingBottom: `${dockBottomMargin}px`,
-        overflow: "hidden",
-      }}
+      <box
+        testId={`dock-surface-${props.monitor().id}`}
+        class={styles.dockSurface}
         onPointerEnter={() => setHovered(true)}
-        onPointerLeave={() => setHovered(false)}>
+        onPointerLeave={() => setHovered(false)}
+      >
         <DockCapsule
           monitorId={props.monitor().id}
           slideProgress={slideProgress}

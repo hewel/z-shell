@@ -1,0 +1,405 @@
+.truncate {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.panel {
+  width: 100%;
+  padding: 14px;
+  flex-direction: column;
+  background-color: transparent;
+  color: var(--color-on-surface);
+  font-family: var(--font-sans);
+  font-size: 13px;
+}
+
+.card {
+  border-radius: 16px;
+  background-color: var(--color-surface-container-high);
+  padding: 14px;
+  gap: 14px;
+  width: 100%;
+}
+
+.topBar {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.mediaFallbackTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-on-surface);
+}
+
+.playersRow {
+  flex-wrap: wrap;
+  gap: 6px;
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+}
+
+.pill {
+  display: flex;
+  min-height: 26px;
+  padding: 4px 10px;
+  border-radius: 14px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.playerPill {
+  max-width: 100%;
+  background-color: var(--color-surface-container-highest);
+  border: 1px solid transparent;
+  color: var(--color-on-surface-variant);
+  font-size: 11px;
+  font-weight: 500;
+
+  &[data-active="true"] {
+    background-color: var(--color-primary-container);
+    border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+    color: var(--color-on-primary-container);
+    font-weight: 600;
+  }
+}
+
+.sinkToggle {
+  max-width: 52%;
+  background-color: var(--color-surface-container-highest);
+  border: 1px solid transparent;
+  color: var(--color-on-surface);
+  font-size: 11px;
+  font-weight: 500;
+
+  &[data-open="true"] {
+    background-color: var(--color-primary-container);
+    border-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+    color: var(--color-on-primary-container);
+  }
+}
+
+.sinkLabel {
+  min-width: 0px;
+}
+
+.sinkChevron {
+  display: flex;
+  width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sinkDrawer {
+  width: 100%;
+  border-radius: 14px;
+  background-color: var(--color-surface-container);
+  padding: 10px;
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent);
+}
+
+.sinkDrawerHeader {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px;
+}
+
+.sinkDrawerHeading {
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--color-on-surface-variant);
+}
+
+.soundSettingsBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background-color: transparent;
+  color: var(--color-primary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.sinkScroll {
+  width: 100%;
+  max-height: 180px;
+  overflow: hidden auto;
+}
+
+.sinkList {
+  gap: 4px;
+  width: 100%;
+}
+
+.sinkEmpty {
+  font-size: 12px;
+  color: var(--color-on-surface-variant);
+  padding: 6px 4px;
+}
+
+.sinkItem {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background-color: var(--color-surface-container);
+  border: 1px solid transparent;
+  color: var(--color-on-surface);
+
+  &[data-selected="true"] {
+    background-color: var(--color-primary-container);
+    border-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+    color: var(--color-on-primary-container);
+  }
+}
+
+.sinkItemName {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+
+  &[data-selected="true"] {
+    font-weight: 600;
+  }
+}
+
+.sinkItemVol {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  color: var(--color-on-surface-variant);
+
+  &[data-selected="true"] {
+    color: var(--color-on-primary-container);
+  }
+}
+
+.emptyCard {
+  width: 100%;
+  border-radius: 14px;
+  background-color: var(--color-surface-container);
+  padding: 28px 16px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.emptyIconWell {
+  display: flex;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-surface-container-high);
+}
+
+.emptyTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-on-surface);
+}
+
+.emptySubtitle {
+  font-size: 12px;
+  color: var(--color-on-surface-variant);
+}
+
+.trackHeader {
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+}
+
+.coverTile {
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+  border-radius: 16px;
+}
+
+.coverFallback {
+  display: flex;
+  background-color: var(--color-surface-container-highest);
+  align-items: center;
+  justify-content: center;
+}
+
+.coverImage {
+  object-fit: cover;
+}
+
+.trackMetaCol {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  gap: 2px;
+}
+
+.trackTitle {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.trackArtists {
+  font-size: 14px;
+  color: var(--color-on-surface);
+  opacity: 0.85;
+  line-height: 20px;
+}
+
+.trackAlbum {
+  color: var(--color-on-surface-variant);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.progressCol {
+  gap: 2px;
+  width: 100%;
+}
+
+.progressControl {
+  display: flex;
+  height: 28px;
+  width: 100%;
+  align-items: center;
+  position: relative;
+}
+
+.wavyVector {
+  position: absolute;
+  inset: 0px;
+  width: 100%;
+  height: 28px;
+  --zgui-fill: transparent;
+  --zgui-stroke: var(--color-primary);
+  --zgui-stroke-width: 4px;
+  --zgui-stroke-linecap: round;
+  --zgui-stroke-linejoin: round;
+
+  &[data-flat="true"] {
+    --zgui-stroke-width: 5px;
+  }
+}
+
+.wavyRestTrack {
+  position: absolute;
+  right: 2px;
+  height: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 1px;
+  border-radius: 3px;
+  --zgui-corner-shape: none;
+  background-color: var(--color-surface-container-highest);
+
+  &[data-flat="true"] {
+    height: 5px;
+  }
+}
+
+.wavyStopDot {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+  background-color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.wavyThumb {
+  position: absolute;
+  width: 4px;
+  height: 20px;
+  border-radius: 2px;
+  --zgui-corner-shape: none;
+  background-color: var(--color-primary);
+}
+
+.timeRow {
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 2px;
+}
+
+.timeLabel {
+  font-family: var(--font-mono);
+  color: var(--color-on-surface-variant);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.transportRow {
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 8px;
+  width: 100%;
+}
+
+.subTransportBtn {
+  display: flex;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+
+  &[data-disabled="true"] {
+    opacity: 0.45;
+  }
+}
+
+.skipBtn {
+  display: flex;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+  align-items: center;
+  justify-content: center;
+  background-color: transparent;
+  flex-shrink: 0;
+}
+
+.playPauseBtn {
+  display: flex;
+  width: 72px;
+  height: 56px;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-primary);
+}

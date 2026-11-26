@@ -1,12 +1,13 @@
-import { Button, For, Image, PopupSurface, Show, createEffect, createMemo, createSignal, untrack, type NativeChild, type NativeNode } from "@hewel/zgui";
+import { Button, For, Image, PopupSurface, Show, createEffect, createMemo, createSignal, cx, untrack, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { MenuItemPrimitive, MenuListPrimitive, MenuRootPrimitive } from "@hewel/zgui/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
 import { createRetainedPresence, panelMotionStyle, popoverContentMotionStyle, useMotionScheme, type M3Spring } from "../motion.ts";
-import { POPOVER_BLEED_STYLE, POPOVER_SHADOW_INSETS, resolvePopoverGeometry } from "../panels/ShellPanels.tsx";
+import { POPOVER_SHADOW_INSETS, resolvePopoverGeometry, shellPanelsStyles } from "../panels/ShellPanels.tsx";
 import { useShellStore, type ImeMenuTarget, type TrayMenuTarget, type TrayOverflowTarget } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import { isImeTrayItem, partitionTrayItems, type BarPosition, type BarStyle, type TrayItem, type TrayMenuNode } from "../topics.ts";
+import styles from "./BarPopups.module.css";
 
 const MENU_MIN_WIDTH = 220;
 const MENU_MAX_WIDTH = 360;
@@ -16,19 +17,11 @@ const TRAY_OVERFLOW_GAP = 4;
 const TRAY_OVERFLOW_PAD = 6;
 const TRAY_OVERFLOW_MAX_COLS = 4;
 const TRAY_OVERFLOW_MAX_HEIGHT = 240;
-const primary = "var(--color-primary)";
-const primaryContainer = "var(--color-primary-container)";
-const onPrimaryContainer = "var(--color-on-primary-container)";
-const onSurface = "var(--color-on-surface)";
-const onSurfaceVariant = "var(--color-on-surface-variant)";
-const containerHighest = "var(--color-surface-container-highest)";
 
 function resolveTrayOverflowWidth(count: number): number {
   const cols = Math.max(1, Math.min(TRAY_OVERFLOW_MAX_COLS, count));
   return 2 + TRAY_OVERFLOW_PAD * 2 + cols * TRAY_OVERFLOW_TILE_SIZE + (cols - 1) * TRAY_OVERFLOW_GAP;
 }
-const separator = { height: "1px", margin: "5px 4px", flexShrink: 0, backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 55%, transparent)" } as const;
-const indicator = { display: "flex", width: "14px", height: "14px", flexShrink: 0, alignItems: "center", justifyContent: "center" } as const;
 
 interface TrayMenuRow {
   readonly node: TrayMenuNode;
@@ -79,7 +72,6 @@ function resolveMenuWidth(rows: readonly { readonly label: string; readonly dept
 }
 
 function PopupContent(props: {
-  padding: string;
   label: string;
   header?: string;
   cardTestId?: string;
@@ -96,33 +88,24 @@ function PopupContent(props: {
   const scheme = useMotionScheme();
   return (
     <MenuRootPrimitive open onDismiss={props.onDismiss}>
-      <box inert={props.inert} style={POPOVER_BLEED_STYLE}>
+      <box inert={props.inert} class={shellPanelsStyles.popoverBleed}>
         <box
           ref={props.cardRef}
           testId={props.cardTestId ?? null}
           data-theme-rev={String(theme.revision())}
+          data-radius="card"
+          class={cx(shellPanelsStyles.popoverFrame, styles.menuCard)}
           style={{
-            width: "100%",
-            borderRadius: "16px",
-            backgroundColor: "var(--surface-popover)",
-            border: "1px solid var(--border-popover)",
-            boxShadow: "var(--shadow-level-2)",
-            color: "var(--color-on-surface)",
-            fontFamily: "var(--font-sans)",
-            fontSize: "13px",
-            overflow: "hidden",
             ...panelMotionStyle(props.spatial(), props.position, false, {
               opacity: props.opacity(),
               reduced: scheme() === "reduced",
             }),
           }}
         >
-          <scroll style={{
-            width: "100%",
-            maxHeight: `${MENU_MAX_HEIGHT - 2}px`,
-            overflow: "hidden auto",
-            ...popoverContentMotionStyle(props.spatial(), props.opacity(), scheme() === "reduced"),
-          }}>
+          <scroll
+            class={styles.menuScroll}
+            style={popoverContentMotionStyle(props.spatial(), props.opacity(), scheme() === "reduced")}
+          >
             <MenuListPrimitive
               label={props.label}
               autoFocus
@@ -130,15 +113,12 @@ function PopupContent(props: {
               dismissOnOutsidePress={false}
               dismissLayer={false}
               onDismiss={props.onDismiss}
-              style={{ display: "flex", flexDirection: "column", padding: props.padding, gap: "2px" }}
+              class={styles.menuList}
             >
               <Show when={props.header}>
                 {title => (
-                  <box ariaHidden style={{ padding: "4px 10px 6px 10px", flexShrink: 0 }}>
-                    <text style={{
-                      fontSize: "10px", lineHeight: "14px", fontWeight: 600, letterSpacing: "0.06em",
-                      color: onSurfaceVariant, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis",
-                    }}>
+                  <box ariaHidden class={styles.menuHeader}>
+                    <text class={styles.menuHeaderText}>
                       {title().toUpperCase()}
                     </text>
                   </box>
@@ -164,43 +144,36 @@ function MenuButton(props: {
   submenu?: boolean;
   activate: () => void;
 }) {
+  const depthAttr = () => {
+    const clamped = Math.min(props.depth ?? 0, 6);
+    return clamped > 0 ? String(clamped) : null;
+  };
   return (
     <MenuItemPrimitive
       testId={props.testId}
       role={props.toggle === "radio" ? "menuItemRadio" : props.toggle === "checkmark" ? "menuItemCheckBox" : "menuItem"}
       checked={props.toggle ? props.checked ?? false : null}
       disabled={props.disabled ?? false}
+      data-active={props.active ? "true" : null}
+      data-depth={depthAttr()}
       closeOnSelect={false}
       onSelect={() => { if (!props.disabled) props.activate(); }}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "8px",
-        height: "36px",
-        borderRadius: "10px",
-        flexShrink: 0,
-        padding: `0 10px 0 ${10 + Math.min(props.depth ?? 0, 6) * 12}px`,
-        backgroundColor: props.active ? primaryContainer : "transparent",
-        border: props.active
-          ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)"
-          : "1px solid transparent",
-        color: props.active ? onPrimaryContainer : "var(--color-on-surface)",
-        fontWeight: props.active ? 600 : 400,
-        opacity: props.disabled ? 0.38 : 1,
-      }}
+      class={styles.menuItem}
     >
-      <box ariaHidden style={indicator}>
+      <box ariaHidden class={styles.menuIndicator}>
         <Show when={props.checked}>
-          <Show when={props.toggle === "radio" || props.active} fallback={<ShellIcon name="check" size={14} color={props.active ? onPrimaryContainer : primary} />}>
-            <box style={{
-              width: "6px", height: "6px", borderRadius: "3px", "--zgui-corner-shape": "none",
-              backgroundColor: props.active ? onPrimaryContainer : primary,
-            }} />
+          <Show
+            when={props.toggle === "radio" || props.active}
+            fallback={<ShellIcon name="check" size={14} color={props.active ? "var(--color-on-primary-container)" : "var(--color-primary)"} />}
+          >
+            <box class={styles.menuRadioDot} data-active={props.active ? "true" : null} />
           </Show>
         </Show>
       </box>
-      <text style={{ flexGrow: 1, minWidth: "0px", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{props.label}</text>
-      <Show when={props.submenu}><ShellIcon name="chevronRight" size={12} color={props.active ? onPrimaryContainer : onSurfaceVariant} /></Show>
+      <text class={styles.menuItemLabel}>{props.label}</text>
+      <Show when={props.submenu}>
+        <ShellIcon name="chevronRight" size={12} color={props.active ? "var(--color-on-primary-container)" : "var(--color-on-surface-variant)"} />
+      </Show>
     </MenuItemPrimitive>
   );
 }
@@ -267,46 +240,23 @@ function TrayOverflowTile(props: {
       onContextMenu={event => {
         handleSecondary(event, "context");
       }}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        width: `${TRAY_OVERFLOW_TILE_SIZE}px`,
-        height: `${TRAY_OVERFLOW_TILE_SIZE}px`,
-        padding: "0px",
-        borderRadius: "8px",
-        backgroundColor: "var(--color-surface-container-high)",
-        color: onSurface,
-        flexShrink: 0,
-      }}
+      class={styles.trayOverflowTile}
     >
-      <box data-press-visual="compact" ariaHidden style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        pointerEvents: "none",
-      }}>
+      <box data-press-visual="compact" ariaHidden class={styles.trayOverflowVisual}>
         <Show when={src()} fallback={
           <Show when={fallbackLetter()} fallback={
-            <box style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: "20px", height: "20px", borderRadius: "6px", backgroundColor: containerHighest,
-            }}>
-              <ShellIcon name="apps" size={14} color={onSurfaceVariant} />
+            <box class={styles.trayFallbackIconBox}>
+              <ShellIcon name="apps" size={14} color="var(--color-on-surface-variant)" />
             </box>
           }>
             {letter => (
-              <box style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: "20px", height: "20px", borderRadius: "6px",
-                backgroundColor: primaryContainer, color: onPrimaryContainer, fontWeight: 700, fontSize: "11px",
-              }}>
-                <text>{letter()}</text>
+              <box class={styles.trayFallbackLetterBox}>
+                <text class={styles.trayFallbackLetterText}>{letter()}</text>
               </box>
             )}
           </Show>
         }>
-          {image => <Image src={image()} style={{ width: "20px", height: "20px", borderRadius: "6px", objectFit: "contain" }} />}
+          {image => <Image src={image()} class={styles.trayOverflowImage} />}
         </Show>
       </box>
     </Button>
@@ -327,40 +277,29 @@ function TrayOverflowCard(props: {
   useShellTheme(theme.data);
   const scheme = useMotionScheme();
   return (
-    <box inert={props.inert} style={POPOVER_BLEED_STYLE}>
+    <box inert={props.inert} class={shellPanelsStyles.popoverBleed}>
       <box
         ref={props.cardRef}
         testId="tray-overflow-card"
         data-theme-rev={String(theme.revision())}
+        data-radius="card"
+        class={cx(shellPanelsStyles.popoverFrame, styles.trayOverflowCard)}
         style={{
-          width: "100%",
-          boxSizing: "border-box",
-          borderRadius: "16px",
-          backgroundColor: "var(--surface-popover)",
-          border: "1px solid var(--border-popover)",
-          boxShadow: "var(--shadow-level-2)",
-          color: onSurface,
-          fontFamily: "var(--font-sans)",
-          overflow: "hidden",
           ...panelMotionStyle(props.spatial(), props.position, false, {
             opacity: props.opacity(),
             reduced: scheme() === "reduced",
           }),
         }}
       >
-        <box style={{
-          width: "100%",
-          ...popoverContentMotionStyle(props.spatial(), props.opacity(), scheme() === "reduced"),
-        }}>
-          <scroll style={{
-            width: "100%",
-            maxHeight: `${TRAY_OVERFLOW_MAX_HEIGHT}px`,
-            overflow: "hidden auto",
-          }}>
-            <column style={{ padding: `${TRAY_OVERFLOW_PAD}px`, gap: `${TRAY_OVERFLOW_GAP}px`, width: "100%" }}>
+        <box
+          class={styles.trayOverflowContent}
+          style={popoverContentMotionStyle(props.spatial(), props.opacity(), scheme() === "reduced")}
+        >
+          <scroll class={styles.trayOverflowScroll}>
+            <column class={styles.trayOverflowGrid}>
               <For each={props.rows} keyed={row => row.map(i => i.id).join("|")}>
                 {row => (
-                  <row style={{ gap: `${TRAY_OVERFLOW_GAP}px`, alignItems: "center" }}>
+                  <row class={styles.trayOverflowRow}>
                     <For each={row()} keyed={item => item.id}>
                       {item => (
                         <TrayOverflowTile
@@ -528,11 +467,11 @@ export function BarPopups(): NativeChild {
               inputRegion={cardNode() ? [cardNode()!] : []}
               placement={geometry().placement} offset={geometry().offset} grab={initialGrab} blurRegion={cardNode() ? [cardNode()!] : "none"}
               onDismiss={() => { presence.dismissInstant(); dismissBarPopupFromCompositor("tray"); }}>
-              <PopupContent padding="8px" label={currentLabel()} header={currentLabel()} cardTestId="tray-menu-card" position={position()} inert={!presence.present()} spatial={presence.progress} opacity={presence.opacity}
+              <PopupContent label={currentLabel()} header={currentLabel()} cardTestId="tray-menu-card" position={position()} inert={!presence.present()} spatial={presence.progress} opacity={presence.opacity}
                 cardRef={setCardNode} onDismiss={closeTrayMenu}>
                 <For each={trayRows()} keyed={row => row.node.id}>
                   {row => (
-                    <Show when={!row().node.separator} fallback={<box ariaHidden style={separator} />}>
+                    <Show when={!row().node.separator} fallback={<box ariaHidden class={styles.separator} />}>
                       <MenuButton testId={`tray-menu-item-${row().node.id}`} label={row().node.label ?? ""} depth={row().depth}
                         disabled={!row().enabled} toggle={row().node.toggle_type} checked={row().node.toggle_state === 1} submenu={row().submenu}
                         activate={() => {
@@ -555,7 +494,7 @@ export function BarPopups(): NativeChild {
               inputRegion={cardNode() ? [cardNode()!] : []}
               placement={geometry().placement} offset={geometry().offset} grab={initialGrab} blurRegion={cardNode() ? [cardNode()!] : "none"}
               onDismiss={() => { presence.dismissInstant(); dismissBarPopupFromCompositor("ime"); }}>
-              <PopupContent padding="8px" label="Input method" header="Input method" cardTestId="ime-menu-card" position={position()} inert={!presence.present()} spatial={presence.progress} opacity={presence.opacity}
+              <PopupContent label="Input method" header="Input method" cardTestId="ime-menu-card" position={position()} inert={!presence.present()} spatial={presence.progress} opacity={presence.opacity}
                 cardRef={setCardNode} onDismiss={closeImeMenu}>
                 <For each={ime.data()?.group_ims} keyed={im => im.unique_name}>
                   {im => {
@@ -571,7 +510,7 @@ export function BarPopups(): NativeChild {
                   }}
                 </For>
                 <Show when={(ime.data()?.group_ims.length ?? 0) > 0 && (ime.data()?.properties.length ?? 0) > 0}>
-                  <box ariaHidden style={separator} />
+                  <box ariaHidden class={styles.separator} />
                 </Show>
                 <For each={ime.data()?.properties} keyed={prop => prop.key}>
                   {prop => (

@@ -1,4 +1,4 @@
-import { Button, For, Image, LayerSurface, Show, createEffect, createMemo, createSignal, mountStylesheet, onCleanup, type Accessor, type NativeChild, type NativeNode } from "@hewel/zgui";
+import { Button, For, Image, LayerSurface, Show, createEffect, createMemo, createSignal, cx, onCleanup, type Accessor, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { M3CardAction, M3Collapsible, M3InteractiveCard } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
@@ -12,31 +12,8 @@ import {
   splitNotificationActions,
   type NotificationItem,
 } from "../topics.ts";
+import styles from "./NotificationToasts.module.css";
 
-const primary = "var(--color-primary)";
-const primaryContainer = "var(--color-primary-container)";
-const onPrimaryContainer = "var(--color-on-primary-container)";
-const onSurface = "var(--color-on-surface)";
-const muted = "var(--color-on-surface-variant)";
-const container = "var(--surface-popover)";
-const containerHigh = "var(--color-surface-container-high)";
-const outline = "1px solid var(--border-popover)";
-const clipped = { minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
-const pill = {
-  display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-  borderRadius: "10px", padding: "6px 10px", minHeight: "30px", fontSize: "12px", fontWeight: 500,
-} as const;
-const iconTile = { width: "40px", height: "40px", borderRadius: "10px", flexShrink: 0 } as const;
-const previewFrame = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  width: "100%",
-  borderRadius: "12px",
-  overflow: "hidden",
-  backgroundColor: "var(--color-surface-container-lowest)",
-  border: "1px solid color-mix(in srgb, var(--color-outline-variant) 42%, transparent)",
-} as const;
 const notificationMedia = { fetchCommand: "notifications.fetch-blob" } as const;
 
 type TrackNode = (node: NativeNode) => () => void;
@@ -94,56 +71,33 @@ function ToastCard({
   const formattedBody = createMemo(() => formatNotificationBody(toast().body));
 
   const bodyContent = () => (
-    <row style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "10px", alignItems: "flex-start" }}>
-      <box style={{ position: "relative", width: "40px", height: "40px", flexShrink: 0 }}>
+    <row class={styles.bodyRow}>
+      <box class={styles.iconWrapper}>
         <Show when={leading.src()} fallback={
-          <box testId={`toast-fallback-${toast().id}`} style={{
-            ...iconTile, display: "flex", alignItems: "center", justifyContent: "center",
-            backgroundColor: mediaLayout().fallbackKind === "image" ? primaryContainer : containerHigh,
-          }}>
+          <box testId={`toast-fallback-${toast().id}`} data-kind={mediaLayout().fallbackKind} class={styles.iconFallback}>
             <ShellIcon
               name={mediaLayout().fallbackKind === "image" ? "image" : "bell"}
               size={18}
-              color={mediaLayout().fallbackKind === "image" ? onPrimaryContainer : primary}
+              color={mediaLayout().fallbackKind === "image" ? "var(--color-on-primary-container)" : "var(--color-primary)"}
             />
           </box>
         }>
-          <box testId={`toast-icon-${toast().id}`} style={{ ...iconTile, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Image
-              src={leading.src()}
-              style={{
-                width: "100%",
-                height: "100%",
-                minWidth: "0px",
-                minHeight: "0px",
-                maxWidth: "100%",
-                maxHeight: "100%",
-                borderRadius: "10px",
-                objectFit: "cover",
-              }}
-            />
+          <box testId={`toast-icon-${toast().id}`} class={styles.iconBox}>
+            <Image src={leading.src()} class={styles.leadingImage} />
           </box>
         </Show>
         <Show when={badge.src()}>
-          <box
-            testId={`toast-badge-${toast().id}`}
-            style={{
-              position: "absolute", right: "-3px", bottom: "-3px",
-              width: "18px", height: "18px", borderRadius: "999px", "--zgui-corner-shape": "none",
-              backgroundColor: container, border: `2px solid ${container}`,
-              overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center",
-            }}
-          >
-            <Image src={badge.src()} style={{ width: "100%", height: "100%", borderRadius: "999px", "--zgui-corner-shape": "none", objectFit: "cover" }} />
+          <box testId={`toast-badge-${toast().id}`} class={styles.badgeBox}>
+            <Image src={badge.src()} class={styles.badgeImage} />
           </box>
         </Show>
       </box>
-      <column style={{ flexGrow: 1, minWidth: "0px", gap: "2px" }}>
-        <text style={{ ...clipped, color: muted, fontSize: "11px" }}>{toast().app_name}</text>
-        <text style={{ ...clipped, fontSize: "14px", fontWeight: 600 }}>{toast().summary}</text>
+      <column class={styles.textColumn}>
+        <text class={styles.appName}>{toast().app_name}</text>
+        <text class={styles.summary}>{toast().summary}</text>
         <Show when={formattedBody()}>
           {body => (
-            <text testId={`toast-body-${toast().id}`} class="notification-body" style={{ color: muted, fontSize: "12px", maxHeight: "56px", overflow: "hidden" }}>{body()}</text>
+            <text testId={`toast-body-${toast().id}`} class={cx(styles.bodyText, "notification-body")}>{body()}</text>
           )}
         </Show>
       </column>
@@ -166,49 +120,39 @@ function ToastCard({
             if (def) void invokePublic("notifications.invoke-action", { id: toast().id, action_key: def.key });
           }
         : undefined}
+      class={styles.toastCard}
       style={{
-        borderRadius: "22px", backgroundColor: container, border: outline, boxShadow: "var(--shadow-level-2)",
-        padding: "14px", gap: "10px", color: onSurface,
         opacity: combinedOpacity(),
         transform: scheme() === "reduced"
           ? "none"
           : `translateX(${((1 - stackSpatial()) * 24).toFixed(2)}px) translateY(${((1 - cardReflow()) * flipDeltaY).toFixed(2)}px) scale(${(0.96 + stackSpatial() * 0.04).toFixed(4)})`,
-        transformOrigin: "top right",
       }}
     >
-      <row style={{ gap: "10px", alignItems: "flex-start" }}>
+      <row class={styles.topRow}>
         {bodyContent()}
         <Show when={countValue() > 1 && onToggleGroup !== undefined}>
-          <M3CardAction style={{ flexShrink: 0 }}>
+          <M3CardAction class={styles.cardActionShrink}>
             <Button
               testId={`toast-group-toggle-${toast().id}`}
               ariaLabel={expandedValue()
                 ? `Collapse notifications from ${toast().app_name || "app"}`
                 : `Expand ${countValue() - 1} more notifications from ${toast().app_name || "app"}`}
               expanded={expandedValue()}
-              style={{
-                display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: "2px",
-                height: "28px", minHeight: "28px", padding: "0 8px",
-                borderRadius: "8px",
-                backgroundColor: primaryContainer, color: onPrimaryContainer,
-              }}
+              class={styles.groupToggle}
               onClick={() => onToggleGroup?.()}
             >
-              <text
-                data-tabular="true"
-                style={{ fontSize: "11px", lineHeight: "14px", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}
-              >
+              <text data-tabular="true" class={styles.groupToggleText}>
                 {expandedValue() ? `${countValue()}` : `+${countValue() - 1}`}
               </text>
-              <ShellIcon name={expandedValue() ? "expandLess" : "expandMore"} size={14} color={onPrimaryContainer} />
+              <ShellIcon name={expandedValue() ? "expandLess" : "expandMore"} size={14} color="var(--color-on-primary-container)" />
             </Button>
           </M3CardAction>
         </Show>
-        <M3CardAction style={{ flexShrink: 0 }}>
+        <M3CardAction class={styles.cardActionShrink}>
           <Button
             ariaLabel={!expandedValue() && countValue() > 1 ? `Dismiss all notifications from ${toast().app_name || "app"}` : "Dismiss notification"}
             testId={`toast-dismiss-${toast().id}`}
-            style={{ ...pill, borderRadius: "999px", "--zgui-corner-shape": "none", padding: "0", width: "28px", minHeight: "28px", backgroundColor: containerHigh, color: muted }}
+            class={styles.dismissButton}
             onClick={() => {
               if (!expandedValue() && countValue() > 1 && onDismissGroup) {
                 onDismissGroup();
@@ -217,39 +161,26 @@ function ToastCard({
               }
             }}
           >
-            <ShellIcon name="close" size={14} color={muted} />
+            <ShellIcon name="close" size={14} color="var(--color-on-surface-variant)" />
           </Button>
         </M3CardAction>
       </row>
       <Show when={preview.src()}>
-        <box testId={`toast-attachment-${toast().id}`} style={{
-          ...previewFrame,
-          height: mediaLayout().previewFit === "contain" ? "136px" : "120px",
-        }}>
-          <Image src={preview.src()} style={{
-            width: "100%",
-            height: "100%",
-            minWidth: "0px",
-            minHeight: "0px",
-            maxWidth: "100%",
-            maxHeight: "100%",
-            borderRadius: "12px",
-            objectFit: mediaLayout().previewFit,
-          }} />
+        <box testId={`toast-attachment-${toast().id}`} data-fit={mediaLayout().previewFit} class={styles.previewFrame}>
+          <Image src={preview.src()} data-fit={mediaLayout().previewFit} class={styles.previewImage} />
         </box>
       </Show>
       <Show when={actions().buttonActions.length > 0}>
-        <row style={{ flexWrap: "wrap", gap: "8px" }}>
+        <row class={styles.actionsRow}>
           <For each={actions().buttonActions} keyed={action => action.key}>
             {action => (
-              <M3CardAction style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px" }}>
-                <Button testId={`toast-action-${toast().id}-${action().key}`}
-                  style={{
-                    ...pill, width: "100%",
-                    backgroundColor: "var(--color-secondary-container)", color: "var(--color-on-secondary-container)",
-                  }}
-                  onClick={() => { void invokePublic("notifications.invoke-action", { id: toast().id, action_key: action().key }); }}>
-                  <text style={clipped}>{action().label}</text>
+              <M3CardAction class={styles.actionSlot}>
+                <Button
+                  testId={`toast-action-${toast().id}-${action().key}`}
+                  class={styles.actionButton}
+                  onClick={() => { void invokePublic("notifications.invoke-action", { id: toast().id, action_key: action().key }); }}
+                >
+                  <text class={styles.clipped}>{action().label}</text>
                 </Button>
               </M3CardAction>
             )}
@@ -270,33 +201,13 @@ function ToastDeckPeek({ headId, count, track, onExpand }: {
   track: TrackNode;
   onExpand: () => void;
 }): NativeChild {
-  mountStylesheet("z-shell-toast-deck", `
-    .toast-deck-layer-1 {
-      width: 92%;
-      height: 8px;
-      border-radius: 0 0 16px 16px;
-      background-color: var(--color-surface-container);
-      border-left: 1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent);
-      border-right: 1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent);
-      border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent);
-    }
-    .toast-deck-layer-2 {
-      width: 84%;
-      height: 6px;
-      border-radius: 0 0 14px 14px;
-      background-color: var(--color-surface-container-low);
-      border-left: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
-      border-right: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
-      border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
-    }
-  `);
   const inputRef = trackedRef(track);
   return (
     <column
       ref={inputRef}
       testId={`toast-deck-peek-${headId}`}
       onClick={onExpand}
-      style={{ width: "100%", alignItems: "center", gap: "0px" }}
+      class={styles.deckPeek}
     >
       <box ariaHidden testId={`toast-deck-layer-1-${headId}`} class="toast-deck-layer-1" />
       <Show when={count >= 3}>
@@ -420,15 +331,16 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
         inert={!visible()}
         onPointerEnter={() => setHovered(true)}
         onPointerLeave={() => setHovered(false)}
-        style={{ width: "100%", height: "100%", padding: "0px" }}
+        class={styles.toastSurfaceRoot}
       >
         <scroll
           testId="toast-expanded-scroll"
           role="scrollView"
           ariaLabel="Active notifications"
-          style={{ width: "100%", maxHeight: `${scrollMaxHeight()}px`, overflowY: "auto" }}
+          class={styles.scrollArea}
+          style={{ maxHeight: `${scrollMaxHeight()}px` }}
         >
-          <column style={{ width: "100%", padding: "12px 14px 28px 22px", gap: "8px" }}>
+          <column class={styles.toastList}>
             <For each={grouped().groups} keyed={group => group.appKey}>
               {(group, groupIndex) => {
                 const head = () => group().items[0]!;
@@ -436,7 +348,7 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
                 const isMulti = () => group().items.length > 1;
                 const isExpanded = () => isMulti() && expandedKeys().includes(group().appKey);
                 return (
-                  <column testId={`toast-group-${head().id}`} style={{ width: "100%", gap: "0px" }}>
+                  <column testId={`toast-group-${head().id}`} class={styles.toastGroup}>
                     <ToastCard
                       toast={head}
                       track={track}
@@ -458,7 +370,7 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
                       />
                     </Show>
                     <M3Collapsible open={isExpanded()} estimatedHeight={Math.max(84, rest().length * 96)}>
-                      <column style={{ width: "100%", gap: "8px", paddingTop: "8px" }}>
+                      <column class={styles.expandedRest}>
                         <For each={rest()} keyed={item => item.id}>
                           {(item, itemIndex) => (
                             <ToastCard

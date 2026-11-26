@@ -1,0 +1,224 @@
+.root {
+  gap: 12px;
+  width: 100%;
+}
+
+.headerRow {
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.headerLeft {
+  align-items: center;
+  gap: 10px;
+  min-width: 0px;
+  flex-grow: 1;
+}
+
+.backButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+  background-color: var(--color-surface-container-high);
+}
+
+.blobBox {
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-surface-container-highest);
+  flex-shrink: 0;
+
+  &[data-variant="icon"] {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-md);
+  }
+
+  &[data-variant="screenshot"] {
+    width: 268px;
+    height: 150px;
+    border-radius: 12px;
+  }
+}
+
+.blobImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.titleColumn {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  gap: 2px;
+}
+
+.titleText {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.subtitleMono {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.body {
+  gap: 12px;
+  width: 100%;
+}
+
+.trustBanner {
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background-color: var(--color-primary-container);
+}
+
+.trustBannerText {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--color-on-primary-container);
+}
+
+.actionsRow {
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.onPrimaryText {
+  color: var(--color-on-primary);
+}
+
+.errorBanner {
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background-color: var(--color-error-container);
+  color: var(--color-on-error-container);
+}
+
+.errorBannerText {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.sectionCardCompact {
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-container-high);
+  padding: 12px 14px;
+  gap: 6px;
+}
+
+.sectionLabel {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.screenshotsRow {
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.screenshotItem {
+  gap: 4px;
+  width: 268px;
+}
+
+.screenshotCaption {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.sectionCard {
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-container-high);
+  padding: 14px;
+  gap: 8px;
+}
+
+.sectionTitle {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.summaryText {
+  font-size: 12px;
+  color: var(--color-on-surface);
+}
+
+.monoClipped {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.runtimeNote {
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+
+  &[data-accent="true"] {
+    color: var(--color-primary);
+  }
+}
+
+.auditCard {
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-container-high);
+  padding: 14px;
+  gap: 6px;
+}
+
+.auditMono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+
+  &[data-error="true"] {
+    color: var(--color-error);
+  }
+}
+
+.auditErrorMono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-error);
+}
+
+.auditMutedMono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}

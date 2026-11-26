@@ -1,0 +1,455 @@
+.row {
+  align-items: center;
+  gap: 8px;
+}
+
+.grow {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+}
+
+.clipped {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hiddenSection {
+  display: none;
+}
+
+.card {
+  border-radius: 16px;
+  background-color: var(--color-surface-container-high);
+  padding: 10px 12px;
+  gap: 6px;
+}
+
+.sliderTrailingBtn {
+  display: flex;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-surface-container-highest);
+}
+
+.qsTileCard {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  height: 50px;
+  border-radius: 14px;
+  align-items: center;
+  background-color: var(--color-surface-container-high);
+  border: 1px solid transparent;
+
+  &[data-active="true"] {
+    background-color: var(--color-primary-container);
+    border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  }
+}
+
+.qsTileBtn {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  height: 100%;
+  border-radius: 14px;
+  padding: 0 10px;
+  color: var(--color-on-surface);
+
+  &[data-has-open="true"] {
+    padding: 0 6px 0 10px;
+  }
+
+  &[data-active="true"] {
+    color: var(--color-on-primary-container);
+  }
+
+  &[data-disabled="true"] {
+    opacity: 0.55;
+  }
+}
+
+.qsTileIcon {
+  display: flex;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background-color: var(--color-surface-container-highest);
+
+  &[data-active="true"] {
+    background-color: color-mix(in srgb, var(--color-primary) 18%, transparent);
+  }
+}
+
+.qsTileTextCol {
+  gap: 1px;
+}
+
+.qsTileLabel {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 17px;
+}
+
+.qsTileDetail {
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--color-on-surface-variant);
+
+  &[data-active="true"] {
+    color: var(--color-on-primary-container);
+    opacity: 0.78;
+  }
+}
+
+.splitDivider {
+  width: 1px;
+  height: 22px;
+  flex-shrink: 0;
+  background-color: var(--color-outline-variant);
+
+  &[data-active="true"] {
+    background-color: color-mix(in srgb, var(--color-on-primary-container) 22%, transparent);
+  }
+}
+
+.expandBtn {
+  display: flex;
+  width: 26px;
+  height: 26px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  background-color: transparent;
+
+  &[data-disabled="true"] {
+    opacity: 0.45;
+  }
+}
+
+.pressVisualCompact {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.splitTrailingPad {
+  width: 4px;
+  flex-shrink: 0;
+}
+
+.batteryRow {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  border-radius: 16px;
+  background-color: var(--color-surface-container-high);
+  padding: 10px 12px;
+  color: var(--color-on-surface);
+}
+
+.batteryIconWell {
+  display: flex;
+  width: 36px;
+  height: 24px;
+  border-radius: 8px;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background-color: var(--color-surface-container-highest);
+}
+
+.batteryTextCol {
+  gap: 1px;
+}
+
+.batteryHeadlineRow {
+  align-items: baseline;
+  gap: 6px;
+}
+
+.batteryPercent {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.batteryState {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-on-surface-variant);
+
+  &[data-charging="true"] {
+    color: var(--color-primary);
+  }
+}
+
+.batteryDetail {
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.batteryChevronWell {
+  display: flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.powerActionBtn {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 2px;
+  border-radius: 10px;
+  background-color: var(--color-surface-container-highest);
+  border: 1px solid transparent;
+  color: var(--color-on-surface-variant);
+  font-size: 11px;
+  font-weight: 500;
+
+  &[data-tone="safe"] {
+    color: var(--color-on-surface);
+  }
+
+  &[data-tone="danger"] {
+    padding: 7px 2px;
+    background-color: color-mix(in srgb, var(--color-error-container) 38%, transparent);
+    border-color: color-mix(in srgb, var(--color-error) 35%, transparent);
+    color: var(--color-on-error-container);
+  }
+}
+
+.powerActionVisual {
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.powerActionLabel {
+  white-space: nowrap;
+}
+
+.powerMenuRow {
+  border-radius: 16px;
+  background-color: var(--color-surface-container-high);
+  padding: 6px;
+  gap: 6px;
+  align-items: center;
+}
+
+.powerMenuDivider {
+  width: 1px;
+  height: 28px;
+  flex-shrink: 0;
+  background-color: var(--color-outline-variant);
+}
+
+.profileMenu {
+  border-radius: 16px;
+  background-color: var(--color-surface-container-high);
+  padding: 6px;
+  gap: 4px;
+  width: 100%;
+}
+
+.profileOptionBtn {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background-color: var(--color-surface-container-highest);
+  border: 1px solid transparent;
+  color: var(--color-on-surface);
+
+  &[data-active="true"] {
+    background-color: var(--color-primary-container);
+    border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+    color: var(--color-on-primary-container);
+  }
+}
+
+.profileOptionRow {
+  align-items: center;
+  gap: 10px;
+}
+
+.profileOptionIcon {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-surface-container-high);
+
+  &[data-active="true"] {
+    background-color: color-mix(in srgb, var(--color-primary) 18%, transparent);
+  }
+}
+
+.profileOptionText {
+  gap: 1px;
+  align-items: flex-start;
+}
+
+.profileOptionTitle {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 17px;
+}
+
+.profileOptionDetail {
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--color-on-surface-variant);
+
+  &[data-active="true"] {
+    color: var(--color-on-primary-container);
+    opacity: 0.8;
+  }
+}
+
+.mainPage {
+  width: 100%;
+  padding: 14px;
+  gap: 10px;
+  flex-direction: column;
+  background-color: transparent;
+  color: var(--color-on-surface);
+  font-family: var(--font-sans);
+  font-size: 13px;
+}
+
+.mainHeader {
+  gap: 10px;
+  padding: 0 2px;
+}
+
+.avatarWrap {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.avatarRosette {
+  position: absolute;
+  inset: 0px;
+  width: 40px;
+  height: 40px;
+  color: var(--color-primary-container);
+}
+
+.avatarFallback {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.avatarImg {
+  position: relative;
+  z-index: 1;
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+}
+
+.userCol {
+  gap: 1px;
+}
+
+.userName {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.userSub {
+  font-size: 12px;
+  color: var(--color-on-surface-variant);
+  line-height: 16px;
+}
+
+.headerBtnGroup {
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.headerBtn {
+  display: flex;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background-color: var(--color-surface-container-highest);
+}
+
+.powerToggleBtn {
+  border: 1px solid transparent;
+
+  &[data-active="true"] {
+    background-color: var(--color-primary-container);
+    border-color: color-mix(in srgb, var(--color-primary) 42%, transparent);
+  }
+}
+
+.tilesGrid {
+  gap: 8px;
+}
+
+.tilesRow {
+  gap: 8px;
+}
+
+.outgoingLayer {
+  position: absolute;
+  top: 0px;
+  left: 0px;
+  right: 0px;
+  pointer-events: none;
+}
+
+.panelRoot {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+}
+
+.activeWrapper {
+  width: 100%;
+}

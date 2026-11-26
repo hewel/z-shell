@@ -1,0 +1,198 @@
+.subcard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-container-high);
+}
+
+.subcardInteractive {
+  color: var(--color-on-surface);
+}
+
+.errorCard {
+  background-color: var(--color-error-container);
+  color: var(--color-on-error-container);
+}
+
+.providerHeader {
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+}
+
+.providerIconWell {
+  display: flex;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-surface-container-highest);
+}
+
+.providerIcon {
+  width: 16px;
+  height: 16px;
+  color: var(--color-primary);
+  --zgui-fill: transparent;
+  --zgui-stroke: var(--color-primary);
+  --zgui-stroke-width: 2px;
+  --zgui-stroke-linecap: round;
+  --zgui-stroke-linejoin: round;
+}
+
+.providerTitleCol {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  gap: 1px;
+  align-items: flex-start;
+}
+
+.providerTitle {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.providerSubtitle {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.chevronIcon {
+  width: 18px;
+  height: 18px;
+  color: var(--color-on-surface-variant);
+  --zgui-fill: transparent;
+  --zgui-stroke: var(--color-on-surface-variant);
+  --zgui-stroke-width: 2px;
+  --zgui-stroke-linecap: round;
+  --zgui-stroke-linejoin: round;
+  flex-shrink: 0;
+}
+
+.extraEntries {
+  gap: 8px;
+}
+
+.metricCol {
+  gap: 4px;
+}
+
+.metricHeader {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.metricLabel {
+  font-size: 12px;
+  color: var(--color-on-surface-variant);
+}
+
+.metricValue {
+  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.monoMuted {
+  color: var(--color-on-surface-variant);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.panel {
+  width: 100%;
+  padding: 14px;
+  gap: 10px;
+  flex-direction: column;
+  background-color: transparent;
+  color: var(--color-on-surface);
+  font-family: var(--font-sans);
+  font-size: 13px;
+}
+
+.headerRow {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.headerTitles {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  gap: 2px;
+}
+
+.panelTitle {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.panelSubtitle {
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.headerActions {
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.actionIcon {
+  width: 16px;
+  height: 16px;
+  color: var(--color-on-surface);
+  --zgui-fill: transparent;
+  --zgui-stroke: var(--color-on-surface);
+  --zgui-stroke-width: 2px;
+  --zgui-stroke-linecap: round;
+  --zgui-stroke-linejoin: round;
+}
+
+.emptyText {
+  color: var(--color-on-surface-variant);
+}
+
+.divider {
+  width: 100%;
+  height: 1px;
+  background-color: color-mix(in srgb, var(--color-outline-variant) 45%, transparent);
+}
+
+.resetsHeader {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.resetsTitle {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.forecastBadge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-container-highest);
+  color: var(--color-primary);
+  font-variant-numeric: tabular-nums;
+}

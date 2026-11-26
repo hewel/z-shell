@@ -1,0 +1,24 @@
+.popoverBleed {
+  width: 100%;
+  padding: 20px 28px 38px 28px;
+  box-sizing: border-box;
+  background-color: transparent;
+}
+
+.popoverFrame {
+  width: 100%;
+  border-radius: var(--radius-panel);
+  background-color: var(--surface-popover);
+  border: 1px solid var(--border-popover);
+  box-shadow: var(--shadow-level-2);
+  overflow: hidden;
+  font-family: var(--font-sans);
+
+  &[data-radius="card"] {
+    border-radius: var(--radius-card);
+  }
+}
+
+.popoverContent {
+  width: 100%;
+}

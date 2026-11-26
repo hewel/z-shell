@@ -1,4 +1,4 @@
-import { Button, For, Image, Show, TextField, createEffect, createMemo, createSignal, flush, focus, getWindowRect, mountStylesheet, scrollIntoView, type Accessor, type NativeKeyEvent, type NativeNode } from "@hewel/zgui";
+import { Button, For, Image, Show, TextField, createEffect, createMemo, createSignal, cx, flush, focus, getWindowRect, scrollIntoView, type Accessor, type NativeKeyEvent, type NativeNode } from "@hewel/zgui";
 import { createVirtualFocus } from "@hewel/zgui/primitives";
 import { M3Button, M3CardAction, M3FilterChip, M3InteractiveCard } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
@@ -6,23 +6,12 @@ import { ShellIcon } from "../icons.tsx";
 import { SPRING_EPSILON, createM3Spring, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { PANEL_MAX_HEIGHTS, resolveClipboardSelection, type ClipboardEntrySummary } from "../topics.ts";
+import styles from "./ClipboardPanel.module.css";
 
 const primary = "var(--color-primary)";
-const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
-const containerHigh = "var(--color-surface-container-high)";
-const containerHighest = "var(--color-surface-container-highest)";
-const primaryContainer = "var(--color-primary-container)";
 const onPrimaryContainer = "var(--color-on-primary-container)";
-const errorContainer = "var(--color-error-container)";
 const onErrorContainer = "var(--color-on-error-container)";
-const thumbnail = { width: "44px", height: "36px", borderRadius: "8px", flexShrink: 0 } as const;
-const thumbnailImage = { ...thumbnail, objectFit: "cover" } as const;
-const iconButton = {
-  display: "flex", width: "28px", height: "28px", borderRadius: "8px",
-  flexShrink: 0, alignItems: "center", justifyContent: "center",
-} as const;
-const truncate = { overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" } as const;
 const searchPlaceholder = "Search the clipboard";
 const filters = [
   { key: "all", label: "All" },
@@ -58,44 +47,40 @@ function ClipboardRow(props: {
         void invokePublic("clipboard.copy", { id: entry().id });
         closePanels();
       }}
-      style={{
-        zIndex: 1,
-        borderRadius: "14px", padding: "10px", gap: "10px", alignItems: "center",
-        backgroundColor: entry().pinned ? primaryContainer : containerHigh,
-        border: entry().pinned ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
-        color: entry().pinned ? onPrimaryContainer : onSurface,
-      }}
+      class={cx(styles.rowCard, entry().pinned && styles.rowCardPinned)}
     >
       <Show when={src()} fallback={
-        <box style={{ ...thumbnail, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: containerHighest }}>
+        <box class={cx(styles.thumbnail, styles.thumbnailFallback)}>
           <ShellIcon name={entry().kind === "image" ? "image" : entry().preview.startsWith("http") ? "link" : "fileText"} size={18} color={primary} />
         </box>
       }>
-        <Image testId={`clip-image-${entry().id}`} src={src()} style={thumbnailImage} />
+        <Image testId={`clip-image-${entry().id}`} src={src()} class={cx(styles.thumbnail, styles.thumbnailImage)} />
       </Show>
-      <column style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "2px" }}>
-        <text style={{ ...truncate, fontWeight: 500, fontSize: "13px" }}>{title()}</text>
-        <text data-tabular="true" style={{
-          ...truncate, fontFamily: "var(--font-mono)", fontSize: "11px", fontVariantNumeric: "tabular-nums",
-          color: entry().pinned ? onPrimaryContainer : muted, opacity: entry().pinned ? 0.78 : 1,
-        }}>
+      <column class={styles.rowTextCol}>
+        <text class={cx(styles.truncate, styles.rowTitle)}>{title()}</text>
+        <text data-tabular="true" class={cx(styles.truncate, styles.rowMeta)} data-pinned={entry().pinned ? "true" : "false"}>
           {`${entry().pinned ? "Pinned · " : ""}${entry().kind} · ${entry().byte_len} B`}
         </text>
       </column>
-      <M3CardAction style={{ flexShrink: 0 }}>
-        <Button testId={`clip-pin-${entry().id}`} ariaLabel={entry().pinned ? "Unpin entry" : "Pin entry"} checked={entry().pinned}
-          style={{
-            ...iconButton,
-            backgroundColor: entry().pinned ? "color-mix(in srgb, var(--color-primary) 20%, transparent)" : containerHighest,
-          }}
-          onClick={() => { void invokePublic(entry().pinned ? "clipboard.unpin" : "clipboard.pin", { id: entry().id }); }}>
+      <M3CardAction class={styles.rowActionWrap}>
+        <Button
+          testId={`clip-pin-${entry().id}`}
+          ariaLabel={entry().pinned ? "Unpin entry" : "Pin entry"}
+          checked={entry().pinned}
+          class={cx(styles.iconButton, styles.pinButton)}
+          data-pinned={entry().pinned ? "true" : "false"}
+          onClick={() => { void invokePublic(entry().pinned ? "clipboard.unpin" : "clipboard.pin", { id: entry().id }); }}
+        >
           <ShellIcon name="pin" filled={entry().pinned} size={14} color={entry().pinned ? onPrimaryContainer : muted} />
         </Button>
       </M3CardAction>
-      <M3CardAction style={{ flexShrink: 0 }}>
-        <Button testId={`clip-forget-${entry().id}`} ariaLabel="Forget entry"
-          style={{ ...iconButton, backgroundColor: containerHighest }}
-          onClick={() => { void invokePublic("clipboard.forget", { id: entry().id }); }}>
+      <M3CardAction class={styles.rowActionWrap}>
+        <Button
+          testId={`clip-forget-${entry().id}`}
+          ariaLabel="Forget entry"
+          class={styles.iconButton}
+          onClick={() => { void invokePublic("clipboard.forget", { id: entry().id }); }}
+        >
           <ShellIcon name="trash" size={14} color="var(--color-error)" />
         </Button>
       </M3CardAction>
@@ -105,21 +90,6 @@ function ClipboardRow(props: {
 
 export function ClipboardPanel() {
   const { clipboard, invokePublic, closePanels } = useShellStore();
-  mountStylesheet("z-shell-clipboard-search", `
-    .clipboard-search {
-      position: relative;
-    }
-    .clipboard-search:empty::before {
-      content: "${searchPlaceholder}";
-      position: absolute;
-      inset: 0;
-      padding: inherit;
-      display: flex;
-      align-items: center;
-      color: var(--color-on-surface-variant);
-      pointer-events: none;
-    }
-  `);
   const [query, setQuery] = createSignal("");
   const [filter, setFilter] = createSignal<Filter>("all");
   const [searchFocused, setSearchFocused] = createSignal(false);
@@ -251,45 +221,41 @@ export function ClipboardPanel() {
   };
 
   return (
-    <column ref={node => { rootNode = node; }} testId="panel-clipboard" data-active-entry={activeEntry() ? String(activeEntry()!.id) : ""} onKeyDown={handleKeyDown} style={{
-      width: "100%", maxHeight: `${PANEL_MAX_HEIGHTS.clipboard}px`, padding: "16px", gap: "10px", flexDirection: "column",
-      backgroundColor: "transparent", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
-    }}>
+    <column
+      ref={node => { rootNode = node; }}
+      testId="panel-clipboard"
+      data-active-entry={activeEntry() ? String(activeEntry()!.id) : ""}
+      onKeyDown={handleKeyDown}
+      class={styles.panel}
+      style={{ maxHeight: `${PANEL_MAX_HEIGHTS.clipboard}px` }}
+    >
       <Show when={!locked()} fallback={
-        <row role="status" style={{ padding: "14px", borderRadius: "16px", gap: "8px", alignItems: "center", backgroundColor: errorContainer, color: onErrorContainer }}>
+        <row role="status" class={styles.lockedBanner}>
           <ShellIcon name="lock" size={18} color={onErrorContainer} />
           <text>Clipboard hidden while session is locked</text>
         </row>
       }>
-        <row testId="clipboard-search-bar" data-composite-input="true" style={{
-          width: "100%", height: "44px", borderRadius: "14px", padding: searchFocused() ? "0 11px 0 13px" : "0 12px 0 14px", gap: "10px",
-          alignItems: "center", flexShrink: 0, backgroundColor: containerHigh,
-          border: searchFocused()
-            ? "2px solid var(--color-primary)"
-            : "1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent)",
-        }}>
+        <row testId="clipboard-search-bar" data-composite-input="true" data-focused={searchFocused() ? "true" : "false"} class={styles.searchBar}>
           <ShellIcon name="search" size={18} color={searchFocused() ? primary : muted} />
-          <TextField ref={node => { searchNode = node; focus(node); }} testId="clipboard-search" class="clipboard-search shell-composite-field" ariaLabel={searchPlaceholder} placeholder={searchPlaceholder} value={query()}
+          <TextField
+            ref={node => { searchNode = node; focus(node); }}
+            testId="clipboard-search"
+            class={cx(styles.searchField, "clipboard-search", "shell-composite-field")}
+            ariaLabel={searchPlaceholder}
+            placeholder={searchPlaceholder}
+            value={query()}
             ariaActiveDescendant={virtualFocus.activeNode()}
             onInput={event => { flush(() => setQuery(event.value)); resetSelection(); }}
-            onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)}
-            style={{
-              flexGrow: 1, flexBasis: "0px", minWidth: "0px", height: "36px", lineHeight: "18px",
-              padding: "9px 0", backgroundColor: "transparent", color: onSurface,
-            }} />
-          <box testId="clipboard-esc-badge" ariaHidden style={{
-            display: "flex", alignItems: "center", justifyContent: "center",
-            height: "22px", padding: "0 7px", borderRadius: "6px", flexShrink: 0,
-            backgroundColor: containerHighest,
-          }}>
-            <text testId="clipboard-esc-text" style={{
-              fontFamily: "var(--font-mono)", fontSize: "10px", lineHeight: "12px", fontWeight: 500, color: muted,
-            }}>
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
+          />
+          <box testId="clipboard-esc-badge" ariaHidden class={styles.escBadge}>
+            <text testId="clipboard-esc-text" class={styles.escText}>
               Esc
             </text>
           </box>
         </row>
-        <row style={{ gap: "6px", flexWrap: "wrap", flexShrink: 0 }}>
+        <row class={styles.filtersRow}>
           <For each={filters} keyed={false}>
             {chip => {
               const active = () => filter() === chip().key;
@@ -305,9 +271,9 @@ export function ClipboardPanel() {
             }}
           </For>
         </row>
-        <scroll style={{ maxHeight: "360px", width: "100%", overflow: "hidden auto" }}>
-          <column ref={setListNode} style={{ position: "relative", gap: "6px" }}>
-            <Show when={filtered().length > 0} fallback={<text style={{ color: muted, padding: "12px 0" }}>{entries().length ? "No matching entries" : "Clipboard is empty"}</text>}>
+        <scroll class={styles.listScroll}>
+          <column ref={setListNode} class={styles.listCol}>
+            <Show when={filtered().length > 0} fallback={<text class={styles.emptyText}>{entries().length ? "No matching entries" : "Clipboard is empty"}</text>}>
               <For each={filtered()} keyed={entry => entry.id}>
                 {entry => (
                   <ClipboardRow
@@ -317,26 +283,25 @@ export function ClipboardPanel() {
                   />
                 )}
               </For>
-              <box ariaHidden style={{
-                position: "absolute", top: "0px", left: "0px", right: "0px", zIndex: 2,
-                height: `${highlightH().toFixed(2)}px`,
-                borderRadius: "14px",
-                border: `1.5px solid ${primary}`,
-                backgroundColor: "transparent",
-                pointerEvents: "none",
-                opacity: Math.max(0, Math.min(1, highlightOpacity())),
-                transform: `translateY(${highlightY().toFixed(2)}px)`,
-              }} />
+              <box
+                ariaHidden
+                class={styles.highlightRing}
+                style={{
+                  height: `${highlightH().toFixed(2)}px`,
+                  opacity: Math.max(0, Math.min(1, highlightOpacity())),
+                  transform: `translateY(${highlightY().toFixed(2)}px)`,
+                }}
+              />
             </Show>
           </column>
         </scroll>
-        <box ariaHidden style={{ height: "1px", flexShrink: 0, backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 50%, transparent)" }} />
-        <row style={{ justifyContent: "space-between", alignItems: "center", gap: "8px", flexShrink: 0 }}>
-          <text style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: muted }}>
+        <box ariaHidden class={styles.divider} />
+        <row class={styles.footerRow}>
+          <text class={styles.footerHints}>
             ↑↓ Move · Enter Copy · Del Forget · Esc Close
           </text>
-          <row style={{ alignItems: "center", gap: "8px", flexShrink: 0 }}>
-            <text testId="clipboard-count" data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: muted, fontVariantNumeric: "tabular-nums" }}>
+          <row class={styles.footerRight}>
+            <text testId="clipboard-count" data-tabular="true" class={styles.footerCount}>
               {`${clipboard.data()?.entry_count ?? 0} kept`}
             </text>
             <M3Button

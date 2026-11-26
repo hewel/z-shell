@@ -1,6 +1,7 @@
-import { For, LayerSurface, createEffect, createMemo, focus, type NativeChild, type NativeNode } from "@hewel/zgui";
+import { For, LayerSurface, createEffect, createMemo, cx, focus, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { useShellStore } from "../store.ts";
 import { formatSurfaceName, resolveMonitorLogicalSize } from "../topics.ts";
+import styles from "./BarPopoverBackdrop.module.css";
 
 /** Transparent top-layer outside-click & Escape catcher for ungrabbed bar popup handoffs. */
 export function BarPopoverBackdrop(): NativeChild {
@@ -47,14 +48,7 @@ export function BarPopoverBackdrop(): NativeChild {
                   dismissOverlay();
                 }
               }}
-              style={{
-                position: "fixed",
-                left: "0px",
-                top: "0px",
-                width: "100%",
-                height: "100%",
-                backgroundColor: "transparent",
-              }}
+              class={cx(styles.backdrop)}
             />
           </LayerSurface>
         );

@@ -18,18 +18,7 @@ import {
   SourcesDialog,
   type ApprovalReviewRequest,
 } from "./PluginDialogs.tsx";
-import {
-  clipped,
-  container,
-  containerHigh,
-  containerHighest,
-  grow,
-  muted,
-  onPrimaryContainer,
-  onSurface,
-  primary,
-  primaryContainer,
-} from "./shared.tsx";
+import styles from "./PluginsPane.module.css";
 
 const VIEW_MODES = [
   { id: "installed", label: "Installed", testId: "plugins-mode-installed" },
@@ -59,13 +48,9 @@ function PluginCardIcon(props: { readonly media: Accessor<MediaRef | null> }): N
   const { hostClient } = useShellStore();
   const { src } = useDaemonMedia(hostClient, props.media, { fetchCommand: "plugins.catalog.fetch-blob" });
   return (
-    <box style={{
-      width: "34px", height: "34px", borderRadius: "10px", overflow: "hidden",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      backgroundColor: containerHighest, flexShrink: 0,
-    }}>
-      <Show when={src()} fallback={<ShellIcon name="extension" size={18} color={primary} />}>
-        {url => <Image ariaHidden src={url()} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+    <box class={styles.cardIcon}>
+      <Show when={src()} fallback={<ShellIcon name="extension" size={18} color="var(--color-primary)" />}>
+        {url => <Image ariaHidden src={url()} class={styles.cardIconImage} />}
       </Show>
     </box>
   );
@@ -191,72 +176,58 @@ export function PluginsPane(props: {
   });
 
   return (
-    <box testId="settings-plugins-root" style={{ position: "relative", width: "100%", minHeight: "500px" }}>
+    <box testId="settings-plugins-root" class={styles.root}>
       <Show
         when={props.selectedPluginId()}
         fallback={
-          <column testId="settings-plugins-pane" style={{ gap: "10px", width: "100%" }}>
-            <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
+          <column testId="settings-plugins-pane" class={styles.pane}>
+            <row class={styles.toolbar}>
               <M3SegmentedControl ariaLabel="Plugin store view" compact options={VIEW_MODES} value={viewMode()} onChange={setViewMode} />
-              <row style={{ alignItems: "center", gap: "6px" }}>
+              <row class={styles.toolbarActions}>
                 <Button
                   testId="plugins-refresh-btn"
                   ariaLabel="Refresh catalogs"
                   disabled={refreshing() || offlineMode()}
                   onClick={() => void refreshCatalog()}
-                  style={{
-                    display: "flex", alignItems: "center", gap: "4px", height: "30px", padding: "0 10px",
-                    borderRadius: "10px", backgroundColor: containerHigh, color: onSurface, fontSize: "11px", fontWeight: 500,
-                    opacity: refreshing() || offlineMode() ? 0.5 : 1,
-                  }}
+                  class={styles.toolbarButton}
                 >
-                  <ShellIcon name="refresh" size={14} color={muted} />
+                  <ShellIcon name="refresh" size={14} color="var(--color-on-surface-variant)" />
                   <text>{refreshing() ? "Refreshing…" : "Refresh"}</text>
                 </Button>
                 <Button
                   testId="plugins-sources-btn"
                   ariaLabel="Configure catalog sources"
                   onClick={() => setSourcesOpen(true)}
-                  style={{
-                    display: "flex", alignItems: "center", gap: "4px", height: "30px", padding: "0 10px",
-                    borderRadius: "10px", backgroundColor: containerHigh, color: onSurface, fontSize: "11px", fontWeight: 500,
-                  }}
+                  class={styles.toolbarButton}
                 >
-                  <ShellIcon name="tune" size={14} color={muted} />
+                  <ShellIcon name="tune" size={14} color="var(--color-on-surface-variant)" />
                   <text>Sources</text>
                 </Button>
                 <Button
                   testId="plugins-install-custom-btn"
                   ariaLabel="Install from local path or Git"
                   onClick={() => setInstallCustomOpen(true)}
-                  style={{
-                    display: "flex", alignItems: "center", gap: "4px", height: "30px", padding: "0 10px",
-                    borderRadius: "10px", backgroundColor: primaryContainer, color: onPrimaryContainer, fontSize: "11px", fontWeight: 600,
-                  }}
+                  class={styles.toolbarButtonPrimary}
                 >
-                  <ShellIcon name="add" size={14} color={onPrimaryContainer} />
+                  <ShellIcon name="add" size={14} color="var(--color-on-primary-container)" />
                   <text>Local / Git</text>
                 </Button>
               </row>
             </row>
 
-            <row style={{ alignItems: "center", gap: "8px" }}>
+            <row class={styles.searchRow}>
               <TextField
                 testId="plugins-search-input"
                 ariaLabel="Search plugins"
                 placeholder="Search plugins by name or id…"
                 value={query()}
                 onInput={ev => setQuery(ev.value)}
-                style={{
-                  ...grow, height: "34px", borderRadius: "10px", padding: "6px 10px",
-                  backgroundColor: containerHigh, border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
-                  color: onSurface, fontSize: "12px",
-                }}
+                class={styles.searchInput}
               />
             </row>
 
             <Show when={viewMode() === "discover"}>
-              <row style={{ gap: "6px", flexWrap: "wrap" }}>
+              <row class={styles.categoryRow}>
                 <For each={CATEGORIES} keyed={c => c.id}>
                   {cat => {
                     const active = () => category() === cat().id;
@@ -264,14 +235,9 @@ export function PluginsPane(props: {
                       <Button
                         testId={`plugins-cat-${cat().id}`}
                         selected={active()}
+                        data-active={active() ? "true" : "false"}
                         onClick={() => setCategory(cat().id)}
-                        style={{
-                          display: "flex", alignItems: "center", height: "26px", padding: "0 10px",
-                          borderRadius: "8px",
-                          backgroundColor: active() ? primaryContainer : containerHigh,
-                          color: active() ? onPrimaryContainer : muted,
-                          fontSize: "11px", fontWeight: 500,
-                        }}
+                        class={styles.categoryButton}
                       >
                         <text>{cat().label}</text>
                       </Button>
@@ -283,21 +249,15 @@ export function PluginsPane(props: {
 
             <Show when={pluginsTopic.data()}>
               {snap => (
-                <row testId="plugins-runtime-banner" style={{
-                  alignItems: "center", justifyContent: "space-between", gap: "8px",
-                  padding: "8px 12px", borderRadius: "12px", backgroundColor: containerHigh,
-                }}>
-                  <text style={{ ...grow, fontSize: "11px", color: muted }}>
+                <row testId="plugins-runtime-banner" class={styles.runtimeBanner}>
+                  <text class={styles.runtimeBannerText}>
                     {!snap().runtime_overlay_supported
                       ? `Pending apply · Desired rev ${snap().desired_revision} · Run \`bun run build:shell\` to compose/apply plugin code`
                       : `Desired rev ${snap().desired_revision} · Applied rev ${snap().applied_desired_revision ?? "—"}`}
                   </text>
                   <Show when={snap().offline_mode}>
-                    <box style={{
-                      display: "flex", alignItems: "center", height: "20px", padding: "0 7px",
-                      borderRadius: "6px", backgroundColor: containerHighest,
-                    }}>
-                      <text style={{ fontSize: "10px", lineHeight: "14px", color: muted }}>Offline</text>
+                    <box class={styles.offlineBadge}>
+                      <text class={styles.offlineBadgeText}>Offline</text>
                     </box>
                   </Show>
                 </row>
@@ -306,28 +266,28 @@ export function PluginsPane(props: {
 
             <Show when={statusError()}>
               {err => (
-                <text style={{ fontSize: "12px", color: "var(--color-error)" }}>{err()}</text>
+                <text class={styles.errorText}>{err()}</text>
               )}
             </Show>
 
-            <column style={{ gap: "8px", width: "100%" }}>
+            <column class={styles.cardList}>
               <For
                 each={cardRows()}
                 keyed={row => row.map(c => c.id).join("|")}
                 fallback={
-                  <column style={{ padding: "24px", borderRadius: "16px", backgroundColor: containerHigh, alignItems: "center", gap: "6px" }}>
-                    <ShellIcon name="extension" size={24} color={muted} />
-                    <text style={{ fontSize: "13px", fontWeight: 500 }}>
+                  <column class={styles.emptyCard}>
+                    <ShellIcon name="extension" size={24} color="var(--color-on-surface-variant)" />
+                    <text class={styles.emptyTitle}>
                       {viewMode() === "installed" ? "No plugins installed" : "No catalog plugins match"}
                     </text>
-                    <text style={{ fontSize: "11px", color: muted }}>
+                    <text class={styles.emptySubtitle}>
                       {viewMode() === "installed" ? "Switch to Discover or add a local / Git plugin." : "Try refreshing catalog sources or clearing filters."}
                     </text>
                   </column>
                 }
               >
                 {row => (
-                  <row style={{ gap: "8px", width: "100%" }}>
+                  <row class={styles.cardRow}>
                     <For each={row()} keyed={card => card.id}>
                       {card => (
                         <M3InteractiveCard
@@ -336,27 +296,21 @@ export function PluginsPane(props: {
                           actionTestId={`plugin-card-action-${card().id}`}
                           ariaLabel={`Inspect ${card().name}`}
                           onClick={() => props.onSelectPlugin(card().id)}
-                          style={{
-                            ...grow,
-                            borderRadius: "14px", padding: "10px 12px", alignItems: "center", gap: "10px",
-                            backgroundColor: containerHigh,
-                          }}
+                          class={styles.pluginCard}
                         >
                           <PluginCardIcon media={() => card().icon} />
-                          <column style={{ ...grow, gap: "2px" }}>
-                            <text style={{ ...clipped, fontSize: "13px", fontWeight: 600 }}>{card().name}</text>
-                            <text style={{ ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", color: muted }}>
+                          <column class={styles.cardTextGroup}>
+                            <text class={styles.cardTitle}>{card().name}</text>
+                            <text class={styles.cardSubtitle}>
                               {card().subtitle}
                             </text>
                           </column>
-                          <M3CardAction style={{ flexShrink: 0 }}>
-                            <box style={{
-                              display: "flex", alignItems: "center", justifyContent: "center",
-                              height: "22px", padding: "0 8px", borderRadius: "8px",
-                              backgroundColor: card().accentStatus ? primaryContainer : container,
-                              color: card().accentStatus ? onPrimaryContainer : muted,
-                            }}>
-                              <text style={{ fontSize: "10px", lineHeight: "14px", fontWeight: 600 }}>
+                          <M3CardAction class={styles.cardAction}>
+                            <box
+                              class={styles.statusBadge}
+                              data-accent={card().accentStatus ? "true" : "false"}
+                            >
+                              <text class={styles.statusBadgeText}>
                                 {card().statusLabel}
                               </text>
                             </box>
@@ -365,7 +319,7 @@ export function PluginsPane(props: {
                       )}
                     </For>
                     <Show when={row().length === 1}>
-                      <box ariaHidden style={{ ...grow }} />
+                      <box ariaHidden class={styles.spacer} />
                     </Show>
                   </row>
                 )}

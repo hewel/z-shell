@@ -12,36 +12,20 @@ import type {
   StagedUpgradeResponse,
 } from "../../topics.ts";
 import type { ApprovalReviewRequest } from "./PluginDialogs.tsx";
-import {
-  clipped,
-  containerHigh,
-  containerHighest,
-  grow,
-  muted,
-  onPrimary,
-  onPrimaryContainer,
-  onSurface,
-  primary,
-} from "./shared.tsx";
+import styles from "./PluginDetailView.module.css";
 
 function PreviewBlobImage(props: {
   readonly media: Accessor<MediaRef | null | undefined>;
   readonly alt: string;
-  readonly width: string;
-  readonly height: string;
-  readonly radius: string;
+  readonly variant: "icon" | "screenshot";
   readonly testId?: string;
 }): NativeChild {
   const { hostClient } = useShellStore();
   const { src } = useDaemonMedia(hostClient, props.media, { fetchCommand: "plugins.catalog.fetch-blob" });
   return (
-    <box testId={props.testId ?? null} style={{
-      width: props.width, height: props.height, borderRadius: props.radius, overflow: "hidden",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      backgroundColor: containerHighest, flexShrink: 0,
-    }}>
-      <Show when={src()} fallback={<ShellIcon name="extension" size={20} color={muted} />}>
-        {url => <Image ariaLabel={props.alt} src={url()} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+    <box testId={props.testId ?? null} class={styles.blobBox} data-variant={props.variant}>
+      <Show when={src()} fallback={<ShellIcon name="extension" size={20} color="var(--color-on-surface-variant)" />}>
+        {url => <Image ariaLabel={props.alt} src={url()} class={styles.blobImage} />}
       </Show>
     </box>
   );
@@ -163,210 +147,196 @@ export function PluginDetailView(props: {
   };
 
   return (
-    <column testId="plugin-detail-view" style={{ gap: "12px", width: "100%" }}>
-      <row style={{ alignItems: "center", justifyContent: "space-between", gap: "10px", flexShrink: 0 }}>
-        <row style={{ alignItems: "center", gap: "10px", minWidth: "0px", flexGrow: 1 }}>
+    <column testId="plugin-detail-view" class={styles.root}>
+      <row class={styles.headerRow}>
+        <row class={styles.headerLeft}>
           <Button
             testId="plugin-detail-back"
             ariaLabel="Back to Plugins"
             onClick={props.onBack}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: "32px", height: "32px", borderRadius: "10px", flexShrink: 0,
-              backgroundColor: containerHigh,
-            }}
+            class={styles.backButton}
           >
-            <ShellIcon name="arrowLeft" size={16} color={onSurface} />
+            <ShellIcon name="arrowLeft" size={16} color="var(--color-on-surface)" />
           </Button>
           <PreviewBlobImage
             testId="plugin-detail-icon"
             media={() => activeOffering()?.icon ?? null}
             alt={title()}
-            width="36px"
-            height="36px"
-            radius="10px"
+            variant="icon"
           />
-          <column style={{ ...grow, gap: "2px" }}>
-            <text role="heading" style={{ fontSize: "18px", fontWeight: 600, lineHeight: "24px" }}>{title()}</text>
-            <text style={{ ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", color: muted }}>
+          <column class={styles.titleColumn}>
+            <text role="heading" class={styles.titleText}>{title()}</text>
+            <text class={styles.subtitleMono}>
               {`${props.pluginId}${installed() ? ` · installed v${installed()!.version}` : ""}${activeOffering() ? ` · catalog v${activeOffering()!.latest_version}` : ""}`}
             </text>
           </column>
         </row>
       </row>
 
-      <column style={{ gap: "12px", width: "100%" }}>
-        <row style={{
-          alignItems: "center", gap: "8px", padding: "10px 12px", borderRadius: "12px",
-          backgroundColor: "var(--color-primary-container)",
-        }}>
-          <ShellIcon name="shield" filled size={16} color={onPrimaryContainer} />
-          <text style={{ ...grow, fontSize: "11px", lineHeight: "15px", color: onPrimaryContainer }}>
+      <column class={styles.body}>
+        <row class={styles.trustBanner}>
+          <ShellIcon name="shield" filled size={16} color="var(--color-on-primary-container)" />
+          <text class={styles.trustBannerText}>
             Enabled plugins compile directly into the host shell bundle (`bun run build:shell`). Review capabilities before approving.
           </text>
         </row>
 
-          <row style={{ flexWrap: "wrap", gap: "8px", paddingTop: "2px" }}>
-            <Show when={!installed() && activeOffering()}>
-              <M3Button testId="plugin-detail-install" variant="filled" size="sm" disabled={busyAction() !== null} onClick={() => void stageInstall()}>
-                <text style={{ color: onPrimary }}>{busyAction() === "install" ? "Staging…" : "Install…"}</text>
-              </M3Button>
-            </Show>
-            <Show when={installed() && audit() && (!installed()!.approved || installed()!.revoked || installed()!.migration_reapproval_required)}>
-              <M3Button
-                testId="plugin-detail-approve"
-                variant="filled"
-                size="sm"
-                disabled={busyAction() !== null}
-                onClick={() => props.onRequestApproval({ kind: "audit-approve", audit: audit()! })}
-              >
-                <text style={{ color: onPrimary }}>Review & approve…</text>
-              </M3Button>
-            </Show>
-            <Show when={installed() && installed()!.approved && !installed()!.revoked}>
-              <M3Button
-                testId="plugin-detail-toggle-enable"
-                variant="accent-tonal"
-                size="sm"
-                disabled={busyAction() !== null}
-                onClick={() => void runHost(
-                  "toggle",
-                  installed()!.enabled ? "plugins.disable" : "plugins.enable",
-                  { id: props.pluginId },
-                )}
-              >
-                <text>{installed()!.enabled ? "Disable" : "Enable"}</text>
-              </M3Button>
-            </Show>
-            <Show when={updateAvailable()}>
-              <M3Button testId="plugin-detail-upgrade" variant="accent-tonal" size="sm" disabled={busyAction() !== null} onClick={() => void stageUpgrade()}>
-                <text>{busyAction() === "upgrade" ? "Staging upgrade…" : `Upgrade to v${activeOffering()!.latest_version}`}</text>
-              </M3Button>
-            </Show>
-            <Show when={installed() && !installed()!.revoked}>
-              <M3Button
-                testId="plugin-detail-revoke"
-                variant="text"
-                danger
-                size="sm"
-                disabled={busyAction() !== null}
-                onClick={() => void runHost("revoke", "plugins.revoke", { id: props.pluginId })}
-              >
-                <text>Revoke</text>
-              </M3Button>
-            </Show>
-            <Show when={installed()}>
-              <M3Button
-                testId="plugin-detail-sync"
-                variant="text"
-                size="sm"
-                disabled={busyAction() !== null}
-                onClick={() => void runHost("sync", "plugins.sync", { id: props.pluginId })}
-              >
-                <text>Sync</text>
-              </M3Button>
-              <M3Button
-                testId="plugin-detail-remove"
-                variant="text"
-                danger
-                size="sm"
-                disabled={busyAction() !== null}
-                onClick={() => void runHost("remove", "plugins.remove", { id: props.pluginId }, props.onBack)}
-              >
-                <text>Remove</text>
-              </M3Button>
-            </Show>
-          </row>
-
-          <Show when={errorMsg()}>
-            {err => (
-              <row style={{
-                alignItems: "center", gap: "8px", padding: "10px 12px", borderRadius: "12px",
-                backgroundColor: "var(--color-error-container)", color: "var(--color-on-error-container)",
-              }}>
-                <ShellIcon name="warning" filled size={16} color="var(--color-on-error-container)" />
-                <text style={{ ...grow, fontSize: "12px", lineHeight: "16px" }}>{err()}</text>
-              </row>
-            )}
+        <row class={styles.actionsRow}>
+          <Show when={!installed() && activeOffering()}>
+            <M3Button testId="plugin-detail-install" variant="filled" size="sm" disabled={busyAction() !== null} onClick={() => void stageInstall()}>
+              <text class={styles.onPrimaryText}>{busyAction() === "install" ? "Staging…" : "Install…"}</text>
+            </M3Button>
           </Show>
-
-          <Show when={hasMultipleOfferings()}>
-            <column style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "12px 14px", gap: "6px" }}>
-              <text style={{ fontSize: "12px", fontWeight: 600 }}>Select catalog source</text>
-              <M3SegmentedControl
-                ariaLabel="Catalog source offering"
-                compact
-                options={offeringOptions()}
-                value={selectedSourceId()}
-                onChange={setSelectedSourceId}
-              />
-            </column>
+          <Show when={installed() && audit() && (!installed()!.approved || installed()!.revoked || installed()!.migration_reapproval_required)}>
+            <M3Button
+              testId="plugin-detail-approve"
+              variant="filled"
+              size="sm"
+              disabled={busyAction() !== null}
+              onClick={() => props.onRequestApproval({ kind: "audit-approve", audit: audit()! })}
+            >
+              <text class={styles.onPrimaryText}>Review & approve…</text>
+            </M3Button>
           </Show>
-
-          <Show when={activeOffering()?.screenshots.length}>
-            <row testId="plugin-detail-screenshots" style={{ gap: "10px", flexWrap: "wrap" }}>
-              <For each={activeOffering()?.screenshots ?? []} keyed={s => s.media.kind === "blob_handle" ? s.media.token : s.media.path}>
-                {shot => (
-                  <column style={{ gap: "4px", width: "268px" }}>
-                    <PreviewBlobImage
-                      testId="plugin-detail-screenshot-img"
-                      media={() => shot().media}
-                      alt={shot().caption ?? "Plugin screenshot"}
-                      width="268px"
-                      height="150px"
-                      radius="12px"
-                    />
-                    <Show when={shot().caption}>
-                      {cap => <text style={{ ...clipped, fontSize: "11px", color: muted }}>{cap()}</text>}
-                    </Show>
-                  </column>
-                )}
-              </For>
-            </row>
-          </Show>
-
-          <column style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "14px", gap: "8px" }}>
-            <text style={{ fontSize: "13px", fontWeight: 600 }}>Details & provenance</text>
-            <Show when={activeOffering()?.summary}>
-              {sum => <text style={{ fontSize: "12px", color: onSurface }}>{sum()}</text>}
-            </Show>
-            <Show when={installed()}>
-              {inst => (
-                <>
-                  <text style={{ ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", color: muted }}>
-                    {`Source: ${inst().source_identity}`}
-                  </text>
-                  <text style={{ ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", color: muted }}>
-                    {`Digest: ${inst().content_digest}`}
-                  </text>
-                  <text style={{ fontSize: "11px", color: !props.runtimeOverlaySupported ? primary : muted }}>
-                    {!props.runtimeOverlaySupported
-                      ? `Desired: ${inst().enabled ? "enabled" : "disabled"} (rev ${props.desiredRevision}) · Runtime: unknown (${props.appliedDesiredRevision == null ? "static build — run bun run build:shell" : `applied rev ${props.appliedDesiredRevision}`})`
-                      : `Runtime: ${props.topicEntry?.runtime_state ?? "unknown"}`}
-                  </text>
-                </>
+          <Show when={installed() && installed()!.approved && !installed()!.revoked}>
+            <M3Button
+              testId="plugin-detail-toggle-enable"
+              variant="accent-tonal"
+              size="sm"
+              disabled={busyAction() !== null}
+              onClick={() => void runHost(
+                "toggle",
+                installed()!.enabled ? "plugins.disable" : "plugins.enable",
+                { id: props.pluginId },
               )}
-            </Show>
-          </column>
+            >
+              <text>{installed()!.enabled ? "Disable" : "Enable"}</text>
+            </M3Button>
+          </Show>
+          <Show when={updateAvailable()}>
+            <M3Button testId="plugin-detail-upgrade" variant="accent-tonal" size="sm" disabled={busyAction() !== null} onClick={() => void stageUpgrade()}>
+              <text>{busyAction() === "upgrade" ? "Staging upgrade…" : `Upgrade to v${activeOffering()!.latest_version}`}</text>
+            </M3Button>
+          </Show>
+          <Show when={installed() && !installed()!.revoked}>
+            <M3Button
+              testId="plugin-detail-revoke"
+              variant="text"
+              danger
+              size="sm"
+              disabled={busyAction() !== null}
+              onClick={() => void runHost("revoke", "plugins.revoke", { id: props.pluginId })}
+            >
+              <text>Revoke</text>
+            </M3Button>
+          </Show>
+          <Show when={installed()}>
+            <M3Button
+              testId="plugin-detail-sync"
+              variant="text"
+              size="sm"
+              disabled={busyAction() !== null}
+              onClick={() => void runHost("sync", "plugins.sync", { id: props.pluginId })}
+            >
+              <text>Sync</text>
+            </M3Button>
+            <M3Button
+              testId="plugin-detail-remove"
+              variant="text"
+              danger
+              size="sm"
+              disabled={busyAction() !== null}
+              onClick={() => void runHost("remove", "plugins.remove", { id: props.pluginId }, props.onBack)}
+            >
+              <text>Remove</text>
+            </M3Button>
+          </Show>
+        </row>
 
-          <Show when={audit()}>
-            {a => (
-              <column style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "14px", gap: "6px" }}>
-                <text style={{ fontSize: "13px", fontWeight: 600 }}>Capabilities & audit</text>
-                <text style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: a().digest_matches ? muted : "var(--color-error)" }}>
-                  {a().digest_matches ? "Bundle digest verified" : "WARNING: Bundle digest drift detected"}
+        <Show when={errorMsg()}>
+          {err => (
+            <row class={styles.errorBanner}>
+              <ShellIcon name="warning" filled size={16} color="var(--color-on-error-container)" />
+              <text class={styles.errorBannerText}>{err()}</text>
+            </row>
+          )}
+        </Show>
+
+        <Show when={hasMultipleOfferings()}>
+          <column class={styles.sectionCardCompact}>
+            <text class={styles.sectionLabel}>Select catalog source</text>
+            <M3SegmentedControl
+              ariaLabel="Catalog source offering"
+              compact
+              options={offeringOptions()}
+              value={selectedSourceId()}
+              onChange={setSelectedSourceId}
+            />
+          </column>
+        </Show>
+
+        <Show when={activeOffering()?.screenshots.length}>
+          <row testId="plugin-detail-screenshots" class={styles.screenshotsRow}>
+            <For each={activeOffering()?.screenshots ?? []} keyed={s => s.media.kind === "blob_handle" ? s.media.token : s.media.path}>
+              {shot => (
+                <column class={styles.screenshotItem}>
+                  <PreviewBlobImage
+                    testId="plugin-detail-screenshot-img"
+                    media={() => shot().media}
+                    alt={shot().caption ?? "Plugin screenshot"}
+                    variant="screenshot"
+                  />
+                  <Show when={shot().caption}>
+                    {cap => <text class={styles.screenshotCaption}>{cap()}</text>}
+                  </Show>
+                </column>
+              )}
+            </For>
+          </row>
+        </Show>
+
+        <column class={styles.sectionCard}>
+          <text class={styles.sectionTitle}>Details & provenance</text>
+          <Show when={activeOffering()?.summary}>
+            {sum => <text class={styles.summaryText}>{sum()}</text>}
+          </Show>
+          <Show when={installed()}>
+            {inst => (
+              <>
+                <text class={styles.monoClipped}>
+                  {`Source: ${inst().source_identity}`}
                 </text>
-                <Show when={a().net_added_host_capabilities.length > 0}>
-                  <text style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--color-error)" }}>
-                    {`Net added host permissions: ${a().net_added_host_capabilities.join(", ")}`}
-                  </text>
-                </Show>
-                <text style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: muted }}>
-                  {`Host commands: ${a().requested_capabilities.host.commands.join(", ") || "none"} · Bus commands: ${a().requested_capabilities.bus.commands_register.join(", ") || "none"}`}
+                <text class={styles.monoClipped}>
+                  {`Digest: ${inst().content_digest}`}
                 </text>
-              </column>
+                <text class={styles.runtimeNote} data-accent={!props.runtimeOverlaySupported ? "true" : "false"}>
+                  {!props.runtimeOverlaySupported
+                    ? `Desired: ${inst().enabled ? "enabled" : "disabled"} (rev ${props.desiredRevision}) · Runtime: unknown (${props.appliedDesiredRevision == null ? "static build — run bun run build:shell" : `applied rev ${props.appliedDesiredRevision}`})`
+                    : `Runtime: ${props.topicEntry?.runtime_state ?? "unknown"}`}
+                </text>
+              </>
             )}
           </Show>
+        </column>
+
+        <Show when={audit()}>
+          {a => (
+            <column class={styles.auditCard}>
+              <text class={styles.sectionTitle}>Capabilities & audit</text>
+              <text class={styles.auditMono} data-error={!a().digest_matches ? "true" : "false"}>
+                {a().digest_matches ? "Bundle digest verified" : "WARNING: Bundle digest drift detected"}
+              </text>
+              <Show when={a().net_added_host_capabilities.length > 0}>
+                <text class={styles.auditErrorMono}>
+                  {`Net added host permissions: ${a().net_added_host_capabilities.join(", ")}`}
+                </text>
+              </Show>
+              <text class={styles.auditMutedMono}>
+                {`Host commands: ${a().requested_capabilities.host.commands.join(", ") || "none"} · Bus commands: ${a().requested_capabilities.bus.commands_register.join(", ") || "none"}`}
+              </text>
+            </column>
+          )}
+        </Show>
       </column>
     </column>
   );

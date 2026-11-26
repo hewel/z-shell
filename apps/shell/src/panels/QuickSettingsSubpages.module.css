@@ -1,0 +1,274 @@
+.scroll {
+  width: 100%;
+  overflow: hidden auto;
+  background-color: transparent;
+  color: var(--color-on-surface);
+  font-family: var(--font-sans);
+  font-size: 13px;
+}
+
+.scrollInner {
+  width: 100%;
+  padding: 14px;
+  gap: 10px;
+  flex-direction: column;
+}
+
+.iconBtn {
+  display: flex;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-surface-container-highest);
+
+  &[data-size="26"] {
+    width: 26px;
+    height: 26px;
+  }
+
+  &[data-size="30"] {
+    width: 30px;
+    height: 30px;
+  }
+
+  &[data-tone="transparent"] {
+    background-color: transparent;
+  }
+
+  &[data-tone="accent-subtle"] {
+    background-color: color-mix(in srgb, var(--color-primary) 18%, transparent);
+  }
+
+  &[data-disabled="true"] {
+    opacity: 0.45;
+  }
+}
+
+.pressVisualCompact {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.grow {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+}
+
+.clipped {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detail {
+  color: var(--color-on-surface-variant);
+  font-size: 12px;
+}
+
+.toggleRow {
+  flex-shrink: 0;
+}
+
+.toggleLabel {
+  font-size: 12px;
+  color: var(--color-on-surface-variant);
+}
+
+.card {
+  border-radius: 16px;
+  background-color: var(--color-surface-container-high);
+  padding: 12px;
+  gap: 8px;
+}
+
+.sectionTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+}
+
+.pageBody {
+  width: 100%;
+  gap: 10px;
+}
+
+.pageTitle {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.scanTrack {
+  width: 100%;
+  height: 3px;
+  border-radius: 2px;
+  background-color: var(--color-surface-container-high);
+  overflow: hidden;
+}
+
+.scanFill {
+  width: 42%;
+  height: 100%;
+  border-radius: 2px;
+  background-color: var(--color-primary);
+}
+
+.batteryPageBody {
+  width: 100%;
+}
+
+.itemCard {
+  border-radius: 14px;
+  background-color: var(--color-surface-container-highest);
+  padding: 10px;
+  gap: 6px;
+}
+
+.passwordInput {
+  height: 36px;
+  line-height: 18px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background-color: var(--color-surface);
+  color: var(--color-on-surface);
+}
+
+.passwordActions {
+  justify-content: flex-end;
+}
+
+.expandChevron {
+  display: flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.itemTextCol {
+  gap: 2px;
+}
+
+.itemTitle {
+  font-weight: 500;
+}
+
+.connectedRow {
+  min-height: 52px;
+  padding: 8px 10px;
+  border-radius: 16px;
+  background-color: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
+}
+
+.vpnActiveRow {
+  min-height: 48px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background-color: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
+}
+
+.connectedTitle {
+  font-weight: 600;
+}
+
+.connectedSub {
+  font-size: 11px;
+  color: var(--color-on-primary-container);
+  opacity: 0.78;
+}
+
+.monoPercent {
+  width: 34px;
+  flex-shrink: 0;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.monoPercentMuted {
+  color: var(--color-on-surface-variant);
+}
+
+.btCard {
+  border-radius: 16px;
+  padding: 10px;
+  gap: 8px;
+  background-color: var(--color-surface-container-highest);
+  color: var(--color-on-surface);
+  border: 1px solid transparent;
+
+  &[data-connected="true"] {
+    background-color: var(--color-primary-container);
+    color: var(--color-on-primary-container);
+    border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  }
+}
+
+.btSub {
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+
+  &[data-connected="true"] {
+    color: var(--color-on-primary-container);
+    opacity: 0.78;
+  }
+}
+
+.btActions {
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.audioCard {
+  border-radius: 14px;
+  padding: 8px 10px;
+  gap: 6px;
+  background-color: var(--color-surface-container-highest);
+  color: var(--color-on-surface);
+  border: 1px solid transparent;
+}
+
+.audioCardActive {
+  background-color: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+  border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+}
+
+.audioHeader {
+  min-height: 26px;
+}
+
+.audioName {
+  font-weight: 500;
+}
+
+.audioNameActive {
+  font-weight: 600;
+}
+
+.appStreamCard {
+  border-radius: 14px;
+  padding: 8px 10px;
+  gap: 4px;
+  background-color: var(--color-surface-container-highest);
+}

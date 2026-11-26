@@ -1,0 +1,5 @@
+.icon {
+  --zgui-stroke-linecap: round;
+  --zgui-stroke-linejoin: round;
+  flex-shrink: 0;
+}

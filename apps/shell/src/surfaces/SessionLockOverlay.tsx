@@ -1,5 +1,5 @@
 import {
-  Button, For, Image, SessionLockSurface, Show, createEffect, createMemo, createSignal, flush,
+  Button, For, Image, SessionLockSurface, Show, createEffect, createMemo, createSignal, cx, flush,
   focus, getSessionGeneration, onCleanup, requestSessionLock,
   type Accessor, type Monitor, type NativeChild, type NativeNode, type SessionLockRequest,
 } from "@hewel/zgui";
@@ -16,6 +16,7 @@ import {
 import { LOCK_MORPH_SHAPES, SHELL_ROSETTE_CLIP_104, SHELL_ROSETTE_PATH } from "../shapes.ts";
 import { useShellStore } from "../store.ts";
 import { formatBarClock, formatFullDate, formatSurfaceName, resolveMonitorWallpaper, selectActiveMediaPlayer, type UnlockApproval } from "../topics.ts";
+import styles from "./SessionLockOverlay.module.css";
 
 type LockScope = { readonly lockId: number; readonly daemonId: string | undefined };
 type ActiveLock = LockScope & { readonly request: SessionLockRequest; confirmed: boolean };
@@ -33,8 +34,6 @@ type LockControls = {
 };
 
 const clockFormat = { clock24h: true, clockSeconds: false };
-const cover = { position: "absolute", inset: "0px", width: "100%", height: "100%", pointerEvents: "none" } as const;
-const centeredColumn = { display: "flex", flexDirection: "column", alignItems: "center" } as const;
 const MORPH_SEQUENCE = [
   LOCK_MORPH_SHAPES.Cookie4,
   LOCK_MORPH_SHAPES.Clover4,
@@ -58,15 +57,19 @@ function MorphPasswordDot(props: { readonly d: string; readonly viewBox: string;
   const deg = () => (props.visible() ? (1 - presence.progress()) * -45 : 0);
   return (
     <Show when={presence.mounted()}>
-      <vector ariaHidden d={props.d} viewBox={props.viewBox} style={{
-        width: "14px", height: "14px", flexShrink: 0,
-        color: props.error?.() ? "var(--color-error)" : "var(--color-on-surface)",
-        opacity: Math.max(0, Math.min(1, presence.opacity())),
-        transform: scheme() === "reduced"
-          ? "none"
-          : `scale(${scale().toFixed(4)}) rotate(${deg().toFixed(1)}deg)`,
-        transformOrigin: "center",
-      }} />
+      <vector
+        ariaHidden
+        d={props.d}
+        viewBox={props.viewBox}
+        data-error={props.error?.() ? "true" : "false"}
+        class={styles.morphDot}
+        style={{
+          opacity: Math.max(0, Math.min(1, presence.opacity())),
+          transform: scheme() === "reduced"
+            ? "none"
+            : `scale(${scale().toFixed(4)}) rotate(${deg().toFixed(1)}deg)`,
+        }}
+      />
     </Show>
   );
 }
@@ -108,17 +111,15 @@ function LockScreen(props: {
   const dotCount = () => Math.min(controls.password().length, MAX_VISIBLE_DOTS);
 
   return (
-    <box style={{
-      ...centeredColumn, position: "fixed", top: "0px", left: "0px", width: "100%", height: "100%", overflow: "hidden",
-      backgroundColor: "var(--color-surface)", fontFamily: "var(--font-sans)",
-      color: "var(--color-on-surface)",
-      opacity: Math.max(0, Math.min(1, entryFade())),
-    }}>
+    <box class={styles.lockRoot} style={{ opacity: Math.max(0, Math.min(1, entryFade())) }}>
       <Show when={backdrop.src()}>{src => <>
-        <Image ariaHidden src={src()} style={{
-          ...cover, zIndex: 0, objectFit: activeWallpaper()?.fit === "center" ? "none" : activeWallpaper()?.fit ?? "cover",
-        }} />
-        <box ariaHidden style={{ ...cover, zIndex: 1, backgroundColor: "color-mix(in srgb, var(--color-surface) 76%, transparent)" }} />
+        <Image
+          ariaHidden
+          src={src()}
+          data-fit={activeWallpaper()?.fit === "center" ? "none" : activeWallpaper()?.fit ?? "cover"}
+          class={styles.backdropImage}
+        />
+        <box ariaHidden class={styles.backdropScrim} />
       </>}</Show>
       <Show when={power.data()?.battery}>{battery => {
         const label = createMemo(() => {
@@ -126,69 +127,46 @@ function LockScreen(props: {
           return percentage == null ? "—" : `${Math.round(percentage)}%`;
         });
         return (
-          <row testId={`lock-battery-${monitor().id}`} style={{
-            position: "absolute", zIndex: 2, top: "28px", right: "36px", alignItems: "center", gap: "6px",
-            borderRadius: "16px", "--zgui-corner-shape": "none", backgroundColor: "color-mix(in srgb, var(--color-on-surface) 10%, transparent)", padding: "5px 10px",
-          }}>
+          <row testId={`lock-battery-${monitor().id}`} class={styles.batteryPill}>
             <ShellIcon name={battery().state === "charging" ? "batteryCharging" : "battery"} size={18} color="var(--color-on-surface)" />
-            <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "14px", fontWeight: 500, fontVariantNumeric: "tabular-nums" }}>
+            <text data-tabular="true" class={styles.batteryLabel}>
               {label()}
             </text>
           </row>
         );
       }}</Show>
-      <box style={{ ...centeredColumn, position: "relative", zIndex: 2, justifyContent: "center", flexGrow: 2, flexBasis: "0px", gap: "6px" }}>
-        <text testId={`lock-clock-${monitor().id}`} style={{
-          fontSize: "112px", fontWeight: 300, lineHeight: "124px", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums",
-        }}>
+      <box class={styles.clockSection}>
+        <text testId={`lock-clock-${monitor().id}`} class={styles.clockTime}>
           {props.clock().time}
         </text>
-        <text style={{ fontSize: "22px", lineHeight: "28px", opacity: 0.85 }}>{props.clock().date}</text>
+        <text class={styles.clockDate}>{props.clock().date}</text>
       </box>
-      <box style={{
-        ...centeredColumn, position: "relative", zIndex: 2,
-        justifyContent: "center", flexGrow: 3, flexBasis: "0px", gap: "16px", maxWidth: "100%",
-      }}>
-        <box ariaHidden style={{
-          width: "104px", height: "104px", flexShrink: 0, position: "relative",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          <vector ariaHidden d={SHELL_ROSETTE_PATH} viewBox="0 0 64 64"
-            style={{ ...cover, zIndex: 0, color: "var(--color-primary-container)" }} />
+      <box class={styles.authSection}>
+        <box ariaHidden class={styles.avatarBox}>
+          <vector ariaHidden d={SHELL_ROSETTE_PATH} viewBox="0 0 64 64" class={styles.avatarRosette} />
           <Show when={props.avatar()} fallback={
             <ShellIcon name="person" filled size={46} color="var(--color-on-primary-container)" />
-          }>{src => <Image ariaHidden src={src()} style={{
-            position: "relative", zIndex: 1, width: "104px", height: "104px", objectFit: "cover", clipPath: SHELL_ROSETTE_CLIP_104,
-          }} />}</Show>
+          }>{src => <Image ariaHidden src={src()} class={styles.avatarImage} style={{ clipPath: SHELL_ROSETTE_CLIP_104 }} />}</Show>
         </box>
-        <text testId={`lock-user-${monitor().id}`} style={{ fontSize: "22px", fontWeight: 500, lineHeight: "28px" }}>
+        <text testId={`lock-user-${monitor().id}`} class={styles.username}>
           {controls.username()}
         </text>
-        <row testId="lock-password-capsule" data-composite-input="true" data-error={controls.error() ? "true" : null} style={{
-          position: "relative", width: "340px", maxWidth: "100%", height: "56px", flexShrink: 0,
-          alignItems: "center", justifyContent: "space-between", gap: "8px",
-          borderRadius: "999px",
-          "--zgui-corner-shape": "none",
-          backgroundColor: controls.error()
-            ? "color-mix(in srgb, var(--color-error-container) 72%, transparent)"
-            : "color-mix(in srgb, var(--color-on-surface) 14%, transparent)",
-          border: controls.error()
-            ? "2px solid var(--color-error)"
-            : passwordFocused()
-              ? "2px solid var(--color-primary)"
-              : "1px solid color-mix(in srgb, var(--color-on-surface) 24%, transparent)",
-          padding: passwordFocused() || controls.error() ? "0px 11px" : "0px 12px",
-          transform: scheme() === "reduced" || Math.abs(shakeX()) < SPRING_EPSILON.px
-            ? "none"
-            : `translateX(${shakeX().toFixed(2)}px)`,
-        }}>
-          <box ariaHidden style={{ width: "36px", height: "32px", flexShrink: 0 }} />
-          <row testId="lock-morph-dots" ariaHidden style={{
-            flexGrow: 1, flexBasis: "0px", minWidth: "0px", alignItems: "center", justifyContent: "center",
-            gap: "12px", overflow: "hidden", pointerEvents: "none",
-          }}>
+        <row
+          testId="lock-password-capsule"
+          data-composite-input="true"
+          data-focused={passwordFocused() ? "true" : "false"}
+          data-error={controls.error() ? "true" : null}
+          class={styles.passwordCapsule}
+          style={{
+            transform: scheme() === "reduced" || Math.abs(shakeX()) < SPRING_EPSILON.px
+              ? "none"
+              : `translateX(${shakeX().toFixed(2)}px)`,
+          }}
+        >
+          <box ariaHidden class={styles.capsuleSpacer} />
+          <row testId="lock-morph-dots" ariaHidden class={styles.morphDots}>
             <Show when={dotCount() > 0} fallback={
-              <text style={{ fontSize: "14px", color: "var(--color-on-surface-variant)", opacity: 0.78 }}>Enter password</text>
+              <text class={styles.passwordPlaceholder}>Enter password</text>
             }>
               <For each={dotSlots} keyed={slot => slot.index}>
                 {slot => (
@@ -202,61 +180,58 @@ function LockScreen(props: {
               </For>
             </Show>
           </row>
-          <TextField testId="lock-password" class="shell-composite-field" secure placeholder="Password" ariaLabel="Password"
-            disabled={controls.disabled()} value={controls.password()} onValueChange={value => controls.setPassword(value)}
-            onFocus={() => setPasswordFocused(true)} onBlur={() => setPasswordFocused(false)}
-            ref={node => { setField(node); }} onKeyDown={e => {
+          <TextField
+            testId="lock-password"
+            class={cx(styles.passwordField, "shell-composite-field")}
+            secure
+            placeholder="Password"
+            ariaLabel="Password"
+            disabled={controls.disabled()}
+            value={controls.password()}
+            onValueChange={value => controls.setPassword(value)}
+            onFocus={() => setPasswordFocused(true)}
+            onBlur={() => setPasswordFocused(false)}
+            ref={node => { setField(node); }}
+            onKeyDown={e => {
               if (e.key === "Enter") {
                 e.preventDefault();
                 void controls.submit();
               }
-            }} style={{
-              position: "absolute", left: "12px", top: "4px", right: "92px", bottom: "4px",
-              padding: "0px", border: "0px", backgroundColor: "transparent", color: "transparent",
-              opacity: 0, fontSize: "14px", boxShadow: "none",
-            }} />
-          <row style={{ alignItems: "center", gap: "6px", flexShrink: 0, position: "relative", zIndex: 2 }}>
-            <box style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              minWidth: "36px", height: "32px", padding: "0 10px", borderRadius: "16px",
-              backgroundColor: "color-mix(in srgb, var(--color-on-surface) 14%, transparent)",
-            }}>
-              <text style={{ fontFamily: "var(--font-mono)", fontSize: "12px", lineHeight: "16px", fontWeight: 600 }}>
+            }}
+          />
+          <row class={styles.capsuleTrailing}>
+            <box class={styles.imeBadge}>
+              <text class={styles.imeText}>
                 {ime.data()?.active_im?.short_label || "EN"}
               </text>
             </box>
-            <Button testId="lock-submit" ariaLabel="Unlock" disabled={controls.disabled()} onClick={() => void controls.submit()}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: "0px",
-                width: "32px", height: "32px", borderRadius: "999px", "--zgui-corner-shape": "none", border: "0px",
-                backgroundColor: "var(--color-primary)", opacity: controls.disabled() ? 0.45 : 1,
-              }}>
+            <Button
+              testId="lock-submit"
+              ariaLabel="Unlock"
+              disabled={controls.disabled()}
+              onClick={() => void controls.submit()}
+              class={styles.submitButton}
+            >
               <ShellIcon name="chevronRight" color="var(--color-on-primary)" size={18} />
             </Button>
           </row>
         </row>
         <Show when={controls.sleepHold()}><text testId="lock-sleep-hold">Preparing for sleep…</text></Show>
         <Show when={controls.authenticating()}>
-          <row testId="lock-verifying" role="status" style={{
-            height: "36px", padding: "0 16px", gap: "8px", alignItems: "center", justifyContent: "center",
-            borderRadius: "999px", "--zgui-corner-shape": "none",
-            backgroundColor: "color-mix(in srgb, var(--color-primary-container) 55%, transparent)",
-            border: "1px solid color-mix(in srgb, var(--color-primary) 45%, transparent)",
-            color: "var(--color-on-primary-container)",
-          }}>
-            <box ariaHidden style={{ width: "8px", height: "8px", borderRadius: "4px", "--zgui-corner-shape": "none", backgroundColor: "var(--color-primary)", flexShrink: 0 }} />
-            <text style={{ fontSize: "12px", lineHeight: "16px", fontWeight: 500 }}>Verifying PAM credentials...</text>
+          <row testId="lock-verifying" role="status" class={styles.verifyingPill}>
+            <box ariaHidden class={styles.verifyingDot} />
+            <text class={styles.verifyingText}>Verifying PAM credentials...</text>
           </row>
         </Show>
         <Show when={controls.error()}>
-          <text testId="lock-error" role="alert" style={{ color: "var(--color-error)", fontSize: "13px", fontWeight: 500 }}>
+          <text testId="lock-error" role="alert" class={styles.errorText}>
             {controls.error()}
           </text>
         </Show>
         <Show when={playing()}>{player => (
-          <row style={{ gap: "6px", alignItems: "center", maxWidth: "320px", opacity: 0.8 }}>
+          <row class={styles.playingRow}>
             <ShellIcon name="play" filled size={14} color="var(--color-on-surface)" />
-            <text style={{ fontSize: "12px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            <text class={styles.playingText}>
               {player().metadata.title ?? player().identity}
               {player().metadata.artists.length > 0 ? ` · ${player().metadata.artists.join(", ")}` : ""}
             </text>

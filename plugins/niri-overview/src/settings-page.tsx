@@ -2,16 +2,7 @@ import { Button, For, Show, createEffect, createSignal, type NativeChild } from 
 import { M3Button, M3Slider } from "@z-shell/sdk/primitives";
 import { useTopic, type PluginSettingsProps } from "@z-shell/sdk/zgui";
 import type { NiriOverviewSnapshot } from "./service.ts";
-
-const primary = "var(--color-primary)";
-const primaryContainer = "var(--color-primary-container)";
-const onPrimaryContainer = "var(--color-on-primary-container)";
-const onSurface = "var(--color-on-surface)";
-const muted = "var(--color-on-surface-variant)";
-const container = "var(--color-surface-container)";
-const containerHigh = "var(--color-surface-container-high)";
-const containerHighest = "var(--color-surface-container-highest)";
-const grow = { flexGrow: 1, flexBasis: "0px", minWidth: "0px" } as const;
+import styles from "./settings-page.module.css";
 
 const ZOOM_PRESETS = [0.25, 0.35, 0.5, 0.72, 0.85, 1.0] as const;
 const QUEUE_PRESETS = [16, 32, 64, 128] as const;
@@ -45,24 +36,17 @@ export default function NiriOverviewSettingsPage(props: PluginSettingsProps): Na
   };
 
   return (
-    <column testId="plugin-niri-overview-settings" style={{ gap: "12px", width: "100%", color: onSurface, fontFamily: "var(--font-sans)" }}>
-      <row style={{
-        alignItems: "center", justifyContent: "space-between", gap: "10px",
-        borderRadius: "16px", backgroundColor: containerHigh, padding: "14px",
-      }}>
-        <column style={{ ...grow, gap: "2px" }}>
-          <text style={{ fontSize: "13px", fontWeight: 600 }}>Compositor IPC bridge</text>
-          <text style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: muted }}>
+    <column testId="plugin-niri-overview-settings" class={styles.page}>
+      <row class={styles.headerCard}>
+        <column class={styles.growCol}>
+          <text class={styles.cardTitle}>Compositor IPC bridge</text>
+          <text class={styles.ipcPath}>
             {`$NIRI_SOCKET · ${snapshot()?.layouts.length ?? 0} workspaces indexed`}
           </text>
         </column>
-        <row style={{ alignItems: "center", gap: "6px", flexShrink: 0 }}>
-          <row style={{
-            alignItems: "center", gap: "5px", padding: "4px 10px", borderRadius: "999px", "--zgui-corner-shape": "none",
-            backgroundColor: connected() ? primaryContainer : containerHighest,
-            color: connected() ? onPrimaryContainer : muted, fontSize: "11px", fontWeight: 600,
-          }}>
-            <box ariaHidden style={{ width: "6px", height: "6px", borderRadius: "3px", backgroundColor: connected() ? primary : muted }} />
+        <row class={styles.headerControls}>
+          <row class={styles.statusPill} data-connected={connected() ? "true" : null}>
+            <box ariaHidden class={styles.statusDot} data-connected={connected() ? "true" : null} />
             <text>{statusLabel()}</text>
           </row>
           <M3Button
@@ -76,13 +60,13 @@ export default function NiriOverviewSettingsPage(props: PluginSettingsProps): Na
         </row>
       </row>
 
-      <column style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "14px", gap: "12px" }}>
-        <text style={{ fontSize: "13px", fontWeight: 600 }}>Grid & visual layout</text>
+      <column class={styles.settingsCard}>
+        <text class={styles.cardTitle}>Grid & visual layout</text>
 
-        <column style={{ gap: "8px" }}>
-          <row style={{ alignItems: "center", justifyContent: "space-between" }}>
-            <text style={{ fontSize: "12px", fontWeight: 500 }}>Workspace zoom scale</text>
-            <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "12px", color: primary, fontVariantNumeric: "tabular-nums" }}>
+        <column class={styles.zoomSection}>
+          <row class={styles.rowBetween}>
+            <text class={styles.settingLabel}>Workspace zoom scale</text>
+            <text data-tabular="true" class={styles.zoomReadout}>
               {`${Math.round(zoomScale() * 100)}%`}
             </text>
           </row>
@@ -96,18 +80,17 @@ export default function NiriOverviewSettingsPage(props: PluginSettingsProps): Na
               void save({ zoom_scale: next }, `Zoom set to ${Math.round(next * 100)}%`);
             }}
           />
-          <row style={{ gap: "6px" }}>
+          <row class={styles.zoomPresetsRow}>
             <For each={ZOOM_PRESETS} keyed={v => v}>
               {preset => {
                 const active = () => Math.abs(zoomScale() - preset()) < 0.01;
                 return (
-                  <Button selected={active()} onClick={() => { setZoomScale(preset()); void save({ zoom_scale: preset() }, `Zoom set to ${Math.round(preset() * 100)}%`); }}
-                    style={{
-                      ...grow, display: "flex", height: "30px", borderRadius: "8px", alignItems: "center", justifyContent: "center",
-                      backgroundColor: active() ? primaryContainer : container,
-                      color: active() ? onPrimaryContainer : muted,
-                      fontFamily: "var(--font-mono)", fontSize: "11px", fontWeight: active() ? 600 : 500,
-                    }}>
+                  <Button
+                    selected={active()}
+                    data-active={active() ? "true" : null}
+                    onClick={() => { setZoomScale(preset()); void save({ zoom_scale: preset() }, `Zoom set to ${Math.round(preset() * 100)}%`); }}
+                    class={styles.zoomPresetBtn}
+                  >
                     <text>{`${Math.round(preset() * 100)}%`}</text>
                   </Button>
                 );
@@ -116,22 +99,21 @@ export default function NiriOverviewSettingsPage(props: PluginSettingsProps): Na
           </row>
         </column>
 
-        <box ariaHidden style={{ width: "100%", height: "1px", backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 45%, transparent)" }} />
+        <box ariaHidden class={styles.divider} />
 
-        <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-          <text style={{ fontSize: "12px", fontWeight: 500 }}>IPC queue depth</text>
-          <row style={{ gap: "4px" }}>
+        <row class={styles.rowBetweenGap}>
+          <text class={styles.settingLabel}>IPC queue depth</text>
+          <row class={styles.queuePresetsRow}>
             <For each={QUEUE_PRESETS} keyed={depth => depth}>
               {depth => {
                 const active = () => queueDepth() === depth();
                 return (
-                  <Button selected={active()} onClick={() => { setQueueDepth(depth()); void save({ max_queue_depth: depth() }, `Queue depth set to ${depth()}`); }}
-                    style={{
-                      display: "flex", minHeight: "26px", padding: "2px 10px", borderRadius: "8px", alignItems: "center", justifyContent: "center",
-                      backgroundColor: active() ? primaryContainer : container,
-                      color: active() ? onPrimaryContainer : muted,
-                      fontFamily: "var(--font-mono)", fontSize: "11px", fontWeight: 500,
-                    }}>
+                  <Button
+                    selected={active()}
+                    data-active={active() ? "true" : null}
+                    onClick={() => { setQueueDepth(depth()); void save({ max_queue_depth: depth() }, `Queue depth set to ${depth()}`); }}
+                    class={styles.queuePresetBtn}
+                  >
                     <text>{`${depth()}`}</text>
                   </Button>
                 );
@@ -141,7 +123,7 @@ export default function NiriOverviewSettingsPage(props: PluginSettingsProps): Na
         </row>
 
         <Show when={savedNotice()}>
-          {notice => <text style={{ fontSize: "11px", color: primary }}>{notice()}</text>}
+          {notice => <text class={styles.savedNotice}>{notice()}</text>}
         </Show>
       </column>
     </column>

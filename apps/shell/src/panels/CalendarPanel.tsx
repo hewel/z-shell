@@ -1,35 +1,15 @@
-import { Button, For, Image, Show, createMemo, createSignal, onCleanup, type Accessor } from "@hewel/zgui";
+import { Button, For, Image, Show, createMemo, createSignal, cx, onCleanup, type Accessor } from "@hewel/zgui";
 import { M3Button, M3CardAction, M3InteractiveCard } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
 import { PANEL_MAX_HEIGHTS, buildMonthCalendarGrid, formatBarClock, formatFullDate, formatMonthYear, formatNotificationBody, resolveNotificationMediaLayout, splitNotificationActions, type NotificationItem } from "../topics.ts";
+import styles from "./CalendarPanel.module.css";
 
 const primary = "var(--color-primary)";
-const onPrimary = "var(--color-on-primary)";
-const primaryContainer = "var(--color-primary-container)";
 const onPrimaryContainer = "var(--color-on-primary-container)";
 const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
-const containerHigh = "var(--color-surface-container-high)";
-const containerHighest = "var(--color-surface-container-highest)";
-const card = { borderRadius: "16px", backgroundColor: containerHigh, padding: "12px", gap: "8px" } as const;
-const pill = {
-  display: "flex", borderRadius: "10px", minHeight: "30px", padding: "4px 10px",
-  flexShrink: 0, alignItems: "center", justifyContent: "center", backgroundColor: containerHighest,
-} as const;
-const imageTile = { width: "36px", height: "36px", borderRadius: "10px", flexShrink: 0 } as const;
-const previewFrame = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  width: "100%",
-  borderRadius: "10px",
-  overflow: "hidden",
-  backgroundColor: "var(--color-surface-container-lowest)",
-  border: "1px solid color-mix(in srgb, var(--color-outline-variant) 42%, transparent)",
-} as const;
-const gridCell = { display: "flex", flexBasis: "0px", flexGrow: 1, minWidth: "0px", height: "30px", alignItems: "center", justifyContent: "center" } as const;
 const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 const rowStarts = [0, 7, 14, 21, 28, 35] as const;
 
@@ -44,13 +24,14 @@ function NotificationRow(props: { item: Accessor<NotificationItem> }) {
   const formattedBody = createMemo(() => formatNotificationBody(item().body));
 
   const bodyContent = () => (
-    <row style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "10px", alignItems: "flex-start" }}>
-      <box testId={`cal-notif-leading-${item().id}`} style={{ position: "relative", width: "36px", height: "36px", flexShrink: 0 }}>
+    <row class={styles.notifBodyMain}>
+      <box testId={`cal-notif-leading-${item().id}`} class={styles.notifLeadingWrap}>
         <Show when={leading.src()} fallback={
-          <box testId={`cal-notif-fallback-${item().id}`} style={{
-            ...imageTile, display: "flex", alignItems: "center", justifyContent: "center",
-            backgroundColor: mediaLayout().fallbackKind === "image" ? primaryContainer : containerHighest,
-          }}>
+          <box
+            testId={`cal-notif-fallback-${item().id}`}
+            class={cx(styles.imageTile, styles.notifFallback)}
+            data-kind={mediaLayout().fallbackKind}
+          >
             <ShellIcon
               name={mediaLayout().fallbackKind === "image" ? "image" : "bell"}
               size={17}
@@ -58,43 +39,26 @@ function NotificationRow(props: { item: Accessor<NotificationItem> }) {
             />
           </box>
         }>
-          <box style={{ ...imageTile, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <box class={cx(styles.imageTile, styles.notifAvatarWrap)}>
             <Image
               testId={`cal-notif-avatar-${item().id}`}
               src={leading.src()}
-              style={{
-                width: "100%",
-                height: "100%",
-                minWidth: "0px",
-                minHeight: "0px",
-                maxWidth: "100%",
-                maxHeight: "100%",
-                borderRadius: "10px",
-                objectFit: "cover",
-              }}
+              class={styles.notifAvatarImg}
             />
           </box>
         </Show>
         <Show when={badge.src()}>
-          <box
-            testId={`cal-notif-badge-${item().id}`}
-            style={{
-              position: "absolute", right: "-3px", bottom: "-3px",
-              width: "16px", height: "16px", borderRadius: "999px", "--zgui-corner-shape": "none",
-              backgroundColor: containerHigh, border: `2px solid ${containerHigh}`,
-              overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center",
-            }}
-          >
-            <Image src={badge.src()} style={{ width: "100%", height: "100%", borderRadius: "999px", "--zgui-corner-shape": "none", objectFit: "cover" }} />
+          <box testId={`cal-notif-badge-${item().id}`} class={styles.notifAppBadge}>
+            <Image src={badge.src()} class={styles.notifAppBadgeImg} />
           </box>
         </Show>
       </box>
-      <column style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "3px" }}>
-        <text style={{ color: muted, fontSize: "11px" }}>{item().app_name}</text>
-        <text style={{ fontWeight: 600, fontSize: "13px" }}>{item().summary}</text>
+      <column class={styles.notifTextCol}>
+        <text class={styles.notifAppName}>{item().app_name}</text>
+        <text class={styles.notifSummary}>{item().summary}</text>
         <Show when={formattedBody()}>
           {body => (
-            <text testId={`cal-notif-body-${item().id}`} class="notification-body" style={{ color: muted, fontSize: "12px", lineHeight: "17px", maxHeight: "52px", overflow: "hidden" }}>{body()}</text>
+            <text testId={`cal-notif-body-${item().id}`} class={cx(styles.notifBody, "notification-body")}>{body()}</text>
           )}
         </Show>
       </column>
@@ -113,43 +77,36 @@ function NotificationRow(props: { item: Accessor<NotificationItem> }) {
             if (def) void invokePublic("notifications.invoke-action", { id: item().id, action_key: def.key });
           }
         : undefined}
-      style={{ borderRadius: "14px", backgroundColor: containerHigh, padding: "10px", gap: "8px" }}
+      class={styles.notifCard}
     >
-      <row style={{ gap: "10px", alignItems: "flex-start" }}>
+      <row class={styles.notifRow}>
         {bodyContent()}
-        <M3CardAction style={{ flexShrink: 0 }}>
-          <Button testId={`cal-notif-dismiss-${item().id}`} ariaLabel="Dismiss notification"
-            style={{ ...pill, width: "28px", padding: "0px" }}
-            onClick={() => { void invokePublic("notifications.dismiss", { id: item().id }); }}>
+        <M3CardAction class={styles.notifActionWrap}>
+          <Button
+            testId={`cal-notif-dismiss-${item().id}`}
+            ariaLabel="Dismiss notification"
+            class={cx(styles.pill, styles.iconBtn)}
+            onClick={() => { void invokePublic("notifications.dismiss", { id: item().id }); }}
+          >
             <ShellIcon name="close" size={14} color={muted} />
           </Button>
         </M3CardAction>
       </row>
       <Show when={preview.src()}>
-        <box testId={`cal-notif-preview-${item().id}`} style={{
-          ...previewFrame,
-          height: mediaLayout().previewFit === "contain" ? "132px" : "104px",
-        }}>
-          <Image src={preview.src()} style={{
-            width: "100%",
-            height: "100%",
-            minWidth: "0px",
-            minHeight: "0px",
-            maxWidth: "100%",
-            maxHeight: "100%",
-            borderRadius: "10px",
-            objectFit: mediaLayout().previewFit,
-          }} />
+        <box testId={`cal-notif-preview-${item().id}`} class={styles.notifPreviewFrame} data-fit={mediaLayout().previewFit}>
+          <Image src={preview.src()} class={styles.notifPreviewImg} data-fit={mediaLayout().previewFit} />
         </box>
       </Show>
       <Show when={actions().buttonActions.length > 0}>
-        <row style={{ flexWrap: "wrap", gap: "6px", paddingLeft: "46px" }}>
+        <row class={styles.notifActionsRow}>
           <For each={actions().buttonActions} keyed={action => action.key}>
             {action => (
               <M3CardAction>
-                <Button testId={`cal-notif-action-${item().id}-${action().key}`}
-                  style={{ ...pill, backgroundColor: "var(--color-secondary-container)", color: "var(--color-on-secondary-container)", fontSize: "11px" }}
-                  onClick={() => { void invokePublic("notifications.invoke-action", { id: item().id, action_key: action().key }); }}>
+                <Button
+                  testId={`cal-notif-action-${item().id}-${action().key}`}
+                  class={cx(styles.pill, styles.notifActionBtn)}
+                  onClick={() => { void invokePublic("notifications.invoke-action", { id: item().id, action_key: action().key }); }}
+                >
                   <text>{action().label}</text>
                 </Button>
               </M3CardAction>
@@ -191,62 +148,56 @@ export function CalendarPanel() {
   }
 
   return (
-    <column testId="panel-calendar" style={{
-      width: "100%", maxHeight: `${PANEL_MAX_HEIGHTS.calendar}px`, overflow: "hidden",
-      padding: "14px", gap: "12px", flexDirection: "column",
-      backgroundColor: "transparent", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
-    }}>
-      <column style={{ gap: "12px", flexShrink: 0 }}>
-        <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-          <column style={{ gap: "2px" }}>
-            <row style={{ alignItems: "baseline", gap: "4px" }}>
-              <text testId="cal-clock-hm" style={{
-                fontSize: "44px", fontWeight: 400, lineHeight: "50px", letterSpacing: "-0.02em",
-                fontVariantNumeric: "tabular-nums", color: primary,
-              }}>
+    <column testId="panel-calendar" class={styles.panel} style={{ maxHeight: `${PANEL_MAX_HEIGHTS.calendar}px` }}>
+      <column class={styles.topSection}>
+        <row class={styles.clockHeaderRow}>
+          <column class={styles.clockCol}>
+            <row class={styles.clockRow}>
+              <text testId="cal-clock-hm" class={styles.clockHm}>
                 {`${clock().hours}:${clock().minutes}`}
               </text>
-              <text data-tabular="true" style={{
-                fontFamily: "var(--font-mono)", fontSize: "16px", color: muted, fontVariantNumeric: "tabular-nums",
-              }}>
+              <text data-tabular="true" class={styles.clockSeconds}>
                 {clock().seconds}
               </text>
             </row>
-            <text style={{ color: muted, fontSize: "13px" }}>{formatFullDate(midnight())}</text>
+            <text class={styles.dateText}>{formatFullDate(midnight())}</text>
           </column>
-          <Button testId="cal-dnd-toggle" checked={dnd()} onClick={() => { void invokePublic("notifications.set-dnd", { dnd: !dnd() }); }}
-            style={{
-              ...pill, borderRadius: "10px", flexDirection: "row", gap: "6px", padding: "5px 11px",
-              backgroundColor: dnd() ? "var(--color-primary-container)" : containerHigh,
-              border: dnd() ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
-              color: dnd() ? "var(--color-on-primary-container)" : onSurface, fontSize: "12px", fontWeight: 500,
-            }}>
-            <ShellIcon name="sleep" size={14} filled={dnd()} color={dnd() ? "var(--color-on-primary-container)" : onSurface} />
+          <Button
+            testId="cal-dnd-toggle"
+            checked={dnd()}
+            class={styles.dndToggle}
+            data-active={dnd() ? "true" : "false"}
+            onClick={() => { void invokePublic("notifications.set-dnd", { dnd: !dnd() }); }}
+          >
+            <ShellIcon name="sleep" size={14} filled={dnd()} color={dnd() ? onPrimaryContainer : onSurface} />
             <text>Do Not Disturb</text>
           </Button>
         </row>
-        <column style={card}>
-          <row style={{ alignItems: "center", gap: "6px" }}>
-            <text testId="cal-month-title" style={{ flexGrow: 1, minWidth: "0px", fontSize: "15px", fontWeight: 600 }}>
+        <column class={styles.calendarCard}>
+          <row class={styles.monthHeaderRow}>
+            <text testId="cal-month-title" class={styles.monthTitle}>
               {formatMonthYear(viewYear(), viewMonth())}
             </text>
-            <Button testId="cal-today" style={{
-              ...pill, backgroundColor: "var(--color-secondary-container)", color: "var(--color-on-secondary-container)",
-              fontSize: "11px", fontWeight: 600,
-            }} onClick={() => {
-              setViewYear(today().getFullYear());
-              setViewMonth(today().getMonth());
-            }}><text>Today</text></Button>
-            <Button testId="cal-prev-month" ariaLabel="Previous month" style={{ ...pill, width: "28px", padding: "0px" }} onClick={() => moveMonth(-1)}>
+            <Button
+              testId="cal-today"
+              class={cx(styles.pill, styles.todayBtn)}
+              onClick={() => {
+                setViewYear(today().getFullYear());
+                setViewMonth(today().getMonth());
+              }}
+            >
+              <text>Today</text>
+            </Button>
+            <Button testId="cal-prev-month" ariaLabel="Previous month" class={cx(styles.pill, styles.iconBtn)} onClick={() => moveMonth(-1)}>
               <ShellIcon name="chevronLeft" size={14} />
             </Button>
-            <Button testId="cal-next-month" ariaLabel="Next month" style={{ ...pill, width: "28px", padding: "0px" }} onClick={() => moveMonth(1)}>
+            <Button testId="cal-next-month" ariaLabel="Next month" class={cx(styles.pill, styles.iconBtn)} onClick={() => moveMonth(1)}>
               <ShellIcon name="chevronRight" size={14} />
             </Button>
           </row>
-          <column style={{ gap: "2px" }}>
+          <column class={styles.calendarGrid}>
             <row>
-              <For each={weekdays} keyed={false}>{day => <box style={gridCell}><text style={{ color: muted, fontSize: "11px", fontWeight: 500 }}>{day()}</text></box>}</For>
+              <For each={weekdays} keyed={false}>{day => <box class={styles.gridCell}><text class={styles.weekdayLabel}>{day()}</text></box>}</For>
             </row>
             <For each={rowStarts} keyed={false}>
               {start => (
@@ -255,14 +206,8 @@ export function CalendarPanel() {
                     {(_, index) => {
                       const cell = () => grid()[start() + index]!;
                       return (
-                        <box testId={cell().isToday ? "cal-today-cell" : null} style={{ ...gridCell, opacity: cell().inMonth ? 1 : 0.38 }}>
-                          <box style={{
-                            display: "flex", width: "28px", height: "28px", borderRadius: "10px", alignItems: "center", justifyContent: "center",
-                            backgroundColor: cell().isToday ? primary : "transparent",
-                            color: cell().isToday ? onPrimary : onSurface,
-                            fontWeight: cell().isToday ? 600 : 400,
-                            fontVariantNumeric: "tabular-nums",
-                          }}>
+                        <box testId={cell().isToday ? "cal-today-cell" : null} class={styles.gridCell} data-muted={!cell().inMonth ? "true" : "false"}>
+                          <box class={styles.dayBadge} data-today={cell().isToday ? "true" : "false"}>
                             <text>{cell().day}</text>
                           </box>
                         </box>
@@ -274,39 +219,30 @@ export function CalendarPanel() {
             </For>
           </column>
         </column>
-        <box ariaHidden style={{ width: "100%", height: "1px", backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 50%, transparent)" }} />
-        <row style={{ alignItems: "center", gap: "8px" }}>
-          <text style={{ fontSize: "15px", fontWeight: 600 }}>Notifications</text>
-          <text testId="cal-notif-count" data-tabular="true" style={{
-            borderRadius: "999px", "--zgui-corner-shape": "none", padding: "2px 8px", fontSize: "11px", fontWeight: 600,
-            fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums",
-            backgroundColor: "var(--color-secondary-container)", color: "var(--color-on-secondary-container)",
-          }}>
+        <box ariaHidden class={styles.divider} />
+        <row class={styles.notifHeaderRow}>
+          <text class={styles.notifHeading}>Notifications</text>
+          <text testId="cal-notif-count" data-tabular="true" class={styles.notifCount}>
             {history().length}
           </text>
           <M3Button
             testId="cal-clear-all"
             variant="text"
             size="sm"
-            style={{ marginLeft: "auto" }}
+            class={styles.clearAllBtn}
             onClick={() => { void invokePublic("notifications.clear", {}); }}
           >
             <text>Clear all</text>
           </M3Button>
         </row>
       </column>
-      <scroll testId="cal-notif-scroll" role="scrollView" ariaLabel="Notifications list" style={{
-        flexGrow: 1, flexShrink: 1, minHeight: "0px", width: "100%", overflow: "hidden auto",
-      }}>
-        <column style={{ gap: "8px", paddingBottom: "2px" }}>
+      <scroll testId="cal-notif-scroll" role="scrollView" ariaLabel="Notifications list" class={styles.notifScroll}>
+        <column class={styles.notifList}>
           <Show when={history().length > 0} fallback={
-            <column testId="cal-notif-empty" style={{
-              width: "100%", borderRadius: "14px", backgroundColor: containerHigh,
-              padding: "24px 16px", alignItems: "center", justifyContent: "center", gap: "6px",
-            }}>
+            <column testId="cal-notif-empty" class={styles.notifEmpty}>
               <ShellIcon name="bell" size={22} color={muted} />
-              <text style={{ fontSize: "13px", fontWeight: 600, color: onSurface }}>All caught up</text>
-              <text style={{ fontSize: "12px", color: muted }}>No unread notifications</text>
+              <text class={styles.notifEmptyTitle}>All caught up</text>
+              <text class={styles.notifEmptySubtitle}>No unread notifications</text>
             </column>
           }>
             <For each={history()} keyed={item => item.id}>{item => <NotificationRow item={item} />}</For>

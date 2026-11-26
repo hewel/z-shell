@@ -1,4 +1,4 @@
-import { For, Show, createMemo, type NativeChild } from "@hewel/zgui";
+import { For, Show, createMemo, cx, type NativeChild } from "@hewel/zgui";
 import { M3IconButton } from "@z-shell/sdk/primitives";
 import { AreaLineChart } from "../charts/TelemetryCharts.tsx";
 import { ShellIcon } from "../icons.tsx";
@@ -17,14 +17,10 @@ import {
   selectPrimaryGpu,
   selectTelemetryHistoryWindow,
 } from "../topics.ts";
+import styles from "./SystemMonitorPanel.module.css";
 
 const primary = "var(--color-primary)";
-const primaryContainer = "var(--color-primary-container)";
 const onSurface = "var(--color-on-surface)";
-const muted = "var(--color-on-surface-variant)";
-const containerHigh = "var(--color-surface-container-high)";
-const containerHighest = "var(--color-surface-container-highest)";
-const clipped = { minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
 
 interface HardwareTileData {
   readonly id: string;
@@ -172,43 +168,28 @@ export function SystemMonitorPanel(): NativeChild {
   });
 
   return (
-    <scroll testId="panel-system-monitor" style={{
-      width: "100%",
-      maxHeight: `${PANEL_MAX_HEIGHTS["system-monitor"]}px`,
-      overflow: "hidden auto",
-      backgroundColor: "transparent",
-      color: onSurface,
-      fontFamily: "var(--font-sans)",
-      fontSize: "13px",
-    }}>
-      <column style={{ padding: "14px", gap: "10px", width: "100%" }}>
+    <scroll
+      testId="panel-system-monitor"
+      class={styles.panelScroll}
+      style={{ maxHeight: `${PANEL_MAX_HEIGHTS["system-monitor"]}px` }}
+    >
+      <column class={styles.panelBody}>
         {/* Header */}
-        <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", width: "100%" }}>
-          <column style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "2px" }}>
-            <text role="heading" style={{ fontSize: "20px", fontWeight: 600, lineHeight: "26px" }}>
+        <row class={styles.headerRow}>
+          <column class={styles.headerTitleCol}>
+            <text role="heading" class={styles.headerTitle}>
               System monitor
             </text>
-            <text testId="sysmon-popover-subtitle" data-tabular="true" style={{
-              ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: "15px", color: muted, fontVariantNumeric: "tabular-nums",
-            }}>
+            <text testId="sysmon-popover-subtitle" data-tabular="true" class={cx(styles.clipped, styles.subtitle)}>
               {subtitle()}
             </text>
           </column>
-          <row style={{ alignItems: "center", gap: "8px", flexShrink: 0 }}>
+          <row class={styles.headerActions}>
             <Show when={pollLabel()}>
               {cadence => (
-                <row testId="sysmon-poll-pill" style={{
-                  alignItems: "center", gap: "6px", height: "28px", padding: "0 10px",
-                  borderRadius: "999px", "--zgui-corner-shape": "none",
-                  backgroundColor: containerHigh,
-                }}>
-                  <box ariaHidden style={{
-                    width: "6px", height: "6px", borderRadius: "999px", "--zgui-corner-shape": "none",
-                    backgroundColor: primary, flexShrink: 0,
-                  }} />
-                  <text data-tabular="true" style={{
-                    fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: "14px", color: muted, fontVariantNumeric: "tabular-nums",
-                  }}>
+                <row testId="sysmon-poll-pill" class={styles.pollPill}>
+                  <box ariaHidden class={styles.pollDot} />
+                  <text data-tabular="true" class={styles.pollText}>
                     {cadence()}
                   </text>
                 </row>
@@ -227,25 +208,18 @@ export function SystemMonitorPanel(): NativeChild {
         </row>
 
         {/* CPU Card */}
-        <column testId="sysmon-cpu-card" style={{
-          borderRadius: "16px", backgroundColor: containerHigh, padding: "12px", gap: "8px", width: "100%",
-        }}>
-          <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", width: "100%" }}>
-            <row style={{ alignItems: "center", gap: "6px", flexGrow: 1, flexBasis: "0px", minWidth: "0px" }}>
+        <column testId="sysmon-cpu-card" class={styles.card}>
+          <row class={styles.cardHeaderRow}>
+            <row class={styles.cpuLabelRow}>
               <ShellIcon name="cpu" size={15} color={primary} />
-              <text style={{ fontSize: "13px", fontWeight: 600, flexShrink: 0 }}>CPU</text>
+              <text class={styles.cardTitle}>CPU</text>
               <Show when={cpuMeta().length > 0}>
-                <text data-tabular="true" style={{
-                  ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: "15px", color: muted, fontVariantNumeric: "tabular-nums",
-                }}>
+                <text data-tabular="true" class={cx(styles.clipped, styles.monoMeta)}>
                   {cpuMeta()}
                 </text>
               </Show>
             </row>
-            <text testId="sysmon-cpu-percent" data-tabular="true" style={{
-              fontFamily: "var(--font-mono)", fontSize: "20px", fontWeight: 600, lineHeight: "24px",
-              color: primary, flexShrink: 0, fontVariantNumeric: "tabular-nums",
-            }}>
+            <text testId="sysmon-cpu-percent" data-tabular="true" class={styles.cpuPercent}>
               {cpuPctLabel()}
             </text>
           </row>
@@ -274,59 +248,47 @@ export function SystemMonitorPanel(): NativeChild {
             const cachePct = () => breakdown().cachePercent;
             const cacheBytes = () => breakdown().cacheBytes;
             return (
-              <column testId="sysmon-memory-card" style={{
-                borderRadius: "16px", backgroundColor: containerHigh, padding: "12px", gap: "8px", width: "100%",
-              }}>
-                <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", width: "100%" }}>
-                  <row style={{ alignItems: "baseline", gap: "8px", flexGrow: 1, flexBasis: "0px", minWidth: "0px" }}>
-                    <text style={{ fontSize: "13px", fontWeight: 600, flexShrink: 0 }}>Memory</text>
-                    <text data-tabular="true" style={{
-                      ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: "15px", color: muted, fontVariantNumeric: "tabular-nums",
-                    }}>
+              <column testId="sysmon-memory-card" class={styles.card}>
+                <row class={styles.cardHeaderRow}>
+                  <row class={styles.memoryTitleRow}>
+                    <text class={styles.cardTitle}>Memory</text>
+                    <text data-tabular="true" class={cx(styles.clipped, styles.monoMeta)}>
                       {`${(breakdown().usedBytes / 1024 ** 3).toFixed(1)} / ${formatBytesDecimalGB(breakdown().totalBytes, 1)}`}
                     </text>
                   </row>
-                  <text testId="sysmon-memory-percent" data-tabular="true" style={{
-                    fontFamily: "var(--font-mono)", fontSize: "14px", fontWeight: 600, lineHeight: "18px",
-                    color: onSurface, flexShrink: 0, fontVariantNumeric: "tabular-nums",
-                  }}>
+                  <text testId="sysmon-memory-percent" data-tabular="true" class={styles.memoryPercent}>
                     {`${Math.round(breakdown().usedPercent)}%`}
                   </text>
                 </row>
 
                 {/* Non-overlapping Active + Cache segmented bar */}
-                <row ariaLabel="Memory usage breakdown" style={{
-                  width: "100%", height: "8px", borderRadius: "999px", "--zgui-corner-shape": "none",
-                  backgroundColor: containerHighest, overflow: "hidden", gap: "2px",
-                }}>
+                <row ariaLabel="Memory usage breakdown" class={styles.memoryBarTrack}>
                   <Show when={activePct() > 0.5}>
-                    <box data-percent-fill="true" ariaHidden style={{
-                      width: `${activePct().toFixed(2)}%`, height: "100%",
-                      borderRadius: "999px", "--zgui-corner-shape": "none",
-                      backgroundColor: primary,
-                    }} />
+                    <box
+                      data-percent-fill="true"
+                      ariaHidden
+                      class={styles.memoryBarActive}
+                      style={{ width: `${activePct().toFixed(2)}%` }}
+                    />
                   </Show>
                   <Show when={cachePct() > 0.5}>
-                    <box data-percent-fill="true" ariaHidden style={{
-                      width: `${cachePct().toFixed(2)}%`, height: "100%",
-                      borderRadius: "999px", "--zgui-corner-shape": "none",
-                      backgroundColor: primaryContainer,
-                    }} />
+                    <box
+                      data-percent-fill="true"
+                      ariaHidden
+                      class={styles.memoryBarCache}
+                      style={{ width: `${cachePct().toFixed(2)}%` }}
+                    />
                   </Show>
                 </row>
 
-                <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", width: "100%" }}>
-                  <text data-tabular="true" style={{
-                    ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: "15px", color: muted, fontVariantNumeric: "tabular-nums",
-                  }}>
+                <row class={styles.cardHeaderRow}>
+                  <text data-tabular="true" class={cx(styles.clipped, styles.monoMeta)}>
                     {cacheBytes() !== null
                       ? `Active ${formatBytesShort(breakdown().usedBytes, true)} · Cache ${formatBytesShort(cacheBytes(), true)}`
                       : `Active ${formatBytesShort(breakdown().usedBytes, true)} · Free ${formatBytesShort(breakdown().availableBytes, true)}`}
                   </text>
                   <Show when={showSwap()}>
-                    <text data-tabular="true" style={{
-                      fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: "15px", color: muted, flexShrink: 0, fontVariantNumeric: "tabular-nums",
-                    }}>
+                    <text data-tabular="true" class={styles.swapText}>
                       {`Swap ${(swap()!.used_bytes / 1024 ** 3).toFixed(1)} / ${(swap()!.total_bytes / 1024 ** 3).toFixed(1)}G`}
                     </text>
                   </Show>
@@ -338,32 +300,26 @@ export function SystemMonitorPanel(): NativeChild {
 
         {/* Dynamic 2x2 Hardware Grid */}
         <Show when={hardwareRows().length > 0}>
-          <column testId="sysmon-hardware-grid" style={{ gap: "8px", width: "100%" }}>
+          <column testId="sysmon-hardware-grid" class={styles.hardwareGrid}>
             <For each={hardwareRows()} keyed={row => row.map(t => t.id).join("-")}>
               {row => (
-                <row style={{ gap: "8px", width: "100%" }}>
+                <row class={styles.hardwareRow}>
                   <For each={row()} keyed={tile => tile.id}>
                     {tile => (
-                      <column testId={`sysmon-tile-${tile().id}`} style={{
-                        flexGrow: 1, flexBasis: "0px", minWidth: "0px",
-                        borderRadius: "14px", backgroundColor: containerHigh,
-                        padding: "10px 12px", gap: "4px",
-                      }}>
-                        <row style={{ alignItems: "center", justifyContent: "space-between", gap: "6px", width: "100%" }}>
-                          <text style={{ fontSize: "12px", fontWeight: 600, color: onSurface, flexShrink: 0 }}>
+                      <column testId={`sysmon-tile-${tile().id}`} class={styles.hardwareTile}>
+                        <row class={styles.tileHeaderRow}>
+                          <text class={styles.tileTitle}>
                             {tile().title}
                           </text>
-                          <text data-tabular="true" style={{
-                            ...clipped, fontFamily: "var(--font-mono)", fontSize: "12px", fontWeight: 600,
-                            lineHeight: "16px", color: tile().accentValue ? primary : onSurface, fontVariantNumeric: "tabular-nums",
-                          }}>
+                          <text
+                            data-tabular="true"
+                            class={cx(styles.clipped, styles.tileValue)}
+                            data-accent={tile().accentValue ? "true" : "false"}
+                          >
                             {tile().value}
                           </text>
                         </row>
-                        <text data-tabular="true" style={{
-                          ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: "15px",
-                          color: muted, fontVariantNumeric: "tabular-nums",
-                        }}>
+                        <text data-tabular="true" class={cx(styles.clipped, styles.monoMeta)}>
                           {tile().detail}
                         </text>
                       </column>

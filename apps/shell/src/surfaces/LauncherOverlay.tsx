@@ -1,15 +1,14 @@
-import { Button, For, Image, LayerSurface, Show, TextField, createEffect, createMemo, createSignal, flush, focus, onCleanup, scrollIntoView, type Accessor, type NativeChild, type NativeKeyEvent, type NativeNode } from "@hewel/zgui";
+import { Button, For, Image, LayerSurface, Show, TextField, createEffect, createMemo, createSignal, cx, flush, focus, onCleanup, scrollIntoView, type Accessor, type NativeChild, type NativeKeyEvent, type NativeNode } from "@hewel/zgui";
 import { createVirtualFocus } from "@hewel/zgui/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
 import { SPRING_EPSILON, createM3Spring, createRetainedPresence, dialogMotionStyle, scrimBackdrop, useMotionScheme, type M3Spring } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { resolveActiveMonitor, resolveMonitorLogicalSize, type LauncherItem, type LauncherQueryResponse } from "../topics.ts";
+import styles from "./LauncherOverlay.module.css";
 
 const columns = 6;
-const iconTile = { width: "44px", height: "44px", flexShrink: 0, borderRadius: "10px" } as const;
 const iconTints = ["primary", "secondary", "tertiary"] as const;
-const clipped = { maxWidth: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
 
 function LauncherTile(props: {
   item: Accessor<LauncherItem>;
@@ -28,33 +27,30 @@ function LauncherTile(props: {
   const tint = () => iconTints[(letter() ?? 0) % iconTints.length];
 
   return (
-    <Button ref={props.registerNode} testId={`launcher-item-${item().provider_id}-${item().item_id}`} tabIndex={-1}
-      selected={props.selected} data-selected={props.selected ? "true" : null} onClick={() => props.activate(item())} style={{
-        position: "relative", zIndex: 1,
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        width: "96px", height: "94px", flexShrink: 0, borderRadius: "14px", padding: "8px",
-        backgroundColor: "transparent",
-        border: "1px solid transparent",
-        color: props.selected ? "var(--color-on-primary-container)" : "var(--color-on-surface)",
-      }}>
-      <column data-press-visual="card" style={{ alignItems: "center", justifyContent: "center", gap: "6px", maxWidth: "100%" }}>
+    <Button
+      ref={props.registerNode}
+      testId={`launcher-item-${item().provider_id}-${item().item_id}`}
+      tabIndex={-1}
+      selected={props.selected}
+      data-selected={props.selected ? "true" : null}
+      onClick={() => props.activate(item())}
+      class={styles.tile}
+    >
+      <column data-press-visual="card" class={styles.tileInner}>
         <Show when={src()} fallback={
-          <box style={{
-            ...iconTile, display: "flex", alignItems: "center", justifyContent: "center",
-            backgroundColor: props.selected ? "var(--color-surface-container-highest)" : `var(--color-${tint()}-container)`,
-            color: props.selected ? "var(--color-on-surface)" : `var(--color-on-${tint()}-container)`,
-            border: props.selected
-              ? "1px solid color-mix(in srgb, var(--color-outline-variant) 75%, transparent)"
-              : "1px solid color-mix(in srgb, var(--color-outline-variant) 28%, transparent)",
-          }}>
-            <text style={{ fontSize: "20px", fontWeight: 600 }}>{initial()}</text>
+          <box
+            class={styles.iconFallback}
+            data-tint={props.selected ? null : tint()}
+            data-selected={props.selected ? "true" : "false"}
+          >
+            <text class={styles.iconInitial}>{initial()}</text>
           </box>
         }>
-          {image => <Image src={image()} style={{ ...iconTile, objectFit: "contain" }} />}
+          {image => <Image src={image()} class={styles.iconImage} />}
         </Show>
-        <text style={{ ...clipped, fontSize: "12px", lineHeight: "15px", fontWeight: props.selected ? 600 : 500 }}>{item().title}</text>
+        <text data-selected={props.selected ? "true" : "false"} class={styles.tileTitle}>{item().title}</text>
         <Show when={item().provider_id !== "desktop"}>
-          <text style={{ ...clipped, fontSize: "10px", lineHeight: "12px", color: "var(--color-on-surface-variant)" }}>{item().provider_id}</text>
+          <text class={styles.tileProvider}>{item().provider_id}</text>
         </Show>
       </column>
     </Button>
@@ -144,70 +140,64 @@ function LauncherContent(props: {
   const highlightOpacity = createM3Spring(() => (hasSelection() ? 1 : 0), "fastEffects", { scheme });
 
   return (
-    <box testId="launcher-backdrop" inert={props.inert} onClick={dismiss} style={{
-      position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      backgroundColor: scrimBackdrop(45, props.opacity(), dark()),
-    }}>
-      <box testId="launcher-card" role="dialog" ariaLabel="Launcher" ariaModal onClick={event => event.stopPropagation()} style={{
-        display: "flex", flexDirection: "column", width: "652px", height: "410px", borderRadius: "22px",
-        backgroundColor: "var(--color-surface-container)",
-        border: "1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
-        boxShadow: "var(--shadow-level-3)",
-        padding: "18px", gap: "14px", fontFamily: "var(--font-sans)", color: "var(--color-on-surface)",
-        ...dialogMotionStyle(props.spatial(), { opacity: props.opacity(), reduced: scheme() === "reduced", fromScale: 0.95, fromY: 10 }),
-      }}>
-        <row testId="launcher-search-bar" data-composite-input="true" style={{
-          width: "100%", height: "46px", borderRadius: "14px", padding: searchFocused() ? "0 11px 0 13px" : "0 12px 0 14px", gap: "10px",
-          alignItems: "center", flexShrink: 0, backgroundColor: "var(--color-surface-container-high)",
-          border: searchFocused()
-            ? "2px solid var(--color-primary)"
-            : "1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent)",
-        }}>
+    <box
+      testId="launcher-backdrop"
+      inert={props.inert}
+      onClick={dismiss}
+      class={styles.backdrop}
+      style={{ backgroundColor: scrimBackdrop(45, props.opacity(), dark()) }}
+    >
+      <box
+        testId="launcher-card"
+        role="dialog"
+        ariaLabel="Launcher"
+        ariaModal
+        onClick={event => event.stopPropagation()}
+        class={styles.card}
+        style={{ ...dialogMotionStyle(props.spatial(), { opacity: props.opacity(), reduced: scheme() === "reduced", fromScale: 0.95, fromY: 10 }) }}
+      >
+        <row
+          testId="launcher-search-bar"
+          data-composite-input="true"
+          data-focused={searchFocused() ? "true" : "false"}
+          class={styles.searchBar}
+        >
           <ShellIcon name="search" size={20} color={searchFocused() ? "var(--color-primary)" : "var(--color-on-surface-variant)"} />
-          <TextField testId="launcher-search" class="shell-composite-field" placeholder="Search apps" value={query()}
+          <TextField
+            testId="launcher-search"
+            class={cx(styles.searchField, "shell-composite-field")}
+            placeholder="Search apps"
+            value={query()}
             ariaActiveDescendant={virtualFocus.activeNode()}
             onInput={event => setQuery(event.value)}
-            onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)}
-            onKeyDown={handleKeyDown} ref={node => focus(node)} style={{
-              flexGrow: 1, flexBasis: "0px", minWidth: "0px", height: "38px",
-              padding: "9px 0", lineHeight: "20px", backgroundColor: "transparent",
-              color: "var(--color-on-surface)", fontSize: "14px",
-            }} />
-          <box testId="launcher-esc-badge" ariaHidden style={{
-            display: "flex", alignItems: "center", justifyContent: "center",
-            height: "22px", padding: "0 7px", borderRadius: "6px", flexShrink: 0,
-            backgroundColor: "var(--color-surface-container-highest)",
-          }}>
-            <text testId="launcher-esc-text" style={{
-              fontFamily: "var(--font-mono)", fontSize: "10px", lineHeight: "12px", fontWeight: 500,
-              color: "var(--color-on-surface-variant)",
-            }}>
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
+            onKeyDown={handleKeyDown}
+            ref={node => focus(node)}
+          />
+          <box testId="launcher-esc-badge" ariaHidden class={styles.escBadge}>
+            <text testId="launcher-esc-text" class={styles.escText}>
               Esc
             </text>
           </box>
         </row>
-        <scroll style={{ flexGrow: 1, width: "100%", overflow: "hidden auto" }}>
+        <scroll class={styles.resultsScroll}>
           <Show when={items().length > 0 || results() === undefined} fallback={
-            <column testId="launcher-empty" style={{
-              width: "100%", minHeight: "220px", borderRadius: "16px",
-              backgroundColor: "var(--color-surface-container-high)",
-              padding: "24px 16px", alignItems: "center", justifyContent: "center", gap: "6px",
-            }}>
+            <column testId="launcher-empty" class={styles.emptyState}>
               <ShellIcon name="search" size={22} color="var(--color-on-surface-variant)" />
-              <text style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-on-surface)" }}>No matching apps</text>
-              <text style={{ fontSize: "12px", color: "var(--color-on-surface-variant)" }}>Press Esc to clear search</text>
+              <text class={styles.emptyTitle}>No matching apps</text>
+              <text class={styles.emptyHint}>Press Esc to clear search</text>
             </column>
           }>
-            <row style={{ position: "relative", width: "100%", flexWrap: "wrap", gap: "6px", justifyContent: "flex-start" }}>
-              <box ariaHidden style={{
-                position: "absolute", top: "0px", left: "0px", width: "96px", height: "94px", borderRadius: "14px",
-                backgroundColor: "var(--color-primary-container)",
-                border: "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)",
-                pointerEvents: "none",
-                opacity: Math.max(0, Math.min(1, highlightOpacity())),
-                transform: `translate(${highlightX().toFixed(2)}px, ${highlightY().toFixed(2)}px)`,
-              }} />
+            <row class={styles.grid}>
+              <box
+                ariaHidden
+                class={styles.highlight}
+                style={{
+                  opacity: Math.max(0, Math.min(1, highlightOpacity())),
+                  transform: `translate(${highlightX().toFixed(2)}px, ${highlightY().toFixed(2)}px)`,
+                }}
+              />
               <For each={items()} keyed={itemKey}>
                 {item => (
                   <LauncherTile
@@ -221,11 +211,11 @@ function LauncherContent(props: {
             </row>
           </Show>
         </scroll>
-        <row style={{ justifyContent: "space-between", alignItems: "center", paddingTop: "2px", flexShrink: 0 }}>
-          <text style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--color-on-surface-variant)" }}>
+        <row class={styles.footer}>
+          <text class={styles.footerText}>
             ↑↓←→ Move · Enter Launch · Esc Close
           </text>
-          <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--color-on-surface-variant)", fontVariantNumeric: "tabular-nums" }}>
+          <text data-tabular="true" class={styles.footerCount}>
             {items().length} apps
           </text>
         </row>

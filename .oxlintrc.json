@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["eslint", "typescript", "oxc"],
-  "jsPlugins": ["./tools/oxlint-design-plugin.mjs", "./node_modules/@hewel/zgui/oxlint/plugin.mjs"],
+  "jsPlugins": ["./tools/oxlint-design-plugin.mjs", "./node_modules/@hewel/zgui/dist/oxlint/plugin.js"],
   "ignorePatterns": [
     "**/node_modules/**",
     "**/dist/**",
@@ -60,7 +60,10 @@
         "zgui/no-direct-bridge": "error",
         "zgui/no-cleanup-in-ref": "error",
         "zgui/no-top-level-service-call": "error",
-        "zgui/no-solid-web-imports": "error"
+        "zgui/no-solid-web-imports": "error",
+        "zgui/no-getter-object-spread": "error",
+        "zgui/no-static-component-stylesheet": "error",
+        "zgui/prefer-stylesheet": "error"
       }
     },
     {

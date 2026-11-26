@@ -1,4 +1,4 @@
-import { Button, For, createEffect, createMemo, createSignal, type NativeChild } from "@hewel/zgui";
+import { Button, For, createEffect, createMemo, createSignal, cx, type NativeChild } from "@hewel/zgui";
 import { M3CardAction, M3InteractiveCard, M3SegmentedControl, M3Slider } from "@z-shell/sdk/primitives";
 import { ShellIcon } from "../../icons.tsx";
 import { useShellStore } from "../../store.ts";
@@ -10,19 +10,8 @@ import {
   type BarPosition,
   type BarStyle,
 } from "../../topics.ts";
-import {
-  SettingsSwitch,
-  clipped,
-  container,
-  containerHigh,
-  containerHighest,
-  grow,
-  muted,
-  onPrimaryContainer,
-  onSurface,
-  primary,
-  primaryContainer,
-} from "./shared.tsx";
+import styles from "./BarLayoutPane.module.css";
+import { SettingsSwitch, muted, primary } from "./shared.tsx";
 
 const BAR_STYLES: readonly { readonly id: BarStyle; readonly label: string; readonly testId: string }[] = [
   { id: "floating", label: "Floating islands", testId: "settings-bar-style-floating" },
@@ -87,11 +76,11 @@ export function BarLayoutPane(props?: { readonly onOpenTrayRules?: () => void })
   const imeEnabled = () => imeSettings()?.mode !== "disabled";
 
   return (
-    <column testId="settings-bar-pane" style={{ gap: "10px", width: "100%" }}>
-      <column style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "12px 14px", gap: "10px" }}>
-        <row style={{ gap: "12px", width: "100%" }}>
-          <column style={{ ...grow, gap: "6px" }}>
-            <text style={{ fontSize: "12px", fontWeight: 600, color: onSurface }}>Bar style</text>
+    <column testId="settings-bar-pane" class={cx(styles.pane)}>
+      <column class={cx(styles.topCard)}>
+        <row class={cx(styles.splitRow)}>
+          <column class={cx(styles.fieldCol)}>
+            <text class={cx(styles.fieldLabel)}>Bar style</text>
             <M3SegmentedControl
               ariaLabel="Bar style"
               options={BAR_STYLES}
@@ -100,8 +89,8 @@ export function BarLayoutPane(props?: { readonly onOpenTrayRules?: () => void })
             />
           </column>
 
-          <column style={{ ...grow, gap: "6px" }}>
-            <text style={{ fontSize: "12px", fontWeight: 600, color: onSurface }}>Screen edge</text>
+          <column class={cx(styles.fieldCol)}>
+            <text class={cx(styles.fieldLabel)}>Screen edge</text>
             <M3SegmentedControl
               ariaLabel="Screen edge"
               options={BAR_POSITIONS}
@@ -111,37 +100,35 @@ export function BarLayoutPane(props?: { readonly onOpenTrayRules?: () => void })
           </column>
         </row>
 
-        <box ariaHidden style={{ width: "100%", height: "1px", backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 45%, transparent)" }} />
+        <box ariaHidden class={cx(styles.divider)} />
 
-        <column style={{ gap: "6px" }}>
-          <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-            <row style={{ alignItems: "baseline", gap: "8px" }}>
-              <text style={{ fontSize: "13px", fontWeight: 600 }}>Outer &amp; popover gaps</text>
-              <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "12px", fontWeight: 600, color: primary, fontVariantNumeric: "tabular-nums" }}>
+        <column class={cx(styles.gapsSection)}>
+          <row class={cx(styles.gapsHeaderRow)}>
+            <row class={cx(styles.gapsTitleRow)}>
+              <text class={cx(styles.sectionTitle)}>Outer &amp; popover gaps</text>
+              <text data-tabular="true" class={cx(styles.gapsValue)}>
                 {gaps()} px
               </text>
             </row>
-            <row style={{ gap: "4px" }}>
+            <row class={cx(styles.presetsRow)}>
               <For each={GAP_PRESETS} keyed={v => v}>
                 {preset => {
                   const active = () => gaps() === preset();
                   return (
-                    <Button selected={active()} onClick={() => patchBar({ gaps: preset() })} style={{
-                      display: "flex", minWidth: "28px", minHeight: "24px", padding: "0 8px", borderRadius: "8px",
-                      alignItems: "center", justifyContent: "center",
-                      backgroundColor: active() ? primaryContainer : container,
-                      border: active() ? "1px solid color-mix(in srgb, var(--color-primary) 35%, transparent)" : "1px solid transparent",
-                      color: active() ? onPrimaryContainer : muted,
-                      fontFamily: "var(--font-mono)", fontSize: "11px", fontWeight: active() ? 600 : 500,
-                    }}>
-                      <text data-tabular="true" style={{ fontVariantNumeric: "tabular-nums" }}>{preset()}</text>
+                    <Button
+                      selected={active()}
+                      data-active={active() ? "true" : null}
+                      onClick={() => patchBar({ gaps: preset() })}
+                      class={cx(styles.presetButton)}
+                    >
+                      <text data-tabular="true" class={cx(styles.tabularText)}>{preset()}</text>
                     </Button>
                   );
                 }}
               </For>
             </row>
           </row>
-          <row style={{ width: "100%" }}>
+          <row class={cx(styles.sliderRow)}>
             <M3Slider
               label="Outer & popover gaps"
               testId="settings-bar-gaps-slider"
@@ -152,9 +139,9 @@ export function BarLayoutPane(props?: { readonly onOpenTrayRules?: () => void })
         </column>
       </column>
 
-      <column style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "12px 14px", gap: "8px" }}>
-        <text style={{ fontSize: "13px", fontWeight: 600 }}>Modules &amp; clock</text>
-        <row style={{ gap: "8px", width: "100%" }}>
+      <column class={cx(styles.modulesCard)}>
+        <text class={cx(styles.sectionTitle)}>Modules &amp; clock</text>
+        <row class={cx(styles.switchRow)}>
           <SettingsSwitch compact testId="settings-bar-launcher" label="Launcher trigger" detail="Material apps grid"
             checked={bar()?.launcher_enabled !== false}
             onToggle={() => patchBar({ launcher_enabled: !(bar()?.launcher_enabled !== false) })} />
@@ -162,7 +149,7 @@ export function BarLayoutPane(props?: { readonly onOpenTrayRules?: () => void })
             checked={bar()?.dock_enabled !== false}
             onToggle={() => patchBar({ dock_enabled: !(bar()?.dock_enabled !== false) })} />
         </row>
-        <row style={{ gap: "8px", width: "100%" }}>
+        <row class={cx(styles.switchRow)}>
           <SettingsSwitch compact testId="settings-bar-24h" label="24-hour clock" detail={sampleClock()}
             checked={bar()?.clock_24h !== false}
             onToggle={() => patchBar({ clock_24h: !(bar()?.clock_24h !== false) })} />
@@ -170,7 +157,7 @@ export function BarLayoutPane(props?: { readonly onOpenTrayRules?: () => void })
             checked={bar()?.clock_seconds === true}
             onToggle={() => patchBar({ clock_seconds: !(bar()?.clock_seconds === true) })} />
         </row>
-        <row style={{ gap: "8px", width: "100%" }}>
+        <row class={cx(styles.switchRow)}>
           <SettingsSwitch compact testId="settings-ime-indicator" label="IME indicator" detail="Show layout badge + OSD"
             checked={imeEnabled()}
             onToggle={() => patchIme(
@@ -190,39 +177,29 @@ export function BarLayoutPane(props?: { readonly onOpenTrayRules?: () => void })
         actionTestId="settings-bar-tray-configure"
         ariaLabel="Configure system tray rules"
         onClick={() => props?.onOpenTrayRules?.()}
-        style={{
-          borderRadius: "16px", backgroundColor: containerHigh, padding: "10px 14px",
-          alignItems: "center", justifyContent: "space-between", gap: "10px",
-        }}
+        class={cx(styles.trayCard)}
       >
-        <row style={{ ...grow, alignItems: "center", gap: "10px", minWidth: "0px" }}>
+        <row class={cx(styles.trayCardLead)}>
           <ShellIcon name="menu" size={16} color={primary} />
-          <text style={{ fontSize: "13px", fontWeight: 600, flexShrink: 0 }}>System tray</text>
-          <text data-tabular="true" style={{ ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", color: muted, fontVariantNumeric: "tabular-nums" }}>
+          <text class={cx(styles.trayTitle)}>System tray</text>
+          <text data-tabular="true" class={cx(styles.trayCounts)}>
             {`${trayCounts().visible} pinned · ${trayCounts().collapsed} collapsed · ${trayCounts().hidden} hidden`}
           </text>
         </row>
-        <M3CardAction style={{ flexShrink: 0 }}>
-          <row style={{ alignItems: "center", gap: "4px", height: "28px", padding: "0 10px", borderRadius: "8px", backgroundColor: containerHighest }}>
-            <text style={{ fontSize: "11px", lineHeight: "14px", fontWeight: 500, color: onSurface }}>Configure</text>
+        <M3CardAction class={cx(styles.cardAction)}>
+          <row class={cx(styles.configurePill)}>
+            <text class={cx(styles.configureLabel)}>Configure</text>
             <ShellIcon name="chevronRight" size={14} color={muted} />
           </row>
         </M3CardAction>
       </M3InteractiveCard>
 
-      <row style={{
-        alignItems: "center", justifyContent: "space-between", gap: "10px",
-        borderRadius: "14px", backgroundColor: containerHigh, padding: "9px 14px",
-      }}>
-        <row style={{ alignItems: "center", gap: "8px", minWidth: "0px" }}>
+      <row class={cx(styles.monitorCard)}>
+        <row class={cx(styles.monitorLead)}>
           <ShellIcon name="overview" size={16} color={primary} />
-          <text style={{ ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px" }}>{monitorLabel()}</text>
+          <text data-tabular="true" class={cx(styles.monitorLabel)}>{monitorLabel()}</text>
         </row>
-        <box style={{
-          display: "flex", alignItems: "center", justifyContent: "center",
-          height: "24px", padding: "0 10px", borderRadius: "8px", backgroundColor: primaryContainer, color: onPrimaryContainer,
-          fontSize: "11px", lineHeight: "14px", fontWeight: 600, flexShrink: 0,
-        }}>
+        <box class={cx(styles.displayBadge)}>
           <text>{monitors().length <= 1 ? "Primary · Bar visible" : `${monitors().length} displays · Bar visible`}</text>
         </box>
       </row>

@@ -329,6 +329,20 @@
   }
 }
 
+.switchCheck {
+  width: 11px;
+  height: 11px;
+  --zgui-fill: transparent;
+  --zgui-stroke: var(--color-on-primary-container);
+  --zgui-stroke-width: 2.6px;
+  --zgui-stroke-linecap: round;
+  --zgui-stroke-linejoin: round;
+
+  &[data-disabled="true"] {
+    --zgui-stroke: color-mix(in srgb, var(--color-on-surface) var(--disabled-ink), transparent);
+  }
+}
+
 .sliderRow {
   display: flex;
   align-items: center;
@@ -477,6 +491,12 @@
   }
 }
 
+.sliderTrailingSpacer {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+}
+
 .segmentedTrack {
   position: relative;
   display: flex;
@@ -590,6 +610,10 @@
     transform: scale(0.955);
   }
 
+  & > .pressInner {
+    gap: 5px;
+  }
+
   &[data-selected="true"] {
     background-color: var(--color-primary-container);
     color: var(--color-on-primary-container);
@@ -610,6 +634,26 @@
     border-color: color-mix(in srgb, var(--color-on-surface) var(--disabled-container), transparent);
     color: color-mix(in srgb, var(--color-on-surface) var(--disabled-ink), transparent);
   }
+}
+
+.filterChipCheck {
+  width: 14px;
+  height: 14px;
+  --zgui-fill: transparent;
+  --zgui-stroke: var(--color-on-primary-container);
+  --zgui-stroke-width: 2.2px;
+  --zgui-stroke-linecap: round;
+  --zgui-stroke-linejoin: round;
+}
+
+.filterChipCount {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.collapsibleHidden {
+  display: none;
 }
 
 .linearProgress {

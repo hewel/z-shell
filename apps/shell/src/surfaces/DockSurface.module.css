@@ -1,0 +1,160 @@
+.dockSurface {
+  /* Fill the full LayerSurface viewport (including the bottom-edge trigger strip) instead of
+     shrinking to the content-sized :root height. */
+  position: fixed;
+  left: 0px;
+  top: 0px;
+  width: 100%;
+  height: 112px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  padding-bottom: 10px;
+  overflow: hidden;
+}
+
+.capsule {
+  height: 60px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: 22px;
+  background-color: var(--surface-dock);
+  border: 1px solid var(--border-dock);
+  box-shadow: var(--shadow-level-2);
+  overflow: visible;
+}
+
+.tileStack {
+  position: relative;
+  width: 46px;
+  height: 60px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.tileButton {
+  display: flex;
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background-color: transparent;
+  overflow: visible;
+}
+
+.tileVisual {
+  display: flex;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  margin-bottom: 2px;
+  border-radius: 10px;
+  background-color: transparent;
+
+  &[data-tint="primary"] {
+    background-color: var(--color-primary-container);
+    color: var(--color-on-primary-container);
+  }
+
+  &[data-tint="secondary"] {
+    background-color: var(--color-secondary-container);
+    color: var(--color-on-secondary-container);
+  }
+
+  &[data-tint="tertiary"] {
+    background-color: var(--color-tertiary-container);
+    color: var(--color-on-tertiary-container);
+  }
+}
+
+.launcherVisual {
+  display: flex;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 2px;
+  border-radius: 10px;
+  background-color: var(--color-surface-container-high);
+}
+
+.fallbackInitial {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.tileIcon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  object-fit: contain;
+}
+
+.dotsRow {
+  position: absolute;
+  bottom: 2px;
+  height: 4px;
+  max-width: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.dot {
+  width: 4px;
+  height: 4px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  --zgui-corner-shape: none;
+  background-color: color-mix(in srgb, var(--color-on-surface) 84%, transparent);
+}
+
+.dotUnpinned {
+  background-color: var(--color-on-surface-variant);
+}
+
+.itemsScroll {
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0px;
+  height: 60px;
+  overflow: auto hidden;
+}
+
+.itemsRow {
+  position: relative;
+  height: 60px;
+  align-items: center;
+  gap: 8px;
+}
+
+.focusPill {
+  position: absolute;
+  left: 0px;
+  bottom: 3px;
+  width: 16px;
+  height: 3px;
+  border-radius: 2px;
+  --zgui-corner-shape: none;
+  background-color: var(--color-primary);
+  pointer-events: none;
+}
+
+.divider {
+  width: 1px;
+  height: 30px;
+  flex-shrink: 0;
+  background-color: var(--color-outline-variant);
+}

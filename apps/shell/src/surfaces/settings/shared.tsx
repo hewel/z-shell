@@ -1,5 +1,6 @@
-import { Show, type NativeChild } from "@hewel/zgui";
+import { Show, cx, type NativeChild } from "@hewel/zgui";
 import { M3Switch } from "@z-shell/sdk/primitives";
+import styles from "./shared.module.css";
 
 export const primary = "var(--color-primary)";
 export const onPrimary = "var(--color-on-primary)";
@@ -26,16 +27,11 @@ export function SettingsSwitch(props: {
   onToggle: () => void;
 }): NativeChild {
   return (
-    <row style={{
-      ...grow, alignItems: "center", justifyContent: "space-between", gap: "10px",
-      padding: props.compact ? "8px 12px" : "10px 12px",
-      borderRadius: props.compact ? "12px" : "14px",
-      backgroundColor: container,
-    }}>
-      <column style={{ ...grow, gap: "1px" }}>
-        <text style={{ ...clipped, fontSize: "12px", fontWeight: 500 }}>{props.label}</text>
-        <Show when={props.detail} fallback={<box style={hiddenSection} />}>
-          <text style={{ ...clipped, fontSize: "11px", color: muted }}>{props.detail}</text>
+    <row class={cx(styles.switchRow)} data-compact={props.compact ? "true" : null}>
+      <column class={cx(styles.switchTextColumn)}>
+        <text class={cx(styles.switchLabel)}>{props.label}</text>
+        <Show when={props.detail} fallback={<box class={cx(styles.hiddenSection)} />}>
+          <text class={cx(styles.switchDetail)}>{props.detail}</text>
         </Show>
       </column>
       <M3Switch

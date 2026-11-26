@@ -1,0 +1,334 @@
+.pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-container-high);
+  padding: 14px;
+  gap: 10px;
+}
+
+.growCard {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-container-high);
+  padding: 14px;
+  gap: 10px;
+}
+
+.compactCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: var(--radius-tile);
+  background-color: var(--color-surface-container-high);
+  padding: 12px 14px;
+}
+
+.bridgesCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-radius: var(--radius-tile);
+  background-color: var(--color-surface-container-high);
+  padding: 12px 14px;
+}
+
+.cardHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wallpaperTitleRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0px;
+}
+
+.sectionTitle {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wallpaperMeta {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-on-surface-variant);
+}
+
+.actionRow {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.compactButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-container-highest);
+  color: var(--color-on-surface);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.compactMutedButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-container-highest);
+  color: var(--color-on-surface-variant);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.accentActionButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.browseEmptyButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-container-highest);
+  border: 1px dashed var(--color-outline-variant);
+  color: var(--color-on-surface);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.gridRow {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+
+.emptyRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+
+.emptyText {
+  font-size: 12px;
+  color: var(--color-on-surface-variant);
+}
+
+.wallpaperTile {
+  display: flex;
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  height: 82px;
+  border-radius: var(--radius-md);
+  position: relative;
+  overflow: hidden;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-surface-container-highest);
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent);
+
+  &[data-active="true"] {
+    border: 2px solid var(--color-primary);
+  }
+}
+
+.wallpaperImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.activeCheckBadge {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-pill);
+  --zgui-corner-shape: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.browseTileButton {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 82px;
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-container-highest);
+  border: 1px dashed var(--color-outline-variant);
+  color: var(--color-on-surface);
+}
+
+.browseTileTitle {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.browseTileSubtitle {
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.splitRow {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+}
+
+.swatchRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.swatchButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-pill);
+  --zgui-corner-shape: none;
+  flex-shrink: 0;
+  padding: 2px;
+  background-color: transparent;
+  border: 2px solid transparent;
+
+  &[data-selected="true"] {
+    background-color: var(--color-surface-container-high);
+    border: 2px solid var(--color-on-surface);
+  }
+}
+
+.swatchDot {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  --zgui-corner-shape: none;
+}
+
+.variantGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.variantRow {
+  display: flex;
+  gap: 6px;
+}
+
+.variantButton {
+  display: flex;
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-surface-container);
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 50%, transparent);
+  color: var(--color-on-surface-variant);
+  font-size: 12px;
+  font-weight: 500;
+
+  &[data-active="true"] {
+    background-color: var(--color-primary-container);
+    border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+    color: var(--color-on-primary-container);
+    font-weight: 600;
+  }
+}
+
+.cardMeta {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  gap: 2px;
+}
+
+.cardSubtitle {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.motionSegmented {
+  width: 260px;
+  flex-shrink: 0;
+}
+
+.gtkButton {
+  display: flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-container-highest);
+  color: var(--color-on-surface-variant);
+  font-size: 11px;
+  font-weight: 600;
+
+  &[data-active="true"] {
+    background-color: var(--color-primary-container);
+    color: var(--color-on-primary-container);
+  }
+}

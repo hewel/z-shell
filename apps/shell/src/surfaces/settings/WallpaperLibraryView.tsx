@@ -1,5 +1,5 @@
 import {
-  Button, For, Image, Show, TextField, createEffect, createMemo, createSignal, scrollIntoView,
+  Button, For, Image, Show, TextField, createEffect, createMemo, createSignal, cx, scrollIntoView,
   type Accessor, type NativeChild, type NativeNode,
 } from "@hewel/zgui";
 import { createVirtualFocus } from "@hewel/zgui/primitives";
@@ -13,18 +13,13 @@ import {
   type WallpaperFit,
   type WallpaperListResponse,
 } from "../../topics.ts";
+import styles from "./WallpaperLibraryView.module.css";
 import {
-  clipped,
-  container,
-  containerHigh,
-  containerHighest,
-  grow,
   muted,
   onPrimary,
   onPrimaryContainer,
   onSurface,
   primary,
-  primaryContainer,
 } from "./shared.tsx";
 
 const FIT_OPTIONS: readonly { readonly id: WallpaperFit; readonly label: string; readonly testId: string }[] = [
@@ -71,52 +66,36 @@ function LibraryTile(props: {
   const image = useDaemonMedia(hostClient, () => props.item().thumbnail, { fetchCommand: "wallpaper.fetch-blob" });
   const label = () => filenameOf(props.item().source_path, props.item().name);
   return (
-    <column style={{ ...grow, gap: "4px", minWidth: "0px" }}>
+    <column class={cx(styles.tileColumn)}>
       <Button
         ref={props.registerNode}
         testId={`wp-lib-item-${props.item().id}`}
         ariaLabel={`Apply wallpaper ${label()}`}
         selected={props.active}
+        data-active={props.active ? "true" : null}
         data-highlighted={props.highlighted ? "true" : null}
         onClick={props.onApply}
-        style={{
-          display: "flex", width: "100%", height: "84px", borderRadius: "10px", position: "relative", overflow: "hidden",
-          alignItems: "center", justifyContent: "center", backgroundColor: containerHighest,
-          border: props.active
-            ? `2px solid ${primary}`
-            : props.highlighted
-              ? `2px solid color-mix(in srgb, var(--color-primary) 70%, transparent)`
-              : "1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent)",
-        }}
+        class={cx(styles.tileButton)}
       >
         <Show when={image.src()} fallback={<ShellIcon name="image" size={20} color={muted} />}>
-          {src => <Image ariaHidden src={src()} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+          {src => <Image ariaHidden src={src()} class={cx(styles.tileImage)} />}
         </Show>
         <Show when={props.outputTag}>
           {tag => (
-            <box ariaHidden style={{
-              position: "absolute", left: "6px", top: "6px", height: "18px", padding: "0 6px", borderRadius: "6px",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              backgroundColor: "var(--color-surface-container-lowest)",
-              color: onSurface,
-            }}>
-              <text style={{ fontFamily: "var(--font-mono)", fontSize: "10px", lineHeight: "12px", fontWeight: 600 }}>
+            <box ariaHidden class={cx(styles.outputTag)}>
+              <text class={cx(styles.outputTagText)}>
                 {tag()}
               </text>
             </box>
           )}
         </Show>
         <Show when={props.active}>
-          <box ariaHidden style={{
-            position: "absolute", right: "6px", bottom: "6px", width: "18px", height: "18px", borderRadius: "999px",
-            "--zgui-corner-shape": "none", display: "flex", alignItems: "center", justifyContent: "center",
-            backgroundColor: primary,
-          }}>
+          <box ariaHidden class={cx(styles.activeCheckBadge)}>
             <ShellIcon name="check" size={11} color={onPrimary} />
           </box>
         </Show>
       </Button>
-      <text style={{ ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: "14px", color: props.active ? onSurface : muted }}>
+      <text class={cx(styles.tileLabel)} data-active={props.active ? "true" : null}>
         {label()}
       </text>
     </column>
@@ -236,68 +215,47 @@ export function WallpaperLibraryView(props: {
   }
 
   return (
-    <column testId="settings-wallpaper-library" style={{ ...grow, height: "100%", width: "100%", gap: "12px", minHeight: "0px" }}>
-      <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", width: "100%", flexShrink: 0 }}>
-        <row style={{ alignItems: "center", gap: "10px", minWidth: "0px", flexGrow: 1 }}>
-          <Button testId="wp-library-back" ariaLabel="Back to Appearance" onClick={props.onBack} style={{
-            display: "flex", width: "30px", height: "30px", borderRadius: "10px", flexShrink: 0,
-            alignItems: "center", justifyContent: "center", backgroundColor: containerHigh,
-          }}>
+    <column testId="settings-wallpaper-library" class={cx(styles.view)}>
+      <row class={cx(styles.headerRow)}>
+        <row class={cx(styles.headerLead)}>
+          <Button testId="wp-library-back" ariaLabel="Back to Appearance" onClick={props.onBack} class={cx(styles.iconButton)}>
             <ShellIcon name="arrowLeft" size={16} color={onSurface} />
           </Button>
-          <column style={{ ...grow, gap: "1px" }}>
-            <text role="heading" style={{ fontSize: "18px", fontWeight: 600, letterSpacing: "-0.015em", lineHeight: "22px" }}>
+          <column class={cx(styles.titleCol)}>
+            <text role="heading" class={cx(styles.heading)}>
               Wallpaper library
             </text>
-            <text data-tabular="true" style={{ ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: "15px", color: muted, fontVariantNumeric: "tabular-nums" }}>
+            <text data-tabular="true" class={cx(styles.headerMeta)}>
               {`${totalCount()} ${totalCount() === 1 ? "file" : "files"} · ${directories().length} ${directories().length === 1 ? "folder" : "folders"}`}
             </text>
           </column>
         </row>
-        <row style={{ alignItems: "center", gap: "6px", flexShrink: 0 }}>
-          <Button testId="wp-library-output" ariaLabel="Cycle target output" onClick={() => setOutputIndex(index => index + 1)} style={{
-            display: "flex", alignItems: "center", justifyContent: "center", height: "30px",
-            padding: "0 10px", borderRadius: "8px", backgroundColor: containerHigh, color: muted, fontSize: "11px", fontWeight: 500,
-          }}>
+        <row class={cx(styles.headerActions)}>
+          <Button testId="wp-library-output" ariaLabel="Cycle target output" onClick={() => setOutputIndex(index => index + 1)} class={cx(styles.headerMutedButton)}>
             <text>{selectedOutput() ? `Output (${selectedOutput()})` : `All outputs (${monitors()[0]?.name ?? "default"})`}</text>
           </Button>
-          <Button testId="wp-library-random" onClick={() => void invokePublic("wallpaper.random", selectedOutput() ? { output: selectedOutput() } : {})} style={{
-            display: "flex", alignItems: "center", justifyContent: "center", gap: "5px", height: "30px",
-            padding: "0 10px", borderRadius: "8px", backgroundColor: containerHigh, color: onSurface, fontSize: "11px", fontWeight: 500,
-          }}>
+          <Button testId="wp-library-random" onClick={() => void invokePublic("wallpaper.random", selectedOutput() ? { output: selectedOutput() } : {})} class={cx(styles.headerButton)}>
             <ShellIcon name="shuffle" size={13} color={primary} />
             <text>Random</text>
           </Button>
           <Button testId="wp-library-rescan" onClick={() => {
             void invokePublic("wallpaper.rescan", {}).then(result => { if (result) setScanRevision(rev => rev + 1); });
-          }} style={{
-            display: "flex", alignItems: "center", justifyContent: "center", height: "30px",
-            padding: "0 10px", borderRadius: "8px", backgroundColor: containerHigh, color: onSurface, fontSize: "11px", fontWeight: 500,
-          }}>
+          }} class={cx(styles.headerButton)}>
             <text>Rescan</text>
           </Button>
-          <Button testId="settings-window-close" ariaLabel="Close settings" onClick={props.onCloseSettings} style={{
-            display: "flex", width: "30px", height: "30px", borderRadius: "10px", flexShrink: 0,
-            alignItems: "center", justifyContent: "center", backgroundColor: containerHigh,
-          }}>
+          <Button testId="settings-window-close" ariaLabel="Close settings" onClick={props.onCloseSettings} class={cx(styles.iconButton)}>
             <ShellIcon name="close" size={15} color={muted} />
           </Button>
         </row>
       </row>
 
-      <column style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "10px 12px", gap: "8px", flexShrink: 0 }}>
-        <row style={{ alignItems: "center", gap: "8px", width: "100%" }}>
-          <row data-composite-input="true" style={{
-            ...grow, height: "32px", borderRadius: "10px", padding: filterFocused() ? "0 9px" : "0 10px", gap: "8px",
-            alignItems: "center", backgroundColor: container,
-            border: filterFocused()
-              ? "2px solid var(--color-primary)"
-              : "1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent)",
-          }}>
+      <column class={cx(styles.controlsCard)}>
+        <row class={cx(styles.searchRow)}>
+          <row data-composite-input="true" class={cx(styles.searchPill)} data-focused={filterFocused() ? "true" : null}>
             <ShellIcon name="search" size={14} color={filterFocused() ? primary : muted} />
             <TextField
               testId="wp-library-filter"
-              class="shell-composite-field"
+              class={cx("shell-composite-field", styles.searchField)}
               ariaLabel="Filter wallpapers by filename"
               placeholder="Filter wallpapers by filename..."
               ariaActiveDescendant={virtualFocus.activeNode()}
@@ -306,66 +264,57 @@ export function WallpaperLibraryView(props: {
               onKeyDown={virtualFocus.onKeyDown}
               onFocus={() => setFilterFocused(true)}
               onBlur={() => setFilterFocused(false)}
-              style={{
-                ...grow, height: "26px", padding: "4px 0", lineHeight: "18px",
-                backgroundColor: "transparent", color: onSurface, fontSize: "12px",
-              }}
             />
           </row>
-          <M3SegmentedControl
-            ariaLabel="Wallpaper fit mode"
-            compact
-            options={FIT_OPTIONS}
-            value={currentFit()}
-            onChange={fit => patchWallpaper({ fit })}
-            style={{ width: "224px", flexShrink: 0 }}
-          />
+          <box class={cx(styles.fitSegmented)}>
+            <M3SegmentedControl
+              ariaLabel="Wallpaper fit mode"
+              compact
+              options={FIT_OPTIONS}
+              value={currentFit()}
+              onChange={fit => patchWallpaper({ fit })}
+            />
+          </box>
         </row>
 
-        <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", width: "100%" }}>
-          <row style={{ alignItems: "center", gap: "5px", flexWrap: "wrap", ...grow }}>
+        <row class={cx(styles.foldersBar)}>
+          <row class={cx(styles.foldersWrap)}>
             <For each={directories()} keyed={dir => dir}>
               {dir => (
-                <row style={{
-                  alignItems: "center", gap: "4px", height: "24px", padding: "0 2px 0 7px", borderRadius: "8px",
-                  backgroundColor: container, border: "1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent)",
-                  maxWidth: "172px",
-                }}>
+                <row class={cx(styles.folderChip)}>
                   <ShellIcon name="folder" size={12} color={primary} />
-                  <text style={{ ...clipped, fontFamily: "var(--font-mono)", fontSize: "10px", lineHeight: "14px", color: onSurface }}>
+                  <text class={cx(styles.folderText)}>
                     {dir()}
                   </text>
                   <Button
                     ariaLabel={`Remove folder ${dir()}`}
                     onClick={() => removeDirectory(dir())}
-                    style={{
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      width: "24px", height: "24px", borderRadius: "6px", backgroundColor: "transparent", flexShrink: 0,
-                    }}
+                    class={cx(styles.removeFolderButton)}
                   >
                     <ShellIcon name="close" size={11} color={muted} />
                   </Button>
                 </row>
               )}
             </For>
-            <Button testId="wp-library-add-folder" onClick={() => setAddFolderOpen(open => !open)} style={{
-              display: "flex", alignItems: "center", justifyContent: "center", height: "24px", padding: "0 8px",
-              borderRadius: "8px", backgroundColor: addFolderOpen() ? primaryContainer : "transparent",
-              border: "1px dashed color-mix(in srgb, var(--color-outline-variant) 70%, transparent)",
-              color: addFolderOpen() ? onPrimaryContainer : primary, fontSize: "11px", fontWeight: 500, flexShrink: 0,
-            }}>
+            <Button
+              testId="wp-library-add-folder"
+              onClick={() => setAddFolderOpen(open => !open)}
+              class={cx(styles.addFolderButton)}
+              data-active={addFolderOpen() ? "true" : null}
+            >
               <text>+ Add folder</text>
             </Button>
           </row>
-          <row style={{ alignItems: "center", gap: "6px", flexShrink: 0 }}>
-            <text style={{ fontSize: "11px", color: muted }}>Slideshow</text>
-            <Button testId="wp-library-slideshow" ariaLabel="Configure slideshow interval" expanded={slideshowOpen()}
-              onClick={() => setSlideshowOpen(open => !open)} style={{
-                display: "flex", alignItems: "center", justifyContent: "center", gap: "3px", height: "24px",
-                padding: "0 8px", borderRadius: "8px",
-                backgroundColor: slideshowOpen() ? primaryContainer : container,
-                color: slideshowOpen() ? onPrimaryContainer : onSurface, fontSize: "11px", fontWeight: 500,
-              }}>
+          <row class={cx(styles.slideshowRow)}>
+            <text class={cx(styles.slideshowLabel)}>Slideshow</text>
+            <Button
+              testId="wp-library-slideshow"
+              ariaLabel="Configure slideshow interval"
+              expanded={slideshowOpen()}
+              onClick={() => setSlideshowOpen(open => !open)}
+              class={cx(styles.slideshowButton)}
+              data-active={slideshowOpen() ? "true" : null}
+            >
               <text>{formatSlideshowLabel(slideshowSeconds())}</text>
               <ShellIcon name="expandMore" size={13} color={slideshowOpen() ? onPrimaryContainer : muted} />
             </Button>
@@ -373,8 +322,8 @@ export function WallpaperLibraryView(props: {
         </row>
 
         <M3Collapsible open={addFolderOpen()} estimatedHeight={40}>
-          <row style={{ alignItems: "center", gap: "8px", paddingTop: "4px", width: "100%" }}>
-            <box style={{ ...grow }}>
+          <row class={cx(styles.collapsibleRow)}>
+            <box class={cx(styles.growBox)}>
               <TextField
                 testId="wp-library-folder-input"
                 ariaLabel="Wallpaper directory path"
@@ -391,11 +340,7 @@ export function WallpaperLibraryView(props: {
                     setAddFolderOpen(false);
                   }
                 }}
-                style={{
-                  width: "100%", height: "30px", borderRadius: "8px", padding: "5px 8px",
-                  backgroundColor: container, border: "1px solid color-mix(in srgb, var(--color-outline-variant) 65%, transparent)",
-                  color: onSurface, fontFamily: "var(--font-mono)", fontSize: "11px",
-                }}
+                class={cx(styles.folderInput)}
               />
             </box>
             <M3Button testId="wp-library-folder-confirm" variant="filled" size="sm" onClick={addDirectory}>
@@ -405,38 +350,34 @@ export function WallpaperLibraryView(props: {
         </M3Collapsible>
 
         <M3Collapsible open={slideshowOpen()} estimatedHeight={38}>
-          <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", paddingTop: "4px", width: "100%" }}>
-            <text style={{ fontSize: "11px", color: muted }}>Auto-advance interval</text>
-            <M3SegmentedControl
-              ariaLabel="Slideshow interval"
-              compact
-              options={SLIDESHOW_PRESETS}
-              value={closestSlideshowPresetId(slideshowSeconds())}
-              onChange={id => {
-                const match = SLIDESHOW_PRESETS.find(preset => preset.id === id);
-                if (match) patchWallpaper({ slideshow_seconds: match.seconds });
-                setSlideshowOpen(false);
-              }}
-              style={{ width: "224px", flexShrink: 0 }}
-            />
+          <row class={cx(styles.slideshowCollapsibleRow)}>
+            <text class={cx(styles.slideshowIntervalLabel)}>Auto-advance interval</text>
+            <box class={cx(styles.slideshowSegmented)}>
+              <M3SegmentedControl
+                ariaLabel="Slideshow interval"
+                compact
+                options={SLIDESHOW_PRESETS}
+                value={closestSlideshowPresetId(slideshowSeconds())}
+                onChange={id => {
+                  const match = SLIDESHOW_PRESETS.find(preset => preset.id === id);
+                  if (match) patchWallpaper({ slideshow_seconds: match.seconds });
+                  setSlideshowOpen(false);
+                }}
+              />
+            </box>
           </row>
         </M3Collapsible>
       </column>
 
-      <scroll testId="wp-library-grid" role="scrollView" ariaLabel="Wallpaper catalog" style={{
-        ...grow, minHeight: "0px", width: "100%", overflow: "hidden auto",
-      }}>
-        <column style={{ gap: "10px", width: "100%", paddingRight: "4px", paddingBottom: "4px" }}>
+      <scroll testId="wp-library-grid" role="scrollView" ariaLabel="Wallpaper catalog" class={cx(styles.gridScroll)}>
+        <column class={cx(styles.gridColumn)}>
           <For each={rows()} keyed={row => row[0]?.id ?? "row"} fallback={
-            <column testId="wp-library-empty" style={{
-              width: "100%", padding: "36px 16px", borderRadius: "16px", backgroundColor: containerHigh,
-              alignItems: "center", justifyContent: "center", gap: "6px",
-            }}>
+            <column testId="wp-library-empty" class={cx(styles.emptyColumn)}>
               <ShellIcon name="image" size={24} color={muted} />
-              <text style={{ fontSize: "13px", fontWeight: 600, color: onSurface }}>
+              <text class={cx(styles.emptyTitle)}>
                 {query().trim() ? "No matching wallpapers" : "No wallpapers indexed"}
               </text>
-              <text style={{ fontSize: "12px", color: muted }}>
+              <text class={cx(styles.emptySubtitle)}>
                 {query().trim() ? "Try clearing the filename filter" : "Add a wallpaper folder above and rescan"}
               </text>
             </column>
@@ -444,7 +385,7 @@ export function WallpaperLibraryView(props: {
             {row => {
               const spacers = () => Math.max(0, 4 - row().length);
               return (
-                <row style={{ gap: "10px", width: "100%", alignItems: "flex-start" }}>
+                <row class={cx(styles.gridRow)}>
                   <For each={row()} keyed={item => item.id}>
                     {item => (
                       <LibraryTile
@@ -461,7 +402,7 @@ export function WallpaperLibraryView(props: {
                     )}
                   </For>
                   <For each={Array.from({ length: spacers() }, (_, i) => i)} keyed={i => i}>
-                    {() => <box ariaHidden style={{ ...grow }} />}
+                    {() => <box ariaHidden class={cx(styles.growBox)} />}
                   </For>
                 </row>
               );
@@ -470,8 +411,8 @@ export function WallpaperLibraryView(props: {
         </column>
       </scroll>
 
-      <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", width: "100%", flexShrink: 0 }}>
-        <text data-tabular="true" style={{ ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", color: muted, fontVariantNumeric: "tabular-nums" }}>
+      <row class={cx(styles.footerRow)}>
+        <text data-tabular="true" class={cx(styles.footerCount)}>
           {`Showing ${filteredItems().length} of ${totalCount()} · Click any thumbnail to apply immediately`}
         </text>
         <M3Button

@@ -1,3 +1,4 @@
+import styles from "./icons.module.css";
 import { SHELL_ROSETTE_PATH } from "./shapes.ts";
 import { TABLER_ICON_PATHS } from "./tabler-icons.generated.ts";
 
@@ -46,6 +47,7 @@ export function ShellIcon(props: {
       ariaHidden={props.label ? null : true}
       ariaLabel={props.label ?? null}
       testId={props.testId ?? null}
+      class={styles.icon}
       style={{
         width: resolvedSize(),
         height: resolvedSize(),
@@ -53,9 +55,6 @@ export function ShellIcon(props: {
         "--zgui-fill": useFilled() ? resolvedColor() : "transparent",
         "--zgui-stroke": useFilled() ? "transparent" : resolvedColor(),
         "--zgui-stroke-width": useFilled() ? "0px" : `${props.strokeWidth ?? 2}px`,
-        "--zgui-stroke-linecap": "round",
-        "--zgui-stroke-linejoin": "round",
-        flexShrink: 0,
       }}
     />
   );

@@ -18,19 +18,7 @@ import { PluginsPane } from "./settings/PluginsPane.tsx";
 import { PowerPane } from "./settings/PowerPane.tsx";
 import { TrayRulesView } from "./settings/TrayRulesView.tsx";
 import { WallpaperLibraryView } from "./settings/WallpaperLibraryView.tsx";
-import {
-  clipped,
-  container,
-  containerHigh,
-  grow,
-  muted,
-  onPrimaryContainer,
-  onSurface,
-  outline,
-  primary,
-  primaryContainer,
-  surface,
-} from "./settings/shared.tsx";
+import styles from "./SettingsWindow.module.css";
 import { FadeThroughPane, SingleInstanceWindowSurface, SlidingNavPill } from "./window-chrome.tsx";
 
 type ShellNavTab = {
@@ -53,13 +41,10 @@ function SharedAxisXPane(props: { readonly direction: 1 | -1; readonly children:
   const scheme = useMotionScheme();
   const progress = createEnterProgress("defaultSpatial", { scheme });
   return (
-    <column style={{
-      ...grow,
-      width: "100%",
-      height: "100%",
-      minHeight: "0px",
-      ...sharedAxisXStyle(progress(), props.direction, scheme() === "reduced"),
-    }}>
+    <column
+      class={styles.sharedAxisPane}
+      style={sharedAxisXStyle(progress(), props.direction, scheme() === "reduced")}
+    >
       {props.children}
     </column>
   );
@@ -126,60 +111,50 @@ function SettingsWindowContent(): NativeChild {
   const subtitle = () => activeShellTab()?.subtitle ?? `Plugin settings · ${activePluginPage()?.pluginId ?? ""}`;
 
   return (
-    <row testId="settings-window-root" data-theme-rev={String(theme.revision())} style={{
-      width: "820px", height: "600px", overflow: "hidden",
-      backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
-    }}>
-      <column testId="settings-sidebar" style={{
-        width: "216px", height: "100%", flexShrink: 0, backgroundColor: surface,
-        borderRight: "1px solid color-mix(in srgb, var(--color-outline-variant) 42%, transparent)",
-        padding: "16px 12px", justifyContent: "space-between",
-      }}>
-        <column style={{ gap: "14px" }}>
-          <row style={{ alignItems: "center", gap: "10px", padding: "2px 6px" }}>
-            <box ariaHidden style={{
-              display: "flex", width: "30px", height: "30px", borderRadius: "10px", flexShrink: 0,
-              alignItems: "center", justifyContent: "center", backgroundColor: primaryContainer,
-            }}>
-              <ShellIcon name="shellEmblem" size={16} color={onPrimaryContainer} />
+    <row testId="settings-window-root" data-theme-rev={String(theme.revision())} class={styles.root}>
+      <column testId="settings-sidebar" class={styles.sidebar}>
+        <column class={styles.sidebarTop}>
+          <row class={styles.brandHeader}>
+            <box ariaHidden class={styles.brandBadge}>
+              <ShellIcon name="shellEmblem" size={16} color="var(--color-on-primary-container)" />
             </box>
-            <column style={{ minWidth: "0px" }}>
-              <text style={{ fontSize: "14px", fontWeight: 600, lineHeight: "18px" }}>Settings</text>
-              <text style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: muted, lineHeight: "14px" }}>z-shell</text>
+            <column class={styles.brandTextCol}>
+              <text class={styles.brandTitle}>Settings</text>
+              <text class={styles.brandSubtitle}>z-shell</text>
             </column>
           </row>
 
-          <column style={{ gap: "3px" }}>
-            <box style={{ padding: "0 8px 4px 8px" }}>
-              <text style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.04em", color: outline }}>SHELL</text>
+          <column class={styles.navSection}>
+            <box class={styles.navSectionHeader}>
+              <text class={styles.navSectionTitle}>SHELL</text>
             </box>
-            <column style={{ position: "relative", gap: "3px" }}>
+            <column class={styles.navTrack}>
               <SlidingNavPill activeIndex={activeShellIndex} />
               <For each={SHELL_NAV_TABS} keyed={tab => tab.id}>
                 {tab => {
                   const active = () => activeTab() === tab().id;
                   return (
-                    <Button testId={`settings-nav-${tab().id}`} data-qs-tile="true" selected={active()} onClick={() => {
-                      if (tab().id === "plugins") setSelectedPluginId(null);
-                      openSettingsWindow(tab().id);
-                    }} style={{
-                      position: "relative", zIndex: 1,
-                      display: "flex", flexDirection: "row", alignItems: "center", gap: "9px", height: "34px",
-                      padding: "0 10px", borderRadius: "10px", flexShrink: 0,
-                      backgroundColor: "transparent", border: "1px solid transparent",
-                      color: active() ? onPrimaryContainer : muted, fontSize: "13px", fontWeight: 500,
-                    }}>
-                      <ShellIcon name={tab().icon} filled={active()} size={15} color={active() ? onPrimaryContainer : muted} />
-                      <text style={{ ...grow, ...clipped }}>{tab().label}</text>
+                    <Button
+                      testId={`settings-nav-${tab().id}`}
+                      data-qs-tile="true"
+                      data-active={active() ? "true" : "false"}
+                      selected={active()}
+                      class={styles.navItem}
+                      onClick={() => {
+                        if (tab().id === "plugins") setSelectedPluginId(null);
+                        openSettingsWindow(tab().id);
+                      }}
+                    >
+                      <ShellIcon
+                        name={tab().icon}
+                        filled={active()}
+                        size={15}
+                        color={active() ? "var(--color-on-primary-container)" : "var(--color-on-surface-variant)"}
+                      />
+                      <text class={styles.navLabel}>{tab().label}</text>
                       <Show when={tab().id === "plugins" && pluginUpdatesCount() > 0}>
-                        <box style={{
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          minWidth: "18px", height: "18px", padding: "0 5px",
-                          borderRadius: "999px", "--zgui-corner-shape": "none",
-                          backgroundColor: active() ? containerHigh : primaryContainer,
-                          color: active() ? onSurface : onPrimaryContainer,
-                        }}>
-                          <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "10px", lineHeight: "12px", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+                        <box class={styles.updatesBadge} data-active={active() ? "true" : "false"}>
+                          <text data-tabular="true" class={styles.updatesBadgeText}>
                             {pluginUpdatesCount()}
                           </text>
                         </box>
@@ -192,27 +167,33 @@ function SettingsWindowContent(): NativeChild {
           </column>
 
           <Show when={pluginSettingsPages().length > 0}>
-            <box ariaHidden style={{ width: "100%", height: "1px", backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 45%, transparent)" }} />
-            <column style={{ gap: "3px" }}>
-              <box style={{ padding: "0 8px 4px 8px" }}>
-                <text style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.04em", color: outline }}>PLUGINS</text>
+            <box ariaHidden class={styles.sidebarDivider} />
+            <column class={styles.navSection}>
+              <box class={styles.navSectionHeader}>
+                <text class={styles.navSectionTitle}>PLUGINS</text>
               </box>
-              <column style={{ position: "relative", gap: "3px" }}>
+              <column class={styles.navTrack}>
                 <SlidingNavPill activeIndex={activePluginIndex} />
                 <For each={pluginSettingsPages()} keyed={page => page.id}>
                   {page => {
                     const active = () => activeTab() === page().id;
                     return (
-                      <Button testId={`settings-nav-plugin-${page().id}`} data-qs-tile="true" selected={active()} onClick={() => openSettingsWindow(page().id)} style={{
-                        position: "relative", zIndex: 1,
-                        display: "flex", flexDirection: "row", alignItems: "center", gap: "9px", height: "34px",
-                        padding: "0 10px", borderRadius: "10px", flexShrink: 0,
-                        backgroundColor: "transparent", border: "1px solid transparent",
-                        color: active() ? onPrimaryContainer : muted, fontSize: "13px", fontWeight: 500,
-                      }}>
-                        <ShellIcon name="layers" filled={active()} size={15} color={active() ? onPrimaryContainer : muted} />
-                        <text style={{ ...grow, ...clipped }}>{page().title}</text>
-                        <box ariaHidden style={{ width: "6px", height: "6px", borderRadius: "3px", flexShrink: 0, backgroundColor: active() ? onPrimaryContainer : primary }} />
+                      <Button
+                        testId={`settings-nav-plugin-${page().id}`}
+                        data-qs-tile="true"
+                        data-active={active() ? "true" : "false"}
+                        selected={active()}
+                        class={styles.navItem}
+                        onClick={() => openSettingsWindow(page().id)}
+                      >
+                        <ShellIcon
+                          name="layers"
+                          filled={active()}
+                          size={15}
+                          color={active() ? "var(--color-on-primary-container)" : "var(--color-on-surface-variant)"}
+                        />
+                        <text class={styles.navLabel}>{page().title}</text>
+                        <box ariaHidden class={styles.pluginDot} data-active={active() ? "true" : "false"} />
                       </Button>
                     );
                   }}
@@ -222,18 +203,17 @@ function SettingsWindowContent(): NativeChild {
           </Show>
         </column>
 
-        <Button ariaLabel="Reload settings.toml" onClick={() => void invokePublic("settings.reload", {})} style={{
-          display: "flex", flexDirection: "row", alignItems: "center", gap: "8px",
-          padding: "8px 10px", borderRadius: "10px", backgroundColor: container, color: muted,
-        }}>
-          <box ariaHidden style={{ width: "6px", height: "6px", borderRadius: "3px", flexShrink: 0, backgroundColor: primary }} />
-          <text style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: muted }}>settings.toml · Live</text>
+        <Button
+          ariaLabel="Reload settings.toml"
+          class={styles.reloadButton}
+          onClick={() => void invokePublic("settings.reload", {})}
+        >
+          <box ariaHidden class={styles.reloadDot} />
+          <text class={styles.reloadLabel}>settings.toml · Live</text>
         </Button>
       </column>
 
-      <column testId="settings-content-pane" style={{
-        ...grow, height: "100%", padding: "18px 22px", gap: "14px", overflow: "hidden", position: "relative",
-      }}>
+      <column testId="settings-content-pane" class={styles.contentPane}>
         <Show
           when={!showingWallpaperLibrary() && !showingTrayRules()}
           fallback={
@@ -251,21 +231,23 @@ function SettingsWindowContent(): NativeChild {
             </Show>
           }
         >
-          <row style={{ alignItems: "center", justifyContent: "space-between", width: "100%", flexShrink: 0 }}>
-            <column style={{ ...grow, gap: "2px" }}>
-              <text role="heading" style={{ fontSize: "18px", fontWeight: 600, letterSpacing: "-0.015em", lineHeight: "24px" }}>
+          <row class={styles.contentHeader}>
+            <column class={styles.headerTextCol}>
+              <text role="heading" class={styles.headerTitle}>
                 {heading()}
               </text>
-              <text style={{ ...clipped, fontSize: "12px", color: muted, lineHeight: "16px" }}>{subtitle()}</text>
+              <text class={styles.headerSubtitle}>{subtitle()}</text>
             </column>
-            <Button testId="settings-window-close" ariaLabel="Close settings" onClick={closeSettingsWindow} style={{
-              display: "flex", width: "30px", height: "30px", borderRadius: "10px", flexShrink: 0,
-              alignItems: "center", justifyContent: "center", backgroundColor: containerHigh,
-            }}>
-              <ShellIcon name="close" size={15} color={muted} />
+            <Button
+              testId="settings-window-close"
+              ariaLabel="Close settings"
+              class={styles.closeButton}
+              onClick={closeSettingsWindow}
+            >
+              <ShellIcon name="close" size={15} color="var(--color-on-surface-variant)" />
             </Button>
           </row>
-          <scroll style={{ ...grow, minHeight: "0px", width: "100%", overflow: "hidden auto" }}>
+          <scroll class={styles.contentScroll}>
             <Switch fallback={<FadeThroughPane animate={animatePane()}><AppearancePane onOpenLibrary={openWallpaperLibrary} /></FadeThroughPane>}>
               <Match when={activeTab() === "appearance"}>
                 <Show when={returnedFromLibrary()} fallback={<FadeThroughPane animate={animatePane()}><AppearancePane onOpenLibrary={openWallpaperLibrary} /></FadeThroughPane>}>

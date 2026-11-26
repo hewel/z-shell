@@ -11,40 +11,7 @@ import type {
   StagedInstallResponse,
   StagedUpgradeResponse,
 } from "../../topics.ts";
-import {
-  clipped,
-  container,
-  containerHigh,
-  containerHighest,
-  grow,
-  muted,
-  onPrimary,
-  onPrimaryContainer,
-  onSurface,
-  primary,
-} from "./shared.tsx";
-
-const inputStyle = {
-  height: "34px",
-  borderRadius: "10px",
-  padding: "6px 10px",
-  backgroundColor: container,
-  border: "1px solid color-mix(in srgb, var(--color-outline-variant) 65%, transparent)",
-  color: onSurface,
-  fontFamily: "var(--font-mono)",
-  fontSize: "12px",
-} as const;
-
-const backdropStyle = {
-  position: "absolute",
-  inset: "0px",
-  zIndex: 30,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  padding: "24px",
-  backgroundColor: "color-mix(in srgb, var(--color-scrim) 52%, transparent)",
-} as const;
+import styles from "./PluginDialogs.module.css";
 
 export type ApprovalReviewRequest =
   | { readonly kind: "staged-install"; readonly response: StagedInstallResponse }
@@ -76,16 +43,16 @@ function CapabilitySummaryBox(props: {
     return list;
   };
   return (
-    <column style={{ gap: "8px", borderRadius: "12px", backgroundColor: containerHigh, padding: "10px 12px" }}>
-      <text style={{ fontSize: "12px", fontWeight: 600 }}>Requested capabilities</text>
-      <text style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: muted }}>
+    <column class={styles.capabilityBox}>
+      <text class={styles.capabilityTitle}>Requested capabilities</text>
+      <text class={styles.monoMuted}>
         {`Host (${hostItems().length}): ${hostItems().join(", ") || "none"}`}
       </text>
-      <text style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: muted }}>
+      <text class={styles.monoMuted}>
         {`Bus (${busItems().length}): ${busItems().join(", ") || "none"}`}
       </text>
       <Show when={(props.netAddedHost?.length ?? 0) > 0}>
-        <text style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--color-error)" }}>
+        <text class={styles.monoError}>
           {`Net new host permissions: ${props.netAddedHost!.join(", ")}`}
         </text>
       </Show>
@@ -191,33 +158,30 @@ export function ApprovalReviewDialog(props: {
   };
 
   return (
-    <box style={backdropStyle} onClick={props.onClose}>
+    <box class={styles.backdrop} onClick={props.onClose}>
       <M3DialogShell
         testId="plugin-approval-dialog"
         ariaLabel={meta().title}
         error={Boolean(errorMsg())}
         style={{ width: "492px" }}
       >
-        <column style={{ gap: "4px" }}>
-          <text role="heading" style={{ fontSize: "16px", fontWeight: 600 }}>{meta().title}</text>
-          <text style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: muted }}>{meta().subtitle}</text>
+        <column class={styles.dialogHeader}>
+          <text role="heading" class={styles.dialogTitle}>{meta().title}</text>
+          <text class={styles.monoMuted}>{meta().subtitle}</text>
         </column>
 
-        <row style={{
-          alignItems: "center", gap: "8px", padding: "8px 10px", borderRadius: "10px",
-          backgroundColor: "var(--color-primary-container)",
-        }}>
-          <ShellIcon name="shield" filled size={16} color={onPrimaryContainer} />
-          <text style={{ ...grow, fontSize: "11px", lineHeight: "15px", color: onPrimaryContainer }}>
+        <row class={styles.trustBanner}>
+          <ShellIcon name="shield" filled size={16} color="var(--color-on-primary-container)" />
+          <text class={styles.trustBannerText}>
             Plugins compose directly into the shared shell bundle and share host trust once enabled and built.
           </text>
         </row>
 
-        <column style={{ gap: "4px", borderRadius: "10px", backgroundColor: containerHigh, padding: "8px 10px" }}>
-          <text style={{ ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", color: muted }}>
+        <column class={styles.provenanceBox}>
+          <text class={styles.monoMutedClipped}>
             {`Source: ${meta().sourceIdentity}`}
           </text>
-          <text style={{ ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", color: muted }}>
+          <text class={styles.monoMutedClipped}>
             {`Digest: ${meta().digest}`}
           </text>
         </column>
@@ -225,8 +189,8 @@ export function ApprovalReviewDialog(props: {
         <CapabilitySummaryBox capabilities={meta().capabilities} netAddedHost={meta().netAddedHost} />
 
         <Show when={props.request.kind === "staged-install"}>
-          <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-            <text style={{ fontSize: "12px", color: onSurface }}>Approve capabilities immediately</text>
+          <row class={styles.switchRow}>
+            <text class={styles.switchLabel}>Approve capabilities immediately</text>
             <M3Switch
               testId="plugin-approve-on-commit-switch"
               ariaLabel="Approve capabilities on commit"
@@ -237,8 +201,8 @@ export function ApprovalReviewDialog(props: {
         </Show>
 
         <Show when={meta().revoked}>
-          <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-            <text style={{ fontSize: "12px", color: "var(--color-error)" }}>
+          <row class={styles.switchRow}>
+            <text class={styles.switchLabelError}>
               Plugin is currently revoked · Explicitly allow un-revoke
             </text>
             <M3Switch
@@ -251,10 +215,10 @@ export function ApprovalReviewDialog(props: {
         </Show>
 
         <Show when={errorMsg()}>
-          {err => <text testId="plugin-approval-error" style={{ fontSize: "12px", color: "var(--color-error)" }}>{err()}</text>}
+          {err => <text testId="plugin-approval-error" class={styles.errorText}>{err()}</text>}
         </Show>
 
-        <row style={{ justifyContent: "flex-end", gap: "8px" }}>
+        <row class={styles.dialogActions}>
           <M3Button testId="plugin-approval-cancel" variant="text" size="sm" onClick={props.onClose}>
             <text>Cancel</text>
           </M3Button>
@@ -265,7 +229,7 @@ export function ApprovalReviewDialog(props: {
             disabled={busy() || (meta().revoked && !allowUnrevoke())}
             onClick={() => void submit()}
           >
-            <text style={{ color: onPrimary }}>{busy() ? "Working…" : meta().confirmLabel}</text>
+            <text class={styles.onPrimaryText}>{busy() ? "Working…" : meta().confirmLabel}</text>
           </M3Button>
         </row>
       </M3DialogShell>
@@ -326,13 +290,13 @@ export function InstallCustomDialog(props: {
   };
 
   return (
-    <box style={backdropStyle} onClick={props.onClose}>
+    <box class={styles.backdrop} onClick={props.onClose}>
       <M3DialogShell testId="plugin-install-custom-dialog" ariaLabel="Install custom plugin" style={{ width: "460px" }}>
-        <text role="heading" style={{ fontSize: "16px", fontWeight: 600 }}>Install local or custom plugin</text>
+        <text role="heading" class={styles.dialogTitle}>Install local or custom plugin</text>
         <M3SegmentedControl ariaLabel="Install source kind" options={CUSTOM_KINDS} value={kind()} onChange={setKind} />
 
-        <column style={{ gap: "4px" }}>
-          <text style={{ fontSize: "11px", color: muted }}>
+        <column class={styles.fieldGroup}>
+          <text class={styles.fieldLabel}>
             {kind() === "path" ? "Absolute directory containing plugin.toml" : kind() === "git" ? "Repository URL" : "Archive URL or path (.tar.gz / .tar.zst)"}
           </text>
           <TextField
@@ -341,40 +305,40 @@ export function InstallCustomDialog(props: {
             placeholder={kind() === "path" ? "/home/user/my-plugin" : "https://example.com/plugin.git"}
             value={location()}
             onInput={ev => setLocation(ev.value)}
-            style={inputStyle}
+            class={styles.input}
           />
         </column>
 
         <Show when={kind() === "git"}>
-          <row style={{ gap: "8px" }}>
-            <column style={{ ...grow, gap: "4px" }}>
-              <text style={{ fontSize: "11px", color: muted }}>Ref / Tag (optional)</text>
-              <TextField ariaLabel="Git ref" placeholder="main" value={refName()} onInput={ev => setRefName(ev.value)} style={inputStyle} />
+          <row class={styles.fieldRow}>
+            <column class={styles.fieldGroupGrow}>
+              <text class={styles.fieldLabel}>Ref / Tag (optional)</text>
+              <TextField ariaLabel="Git ref" placeholder="main" value={refName()} onInput={ev => setRefName(ev.value)} class={styles.input} />
             </column>
-            <column style={{ ...grow, gap: "4px" }}>
-              <text style={{ fontSize: "11px", color: muted }}>Subdir (optional)</text>
-              <TextField ariaLabel="Git subdir" placeholder="plugins/demo" value={subdir()} onInput={ev => setSubdir(ev.value)} style={inputStyle} />
+            <column class={styles.fieldGroupGrow}>
+              <text class={styles.fieldLabel}>Subdir (optional)</text>
+              <TextField ariaLabel="Git subdir" placeholder="plugins/demo" value={subdir()} onInput={ev => setSubdir(ev.value)} class={styles.input} />
             </column>
           </row>
         </Show>
 
         <Show when={kind() === "archive"}>
-          <column style={{ gap: "4px" }}>
-            <text style={{ fontSize: "11px", color: muted }}>Expected SHA-256</text>
-            <TextField ariaLabel="Archive sha256" placeholder="sha256:..." value={sha256()} onInput={ev => setSha256(ev.value)} style={inputStyle} />
+          <column class={styles.fieldGroup}>
+            <text class={styles.fieldLabel}>Expected SHA-256</text>
+            <TextField ariaLabel="Archive sha256" placeholder="sha256:..." value={sha256()} onInput={ev => setSha256(ev.value)} class={styles.input} />
           </column>
         </Show>
 
         <Show when={errorMsg()}>
-          {err => <text style={{ fontSize: "12px", color: "var(--color-error)" }}>{err()}</text>}
+          {err => <text class={styles.errorText}>{err()}</text>}
         </Show>
 
-        <row style={{ justifyContent: "flex-end", gap: "8px" }}>
+        <row class={styles.dialogActions}>
           <M3Button testId="plugin-install-custom-cancel" variant="text" size="sm" onClick={props.onClose}>
             <text>Cancel</text>
           </M3Button>
           <M3Button testId="plugin-install-custom-stage" variant="filled" size="sm" disabled={busy()} onClick={() => void stage()}>
-            <text style={{ color: onPrimary }}>{busy() ? "Staging…" : "Stage & review"}</text>
+            <text class={styles.onPrimaryText}>{busy() ? "Staging…" : "Stage & review"}</text>
           </M3Button>
         </row>
       </M3DialogShell>
@@ -461,64 +425,57 @@ export function SourcesDialog(props: {
   };
 
   return (
-    <box style={backdropStyle} onClick={props.onClose}>
+    <box class={styles.backdrop} onClick={props.onClose}>
       <M3DialogShell testId="plugin-sources-dialog" ariaLabel="Catalog sources" style={{ width: "520px" }}>
-        <row style={{ alignItems: "center", justifyContent: "space-between" }}>
-          <text role="heading" style={{ fontSize: "16px", fontWeight: 600 }}>Catalog sources</text>
+        <row class={styles.sourcesHeader}>
+          <text role="heading" class={styles.dialogTitle}>Catalog sources</text>
           <Button
             testId="plugin-sources-add-toggle"
             ariaLabel="Add catalog source"
             onClick={() => setAdding(v => !v)}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center", gap: "4px",
-              height: "28px", padding: "0 10px", borderRadius: "8px",
-              backgroundColor: containerHighest, color: onSurface, fontSize: "11px", fontWeight: 600,
-            }}
+            class={styles.addSourceButton}
           >
-            <ShellIcon name="add" size={14} color={primary} />
+            <ShellIcon name="add" size={14} color="var(--color-primary)" />
             <text>Add source</text>
           </Button>
         </row>
 
         <Show when={adding()}>
-          <column style={{ gap: "8px", padding: "10px", borderRadius: "12px", backgroundColor: containerHigh }}>
+          <column class={styles.addSourceForm}>
             <M3SegmentedControl ariaLabel="Source kind" compact options={SOURCE_KINDS} value={newKind()} onChange={setNewKind} />
-            <row style={{ gap: "8px" }}>
-              <box style={grow}>
-                <TextField ariaLabel="Source ID" placeholder="slug-id" value={newId()} onInput={ev => setNewId(ev.value)} style={inputStyle} />
+            <row class={styles.fieldRow}>
+              <box class={styles.grow}>
+                <TextField ariaLabel="Source ID" placeholder="slug-id" value={newId()} onInput={ev => setNewId(ev.value)} class={styles.input} />
               </box>
-              <box style={grow}>
-                <TextField ariaLabel="Source Name" placeholder="Display name" value={newName()} onInput={ev => setNewName(ev.value)} style={inputStyle} />
+              <box class={styles.grow}>
+                <TextField ariaLabel="Source Name" placeholder="Display name" value={newName()} onInput={ev => setNewName(ev.value)} class={styles.input} />
               </box>
             </row>
-            <TextField ariaLabel="Source URL" placeholder="https://... or /path/to/catalog-v1.json" value={newUrl()} onInput={ev => setNewUrl(ev.value)} style={inputStyle} />
-            <row style={{ justifyContent: "flex-end", gap: "8px" }}>
+            <TextField ariaLabel="Source URL" placeholder="https://... or /path/to/catalog-v1.json" value={newUrl()} onInput={ev => setNewUrl(ev.value)} class={styles.input} />
+            <row class={styles.dialogActions}>
               <M3Button variant="text" size="sm" onClick={() => setAdding(false)}><text>Cancel</text></M3Button>
-              <M3Button variant="filled" size="sm" onClick={addSource}><text style={{ color: onPrimary }}>Save</text></M3Button>
+              <M3Button variant="filled" size="sm" onClick={addSource}><text class={styles.onPrimaryText}>Save</text></M3Button>
             </row>
           </column>
         </Show>
 
-        <scroll style={{ maxHeight: "260px", width: "100%", overflow: "hidden auto" }}>
-          <column style={{ gap: "6px", width: "100%" }}>
+        <scroll class={styles.sourcesScroll}>
+          <column class={styles.sourcesList}>
             <For
               each={items()}
               keyed={item => item.source.id}
-              fallback={<text style={{ fontSize: "12px", color: muted }}>No catalog sources configured in settings.toml</text>}
+              fallback={<text class={styles.emptySourcesText}>No catalog sources configured in settings.toml</text>}
             >
               {entry => (
-                <row testId={`plugin-source-row-${entry().source.id}`} style={{
-                  alignItems: "center", justifyContent: "space-between", gap: "8px",
-                  padding: "8px 10px", borderRadius: "10px", backgroundColor: containerHigh,
-                }}>
-                  <column style={{ ...grow, gap: "2px" }}>
-                    <row style={{ alignItems: "center", gap: "6px" }}>
-                      <text style={{ ...clipped, fontSize: "12px", fontWeight: 600 }}>{entry().source.name}</text>
-                      <text style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: muted }}>
+                <row testId={`plugin-source-row-${entry().source.id}`} class={styles.sourceRow}>
+                  <column class={styles.sourceInfo}>
+                    <row class={styles.sourceTitleRow}>
+                      <text class={styles.sourceName}>{entry().source.name}</text>
+                      <text class={styles.sourceBadge}>
                         {entry().cached ? "Cached" : "Uncached"}
                       </text>
                     </row>
-                    <text style={{ ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", color: muted }}>
+                    <text class={styles.monoMutedClipped}>
                       {entry().source.url}
                     </text>
                   </column>
@@ -537,10 +494,10 @@ export function SourcesDialog(props: {
         </scroll>
 
         <Show when={errorMsg()}>
-          {err => <text style={{ fontSize: "12px", color: "var(--color-error)" }}>{err()}</text>}
+          {err => <text class={styles.errorText}>{err()}</text>}
         </Show>
 
-        <row style={{ justifyContent: "flex-end" }}>
+        <row class={styles.sourcesFooter}>
           <M3Button testId="plugin-sources-close" variant="accent-tonal" size="sm" onClick={props.onClose}>
             <text>Done</text>
           </M3Button>

@@ -1,0 +1,169 @@
+.card {
+  padding: 10px 12px;
+  gap: 8px;
+  border-radius: 16px;
+  background-color: var(--surface-popover);
+  border: 1px solid var(--border-popover);
+  color: var(--color-on-surface);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  overflow: hidden;
+}
+
+.header {
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.headerVerticalWithCandidates {
+  padding-bottom: 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 35%, transparent);
+}
+
+.preeditRow {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
+
+  &[data-inline-pager="true"] {
+    min-height: 24px;
+  }
+}
+
+.preedit {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  height: 20px;
+  align-items: center;
+  overflow: hidden;
+}
+
+.preeditText {
+  min-width: 0px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.caret {
+  width: 2px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 1px;
+  background-color: var(--color-primary);
+}
+
+.pagerInlineRow {
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.pagerBottomRow {
+  justify-content: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.pagerButton {
+  display: flex;
+  width: 26px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background-color: var(--color-surface-container-high);
+  flex-shrink: 0;
+  opacity: 1;
+
+  &:disabled {
+    opacity: 0.4;
+  }
+}
+
+.cursorLabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.auxText {
+  min-width: 0px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  height: 18px;
+  font-size: 12px;
+  color: var(--color-on-surface-variant);
+}
+
+.candidatesScroll {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-height: 0px;
+  overflow: auto;
+}
+
+.candidatesList {
+  gap: 4px;
+}
+
+.candidateButton {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-shrink: 0;
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 72px;
+  height: 30px;
+  padding: 0 10px;
+  gap: 8px;
+  border-radius: 10px;
+  background-color: transparent;
+  border: 1px solid transparent;
+  color: var(--color-on-surface);
+
+  &[data-layout="vertical"] {
+    flex-grow: 0;
+    flex-basis: auto;
+    min-width: 0px;
+  }
+
+  &[data-active="true"] {
+    background-color: var(--color-primary-container);
+    border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
+    color: var(--color-on-primary-container);
+  }
+}
+
+.candidateIndex {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-on-surface-variant);
+
+  &[data-active="true"] {
+    font-weight: 700;
+    color: var(--color-on-primary-container);
+  }
+}
+
+.candidateText {
+  min-width: 0px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 400;
+
+  &[data-active="true"] {
+    font-weight: 600;
+  }
+}

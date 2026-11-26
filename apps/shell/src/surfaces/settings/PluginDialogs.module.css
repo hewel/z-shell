@@ -1,0 +1,226 @@
+.backdrop {
+  position: absolute;
+  inset: 0px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background-color: color-mix(in srgb, var(--color-scrim) 52%, transparent);
+}
+
+.capabilityBox {
+  gap: 8px;
+  border-radius: 12px;
+  background-color: var(--color-surface-container-high);
+  padding: 10px 12px;
+}
+
+.capabilityTitle {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.monoMuted {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.monoMutedClipped {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.monoError {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-error);
+}
+
+.dialogHeader {
+  gap: 4px;
+}
+
+.dialogTitle {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.trustBanner {
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background-color: var(--color-primary-container);
+}
+
+.trustBannerText {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--color-on-primary-container);
+}
+
+.provenanceBox {
+  gap: 4px;
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-container-high);
+  padding: 8px 10px;
+}
+
+.switchRow {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.switchLabel {
+  font-size: 12px;
+  color: var(--color-on-surface);
+}
+
+.switchLabelError {
+  font-size: 12px;
+  color: var(--color-error);
+}
+
+.errorText {
+  font-size: 12px;
+  color: var(--color-error);
+}
+
+.dialogActions {
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.onPrimaryText {
+  color: var(--color-on-primary);
+}
+
+.fieldGroup {
+  gap: 4px;
+}
+
+.fieldGroupGrow {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  gap: 4px;
+}
+
+.fieldRow {
+  gap: 8px;
+}
+
+.fieldLabel {
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.input {
+  height: 34px;
+  border-radius: var(--radius-md);
+  padding: 6px 10px;
+  background-color: var(--color-surface-container);
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 65%, transparent);
+  color: var(--color-on-surface);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.sourcesHeader {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.addSourceButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-container-highest);
+  color: var(--color-on-surface);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.addSourceForm {
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background-color: var(--color-surface-container-high);
+}
+
+.grow {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+}
+
+.sourcesScroll {
+  max-height: 260px;
+  width: 100%;
+  overflow: hidden auto;
+}
+
+.sourcesList {
+  gap: 6px;
+  width: 100%;
+}
+
+.emptySourcesText {
+  font-size: 12px;
+  color: var(--color-on-surface-variant);
+}
+
+.sourceRow {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-container-high);
+}
+
+.sourceInfo {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  gap: 2px;
+}
+
+.sourceTitleRow {
+  align-items: center;
+  gap: 6px;
+}
+
+.sourceName {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sourceBadge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-on-surface-variant);
+}
+
+.sourcesFooter {
+  justify-content: flex-end;
+}

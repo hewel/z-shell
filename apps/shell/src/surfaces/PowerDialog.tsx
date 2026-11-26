@@ -4,6 +4,7 @@ import { ShellIcon } from "../icons.tsx";
 import { createRetainedPresence, dialogMotionStyle, scrimBackdrop, useMotionScheme, type M3Spring } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { POWER_DIALOG_COPY, resolveMonitorLogicalSize, type PowerConfirmAction } from "../topics.ts";
+import styles from "./PowerDialog.module.css";
 
 function PowerDialogContent(props: {
   action: Accessor<PowerConfirmAction>;
@@ -35,11 +36,13 @@ function PowerDialogContent(props: {
   });
 
   return (
-    <box testId="power-dialog-backdrop" inert={props.inert} onClick={closePowerDialog} style={{
-      position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      backgroundColor: scrimBackdrop(55, props.opacity(), dark()),
-    }}>
+    <box
+      testId="power-dialog-backdrop"
+      inert={props.inert}
+      onClick={closePowerDialog}
+      class={styles.backdrop}
+      style={{ backgroundColor: scrimBackdrop(55, props.opacity(), dark()) }}
+    >
       <M3DialogShell
         testId="power-dialog-card"
         ariaLabel={copy().title}
@@ -61,11 +64,11 @@ function PowerDialogContent(props: {
           ...dialogMotionStyle(props.spatial(), { opacity: props.opacity(), reduced: scheme() === "reduced", fromScale: 0.92, fromY: 0 }),
         }}
       >
-        <text testId="power-dialog-title" role="heading" style={{ fontSize: "20px", fontWeight: 700 }}>{copy().title}</text>
-        <text testId="power-dialog-desc" style="font-size: 13px; color: var(--color-on-surface-variant); text-align: center; line-height: 18px;">
+        <text testId="power-dialog-title" role="heading" class={styles.title}>{copy().title}</text>
+        <text testId="power-dialog-desc" class={styles.description}>
           {copy().description}
         </text>
-        <row style={{ gap: "8px", justifyContent: "flex-end", width: "100%", marginTop: "6px" }}>
+        <row class={styles.actions}>
           <M3Button testId="power-dialog-cancel" variant="outlined" neutral onClick={closePowerDialog} ref={node => focus(node)}>
             Cancel
           </M3Button>

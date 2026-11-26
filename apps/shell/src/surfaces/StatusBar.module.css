@@ -1,0 +1,1000 @@
+.barRoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  color: var(--color-on-surface);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  overflow: visible;
+  background-color: transparent;
+
+  &[data-vertical="true"] {
+    flex-direction: column;
+  }
+
+  &[data-bar-style="docked"] {
+    overflow: hidden;
+    background-color: var(--color-surface-container);
+    padding: 0 10px;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 48%, transparent);
+
+    &[data-vertical="true"] {
+      padding: 8px 0;
+      border-bottom: none;
+    }
+
+    &[data-position="left"] {
+      border-right: 1px solid color-mix(in srgb, var(--color-outline-variant) 48%, transparent);
+    }
+
+    &[data-position="right"] {
+      border-left: 1px solid color-mix(in srgb, var(--color-outline-variant) 48%, transparent);
+    }
+  }
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  gap: 6px;
+
+  &[data-vertical="true"] {
+    flex-direction: column;
+  }
+
+  &[data-align="end"] {
+    justify-content: flex-end;
+  }
+}
+
+.centerZone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: row;
+  gap: 6px;
+  flex-shrink: 0;
+
+  &[data-vertical="true"] {
+    flex-direction: column;
+  }
+}
+
+/* Shared layout, radius, shadow, and text color for bar segments.
+   CRITICAL: Never declare background-color or border here so [data-bar-segment]
+   rules in app.css remain authoritative on interactive segment buttons. */
+.segment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  flex-direction: row;
+  border-radius: 16px;
+  --zgui-corner-shape: none;
+  color: var(--color-on-surface);
+  box-shadow: var(--shadow-level-1);
+
+  &[data-vertical="true"] {
+    flex-direction: column;
+    border-radius: 999px;
+  }
+
+  &[data-docked="true"] {
+    border-radius: 8px;
+    --zgui-corner-shape: superellipse(2.83);
+    box-shadow: none;
+
+    &[data-active="true"] {
+      color: var(--color-on-primary-container);
+    }
+  }
+}
+
+/* Non-interactive islands only (never applied to [data-bar-segment] buttons). */
+.segmentSurface {
+  background-color: var(--surface-bar-floating);
+  border: 1px solid var(--border-bar-floating);
+
+  &[data-active="true"] {
+    background-color: var(--surface-bar-floating-active);
+    border: 1px solid color-mix(in srgb, var(--color-primary) 60%, transparent);
+  }
+
+  &[data-docked="true"] {
+    background-color: transparent;
+    border: 1px solid transparent;
+
+    &[data-active="true"] {
+      background-color: var(--color-primary-container);
+      border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+    }
+  }
+}
+
+.divider {
+  flex-shrink: 0;
+  background-color: color-mix(in srgb, var(--color-outline-variant) 65%, transparent);
+  width: 1px;
+  height: 14px;
+
+  &[data-short="true"] {
+    height: 12px;
+  }
+
+  &[data-vertical="true"] {
+    width: 20px;
+    height: 1px;
+
+    &[data-short="true"] {
+      width: 16px;
+    }
+  }
+}
+
+.pressInner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.launcherButton {
+  width: 32px;
+  height: 32px;
+
+  &[data-docked="true"] {
+    width: 28px;
+    height: 28px;
+  }
+
+  &[data-vertical="true"] {
+    width: 40px;
+    height: 40px;
+
+    &[data-docked="true"] {
+      width: 32px;
+      height: 32px;
+    }
+  }
+}
+
+.workspacesIsland {
+  height: 32px;
+  gap: 3px;
+  padding: 0 4px;
+
+  &[data-docked="true"] {
+    height: 28px;
+    background-color: var(--color-surface-container-high);
+    border-radius: 8px;
+    border: none;
+    padding: 0 3px;
+  }
+
+  &[data-vertical="true"] {
+    width: 40px;
+    height: auto;
+    padding: 6px 0;
+
+    &[data-docked="true"] {
+      width: 32px;
+      height: auto;
+      padding: 3px 0;
+    }
+  }
+}
+
+.wsTrack {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+
+  &[data-vertical="true"] {
+    flex-direction: column;
+  }
+}
+
+.wsIndicator {
+  position: absolute;
+  pointer-events: none;
+  left: 0px;
+  top: 0px;
+  height: 24px;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+  background-color: var(--color-primary);
+
+  &[data-vertical="true"] {
+    width: 28px;
+    height: auto;
+  }
+
+  &[data-docked="true"] {
+    border-radius: 6px;
+    --zgui-corner-shape: superellipse(2.83);
+
+    &[data-vertical="true"] {
+      width: 24px;
+    }
+  }
+
+  &[data-urgent="true"] {
+    background-color: var(--color-error);
+  }
+}
+
+.wsButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  min-width: 24px;
+  height: 24px;
+  padding: 0px;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+  background-color: transparent;
+
+  &[data-wide-active="true"] {
+    padding: 0 6px;
+  }
+
+  &[data-vertical="true"] {
+    min-width: 28px;
+    height: 28px;
+  }
+
+  &[data-docked="true"] {
+    border-radius: 6px;
+    --zgui-corner-shape: superellipse(2.83);
+
+    &[data-vertical="true"] {
+      min-width: 24px;
+      height: 24px;
+    }
+  }
+}
+
+.wsButtonInner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.wsDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+  background-color: var(--color-on-surface-variant);
+
+  &[data-compact="true"] {
+    width: 6px;
+    height: 6px;
+  }
+
+  &[data-urgent="true"] {
+    background-color: var(--color-error);
+  }
+}
+
+.wsCutout {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+  background-color: var(--color-surface-container);
+
+  &[data-compact="true"] {
+    width: 6px;
+    height: 6px;
+  }
+
+  &[data-docked="true"] {
+    background-color: var(--color-surface-container-high);
+  }
+}
+
+.wsActiveLabel {
+  max-width: 84px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  color: var(--color-on-primary);
+  font-variant-numeric: tabular-nums;
+
+  &[data-vertical="true"] {
+    max-width: 20px;
+  }
+
+  &[data-urgent="true"] {
+    color: var(--color-on-error);
+  }
+}
+
+.overviewButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+
+  &[data-vertical="true"][data-docked="false"] {
+    width: 28px;
+    height: 28px;
+  }
+
+  &[data-docked="true"] {
+    border-radius: 6px;
+    --zgui-corner-shape: superellipse(2.83);
+  }
+}
+
+.activeWindow {
+  height: 32px;
+  justify-content: flex-start;
+  padding: 0 12px;
+  gap: 8px;
+  flex-shrink: 1;
+  min-width: 0px;
+  overflow: hidden;
+
+  &[data-docked="true"] {
+    height: 28px;
+    padding: 0 4px;
+    gap: 7px;
+  }
+
+  &[data-vertical="true"] {
+    width: 40px;
+    height: 40px;
+    justify-content: center;
+    padding: 0px;
+    gap: 0px;
+    flex-shrink: 0;
+
+    &[data-docked="true"] {
+      width: 32px;
+      height: 32px;
+    }
+  }
+}
+
+.activeWindowFallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background-color: var(--color-surface-container-highest);
+  flex-shrink: 0;
+
+  &[data-docked="true"] {
+    width: 24px;
+    height: 24px;
+    background-color: var(--color-surface-container-high);
+  }
+}
+
+.activeWindowIcon {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  object-fit: contain;
+
+  &[data-vertical="true"] {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+  }
+}
+
+.activeWindowTitle {
+  min-width: 0px;
+  max-width: 224px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.clockButton {
+  height: 32px;
+  padding: 0 12px;
+  white-space: nowrap;
+
+  &[data-has-badge="true"] {
+    /* Asymmetric optical cap padding: right cap holds 24px (R=12px) badge inside 1px border -> 1+3=4px == vertical inset. */
+    padding: 0 3px 0 12px;
+  }
+
+  &[data-docked="true"] {
+    height: 28px;
+    padding: 0 10px;
+  }
+
+  &[data-vertical="true"] {
+    width: 40px;
+    height: auto;
+    /* Concentric bottom cap: 28px (R=14) circle inside 40px (R=20) with 1px border -> 1+5=6px inset (6+14=20). */
+    padding: 8px 0;
+    font-weight: 600;
+    line-height: 1.15;
+
+    &[data-has-badge="true"] {
+      padding: 8px 0 5px 0;
+    }
+
+    &[data-docked="true"] {
+      width: 32px;
+      padding: 5px 0;
+
+      &[data-has-badge="true"] {
+        padding: 5px 0 4px 0;
+      }
+    }
+  }
+}
+
+.clockInner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: row;
+  gap: 8px;
+  pointer-events: none;
+
+  &[data-vertical="true"] {
+    flex-direction: column;
+    gap: 4px;
+  }
+}
+
+.clockText {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.clockStack {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+}
+
+.clockDigit {
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.clockSeconds {
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  color: var(--color-on-surface-variant);
+}
+
+.notificationBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 24px;
+  background-color: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+  padding: 0 7px;
+  font-size: 11px;
+  font-weight: 600;
+
+  &[data-vertical="true"] {
+    width: 28px;
+    height: 28px;
+    max-width: 28px;
+    padding: 0px;
+    flex-direction: column;
+    gap: 1px;
+    font-size: 9px;
+    line-height: 10px;
+    overflow: hidden;
+  }
+
+  &[data-docked="true"] {
+    height: 20px;
+    padding: 0 6px;
+    gap: 3px;
+    border-radius: 6px;
+    --zgui-corner-shape: superellipse(2.83);
+
+    &[data-vertical="true"] {
+      width: 26px;
+      height: 18px;
+      max-width: 26px;
+      padding: 0 4px;
+      flex-direction: row;
+      gap: 2px;
+      border-radius: 6px;
+      font-size: 10px;
+      line-height: 12px;
+      overflow: hidden;
+    }
+  }
+
+  &[data-on-active="true"] {
+    background-color: color-mix(in srgb, var(--color-on-primary-container) 14%, transparent);
+  }
+}
+
+.notificationCount {
+  font-variant-numeric: tabular-nums;
+
+  &[data-vertical="true"] {
+    font-size: 9px;
+    line-height: 10px;
+
+    &[data-docked="true"] {
+      font-size: 10px;
+      line-height: 12px;
+    }
+  }
+}
+
+.pluginSlot {
+  height: 32px;
+  padding: 0px;
+  overflow: hidden;
+
+  &[data-docked="true"] {
+    height: 28px;
+  }
+
+  &[data-vertical="true"] {
+    width: 40px;
+    height: auto;
+    min-height: 40px;
+
+    &[data-docked="true"] {
+      width: 32px;
+      min-height: 32px;
+    }
+  }
+}
+
+.mediaButton {
+  height: 32px;
+  justify-content: flex-start;
+  padding: 0 12px;
+  flex-shrink: 1;
+  min-width: 0px;
+  overflow: hidden;
+
+  &[data-docked="true"] {
+    height: 28px;
+    padding: 0 6px;
+  }
+
+  &[data-vertical="true"] {
+    width: 40px;
+    height: 40px;
+    justify-content: center;
+    padding: 0px;
+    flex-shrink: 0;
+
+    &[data-docked="true"] {
+      width: 32px;
+      height: 32px;
+    }
+  }
+}
+
+.mediaInner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0px;
+  overflow: hidden;
+  pointer-events: none;
+
+  &[data-docked="true"] {
+    gap: 7px;
+  }
+}
+
+.mediaText {
+  min-width: 0px;
+  max-width: 224px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sysmonButton {
+  height: 32px;
+  /* Asymmetric optical cap padding: 24px (R=12) circular pulse badge inside 32px (R=16) capsule with 1px border -> 1+3=4px. */
+  padding: 0 10px 0 3px;
+  gap: 6px;
+  white-space: nowrap;
+
+  &[data-docked="true"] {
+    height: 28px;
+    padding: 0 8px 0 4px;
+  }
+
+  &[data-vertical="true"] {
+    width: 40px;
+    height: 40px;
+    padding: 0px;
+    border-radius: 999px;
+    --zgui-corner-shape: none;
+
+    &[data-docked="true"] {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      --zgui-corner-shape: superellipse(2.83);
+    }
+  }
+}
+
+.sysmonRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.sysmonBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+  background-color: var(--color-primary-container);
+  flex-shrink: 0;
+
+  &[data-docked="true"] {
+    width: 22px;
+    height: 22px;
+  }
+
+  &[data-on-active="true"] {
+    background-color: color-mix(in srgb, var(--color-on-primary-container) 14%, transparent);
+  }
+}
+
+.sysmonCpu {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 14px;
+  color: var(--color-on-surface);
+  font-variant-numeric: tabular-nums;
+
+  &[data-on-active="true"] {
+    color: var(--color-on-primary-container);
+  }
+}
+
+.sysmonRam {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 14px;
+  color: var(--color-on-surface-variant);
+  font-variant-numeric: tabular-nums;
+
+  &[data-on-active="true"] {
+    color: var(--color-on-primary-container);
+  }
+}
+
+.trayIsland {
+  height: 32px;
+  gap: 2px;
+  padding: 0 4px;
+
+  &[data-docked="true"] {
+    height: 28px;
+    gap: 1px;
+    padding: 0 2px;
+  }
+
+  &[data-vertical="true"] {
+    width: 40px;
+    height: auto;
+    padding: 6px 0;
+
+    &[data-docked="true"] {
+      width: 32px;
+      padding: 2px 0;
+    }
+  }
+}
+
+.trayOverflowToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+  flex-shrink: 0;
+  background-color: var(--color-surface-container-highest);
+  color: var(--color-on-surface-variant);
+
+  &[data-vertical="true"][data-docked="false"] {
+    width: 28px;
+    height: 28px;
+  }
+
+  &[data-docked="true"] {
+    border-radius: 6px;
+    --zgui-corner-shape: superellipse(2.83);
+  }
+
+  &[data-active="true"] {
+    background-color: var(--color-primary-container);
+    color: var(--color-on-primary-container);
+  }
+}
+
+.trayButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 24px;
+  min-height: 24px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+
+  &[data-vertical="true"][data-docked="false"] {
+    width: 28px;
+    height: 28px;
+  }
+
+  &[data-docked="true"] {
+    border-radius: 6px;
+    --zgui-corner-shape: superellipse(2.83);
+  }
+}
+
+.trayFallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  background-color: var(--color-surface-container-highest);
+
+  &[data-large="true"] {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+.trayLetterFallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  background-color: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+  font-weight: 700;
+  font-size: 10px;
+
+  &[data-large="true"] {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+.trayIconImage {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  object-fit: contain;
+
+  &[data-large="true"] {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+.systemPill {
+  height: 32px;
+  gap: 2px;
+  padding: 0 4px;
+
+  &[data-has-ime="true"] {
+    /* Asymmetric optical cap padding: left cap holds 24px (R=12px) IME pill inside 1px border -> 1+3=4px == vertical inset. */
+    padding: 0 4px 0 3px;
+  }
+
+  &[data-docked="true"] {
+    height: 28px;
+    gap: 1px;
+    padding: 0 4px;
+  }
+
+  &[data-vertical="true"] {
+    width: 40px;
+    height: auto;
+    padding: 6px 0;
+
+    &[data-has-ime="true"] {
+      /* Concentric top cap: 30px (R=15) IME circle inside 40px (R=20) with 1px border -> 1+4=5px inset (5+15=20). */
+      padding: 4px 0 6px 0;
+    }
+
+    &[data-docked="true"] {
+      width: 32px;
+      padding: 3px 0;
+    }
+  }
+}
+
+.imeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+  background-color: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+  font-weight: 700;
+  font-size: 11px;
+  line-height: 14px;
+
+  &[data-vertical="true"] {
+    width: 30px;
+    min-width: 30px;
+    max-width: 30px;
+    overflow: hidden;
+    height: 30px;
+    padding: 0px;
+    font-size: 12px;
+    line-height: 1;
+  }
+
+  &[data-docked="true"] {
+    min-width: 24px;
+    border-radius: 6px;
+    --zgui-corner-shape: superellipse(2.83);
+
+    &[data-vertical="true"] {
+      width: 24px;
+      min-width: 24px;
+      max-width: 24px;
+      height: 24px;
+      font-size: 11px;
+    }
+  }
+
+  &[data-on-active="true"] {
+    background-color: color-mix(in srgb, var(--color-on-primary-container) 14%, transparent);
+    color: var(--color-on-primary-container);
+  }
+
+  &[data-active="true"] {
+    background-color: var(--color-primary);
+    color: var(--color-on-primary);
+  }
+}
+
+.sysBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+
+  &[data-vertical="true"][data-docked="false"] {
+    width: 28px;
+    height: 28px;
+  }
+
+  &[data-docked="true"] {
+    border-radius: 6px;
+    --zgui-corner-shape: superellipse(2.83);
+  }
+
+  &[data-active="true"] {
+    background-color: var(--color-primary-container);
+    color: var(--color-on-primary-container);
+  }
+}
+
+.privacyButton {
+  background-color: var(--color-error-container);
+  color: var(--color-on-error-container);
+}
+
+.batteryButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  height: 24px;
+  padding: 0 5px;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+  flex-shrink: 0;
+
+  &[data-vertical="true"] {
+    height: auto;
+    padding: 3px 4px;
+  }
+
+  &[data-docked="true"] {
+    border-radius: 6px;
+    --zgui-corner-shape: superellipse(2.83);
+  }
+
+  &[data-active="true"] {
+    background-color: var(--color-primary-container);
+    color: var(--color-on-primary-container);
+  }
+}
+
+.batteryInner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: row;
+  gap: 4px;
+  pointer-events: none;
+
+  &[data-vertical="true"] {
+    flex-direction: column;
+    gap: 1px;
+  }
+}
+
+.batteryText {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}

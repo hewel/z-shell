@@ -1,0 +1,334 @@
+.workspaceCard {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  max-width: 316px;
+  padding: 16px;
+  gap: 10px;
+  border-radius: var(--radius-panel);
+  background-color: var(--color-surface-container-high);
+  color: var(--color-on-surface);
+  border: 1.5px solid color-mix(in srgb, var(--color-outline-variant) 65%, transparent);
+
+  &[data-active="true"] {
+    border-color: var(--color-primary);
+  }
+}
+
+.wsHeader {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.wsTitleGroup {
+  align-items: center;
+  gap: 8px;
+  min-width: 0px;
+  flex-grow: 1;
+}
+
+.wsIndexBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  min-width: 24px;
+  padding: 0 8px;
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+  background-color: var(--color-surface-container-highest);
+  color: var(--color-on-surface-variant);
+
+  &[data-active="true"] {
+    background-color: var(--color-primary);
+    color: var(--color-on-primary);
+  }
+}
+
+.wsIndexText {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wsName {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--color-on-surface-variant);
+
+  &[data-active="true"] {
+    font-weight: 600;
+    color: var(--color-on-surface);
+  }
+}
+
+.wsCount {
+  font-size: 12px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-on-surface-variant);
+
+  &[data-empty="true"] {
+    color: var(--color-outline);
+  }
+
+  &[data-active="true"] {
+    color: var(--color-primary);
+  }
+}
+
+.wsCanvas {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 158px;
+  overflow: hidden;
+  border-radius: var(--radius-card);
+  background: linear-gradient(145deg, var(--color-surface) 0%, color-mix(in srgb, var(--color-primary-container) 34%, var(--color-surface)) 100%);
+  align-items: center;
+  justify-content: center;
+}
+
+.wsEmptyCol {
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.wsEmptyIcon {
+  width: 24px;
+  height: 24px;
+  --zgui-fill: transparent;
+  --zgui-stroke: var(--color-outline);
+  --zgui-stroke-width: 2px;
+  --zgui-stroke-linecap: round;
+  --zgui-stroke-linejoin: round;
+}
+
+.wsEmptyText {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-outline);
+}
+
+.wsWindow {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-md);
+  padding: 6px;
+  gap: 5px;
+  overflow: hidden;
+  background-color: var(--color-surface-container);
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 65%, transparent);
+
+  &[data-focused="true"] {
+    border-color: var(--color-primary);
+  }
+}
+
+.wsWindowHeader {
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  width: 100%;
+}
+
+.wsWindowTitle {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  line-height: 12px;
+  font-weight: 500;
+  color: var(--color-on-surface-variant);
+
+  &[data-focused="true"] {
+    font-weight: 600;
+    color: var(--color-on-surface);
+  }
+}
+
+.wsWindowDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  --zgui-corner-shape: none;
+  flex-shrink: 0;
+  background-color: var(--color-primary);
+}
+
+.wsWindowBarLong {
+  width: 80%;
+  height: 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  background-color: var(--color-surface-container-highest);
+
+  &[data-focused="true"] {
+    background-color: var(--color-primary-container);
+  }
+}
+
+.wsWindowBarShort {
+  width: 62%;
+  height: 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  background-color: var(--color-surface-container-highest);
+}
+
+.backdrop {
+  position: fixed;
+  left: 0px;
+  top: 0px;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+}
+
+.overviewCard {
+  width: 684px;
+  max-width: 100%;
+  max-height: 760px;
+  padding: 18px;
+  gap: 16px;
+  border-radius: var(--radius-panel);
+  background-color: var(--color-surface-container);
+  color: var(--color-on-surface);
+  font-family: var(--font-sans);
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 65%, transparent);
+  box-shadow: var(--shadow-level-3);
+  transform-origin: center;
+}
+
+.cardHeader {
+  align-items: center;
+  flex-shrink: 0;
+  gap: 12px;
+  width: 100%;
+}
+
+.headerBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-tile);
+  flex-shrink: 0;
+  background-color: var(--color-primary-container);
+}
+
+.headerBadgeIcon {
+  width: 22px;
+  height: 22px;
+  --zgui-fill: var(--color-on-primary-container);
+}
+
+.headerTitles {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  gap: 2px;
+}
+
+.headerTitle {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 28px;
+  letter-spacing: -0.015em;
+}
+
+.headerSubtitle {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-on-surface-variant);
+}
+
+.headerActions {
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.circleBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-pill);
+  --zgui-corner-shape: none;
+  background-color: var(--color-surface-container-high);
+  color: var(--color-on-surface);
+}
+
+.circleBtnIcon {
+  width: 18px;
+  height: 18px;
+  --zgui-fill: transparent;
+  --zgui-stroke: var(--color-on-surface);
+  --zgui-stroke-width: 2px;
+  --zgui-stroke-linecap: round;
+  --zgui-stroke-linejoin: round;
+}
+
+.hidden {
+  display: none;
+}
+
+.errorText {
+  color: var(--color-error);
+}
+
+.emptyCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 158px;
+  border-radius: var(--radius-card);
+  gap: 6px;
+  background-color: var(--color-surface-container-high);
+}
+
+.wsScroll {
+  width: 100%;
+  max-height: 520px;
+  overflow: hidden auto;
+}
+
+.wsGridCol {
+  gap: 16px;
+  width: 100%;
+}
+
+.wsGridRow {
+  gap: 16px;
+  width: 100%;
+}
+
+.wsSpacer {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+}

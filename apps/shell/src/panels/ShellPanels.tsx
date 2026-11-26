@@ -1,4 +1,4 @@
-import { PopupSurface, Show, createMemo, createSignal, untrack, type NativeChild, type NativeNode, type PopupSurfacePlacement } from "@hewel/zgui";
+import { PopupSurface, Show, createMemo, createSignal, cx, untrack, type NativeChild, type NativeNode, type PopupSurfacePlacement } from "@hewel/zgui";
 import {
   createRetainedPresence,
   panelMotionStyle,
@@ -13,6 +13,7 @@ import { BatteryPanel } from "./BatteryPanel.tsx";
 import { CalendarPanel } from "./CalendarPanel.tsx";
 import { MediaPanel } from "./MediaPanel.tsx";
 import { QuickSettingsPanel } from "./QuickSettingsPanel.tsx";
+import styles from "./ShellPanels.module.css";
 import { SystemMonitorPanel } from "./SystemMonitorPanel.tsx";
 
 const panels = {
@@ -26,22 +27,7 @@ const panels = {
 /** Outer drawable shadow bleed for Level 2 popovers (`--shadow-level-2`: `0 10px 24px`). */
 export const POPOVER_SHADOW_INSETS = { top: 20, right: 28, bottom: 38, left: 28 } as const;
 
-export const POPOVER_BLEED_STYLE = {
-  width: "100%",
-  padding: `${POPOVER_SHADOW_INSETS.top}px ${POPOVER_SHADOW_INSETS.right}px ${POPOVER_SHADOW_INSETS.bottom}px ${POPOVER_SHADOW_INSETS.left}px`,
-  boxSizing: "border-box",
-  backgroundColor: "transparent",
-} as const;
-
-export const POPOVER_FRAME_STYLE = {
-  width: "100%",
-  borderRadius: "22px",
-  backgroundColor: "var(--surface-popover)",
-  border: "1px solid var(--border-popover)",
-  boxShadow: "var(--shadow-level-2)",
-  overflow: "hidden",
-  fontFamily: "var(--font-sans)",
-} as const;
+export { styles as shellPanelsStyles };
 
 export function resolvePopoverGeometry(
   position: BarPosition,
@@ -88,13 +74,13 @@ function PanelContent(props: {
   useShellTheme(props.theme.data);
   const scheme = useMotionScheme();
   return (
-    <box inert={props.inert} style={POPOVER_BLEED_STYLE}>
+    <box inert={props.inert} class={cx(styles.popoverBleed)}>
       <box
         ref={props.cardRef}
         testId={`panel-root-${props.id}`}
         data-theme-rev={String(props.theme.revision())}
+        class={cx(styles.popoverFrame)}
         style={{
-          ...POPOVER_FRAME_STYLE,
           maxHeight: `${props.maxHeight}px`,
           ...panelMotionStyle(props.spatial(), props.position, props.centered, {
             opacity: props.opacity(),
@@ -102,10 +88,10 @@ function PanelContent(props: {
           }),
         }}
       >
-        <box style={{
-          width: "100%",
-          ...popoverContentMotionStyle(props.spatial(), props.opacity(), scheme() === "reduced"),
-        }}>
+        <box
+          class={styles.popoverContent}
+          style={popoverContentMotionStyle(props.spatial(), props.opacity(), scheme() === "reduced")}
+        >
           {props.children}
         </box>
       </box>

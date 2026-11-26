@@ -1,5 +1,5 @@
 import {
-  Button, For, Image, LayerSurface, Show, createEffect, createMemo, createSignal, getWindowRect, onCleanup,
+  Button, For, Image, LayerSurface, Show, createEffect, createMemo, createSignal, cx, getWindowRect, onCleanup,
   type Accessor, type ButtonProps, type Monitor, type NativeNode, type NativeStyle, type NativeWheelEvent, type NativeWindowRect,
 } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
@@ -13,29 +13,7 @@ import {
   formatBarClock, formatSurfaceName, isImeTrayItem, partitionPluginBarWidgets, partitionTrayItems, resolveBarLayout, resolveBarPopupAnchor, resolveDesktopApp, resolveWorkspaceLabel, selectActiveMediaPlayer,
   type ResolvedBarLayout, type TrayItem, type WaylandWindow, type WaylandWorkspace,
 } from "../topics.ts";
-
-const primary = "var(--color-primary)";
-const onSurface = "var(--color-on-surface)";
-const muted = "var(--color-on-surface-variant)";
-const error = "var(--color-error)";
-const primaryContainer = "var(--color-primary-container)";
-const onPrimaryContainer = "var(--color-on-primary-container)";
-const islandBorder = "1px solid var(--border-bar-floating)";
-const activeIslandBorder = "1px solid color-mix(in srgb, var(--color-primary) 60%, transparent)";
-const dockedEdgeBorder = "1px solid color-mix(in srgb, var(--color-outline-variant) 48%, transparent)";
-
-const center = { display: "flex", alignItems: "center", justifyContent: "center" } as const;
-const group = { display: "flex", alignItems: "center", flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "6px" } as const;
-const verticalGroup = { ...group, flexDirection: "column" } as const;
-const clippedText = { minWidth: "0px", maxWidth: "224px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
-const compactIconButton = { ...center, width: "24px", height: "24px", flexShrink: 0, borderRadius: "6px" } as const;
-const verticalCompactIconButton = { ...center, width: "24px", height: "24px", flexShrink: 0, borderRadius: "6px" } as const;
-const notificationBadge = {
-  ...center, gap: "4px", height: "24px", backgroundColor: primaryContainer, color: onPrimaryContainer,
-  borderRadius: "999px", "--zgui-corner-shape": "none", padding: "0 7px", fontSize: "11px", fontWeight: 600,
-} as const;
-const outline = "color-mix(in srgb, var(--color-outline-variant) 65%, transparent)";
-const tabular = { fontVariantNumeric: "tabular-nums" } as const;
+import styles from "./StatusBar.module.css";
 
 interface BarClock {
   readonly horizontal: string;
@@ -59,46 +37,15 @@ function useBlurRef(track: TrackBlurNode): (node: NativeNode) => void {
   };
 }
 
-function segmentChrome(vertical: boolean, docked: boolean, active = false, interactive = false): StyleObj {
-  if (docked) {
-    return {
-      ...center,
-      flexShrink: 0,
-      flexDirection: vertical ? "column" : "row",
-      borderRadius: "8px",
-      ...(interactive
-        ? {}
-        : {
-            backgroundColor: active ? primaryContainer : "transparent",
-            border: active ? "1px solid color-mix(in srgb, var(--color-primary) 35%, transparent)" : "1px solid transparent",
-          }),
-      color: active ? onPrimaryContainer : onSurface,
-    };
-  }
-  return {
-    ...center,
-    flexShrink: 0,
-    flexDirection: vertical ? "column" : "row",
-    borderRadius: vertical ? "999px" : "16px",
-    "--zgui-corner-shape": "none",
-    ...(interactive
-      ? {}
-      : {
-          backgroundColor: active ? "var(--surface-bar-floating-active)" : "var(--surface-bar-floating)",
-          border: active ? activeIslandBorder : islandBorder,
-        }),
-    color: onSurface,
-    boxShadow: "var(--shadow-level-1)",
-  };
-}
-
 function Divider(props: { vertical: boolean; short?: boolean }) {
-  return <box ariaHidden style={{
-    flexShrink: 0,
-    backgroundColor: outline,
-    width: props.vertical ? (props.short ? "16px" : "20px") : "1px",
-    height: props.vertical ? "1px" : props.short ? "12px" : "14px",
-  }} />;
+  return (
+    <box
+      ariaHidden
+      data-vertical={props.vertical ? "true" : "false"}
+      data-short={props.short ? "true" : "false"}
+      class={styles.divider}
+    />
+  );
 }
 
 function wheelDirection(event: NativeWheelEvent): number {
@@ -135,58 +82,50 @@ function WorkspaceButton(props: {
   const scheme = useMotionScheme();
   const activeFade = createM3Spring(() => (props.workspace.active ? 1 : 0), "fastEffects", { scheme });
   const label = () => resolveWorkspaceLabel(props.workspace, props.workspaceNumbers, props.ordinalIndex);
-  const dotFill = () => props.workspace.urgent ? error : muted;
-  const activeLabel = () => ({
-    maxWidth: props.vertical ? "20px" : "84px",
-    fontSize: "11px",
-    fontWeight: 700,
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    color: props.workspace.urgent ? "var(--color-on-error)" : "var(--color-on-primary)",
-    ...tabular,
-  }) as const;
-  const dotSize = () => props.docked || props.vertical ? "6px" : "8px";
+  const compact = () => props.docked || props.vertical;
   return (
     <Button
       ref={node => props.registerNode(props.workspace.workspace_id, node)}
       testId={`ws-${props.workspace.workspace_id}`}
       ariaLabel={label() ? `Workspace ${label()}` : `Workspace ${props.ordinalIndex + 1}`}
       onClick={props.activate}
-      style={{
-        ...center,
-        position: "relative",
-        zIndex: 1,
-        flexShrink: 0,
-        minWidth: props.vertical ? (props.docked ? "24px" : "28px") : `${WS_SLOT_WIDTH_H}px`,
-        height: props.vertical ? (props.docked ? "24px" : "28px") : "24px",
-        padding: !props.vertical && props.workspace.active && label().length > 1 ? "0 6px" : "0px",
-        borderRadius: props.docked ? "6px" : "999px",
-        ...(props.docked ? {} : { "--zgui-corner-shape": "none" }),
-        backgroundColor: "transparent",
-      }}>
-      <box data-press-visual="compact" ariaHidden style={{ ...center, position: "relative", width: "100%", height: "100%" }}>
+      data-vertical={props.vertical ? "true" : "false"}
+      data-docked={props.docked ? "true" : "false"}
+      data-wide-active={!props.vertical && props.workspace.active && label().length > 1 ? "true" : "false"}
+      class={styles.wsButton}
+    >
+      <box data-press-visual="compact" ariaHidden class={styles.wsButtonInner}>
         <Show when={props.workspace.active} fallback={
-          <box testId={`ws-dot-${props.workspace.workspace_id}`} ariaHidden style={{
-            width: dotSize(),
-            height: dotSize(),
-            borderRadius: "999px",
-            "--zgui-corner-shape": "none",
-            backgroundColor: dotFill(),
-            opacity: props.workspace.urgent ? 1 : Math.max(0.15, (1 - activeFade()) * 0.55),
-            transform: scheme() === "reduced" ? "none" : `scale(${(1 - activeFade() * 0.3).toFixed(4)})`,
-          }} />
+          <box
+            testId={`ws-dot-${props.workspace.workspace_id}`}
+            ariaHidden
+            data-compact={compact() ? "true" : "false"}
+            data-urgent={props.workspace.urgent ? "true" : "false"}
+            class={styles.wsDot}
+            style={{
+              opacity: props.workspace.urgent ? 1 : Math.max(0.15, (1 - activeFade()) * 0.55),
+              transform: scheme() === "reduced" ? "none" : `scale(${(1 - activeFade() * 0.3).toFixed(4)})`,
+            }}
+          />
         }>
           <Show when={label().length > 0} fallback={
-            <box testId={`ws-cutout-${props.workspace.workspace_id}`} ariaHidden style={{
-              width: dotSize(),
-              height: dotSize(),
-              borderRadius: "999px",
-              "--zgui-corner-shape": "none",
-              backgroundColor: props.docked ? "var(--color-surface-container-high)" : "var(--color-surface-container)",
-              opacity: Math.max(0, Math.min(1, activeFade())),
-            }} />
+            <box
+              testId={`ws-cutout-${props.workspace.workspace_id}`}
+              ariaHidden
+              data-compact={compact() ? "true" : "false"}
+              data-docked={props.docked ? "true" : "false"}
+              class={styles.wsCutout}
+              style={{ opacity: Math.max(0, Math.min(1, activeFade())) }}
+            />
           }>
-            <text style={{ ...activeLabel(), opacity: Math.max(0, Math.min(1, activeFade())) }}>{label()}</text>
+            <text
+              data-vertical={props.vertical ? "true" : "false"}
+              data-urgent={props.workspace.urgent ? "true" : "false"}
+              class={styles.wsActiveLabel}
+              style={{ opacity: Math.max(0, Math.min(1, activeFade())) }}
+            >
+              {label()}
+            </text>
           </Show>
         </Show>
       </box>
@@ -248,7 +187,6 @@ function WorkspaceTrack(props: {
   const slideOffset = createM3Spring(targetOffset, "fastSpatial", { scheme, epsilon: SPRING_EPSILON.px });
   const slideSize = createM3Spring(targetSize, "fastSpatial", { scheme, epsilon: SPRING_EPSILON.px });
   const pillOpacity = createM3Spring(() => (activeIndex() >= 0 ? 1 : 0), "fastEffects", { scheme });
-  const pillFill = () => activeWorkspace()?.urgent ? error : primary;
 
   let initialized = false;
   createEffect(
@@ -273,29 +211,30 @@ function WorkspaceTrack(props: {
   );
 
   return (
-    <box ref={node => { trackNode = node; }} style={{
-      position: "relative",
-      display: "flex",
-      flexDirection: props.vertical ? "column" : "row",
-      alignItems: "center",
-      gap: `${WS_SLOT_GAP}px`,
-      flexShrink: 0,
-    }}>
-      <box data-active-indicator="true" ariaHidden style={{
-        position: "absolute",
-        pointerEvents: "none",
-        left: "0px",
-        top: "0px",
-        width: props.vertical ? (props.docked ? "24px" : "28px") : `${Math.max(WS_SLOT_WIDTH_H, slideSize()).toFixed(2)}px`,
-        height: props.vertical ? `${Math.max(props.docked ? 24 : 28, slideSize()).toFixed(2)}px` : "24px",
-        borderRadius: props.docked ? "6px" : "999px",
-        ...(props.docked ? {} : { "--zgui-corner-shape": "none" }),
-        backgroundColor: pillFill(),
-        opacity: Math.max(0, Math.min(1, pillOpacity())),
-        transform: props.vertical
-          ? `translateY(${slideOffset().toFixed(2)}px)`
-          : `translateX(${slideOffset().toFixed(2)}px)`,
-      }} />
+    <box
+      ref={node => { trackNode = node; }}
+      data-vertical={props.vertical ? "true" : "false"}
+      class={styles.wsTrack}
+    >
+      <box
+        data-active-indicator="true"
+        ariaHidden
+        data-vertical={props.vertical ? "true" : "false"}
+        data-docked={props.docked ? "true" : "false"}
+        data-urgent={activeWorkspace()?.urgent ? "true" : "false"}
+        class={styles.wsIndicator}
+        style={props.vertical
+          ? {
+              height: `${Math.max(props.docked ? 24 : 28, slideSize()).toFixed(2)}px`,
+              opacity: Math.max(0, Math.min(1, pillOpacity())),
+              transform: `translateY(${slideOffset().toFixed(2)}px)`,
+            }
+          : {
+              width: `${Math.max(WS_SLOT_WIDTH_H, slideSize()).toFixed(2)}px`,
+              opacity: Math.max(0, Math.min(1, pillOpacity())),
+              transform: `translateX(${slideOffset().toFixed(2)}px)`,
+            }}
+      />
       <For each={indexedWorkspaces()} keyed={entry => entry.workspace.workspace_id}>
         {entry => (
           <WorkspaceButton
@@ -317,55 +256,36 @@ function ActiveWindowPill(props: { window: Accessor<WaylandWindow>; vertical: bo
   const { apps, hostClient } = useShellStore();
   const app = createMemo(() => resolveDesktopApp(apps.data()?.apps, props.window().app_id));
   const { src } = useDaemonMedia(hostClient, () => app()?.icon, { fetchCommand: "launcher.fetch-blob" });
-  const base = () => segmentChrome(props.vertical, props.docked);
   const blurRef = useBlurRef(props.trackBlur);
   return (
-    <box ref={blurRef} testId="bar-active-window" ariaLabel={props.window().title} style={
-      props.vertical
-        ? { ...base(), width: props.docked ? "32px" : "40px", height: props.docked ? "32px" : "40px" }
-        : {
-            ...base(),
-            height: props.docked ? "28px" : "32px",
-            justifyContent: "flex-start",
-            padding: props.docked ? "0 4px" : "0 12px",
-            gap: props.docked ? "7px" : "8px",
-            flexShrink: 1,
-            minWidth: "0px",
-            overflow: "hidden",
-          }
-    }>
+    <box
+      ref={blurRef}
+      testId="bar-active-window"
+      ariaLabel={props.window().title}
+      data-vertical={props.vertical ? "true" : "false"}
+      data-docked={props.docked ? "true" : "false"}
+      class={cx(styles.segment, styles.segmentSurface, styles.activeWindow)}
+    >
       <Show when={src()} fallback={
         props.vertical
           ? (
-            <box style={{
-              ...center,
-              width: props.docked ? "24px" : "22px",
-              height: props.docked ? "24px" : "22px",
-              borderRadius: "6px",
-              backgroundColor: props.docked ? "var(--color-surface-container-high)" : "var(--color-surface-container-highest)",
-              flexShrink: 0,
-            }}>
-              <ShellIcon name="terminal" size={14} color={primary} />
+            <box data-docked={props.docked ? "true" : "false"} class={styles.activeWindowFallback}>
+              <ShellIcon name="terminal" size={14} color="var(--color-primary)" />
             </box>
           )
-          : <ShellIcon name="terminal" size={16} color={primary} />
+          : <ShellIcon name="terminal" size={16} color="var(--color-primary)" />
       }>
         {image => (
           <Image
             ariaHidden
             src={image()}
-            style={{
-              width: props.vertical ? "22px" : "16px",
-              height: props.vertical ? "22px" : "16px",
-              borderRadius: props.vertical ? "6px" : "4px",
-              flexShrink: 0,
-              objectFit: "contain",
-            }}
+            data-vertical={props.vertical ? "true" : "false"}
+            class={styles.activeWindowIcon}
           />
         )}
       </Show>
       <Show when={!props.vertical}>
-        <text testId="bar-active-window-title" style={{ ...clippedText, fontSize: "13px", fontWeight: 500, lineHeight: "18px" }}>
+        <text testId="bar-active-window-title" class={styles.activeWindowTitle}>
           {props.window().title ?? app()?.title ?? props.window().app_id}
         </text>
       </Show>
@@ -383,19 +303,14 @@ function TrayButton(props: { item: TrayItem; vertical: boolean; docked: boolean;
     const first = trimmed ? Array.from(trimmed)[0] : undefined;
     return first && /^[\p{L}\p{N}]$/u.test(first) ? first.toUpperCase() : null;
   };
-  const iconSize = () => (props.vertical && !props.docked ? 20 : 18);
+  const large = () => props.vertical && !props.docked;
   return (
-    <Button testId={`tray-item-${props.item.id}`} ariaLabel={props.item.title || props.item.id}
-      style={{
-        ...center,
-        flexShrink: 0,
-        minWidth: "24px",
-        minHeight: "24px",
-        width: props.vertical && !props.docked ? "28px" : "24px",
-        height: props.vertical && !props.docked ? "28px" : "24px",
-        borderRadius: props.docked ? "6px" : "999px",
-        ...(props.docked ? {} : { "--zgui-corner-shape": "none" }),
-      }}
+    <Button
+      testId={`tray-item-${props.item.id}`}
+      ariaLabel={props.item.title || props.item.id}
+      data-vertical={props.vertical ? "true" : "false"}
+      data-docked={props.docked ? "true" : "false"}
+      class={styles.trayButton}
       onClick={event => {
         const item = props.item;
         if (item.item_is_menu && item.menu) {
@@ -412,28 +327,23 @@ function TrayButton(props: { item: TrayItem; vertical: boolean; docked: boolean;
         } else {
           void invokePublic("tray.context-menu", { id: item.id });
         }
-      })}>
-      <box data-press-visual="compact" ariaHidden style={{ ...center, pointerEvents: "none" }}>
+      })}
+    >
+      <box data-press-visual="compact" ariaHidden class={styles.pressInner}>
         <Show when={src()} fallback={
           <Show when={fallbackLetter()} fallback={
-            <box style={{
-              ...center, width: `${iconSize()}px`, height: `${iconSize()}px`, borderRadius: "6px",
-              backgroundColor: "var(--color-surface-container-highest)",
-            }}>
-              <ShellIcon name="apps" size={12} color={muted} />
+            <box data-large={large() ? "true" : "false"} class={styles.trayFallback}>
+              <ShellIcon name="apps" size={12} color="var(--color-on-surface-variant)" />
             </box>
           }>
             {letter => (
-              <box style={{
-                ...center, width: `${iconSize()}px`, height: `${iconSize()}px`, borderRadius: "6px",
-                backgroundColor: primaryContainer, color: onPrimaryContainer, fontWeight: 700, fontSize: "10px",
-              }}>
+              <box data-large={large() ? "true" : "false"} class={styles.trayLetterFallback}>
                 <text>{letter()}</text>
               </box>
             )}
           </Show>
         }>
-          {image => <Image src={image()} style={{ width: `${iconSize()}px`, height: `${iconSize()}px`, borderRadius: "4px", objectFit: "contain" }} />}
+          {image => <Image src={image()} data-large={large() ? "true" : "false"} class={styles.trayIconImage} />}
         </Show>
       </box>
     </Button>
@@ -443,51 +353,28 @@ function TrayButton(props: { item: TrayItem; vertical: boolean; docked: boolean;
 function NotificationBadgePill(props: { count: number; dnd: boolean; vertical: boolean; docked?: boolean; onActiveContainer?: boolean }) {
   const scheme = useMotionScheme();
   const pop = createEnterProgress("fastSpatial", { scheme });
-  const circleSize = () => (props.docked ? "26px" : "28px");
   return (
-    <box testId="bar-notifications-badge" style={{
-      ...notificationBadge,
-      ...(props.docked
-        ? (props.vertical
-            ? {
-                width: "26px",
-                height: "18px",
-                maxWidth: "26px",
-                padding: "0 4px",
-                flexDirection: "row",
-                gap: "2px",
-                borderRadius: "6px",
-                fontSize: "10px",
-                lineHeight: "12px",
-                overflow: "hidden",
-              }
-            : {
-                height: "20px",
-                padding: "0 6px",
-                gap: "3px",
-                borderRadius: "6px",
-              })
-        : (props.vertical
-            ? {
-                width: circleSize(),
-                height: circleSize(),
-                maxWidth: circleSize(),
-                padding: "0px",
-                flexDirection: "column",
-                gap: "1px",
-                fontSize: "9px",
-                lineHeight: "10px",
-                overflow: "hidden",
-              }
-            : {})),
-      ...(props.docked ? { "--zgui-corner-shape": "superellipse(2.83)" } : {}),
-      ...(props.onActiveContainer
-        ? { backgroundColor: "color-mix(in srgb, var(--color-on-primary-container) 14%, transparent)" }
-        : {}),
-      transform: scheme() === "reduced" ? "none" : `scale(${(0.7 + pop() * 0.3).toFixed(4)})`,
-    }}>
-      <ShellIcon name={props.dnd ? "bellOff" : "bell"} filled={!props.dnd} size={props.vertical ? 10 : props.docked ? 11 : 12} color={onPrimaryContainer} />
-      <text style={{ ...tabular, ...(props.vertical ? { fontSize: props.docked ? "10px" : "9px", lineHeight: props.docked ? "12px" : "10px" } : {}) }}>{props.count}</text>
+    <box
+      testId="bar-notifications-badge"
+      data-vertical={props.vertical ? "true" : "false"}
+      data-docked={props.docked ? "true" : "false"}
+      data-on-active={props.onActiveContainer ? "true" : "false"}
+      class={styles.notificationBadge}
+      style={{ transform: scheme() === "reduced" ? "none" : `scale(${(0.7 + pop() * 0.3).toFixed(4)})` }}
+    >
+      <ShellIcon
+        name={props.dnd ? "bellOff" : "bell"}
+        filled={!props.dnd}
+        size={props.vertical ? 10 : props.docked ? 11 : 12}
+        color="var(--color-on-primary-container)"
+      />
+      <text
+        data-vertical={props.vertical ? "true" : "false"}
+        data-docked={props.docked ? "true" : "false"}
+        class={styles.notificationCount}
+      >
+        {props.count}
+      </text>
     </box>
   );
 }
@@ -506,12 +393,19 @@ function ClockPill(props: {
   const { notifications, togglePanel } = useShellStore();
   const count = () => notifications.data()?.history.length ?? 0;
   const dnd = () => notifications.data()?.dnd ?? false;
-  const base = () => segmentChrome(props.vertical, props.docked, props.active, true);
+  const hasBadge = () => count() > 0 || dnd();
   const blurRef = useBlurRef(props.trackBlur);
   return (
-    <Button ref={blurRef} testId="bar-clock" ariaLabel={props.clock().horizontal}
+    <Button
+      ref={blurRef}
+      testId="bar-clock"
+      ariaLabel={props.clock().horizontal}
       data-bar-segment={props.docked ? "docked" : "floating"}
       data-active={props.active ? "true" : null}
+      data-vertical={props.vertical ? "true" : "false"}
+      data-docked={props.docked ? "true" : "false"}
+      data-has-badge={hasBadge() ? "true" : "false"}
+      class={cx(styles.segment, styles.clockButton)}
       onClick={event => {
         event.stopPropagation();
         togglePanel("calendar", {
@@ -520,40 +414,18 @@ function ClockPill(props: {
           anchorRect: resolveBarPopupAnchor(props.layout, { align: "center", targetRect: getWindowRect(event.currentTarget) }),
         });
       }}
-      style={props.vertical
-        ? {
-            ...base(),
-            width: props.docked ? "32px" : "40px",
-            // Concentric bottom cap: 28px (R=14) circle inside 40px (R=20) with 1px border -> 1+5=6px inset (6+14=20).
-            padding: props.docked
-              ? (count() > 0 || dnd() ? "5px 0 4px 0" : "5px 0")
-              : (count() > 0 || dnd() ? "8px 0 5px 0" : "8px 0"),
-            fontWeight: 600,
-            lineHeight: 1.15,
-          }
-        : {
-            ...base(),
-            height: props.docked ? "28px" : "32px",
-            // Asymmetric optical cap padding: right cap holds 24px (R=12px) badge inside 1px border -> 1+3=4px == vertical inset.
-            padding: !props.docked && (count() > 0 || dnd()) ? "0 3px 0 12px" : props.docked ? "0 10px" : "0 12px",
-            whiteSpace: "nowrap",
-          }}>
-      <box data-press-visual="compact" style={{
-        ...center,
-        flexDirection: props.vertical ? "column" : "row",
-        gap: props.vertical ? "4px" : "8px",
-        pointerEvents: "none",
-      }}>
+    >
+      <box data-press-visual="compact" data-vertical={props.vertical ? "true" : "false"} class={styles.clockInner}>
         <Show when={props.vertical} fallback={
-          <text testId="bar-clock-text" style={{ ...tabular, fontSize: "13px", fontWeight: 500, lineHeight: "18px" }}>{props.clock().horizontal}</text>
+          <text testId="bar-clock-text" class={styles.clockText}>{props.clock().horizontal}</text>
         }>
-          <box testId="bar-clock-text" style={{ ...center, flexDirection: "column" }}>
-            <text style={{ ...tabular, fontSize: "14px", fontWeight: 600, lineHeight: "16px" }}>{props.clock().hours}</text>
-            <text style={{ ...tabular, fontSize: "14px", fontWeight: 600, lineHeight: "16px" }}>{props.clock().minutes}</text>
-            <Show when={props.seconds}><text style={{ ...tabular, fontSize: "10px", color: muted }}>{props.clock().seconds}</text></Show>
+          <box testId="bar-clock-text" class={styles.clockStack}>
+            <text class={styles.clockDigit}>{props.clock().hours}</text>
+            <text class={styles.clockDigit}>{props.clock().minutes}</text>
+            <Show when={props.seconds}><text class={styles.clockSeconds}>{props.clock().seconds}</text></Show>
           </box>
         </Show>
-        <Show when={count() > 0 || dnd()}>
+        <Show when={hasBadge()}>
           <Divider vertical={props.vertical} short />
           <NotificationBadgePill count={count()} dnd={dnd()} vertical={props.vertical} docked={props.docked} onActiveContainer={props.active && props.docked} />
         </Show>
@@ -578,7 +450,7 @@ function SystemMonitorTrigger(props: {
   const cpuLabel = () => (cpuPct() === null ? "—" : `${Math.round(cpuPct()!)}%`);
   const ramLabel = () => (ramPct() === null ? "—" : `${Math.round(ramPct()!)}%`);
   const sparkline = () => telemetry.data()?.history?.window_60s.cpu_percent ?? null;
-  const base = () => segmentChrome(props.vertical, props.docked, props.active, true);
+  const onActiveDocked = () => props.active && props.docked;
 
   return (
     <Button
@@ -587,6 +459,9 @@ function SystemMonitorTrigger(props: {
       ariaLabel={`System monitor · CPU ${cpuLabel()} · RAM ${ramLabel()}`}
       data-bar-segment={props.docked ? "docked" : "floating"}
       data-active={props.active ? "true" : null}
+      data-vertical={props.vertical ? "true" : "false"}
+      data-docked={props.docked ? "true" : "false"}
+      class={cx(styles.segment, styles.sysmonButton)}
       onClick={event => {
         event.stopPropagation();
         togglePanel("system-monitor", {
@@ -598,71 +473,45 @@ function SystemMonitorTrigger(props: {
           }),
         });
       }}
-      style={props.vertical
-        ? {
-            ...base(),
-            width: props.docked ? "32px" : "40px",
-            height: props.docked ? "32px" : "40px",
-            padding: "0px",
-            borderRadius: props.docked ? "8px" : "999px",
-            "--zgui-corner-shape": "none",
-          }
-        : {
-            ...base(),
-            height: props.docked ? "28px" : "32px",
-            // Asymmetric optical cap padding: 24px (R=12) circular pulse badge inside 32px (R=16) capsule with 1px border -> 1+3=4px.
-            padding: props.docked ? "0 8px 0 4px" : "0 10px 0 3px",
-            gap: "6px",
-            whiteSpace: "nowrap",
-          }}
     >
       <Show when={props.vertical} fallback={
-        <row data-press-visual="compact" style={{ display: "flex", alignItems: "center", gap: "6px", pointerEvents: "none" }}>
-          <box ariaHidden style={{
-            ...center,
-            width: props.docked ? "22px" : "24px",
-            height: props.docked ? "22px" : "24px",
-            borderRadius: "999px",
-            "--zgui-corner-shape": "none",
-            backgroundColor: props.active && props.docked
-              ? "color-mix(in srgb, var(--color-on-primary-container) 14%, transparent)"
-              : primaryContainer,
-            flexShrink: 0,
-          }}>
-            <ShellIcon name="pulse" size={13} color={onPrimaryContainer} />
+        <row data-press-visual="compact" class={styles.sysmonRow}>
+          <box
+            ariaHidden
+            data-docked={props.docked ? "true" : "false"}
+            data-on-active={onActiveDocked() ? "true" : "false"}
+            class={styles.sysmonBadge}
+          >
+            <ShellIcon name="pulse" size={13} color="var(--color-on-primary-container)" />
           </box>
-          <text testId="bar-sysmon-cpu" data-tabular="true" style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "11px",
-            fontWeight: 600,
-            lineHeight: "14px",
-            color: props.active && props.docked ? onPrimaryContainer : onSurface,
-            fontVariantNumeric: "tabular-nums",
-          }}>
+          <text
+            testId="bar-sysmon-cpu"
+            data-tabular="true"
+            data-on-active={onActiveDocked() ? "true" : "false"}
+            class={styles.sysmonCpu}
+          >
             {cpuLabel()}
           </text>
           <Show when={sparkline()}>
-            {series => <MiniSparkline values={series()} color={props.active && props.docked ? onPrimaryContainer : primary} />}
+            {series => <MiniSparkline values={series()} color={onActiveDocked() ? "var(--color-on-primary-container)" : "var(--color-primary)"} />}
           </Show>
           <Divider vertical={false} short />
-          <text testId="bar-sysmon-ram" data-tabular="true" style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "11px",
-            fontWeight: 500,
-            lineHeight: "14px",
-            color: props.active && props.docked ? onPrimaryContainer : muted,
-            fontVariantNumeric: "tabular-nums",
-          }}>
+          <text
+            testId="bar-sysmon-ram"
+            data-tabular="true"
+            data-on-active={onActiveDocked() ? "true" : "false"}
+            class={styles.sysmonRam}
+          >
             {ramLabel()}
           </text>
         </row>
       }>
-        <box data-press-visual="compact" style={{ ...center, pointerEvents: "none" }}>
+        <box data-press-visual="compact" class={styles.pressInner}>
           <SplitDualArcGauge
             cpuPercent={cpuPct()}
             ramPercent={ramPct()}
             size={props.docked ? 26 : 30}
-            iconColor={props.active && props.docked ? onPrimaryContainer : onSurface}
+            iconColor={onActiveDocked() ? "var(--color-on-primary-container)" : "var(--color-on-surface)"}
           />
         </box>
       </Show>
@@ -697,16 +546,6 @@ function SystemPill(props: {
   const batteryActive = () => batteryPanelHere() || (qsOpenHere() && quickSettingsPage() === "battery");
   const mainQsActive = () => qsOpenHere() && quickSettingsPage() === "main";
   const imeActive = () => activeImeMenu()?.parentSurface === props.surfaceName;
-  const sysBtnStyle = (itemActive: boolean): StyleObj => ({
-    ...(props.vertical && !props.docked
-      ? { ...center, width: "28px", height: "28px", flexShrink: 0, borderRadius: "999px", "--zgui-corner-shape": "none" }
-      : {
-          ...(props.vertical ? verticalCompactIconButton : compactIconButton),
-          borderRadius: props.docked ? "6px" : "999px",
-          ...(props.docked ? {} : { "--zgui-corner-shape": "none" }),
-        }),
-    ...(itemActive ? { backgroundColor: primaryContainer, color: onPrimaryContainer } : {}),
-  });
   const networkIcon = createMemo(() => {
     const state = network.data();
     if (!state?.available) return "wifiOff";
@@ -724,43 +563,26 @@ function SystemPill(props: {
     return !device || device.muted || device.volume <= 0 ? "volumeMute" : device.volume < 0.5 ? "volumeLow" : "volumeHigh";
   });
   const hasIme = () => Boolean(ime.data()?.available && ime.data()?.mode !== "disabled");
-  const base = () => segmentChrome(props.vertical, props.docked, false);
-  const verticalImeSize = () => (props.docked ? "24px" : "30px");
+
   return (
-    <box ref={node => { systemNode = node; blurRef(node); }} testId="bar-system" style={props.vertical
-      ? {
-          ...base(),
-          width: props.docked ? "32px" : "40px",
-          gap: props.docked ? "1px" : "2px",
-          // Concentric top cap: 30px (R=15) IME circle inside 40px (R=20) with 1px border -> 1+4=5px inset (5+15=20).
-          padding: props.docked
-            ? "3px 0"
-            : (hasIme() ? "4px 0 6px 0" : "6px 0"),
-        }
-      : {
-          ...base(),
-          height: props.docked ? "28px" : "32px",
-          gap: props.docked ? "1px" : "2px",
-          // Asymmetric optical cap padding: left cap holds 24px (R=12px) IME pill inside 1px border -> 1+3=4px == vertical inset.
-          padding: !props.docked && hasIme() ? "0 4px 0 3px" : "0 4px",
-        }}>
+    <box
+      ref={node => { systemNode = node; blurRef(node); }}
+      testId="bar-system"
+      data-vertical={props.vertical ? "true" : "false"}
+      data-docked={props.docked ? "true" : "false"}
+      data-has-ime={hasIme() ? "true" : "false"}
+      class={cx(styles.segment, styles.segmentSurface, styles.systemPill)}
+    >
       <Show when={hasIme()}>
-        <Button testId="bar-ime" ariaLabel="Input method" ariaHasPopup="menu"
-          style={{
-            ...center,
-            width: props.vertical ? verticalImeSize() : "auto",
-            minWidth: props.vertical ? verticalImeSize() : (props.docked ? "24px" : "26px"),
-            ...(props.vertical ? { maxWidth: verticalImeSize(), overflow: "hidden" } : {}),
-            height: props.vertical ? (props.docked ? "24px" : verticalImeSize()) : "24px",
-            padding: props.vertical ? "0px" : "0 6px",
-            borderRadius: props.docked ? "6px" : "999px",
-            ...(props.docked ? {} : { "--zgui-corner-shape": "none" }),
-            backgroundColor: imeActive() ? primary : primaryContainer,
-            color: imeActive() ? "var(--color-on-primary)" : onPrimaryContainer,
-            fontWeight: 700,
-            fontSize: props.vertical ? (props.docked ? "11px" : "12px") : "11px",
-            lineHeight: props.vertical ? "1" : "14px",
-          }}
+        <Button
+          testId="bar-ime"
+          ariaLabel="Input method"
+          ariaHasPopup="menu"
+          data-vertical={props.vertical ? "true" : "false"}
+          data-docked={props.docked ? "true" : "false"}
+          data-active={imeActive() ? "true" : "false"}
+          data-on-active="false"
+          class={styles.imeButton}
           onClick={() => { void invokePublic("ime.toggle", {}); }}
           {...secondaryAction(node => {
             openImeMenu({
@@ -768,8 +590,9 @@ function SystemPill(props: {
               parentSurface: props.surfaceName,
               anchorRect: resolveBarPopupAnchor(props.layout, { align: "target", targetRect: getWindowRect(node) }),
             });
-          })}>
-          <box data-press-visual="compact" ariaHidden style={{ ...center, pointerEvents: "none" }}>
+          })}
+        >
+          <box data-press-visual="compact" ariaHidden class={styles.pressInner}>
             <text>{ime.data()?.active_im?.short_label || "EN"}</text>
           </box>
         </Button>
@@ -778,20 +601,29 @@ function SystemPill(props: {
         </Show>
       </Show>
       <Show when={idle.data()?.caffeine}>
-        <Button testId="bar-keep-awake" ariaLabel="Keep awake active"
-          style={sysBtnStyle(false)}
+        <Button
+          testId="bar-keep-awake"
+          ariaLabel="Keep awake active"
+          data-vertical={props.vertical ? "true" : "false"}
+          data-docked={props.docked ? "true" : "false"}
+          class={styles.sysBtn}
           onClick={event => {
             event.stopPropagation();
             openSettingsWindow("idle");
-          }}>
-          <box data-press-visual="compact" ariaHidden style={{ ...center, pointerEvents: "none" }}>
-            <ShellIcon name="coffee" size={14} color={primary} />
+          }}
+        >
+          <box data-press-visual="compact" ariaHidden class={styles.pressInner}>
+            <ShellIcon name="coffee" size={14} color="var(--color-primary)" />
           </box>
         </Button>
       </Show>
       <Show when={privacy.data()?.audio_capture.state === "active"}>
-        <Button testId="bar-privacy" ariaLabel="Microphone in use"
-          style={{ ...sysBtnStyle(false), backgroundColor: "var(--color-error-container)", color: "var(--color-on-error-container)" }}
+        <Button
+          testId="bar-privacy"
+          ariaLabel="Microphone in use"
+          data-vertical={props.vertical ? "true" : "false"}
+          data-docked={props.docked ? "true" : "false"}
+          class={cx(styles.sysBtn, styles.privacyButton)}
           onClick={event => {
             event.stopPropagation();
             toggleQuickSettingsPage("sound", {
@@ -799,13 +631,20 @@ function SystemPill(props: {
               parentSurface: props.surfaceName,
               anchorRect: anchorFor(event.currentTarget),
             });
-          }}>
-          <box data-press-visual="compact" ariaHidden style={{ ...center, pointerEvents: "none" }}>
+          }}
+        >
+          <box data-press-visual="compact" ariaHidden class={styles.pressInner}>
             <ShellIcon name="mic" size={13} color="var(--color-on-error-container)" />
           </box>
         </Button>
       </Show>
-      <Button testId="bar-network" ariaLabel="Network settings" style={sysBtnStyle(networkActive())}
+      <Button
+        testId="bar-network"
+        ariaLabel="Network settings"
+        data-vertical={props.vertical ? "true" : "false"}
+        data-docked={props.docked ? "true" : "false"}
+        data-active={networkActive() ? "true" : "false"}
+        class={styles.sysBtn}
         onClick={event => {
           event.stopPropagation();
           toggleQuickSettingsPage("wifi", {
@@ -813,13 +652,23 @@ function SystemPill(props: {
             parentSurface: props.surfaceName,
             anchorRect: anchorFor(event.currentTarget),
           });
-        }}>
-        <box data-press-visual="compact" ariaHidden style={{ ...center, pointerEvents: "none" }}>
-          <ShellIcon name={networkIcon()} size={15}
-            color={networkActive() ? onPrimaryContainer : networkIcon() === "wifiOff" ? muted : onSurface} />
+        }}
+      >
+        <box data-press-visual="compact" ariaHidden class={styles.pressInner}>
+          <ShellIcon
+            name={networkIcon()}
+            size={15}
+            color={networkActive() ? "var(--color-on-primary-container)" : networkIcon() === "wifiOff" ? "var(--color-on-surface-variant)" : "var(--color-on-surface)"}
+          />
         </box>
       </Button>
-      <Button testId="bar-bluetooth" ariaLabel="Bluetooth settings" style={sysBtnStyle(bluetoothActive())}
+      <Button
+        testId="bar-bluetooth"
+        ariaLabel="Bluetooth settings"
+        data-vertical={props.vertical ? "true" : "false"}
+        data-docked={props.docked ? "true" : "false"}
+        data-active={bluetoothActive() ? "true" : "false"}
+        class={styles.sysBtn}
         onClick={event => {
           event.stopPropagation();
           toggleQuickSettingsPage("bluetooth", {
@@ -827,13 +676,23 @@ function SystemPill(props: {
             parentSurface: props.surfaceName,
             anchorRect: anchorFor(event.currentTarget),
           });
-        }}>
-        <box data-press-visual="compact" ariaHidden style={{ ...center, pointerEvents: "none" }}>
-          <ShellIcon name={bluetoothPowered() || bluetoothConnected() ? "bluetooth" : "bluetoothOff"} size={15}
-            color={bluetoothActive() ? onPrimaryContainer : bluetoothConnected() ? primary : bluetoothPowered() ? onSurface : muted} />
+        }}
+      >
+        <box data-press-visual="compact" ariaHidden class={styles.pressInner}>
+          <ShellIcon
+            name={bluetoothPowered() || bluetoothConnected() ? "bluetooth" : "bluetoothOff"}
+            size={15}
+            color={bluetoothActive() ? "var(--color-on-primary-container)" : bluetoothConnected() ? "var(--color-primary)" : bluetoothPowered() ? "var(--color-on-surface)" : "var(--color-on-surface-variant)"}
+          />
         </box>
       </Button>
-      <Button testId="bar-audio" ariaLabel="Audio settings" style={sysBtnStyle(audioActive())}
+      <Button
+        testId="bar-audio"
+        ariaLabel="Audio settings"
+        data-vertical={props.vertical ? "true" : "false"}
+        data-docked={props.docked ? "true" : "false"}
+        data-active={audioActive() ? "true" : "false"}
+        class={styles.sysBtn}
         onClick={event => {
           event.stopPropagation();
           toggleQuickSettingsPage("sound", {
@@ -853,14 +712,21 @@ function SystemPill(props: {
         {...secondaryAction(() => {
           const device = sink();
           if (device) void invokePublic("audio.set-mute", { kind: "sink", index: device.index, muted: !device.muted });
-        })}>
-        <box data-press-visual="compact" ariaHidden style={{ ...center, pointerEvents: "none" }}>
-          <ShellIcon name={audioIcon()} size={15} color={audioActive() ? onPrimaryContainer : onSurface} />
+        })}
+      >
+        <box data-press-visual="compact" ariaHidden class={styles.pressInner}>
+          <ShellIcon name={audioIcon()} size={15} color={audioActive() ? "var(--color-on-primary-container)" : "var(--color-on-surface)"} />
         </box>
       </Button>
       <Show when={power.data()?.battery}>
         {battery => (
-          <Button testId="bar-battery" ariaLabel="Battery"
+          <Button
+            testId="bar-battery"
+            ariaLabel="Battery"
+            data-vertical={props.vertical ? "true" : "false"}
+            data-docked={props.docked ? "true" : "false"}
+            data-active={batteryActive() ? "true" : "false"}
+            class={styles.batteryButton}
             onClick={event => {
               event.stopPropagation();
               togglePanel("battery", {
@@ -869,36 +735,33 @@ function SystemPill(props: {
                 anchorRect: anchorFor(event.currentTarget),
               });
             }}
-            style={{
-              ...center,
-              minWidth: "24px",
-              minHeight: "24px",
-              height: props.vertical ? "auto" : "24px",
-              padding: props.vertical ? "3px 4px" : "0 5px",
-              borderRadius: props.docked ? "6px" : "999px",
-              ...(props.docked ? {} : { "--zgui-corner-shape": "none" }),
-              ...(batteryActive() ? { backgroundColor: primaryContainer, color: onPrimaryContainer } : {}),
-              flexShrink: 0,
-            }}>
-            <box data-press-visual="compact" ariaHidden style={{
-              ...center,
-              flexDirection: props.vertical ? "column" : "row",
-              gap: props.vertical ? "1px" : "4px",
-              pointerEvents: "none",
-            }}>
-              <ShellIcon name={battery().state === "charging" || battery().state === "full" ? "batteryCharging" : "battery"} size={15}
+          >
+            <box data-press-visual="compact" ariaHidden data-vertical={props.vertical ? "true" : "false"} class={styles.batteryInner}>
+              <ShellIcon
+                name={battery().state === "charging" || battery().state === "full" ? "batteryCharging" : "battery"}
+                size={15}
                 color={batteryActive()
-                  ? onPrimaryContainer
+                  ? "var(--color-on-primary-container)"
                   : battery().state === "discharging" && (battery().percentage ?? 100) < 20
-                    ? error : battery().state === "charging" ? primary : onSurface} />
-              <text testId="bar-battery-text" data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", fontVariantNumeric: "tabular-nums" }}>
+                    ? "var(--color-error)"
+                    : battery().state === "charging"
+                      ? "var(--color-primary)"
+                      : "var(--color-on-surface)"}
+              />
+              <text testId="bar-battery-text" data-tabular="true" class={styles.batteryText}>
                 {battery().percentage == null ? "—" : `${Math.round(battery().percentage ?? 0)}%`}
               </text>
             </box>
           </Button>
         )}
       </Show>
-      <Button testId="bar-quick-settings" ariaLabel="Quick settings" style={sysBtnStyle(mainQsActive())}
+      <Button
+        testId="bar-quick-settings"
+        ariaLabel="Quick settings"
+        data-vertical={props.vertical ? "true" : "false"}
+        data-docked={props.docked ? "true" : "false"}
+        data-active={mainQsActive() ? "true" : "false"}
+        class={styles.sysBtn}
         onClick={event => {
           event.stopPropagation();
           toggleQuickSettingsPage("main", {
@@ -906,9 +769,15 @@ function SystemPill(props: {
             parentSurface: props.surfaceName,
             anchorRect: anchorFor(event.currentTarget),
           });
-        }}>
-        <box data-press-visual="compact" ariaHidden style={{ ...center, pointerEvents: "none" }}>
-          <ShellIcon name="tune" filled={mainQsActive()} size={15} color={mainQsActive() ? onPrimaryContainer : onSurface} />
+        }}
+      >
+        <box data-press-visual="compact" ariaHidden class={styles.pressInner}>
+          <ShellIcon
+            name="tune"
+            filled={mainQsActive()}
+            size={15}
+            color={mainQsActive() ? "var(--color-on-primary-container)" : "var(--color-on-surface)"}
+          />
         </box>
       </Button>
     </box>
@@ -938,21 +807,10 @@ function PluginSlotIsland(props: {
       ref={blurRef}
       testId={`bar-plugin-slot-${props.slot.id}`}
       data-active={active() ? "true" : null}
+      data-vertical={props.vertical ? "true" : "false"}
+      data-docked={props.docked ? "true" : "false"}
       onClick={event => event.stopPropagation()}
-      style={props.vertical
-        ? {
-            ...segmentChrome(true, props.docked, active()),
-            width: props.docked ? "32px" : "40px",
-            minHeight: props.docked ? "32px" : "40px",
-            padding: "0px",
-            overflow: "hidden",
-          }
-        : {
-            ...segmentChrome(false, props.docked, active()),
-            height: props.docked ? "28px" : "32px",
-            padding: "0px",
-            overflow: "hidden",
-          }}
+      class={cx(styles.segment, styles.segmentSurface, styles.pluginSlot)}
     >
       {props.slot.render({ vertical: props.vertical })}
     </box>
@@ -996,71 +854,61 @@ function BarContent(props: {
     const isDocked = docked();
     const isVertical = vertical();
     const bleed = props.layout.shadowBleed;
-    const bleedPadding = `${bleed.top}px ${bleed.right}px ${bleed.bottom}px ${bleed.left}px`;
-    const base: StyleObj = {
-      ...center,
-      justifyContent: "space-between",
-      color: onSurface,
-      fontFamily: "var(--font-sans)",
-      fontSize: "12px",
-      overflow: isDocked ? "hidden" : "visible",
-      backgroundColor: isDocked ? "var(--color-surface-container)" : "transparent",
-    };
-    if (isVertical) {
-      return {
-        ...base,
-        width: `${props.layout.width}px`,
-        height: `${props.layout.height}px`,
-        padding: isDocked ? "8px 0" : bleedPadding,
-        flexDirection: "column",
-        ...(isDocked && props.layout.position === "left" ? { borderRight: dockedEdgeBorder } : {}),
-        ...(isDocked && props.layout.position === "right" ? { borderLeft: dockedEdgeBorder } : {}),
-      };
-    }
+    const sizeStyle: StyleObj = isVertical
+      ? { width: `${props.layout.width}px`, height: `${props.layout.height}px` }
+      : { height: `${props.layout.height}px` };
+    if (isDocked) return sizeStyle;
     return {
-      ...base,
-      width: "100%",
-      height: `${props.layout.height}px`,
-      padding: isDocked ? "0 10px" : bleedPadding,
-      ...(isDocked ? { borderBottom: dockedEdgeBorder } : {}),
+      ...sizeStyle,
+      padding: `${bleed.top}px ${bleed.right}px ${bleed.bottom}px ${bleed.left}px`,
     };
   });
 
   return (
-    <box testId={`bar-root-${props.monitor.id}`} data-theme-rev={String(store.theme.revision())}
-      data-position={props.layout.position} data-bar-style={props.layout.style} data-active-panel={activePanel() ?? "none"}
+    <box
+      testId={`bar-root-${props.monitor.id}`}
+      data-theme-rev={String(store.theme.revision())}
+      data-position={props.layout.position}
+      data-bar-style={props.layout.style}
+      data-vertical={vertical() ? "true" : "false"}
+      data-active-panel={activePanel() ?? "none"}
       onPointerDown={() => store.recordBarPointerDown()}
       onClick={() => dismissOverlay()}
-      style={rootStyle()}>
-      <box style={vertical() ? verticalGroup : group}>
+      class={styles.barRoot}
+      style={rootStyle()}
+    >
+      <box data-vertical={vertical() ? "true" : "false"} class={styles.group}>
         <Show when={props.launcher}>
           {() => {
             const launcherRef = useBlurRef(props.trackBlur);
             return (
-              <Button ref={launcherRef} testId="bar-launcher" ariaLabel="Launcher"
+              <Button
+                ref={launcherRef}
+                testId="bar-launcher"
+                ariaLabel="Launcher"
                 data-bar-segment={docked() ? "docked" : "floating"}
                 data-active={activePanel() === "launcher" ? "true" : null}
-                style={vertical()
-                  ? { ...segmentChrome(true, docked(), activePanel() === "launcher", true), width: docked() ? "32px" : "40px", height: docked() ? "32px" : "40px" }
-                  : { ...segmentChrome(false, docked(), activePanel() === "launcher", true), width: docked() ? "28px" : "32px", height: docked() ? "28px" : "32px" }}
+                data-vertical={vertical() ? "true" : "false"}
+                data-docked={docked() ? "true" : "false"}
+                class={cx(styles.segment, styles.launcherButton)}
                 onClick={event => {
                   event.stopPropagation();
                   togglePanel("launcher", { monitorId: props.monitor.id });
-                }}>
-                <box data-press-visual="compact" ariaHidden style={center}>
-                  <ShellIcon name="apps" size={18} color={primary} />
+                }}
+              >
+                <box data-press-visual="compact" ariaHidden class={styles.pressInner}>
+                  <ShellIcon name="apps" size={18} color="var(--color-primary)" />
                 </box>
               </Button>
             );
           }}
         </Show>
-        <box ref={workspacesRef} testId="bar-workspaces" style={vertical()
-          ? (docked()
-              ? { ...segmentChrome(true, true), width: "32px", backgroundColor: "var(--color-surface-container-high)", borderRadius: "8px", border: "none", gap: "3px", padding: "3px 0" }
-              : { ...segmentChrome(true, false), width: "40px", gap: "3px", padding: "6px 0" })
-          : (docked()
-              ? { ...segmentChrome(false, true), height: "28px", backgroundColor: "var(--color-surface-container-high)", borderRadius: "8px", border: "none", gap: "3px", padding: "0 3px" }
-              : { ...segmentChrome(false, false), height: "32px", gap: "3px", padding: "0 4px" })}
+        <box
+          ref={workspacesRef}
+          testId="bar-workspaces"
+          data-vertical={vertical() ? "true" : "false"}
+          data-docked={docked() ? "true" : "false"}
+          class={cx(styles.segment, styles.segmentSurface, styles.workspacesIsland)}
           onWheel={event => {
             const direction = wheelDirection(event);
             const items = workspaces();
@@ -1070,24 +918,29 @@ function BarContent(props: {
             const next = active < 0 ? (direction > 0 ? 0 : items.length - 1) : (active + direction + items.length) % items.length;
             const target = items[next];
             if (next !== active && target) activateWorkspace(target.workspace_id);
-          }}>
+          }}
+        >
           <WorkspaceTrack workspaces={workspaces} vertical={vertical()} docked={docked()} workspaceNumbers={props.workspaceNumbers} activate={activateWorkspace} />
           <Show when={workspaces().length > 0}><Divider vertical={vertical()} short /></Show>
-          <Button testId="bar-overview" ariaLabel="Overview" selected={activePanel() === "overview"}
-            style={{
-              ...center,
-              flexShrink: 0,
-              width: vertical() && !docked() ? "28px" : "24px",
-              height: vertical() && !docked() ? "28px" : "24px",
-              borderRadius: docked() ? "6px" : "999px",
-              ...(docked() ? {} : { "--zgui-corner-shape": "none" }),
-            }}
+          <Button
+            testId="bar-overview"
+            ariaLabel="Overview"
+            selected={activePanel() === "overview"}
+            data-vertical={vertical() ? "true" : "false"}
+            data-docked={docked() ? "true" : "false"}
+            class={styles.overviewButton}
             onClick={event => {
               event.stopPropagation();
               togglePanel("overview", { monitorId: props.monitor.id });
-            }}>
-            <box data-press-visual="compact" ariaHidden style={center}>
-              <ShellIcon name="overview" filled={activePanel() === "overview"} size={docked() ? 14 : 15} color={activePanel() === "overview" ? primary : muted} />
+            }}
+          >
+            <box data-press-visual="compact" ariaHidden class={styles.pressInner}>
+              <ShellIcon
+                name="overview"
+                filled={activePanel() === "overview"}
+                size={docked() ? 14 : 15}
+                color={activePanel() === "overview" ? "var(--color-primary)" : "var(--color-on-surface-variant)"}
+              />
             </box>
           </Button>
         </box>
@@ -1102,7 +955,7 @@ function BarContent(props: {
         <ClockPill vertical={vertical()} docked={docked()} active={activePanel() === "calendar"}
           clock={props.clock} seconds={props.seconds} monitorId={props.monitor.id} surfaceName={surfaceName()} layout={props.layout} trackBlur={props.trackBlur} />
       }>
-        <box style={{ ...center, flexDirection: vertical() ? "column" : "row", gap: "6px", flexShrink: 0 }}>
+        <box data-vertical={vertical() ? "true" : "false"} class={styles.centerZone}>
           <ClockPill vertical={vertical()} docked={docked()} active={activePanel() === "calendar"}
             clock={props.clock} seconds={props.seconds} monitorId={props.monitor.id} surfaceName={surfaceName()} layout={props.layout} trackBlur={props.trackBlur} />
           <For each={pluginZones().center} keyed={slot => slot.id}>
@@ -1110,10 +963,7 @@ function BarContent(props: {
           </For>
         </box>
       </Show>
-      <box style={{
-        ...(vertical() ? verticalGroup : group),
-        justifyContent: "flex-end",
-      }}>
+      <box data-vertical={vertical() ? "true" : "false"} data-align="end" class={styles.group}>
         <For each={pluginZones().right} keyed={slot => slot.id}>
           {slot => <PluginSlotIsland slot={slot()} vertical={vertical()} docked={docked()} monitorId={props.monitor.id} trackBlur={props.trackBlur} />}
         </For>
@@ -1121,20 +971,15 @@ function BarContent(props: {
           {active => {
             const mediaRef = useBlurRef(props.trackBlur);
             return (
-              <Button ref={mediaRef} testId="bar-media" ariaLabel={mediaLabel()}
+              <Button
+                ref={mediaRef}
+                testId="bar-media"
+                ariaLabel={mediaLabel()}
                 data-bar-segment={docked() ? "docked" : "floating"}
                 data-active={activePanel() === "media" ? "true" : null}
-                style={vertical()
-                  ? { ...segmentChrome(true, docked(), activePanel() === "media", true), width: docked() ? "32px" : "40px", height: docked() ? "32px" : "40px" }
-                  : {
-                      ...segmentChrome(false, docked(), activePanel() === "media", true),
-                      height: docked() ? "28px" : "32px",
-                      justifyContent: "flex-start",
-                      padding: docked() ? "0 6px" : "0 12px",
-                      flexShrink: 1,
-                      minWidth: "0px",
-                      overflow: "hidden",
-                    }}
+                data-vertical={vertical() ? "true" : "false"}
+                data-docked={docked() ? "true" : "false"}
+                class={cx(styles.segment, styles.mediaButton)}
                 onClick={event => {
                   event.stopPropagation();
                   togglePanel("media", {
@@ -1151,10 +996,11 @@ function BarContent(props: {
                   if (!direction) return;
                   event.preventDefault();
                   void invokePublic(direction > 0 ? "media.next" : "media.previous", { player_id: active().id });
-                }}>
-                <row data-press-visual="compact" style={{ display: "flex", alignItems: "center", gap: docked() ? "7px" : "8px", minWidth: "0px", overflow: "hidden", pointerEvents: "none" }}>
-                  <ShellIcon name="mediaEq" size={16} color={primary} />
-                  <Show when={!vertical()}><text testId="bar-media-text" style={clippedText}>{mediaLabel()}</text></Show>
+                }}
+              >
+                <row data-press-visual="compact" data-docked={docked() ? "true" : "false"} class={styles.mediaInner}>
+                  <ShellIcon name="mediaEq" size={16} color="var(--color-primary)" />
+                  <Show when={!vertical()}><text testId="bar-media-text" class={styles.mediaText}>{mediaLabel()}</text></Show>
                 </row>
               </Button>
             );
@@ -1181,15 +1027,23 @@ function BarContent(props: {
               return open ? "expandLess" : "expandMore";
             };
             return (
-              <box ref={trayRef} testId="bar-tray" style={vertical()
-                ? { ...segmentChrome(true, docked()), width: docked() ? "32px" : "40px", gap: docked() ? "1px" : "2px", padding: docked() ? "2px 0" : "6px 0" }
-                : { ...segmentChrome(false, docked()), height: docked() ? "28px" : "32px", gap: docked() ? "1px" : "2px", padding: docked() ? "0 2px" : "0 4px" }}>
+              <box
+                ref={trayRef}
+                testId="bar-tray"
+                data-vertical={vertical() ? "true" : "false"}
+                data-docked={docked() ? "true" : "false"}
+                class={cx(styles.segment, styles.segmentSurface, styles.trayIsland)}
+              >
                 <Show when={trayPartition().collapsed.length > 0}>
                   <Button
                     testId="bar-tray-overflow-toggle"
                     ariaLabel={`Hidden tray icons (${trayPartition().collapsed.length})`}
                     ariaHasPopup="menu"
                     expanded={overflowActive()}
+                    data-vertical={vertical() ? "true" : "false"}
+                    data-docked={docked() ? "true" : "false"}
+                    data-active={overflowActive() ? "true" : "false"}
+                    class={styles.trayOverflowToggle}
                     onClick={event => {
                       event.stopPropagation();
                       store.openTrayOverflow({
@@ -1199,24 +1053,12 @@ function BarContent(props: {
                       });
                     }}
                     {...secondaryAction(() => store.openSettingsWindow("bar", "tray-rules"))}
-                    style={{
-                      ...center,
-                      minWidth: "24px",
-                      minHeight: "24px",
-                      width: vertical() && !docked() ? "28px" : "24px",
-                      height: vertical() && !docked() ? "28px" : "24px",
-                      borderRadius: docked() ? "6px" : "999px",
-                      ...(docked() ? {} : { "--zgui-corner-shape": "none" }),
-                      flexShrink: 0,
-                      backgroundColor: overflowActive() ? primaryContainer : "var(--color-surface-container-highest)",
-                      color: overflowActive() ? onPrimaryContainer : muted,
-                    }}
                   >
-                    <box data-press-visual="compact" ariaHidden style={{ ...center, pointerEvents: "none" }}>
+                    <box data-press-visual="compact" ariaHidden class={styles.pressInner}>
                       <ShellIcon
                         name={overflowIcon()}
                         size={14}
-                        color={overflowActive() ? onPrimaryContainer : muted}
+                        color={overflowActive() ? "var(--color-on-primary-container)" : "var(--color-on-surface-variant)"}
                       />
                     </box>
                   </Button>

@@ -1,0 +1,233 @@
+.hiddenSection {
+  /* An empty native child becomes a text marker that would occupy space in the flex card. */
+  display: none;
+}
+
+.backdrop {
+  position: fixed;
+  left: 0px;
+  top: 0px;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.headerRow {
+  align-items: center;
+  gap: 12px;
+}
+
+.headerBadge {
+  display: flex;
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+}
+
+.headerText {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  gap: 2px;
+}
+
+.headerTitle {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.headerSubtitle {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--color-on-surface-variant);
+  line-height: 16px;
+}
+
+.sectionCard {
+  border-radius: 14px;
+  background-color: var(--color-surface-container-high);
+  padding: 10px 12px;
+  gap: 4px;
+}
+
+.messageText {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.actionId {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.detailsList {
+  padding-top: 6px;
+  gap: 3px;
+}
+
+.detailRow {
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.detailKey {
+  color: var(--color-on-surface-variant);
+  flex-shrink: 0;
+}
+
+.detailValue {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-grow: 1;
+  font-family: var(--font-mono);
+}
+
+.authCard {
+  border-radius: 14px;
+  background-color: var(--color-surface-container-high);
+  padding: 10px;
+  gap: 8px;
+}
+
+.identityRow {
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+}
+
+.identityAvatar {
+  display: flex;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  --zgui-corner-shape: none;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-surface-container-highest);
+}
+
+.identityName {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-grow: 1;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.identityUid {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.identityList {
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.identityButton {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background-color: var(--color-surface-container-highest);
+  color: var(--color-on-surface-variant);
+  font-size: 12px;
+  font-weight: 500;
+
+  &[data-selected="true"] {
+    background-color: var(--color-primary-container);
+    color: var(--color-on-primary-container);
+    font-weight: 600;
+  }
+}
+
+.compositeInput {
+  height: 42px;
+  align-items: center;
+  gap: 6px;
+  border-radius: 10px;
+  background-color: var(--color-surface-container-highest);
+  padding: 0 8px 0 12px;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent);
+
+  &[data-focused="true"] {
+    padding: 0 7px 0 11px;
+    border: 2px solid var(--color-primary);
+  }
+
+  &[data-error="true"] {
+    border: 2px solid var(--color-error);
+  }
+}
+
+.textField {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  height: 38px;
+  line-height: 20px;
+  padding: 9px 0px;
+  border: 0px;
+  background-color: transparent;
+  color: var(--color-on-surface);
+  font-size: 14px;
+}
+
+.revealButton {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  background-color: transparent;
+  opacity: 1;
+
+  &:disabled {
+    opacity: 0.35;
+  }
+}
+
+.infoText {
+  font-size: 12px;
+  color: var(--color-on-surface-variant);
+}
+
+.errorText {
+  font-size: 12px;
+  color: var(--color-error);
+}
+
+.actionsRow {
+  justify-content: flex-end;
+  gap: 8px;
+}

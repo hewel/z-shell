@@ -13,22 +13,7 @@ import {
   type WaylandWindow,
   type WaylandWorkspace,
 } from "../topics.ts";
-
-const primary = "var(--color-primary)";
-const onPrimary = "var(--color-on-primary)";
-const primaryContainer = "var(--color-primary-container)";
-const onPrimaryContainer = "var(--color-on-primary-container)";
-const error = "var(--color-error)";
-const errorContainer = "var(--color-error-container)";
-const onErrorContainer = "var(--color-on-error-container)";
-const onSurface = "var(--color-on-surface)";
-const muted = "var(--color-on-surface-variant)";
-const outline = "var(--color-outline)";
-const container = "var(--color-surface-container)";
-const containerHigh = "var(--color-surface-container-high)";
-const containerHighest = "var(--color-surface-container-highest)";
-const canvasGradient = "linear-gradient(145deg, var(--color-surface) 0%, color-mix(in srgb, var(--color-primary-container) 34%, var(--color-surface)) 100%)";
-const clipped = { minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
+import styles from "./OverviewOverlay.module.css";
 
 function workspaceIndexLabel(workspace: WaylandWorkspace, index: number): string {
   const coord = workspace.coordinates[0];
@@ -60,44 +45,31 @@ function MiniWindowTile(props: {
 }): NativeChild {
   const focused = () => props.window.activated;
   const label = () => formatWindowLabel(props.window, props.app);
-  const barTint = () => (props.urgent ? errorContainer : focused() ? primaryContainer : containerHighest);
-  const borderColor = () => (
-    props.urgent
-      ? error
-      : focused()
-        ? primary
-        : "color-mix(in srgb, var(--color-outline-variant) 65%, transparent)"
-  );
+  const barState = () => (props.urgent ? "urgent" : focused() ? "focused" : "idle");
 
   return (
-    <Button testId={`overview-window-${props.window.window_id}`}
+    <Button
+      testId={`overview-window-${props.window.window_id}`}
       ariaLabel={`Focus ${props.window.title?.trim() || label()}`}
       onClick={event => {
         event.stopPropagation();
         props.onActivate();
       }}
-      style={{
-        display: "flex", flexDirection: "column", alignItems: "stretch", justifyContent: "flex-start",
-        flexGrow: 1, flexBasis: "0px", minWidth: "48px", height: "100%",
-        padding: "8px", gap: "6px", borderRadius: "10px",
-        backgroundColor: container, color: focused() || props.urgent ? onSurface : muted,
-        border: `1px solid ${borderColor()}`,
-      }}>
-      <row style={{ alignItems: "center", justifyContent: "space-between", gap: "4px", width: "100%" }}>
-        <text style={{
-          ...clipped, fontSize: "10px", lineHeight: "12px",
-          fontWeight: focused() || props.urgent ? 600 : 500,
-          color: focused() || props.urgent ? onSurface : muted,
-        }}>
+      data-focused={focused() ? "true" : "false"}
+      data-urgent={props.urgent ? "true" : "false"}
+      class={styles.miniWindowTile}
+    >
+      <row class={styles.miniWindowHeader}>
+        <text data-active={focused() || props.urgent ? "true" : "false"} class={styles.miniWindowTitle}>
           {label()}
         </text>
         <Show when={focused()}>
-          <box ariaHidden style={{ width: "6px", height: "6px", borderRadius: "3px", flexShrink: 0, backgroundColor: primary }} />
+          <box ariaHidden class={styles.miniFocusDot} />
         </Show>
       </row>
-      <box ariaHidden style={{ width: "82%", height: "6px", borderRadius: "3px", flexShrink: 0, backgroundColor: barTint() }} />
-      <box ariaHidden style={{ width: "66%", height: "6px", borderRadius: "3px", flexShrink: 0, backgroundColor: containerHighest }} />
-      <box ariaHidden style={{ width: "74%", height: "6px", borderRadius: "3px", flexShrink: 0, backgroundColor: containerHighest }} />
+      <box ariaHidden data-state={barState()} class={styles.miniBar1} />
+      <box ariaHidden class={styles.miniBar2} />
+      <box ariaHidden class={styles.miniBar3} />
     </Button>
   );
 }
@@ -122,16 +94,7 @@ function WorkspacePreviewCard(props: {
   const visibleTiles = () => cardWindows().slice(0, 3);
   const overflowCount = () => Math.max(0, cardWindows().length - visibleTiles().length);
   const isEmpty = () => cardWindows().length === 0;
-
-  const cardBorder = () => (
-    urgent()
-      ? `1.5px solid ${error}`
-      : active()
-        ? `1.5px solid ${primary}`
-        : "1.5px solid color-mix(in srgb, var(--color-outline-variant) 65%, transparent)"
-  );
-  const badgeBg = () => (urgent() ? errorContainer : active() ? primary : containerHighest);
-  const badgeFg = () => (urgent() ? onErrorContainer : active() ? onPrimary : muted);
+  const state = () => (urgent() ? "urgent" : active() ? "active" : "idle");
   const statusText = () => {
     if (active()) {
       const count = cardWindows().length;
@@ -140,71 +103,46 @@ function WorkspacePreviewCard(props: {
     if (urgent()) return "Urgent";
     return "Switch";
   };
-  const statusColor = () => (urgent() ? error : active() ? primary : outline);
 
   return (
-    <Button testId={`overview-ws-${ws().workspace_id}`} selected={active()}
+    <Button
+      testId={`overview-ws-${ws().workspace_id}`}
+      selected={active()}
       ariaLabel={`Switch to ${title()}`}
       onClick={props.onActivateWorkspace}
-      style={{
-        display: "flex", flexDirection: "column", alignItems: "stretch", justifyContent: "flex-start",
-        flexGrow: 1, flexBasis: "0px", minWidth: "0px", maxWidth: "316px",
-        padding: "16px", gap: "10px", borderRadius: "22px",
-        backgroundColor: containerHigh, color: onSurface, border: cardBorder(),
-      }}>
-      <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", width: "100%" }}>
-        <row style={{ alignItems: "center", gap: "8px", minWidth: "0px", flexGrow: 1 }}>
-          <box style={{
-            display: "flex", alignItems: "center", justifyContent: "center",
-            height: "20px", minWidth: "24px", padding: "0 8px", borderRadius: "10px", flexShrink: 0,
-            backgroundColor: badgeBg(), color: badgeFg(),
-          }}>
-            <text data-tabular="true" style={{
-              fontFamily: "var(--font-mono)", fontSize: "12px", fontWeight: 600, lineHeight: "16px",
-              fontVariantNumeric: "tabular-nums",
-            }}>
+      data-active={active() ? "true" : "false"}
+      data-urgent={urgent() ? "true" : "false"}
+      class={styles.workspaceCard}
+    >
+      <row class={styles.workspaceHeader}>
+        <row class={styles.workspaceTitleGroup}>
+          <box data-state={state()} class={styles.workspaceBadge}>
+            <text data-tabular="true" class={styles.workspaceBadgeText}>
               {idxLabel()}
             </text>
           </box>
-          <text style={{
-            ...clipped, fontSize: "14px", lineHeight: "20px",
-            fontWeight: active() || urgent() ? 600 : 500,
-            color: active() || urgent() ? onSurface : muted,
-          }}>
+          <text data-emphasized={active() || urgent() ? "true" : "false"} class={styles.workspaceTitle}>
             {title()}
           </text>
         </row>
-        <row style={{ alignItems: "center", gap: "6px", flexShrink: 0 }}>
+        <row class={styles.workspaceStatusRow}>
           <Show when={urgent()}>
-            <box ariaHidden style={{ width: "6px", height: "6px", borderRadius: "3px", flexShrink: 0, backgroundColor: error }} />
+            <box ariaHidden class={styles.urgentDot} />
           </Show>
-          <text data-tabular="true" style={{
-            fontSize: "12px", lineHeight: "16px", color: statusColor(), fontVariantNumeric: "tabular-nums",
-          }}>
+          <text data-tabular="true" data-state={state()} class={styles.workspaceStatusText}>
             {statusText()}
           </text>
         </row>
       </row>
 
-      <box style={{
-        position: "relative", display: "flex", width: "100%", height: "158px",
-        borderRadius: "16px", overflow: "hidden", padding: "10px", gap: "8px",
-        background: canvasGradient,
-        alignItems: isEmpty() ? "center" : "stretch",
-        justifyContent: isEmpty() ? "center" : "flex-start",
-      }}>
+      <box data-empty={isEmpty() ? "true" : "false"} class={styles.previewCanvas}>
         <Show when={props.wallpaperSrc}>
-          {src => (
-            <Image ariaHidden src={src()} style={{
-              position: "absolute", left: "0px", top: "0px", width: "100%", height: "100%",
-              objectFit: "cover", opacity: 0.28,
-            }} />
-          )}
+          {src => <Image ariaHidden src={src()} class={styles.previewWallpaper} />}
         </Show>
         <Show when={!isEmpty()} fallback={
-          <column style={{ alignItems: "center", justifyContent: "center", gap: "6px" }}>
-            <ShellIcon name="add" size={24} color={urgent() ? error : outline} />
-            <text style={{ fontSize: "12px", lineHeight: "16px", color: urgent() ? error : outline }}>
+          <column class={styles.emptyWorkspace}>
+            <ShellIcon name="add" size={24} color={urgent() ? "var(--color-error)" : "var(--color-outline)"} />
+            <text data-urgent={urgent() ? "true" : "false"} class={styles.emptyWorkspaceText}>
               {active() ? "Empty workspace" : urgent() ? "Attention requested" : "Open workspace"}
             </text>
           </column>
@@ -220,13 +158,8 @@ function WorkspacePreviewCard(props: {
             )}
           </For>
           <Show when={overflowCount() > 0}>
-            <box style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: "40px", height: "100%", borderRadius: "10px", flexShrink: 0,
-              backgroundColor: container, color: muted,
-              border: "1px solid color-mix(in srgb, var(--color-outline-variant) 65%, transparent)",
-            }}>
-              <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: "14px", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+            <box class={styles.overflowBadge}>
+              <text data-tabular="true" class={styles.overflowBadgeText}>
                 {`+${overflowCount()}`}
               </text>
             </box>
@@ -303,63 +236,59 @@ function OverviewContent(props: {
   const wsCount = () => monitorWorkspaces().length;
 
   return (
-    <box testId="overview-backdrop" inert={props.inert} onClick={closePanels} style={{
-      position: "fixed", left: "0px", top: "0px", width: "100%", height: "100%",
-      display: "flex", alignItems: "center", justifyContent: "center", padding: "14px",
-      backgroundColor: scrimBackdrop(48, props.opacity(), dark()),
-    }}>
-      <column testId="overview-card" role="dialog" ariaLabel="Workspace overview" ariaModal
-        onClick={event => event.stopPropagation()} onKeyDown={handleKeyDown}
-        style={{
-          width: "684px", maxWidth: "100%", maxHeight: "760px", padding: "18px", gap: "16px", borderRadius: "22px",
-          backgroundColor: container, color: onSurface, fontFamily: "var(--font-sans)",
-          border: "1px solid color-mix(in srgb, var(--color-outline-variant) 65%, transparent)",
-          boxShadow: "var(--shadow-level-3)",
-          ...dialogMotionStyle(props.spatial(), { opacity: props.opacity(), reduced: scheme() === "reduced", fromScale: 0.96, fromY: 8 }),
-        }}>
-        <row style={{ alignItems: "center", gap: "12px", width: "100%", flexShrink: 0 }}>
-          <box ariaHidden style={{
-            display: "flex", alignItems: "center", justifyContent: "center",
-            width: "40px", height: "40px", borderRadius: "14px", flexShrink: 0,
-            backgroundColor: primaryContainer,
-          }}>
-            <ShellIcon name="overview" filled size={22} color={onPrimaryContainer} />
+    <box
+      testId="overview-backdrop"
+      inert={props.inert}
+      onClick={closePanels}
+      class={styles.backdrop}
+      style={{ backgroundColor: scrimBackdrop(48, props.opacity(), dark()) }}
+    >
+      <column
+        testId="overview-card"
+        role="dialog"
+        ariaLabel="Workspace overview"
+        ariaModal
+        onClick={event => event.stopPropagation()}
+        onKeyDown={handleKeyDown}
+        class={styles.card}
+        style={{ ...dialogMotionStyle(props.spatial(), { opacity: props.opacity(), reduced: scheme() === "reduced", fromScale: 0.96, fromY: 8 }) }}
+      >
+        <row class={styles.headerRow}>
+          <box ariaHidden class={styles.headerBadge}>
+            <ShellIcon name="overview" filled size={22} color="var(--color-on-primary-container)" />
           </box>
-          <column style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "2px" }}>
-            <text role="heading" style={{
-              fontSize: "22px", fontWeight: 600, lineHeight: "28px", letterSpacing: "-0.015em", color: onSurface,
-            }}>
+          <column class={styles.headerText}>
+            <text role="heading" class={styles.headerTitle}>
               Workspace overview
             </text>
-            <text style={{ fontSize: "12px", lineHeight: "16px", color: muted }}>
+            <text class={styles.headerSubtitle}>
               {`${monitorName()} · ${wsCount()} ${wsCount() === 1 ? "workspace" : "workspaces"}`}
             </text>
           </column>
-          <Button testId="overview-close" ariaLabel="Close overview" ref={node => focus(node)} onClick={closePanels} style={{
-            display: "flex", alignItems: "center", justifyContent: "center",
-            width: "36px", height: "36px", borderRadius: "999px", "--zgui-corner-shape": "none", flexShrink: 0,
-            backgroundColor: containerHigh, color: onSurface,
-          }}>
-            <ShellIcon name="close" size={18} color={onSurface} />
+          <Button
+            testId="overview-close"
+            ariaLabel="Close overview"
+            ref={node => focus(node)}
+            onClick={closePanels}
+            class={styles.closeButton}
+          >
+            <ShellIcon name="close" size={18} color="var(--color-on-surface)" />
           </Button>
         </row>
 
         <Show when={workspaceRows().length > 0} fallback={
-          <box style={{
-            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-            width: "100%", height: "158px", borderRadius: "16px", gap: "6px", backgroundColor: containerHigh,
-          }}>
-            <ShellIcon name="overview" size={24} color={outline} />
-            <text style={{ fontSize: "12px", lineHeight: "16px", color: outline }}>
+          <box class={styles.emptyWorkspaces}>
+            <ShellIcon name="overview" size={24} color="var(--color-outline)" />
+            <text class={styles.emptyWorkspacesText}>
               No workspaces reported by compositor
             </text>
           </box>
         }>
-          <scroll style={{ width: "100%", maxHeight: "520px", overflow: "hidden auto" }}>
-            <column style={{ gap: "16px", width: "100%" }}>
+          <scroll class={styles.gridScroll}>
+            <column class={styles.gridRows}>
               <For each={workspaceRows()} keyed={row => row.key}>
                 {row => (
-                  <row style={{ gap: "16px", width: "100%" }}>
+                  <row class={styles.gridRow}>
                     <For each={row().items} keyed={entry => entry.workspace.workspace_id}>
                       {entry => (
                         <WorkspacePreviewCard
@@ -374,7 +303,7 @@ function OverviewContent(props: {
                       )}
                     </For>
                     <Show when={row().items.length === 1}>
-                      <box ariaHidden style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px" }} />
+                      <box ariaHidden class={styles.rowSpacer} />
                     </Show>
                   </row>
                 )}

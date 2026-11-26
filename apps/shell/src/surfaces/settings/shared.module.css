@@ -1,0 +1,61 @@
+.grow {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+}
+
+.clipped {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hiddenSection {
+  display: none;
+}
+
+.switchRow {
+  display: flex;
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-tile);
+  background-color: var(--color-surface-container);
+
+  &[data-compact="true"] {
+    padding: 8px 12px;
+    border-radius: 12px;
+  }
+}
+
+.switchTextColumn {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  gap: 1px;
+}
+
+.switchLabel {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.switchDetail {
+  min-width: 0px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}

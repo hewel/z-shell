@@ -1,4 +1,4 @@
-import { Button, For, Show, TextField, createEffect, createMemo, createSignal, onCleanup, type Accessor, type NativeChild } from "@hewel/zgui";
+import { Button, For, Show, TextField, createEffect, createMemo, createSignal, cx, onCleanup, type Accessor, type NativeChild } from "@hewel/zgui";
 import { M3Button, M3CardAction, M3InteractiveCard, M3SegmentedControl, M3Switch } from "@z-shell/sdk/primitives";
 import { createOpacityEnter, useMotionScheme } from "../../motion.ts";
 import { useShellStore } from "../../store.ts";
@@ -8,6 +8,7 @@ import {
   supportsTimedKeepAwake,
   type IdleAction,
 } from "../../topics.ts";
+import styles from "./IdlePane.module.css";
 
 const KEEP_AWAKE_PRESETS = [
   { id: "1800", label: "30m", seconds: 1800, testId: "settings-keep-awake-30m" },
@@ -21,19 +22,6 @@ function presetIdForDuration(seconds: number | null | undefined): string {
   const matched = KEEP_AWAKE_PRESETS.find(p => p.seconds === seconds);
   return matched ? matched.id : "3600";
 }
-import {
-  clipped,
-  container,
-  containerHigh,
-  containerHighest,
-  grow,
-  muted,
-  onPrimary,
-  onPrimaryContainer,
-  onSurface,
-  primary,
-  primaryContainer,
-} from "./shared.tsx";
 
 const IDLE_ACTIONS = {
   lock: "Lock",
@@ -49,17 +37,6 @@ const IDLE_ACTION_KINDS = [
   { id: "lock_and_suspend", label: "Lock + sleep", testId: "settings-idle-action-lock_and_suspend" },
   { id: "custom_command", label: "Command", testId: "settings-idle-action-custom_command" },
 ] as const;
-
-const inputField = {
-  height: "32px",
-  borderRadius: "8px",
-  padding: "6px 8px",
-  backgroundColor: container,
-  border: "1px solid color-mix(in srgb, var(--color-outline-variant) 65%, transparent)",
-  color: onSurface,
-  fontFamily: "var(--font-mono)",
-  fontSize: "12px",
-} as const;
 
 interface EditableIdleRule {
   name: string;
@@ -104,12 +81,12 @@ function RuleEditorCard(props: {
   const scheme = useMotionScheme();
   const fade = createOpacityEnter("fastEffects", scheme);
   return (
-    <column style={{
-      borderRadius: "16px", backgroundColor: containerHigh, padding: "14px", gap: "10px",
-      opacity: props.animate ? Math.max(0, Math.min(1, fade())) : 1,
-    }}>
-      <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-        <text style={{ fontSize: "13px", fontWeight: 600 }}>{`Rule editor · ${props.rule().name}`}</text>
+    <column
+      class={cx(styles.editorCard)}
+      style={{ opacity: props.animate ? Math.max(0, Math.min(1, fade())) : 1 }}
+    >
+      <row class={cx(styles.editorHeaderRow)}>
+        <text class={cx(styles.sectionTitle)}>{`Rule editor · ${props.rule().name}`}</text>
         <M3Button variant="text" danger size="sm" onClick={props.onRemove}>
           <text>Remove</text>
         </M3Button>
@@ -129,8 +106,8 @@ function RuleEditorCard(props: {
       />
 
       <Show when={actionKindOf(props.rule().action) === "custom_command"}>
-        <column style={{ gap: "4px", width: "100%" }}>
-          <text style={{ fontSize: "11px", fontWeight: 500, color: primary }}>
+        <column class={cx(styles.commandSection)}>
+          <text class={cx(styles.commandLabel)}>
             Action command (required argv, space-separated)
           </text>
           <TextField
@@ -142,29 +119,25 @@ function RuleEditorCard(props: {
               const parts = ev.value.trim().split(/\s+/).filter(Boolean);
               props.onUpdate(props.rule().name, r => ({ ...r, action: { custom_command: parts } }));
             }}
-            style={{
-              ...inputField,
-              border: (customCommandOf(props.rule().action)?.length ?? 0) === 0
-                ? "1px solid var(--color-error)"
-                : "1px solid color-mix(in srgb, var(--color-primary) 55%, transparent)",
-            }}
+            class={cx(styles.commandInput)}
+            data-missing={(customCommandOf(props.rule().action)?.length ?? 0) === 0 ? "true" : null}
           />
         </column>
       </Show>
 
-      <row style={{ gap: "8px", width: "100%" }}>
-        <column style={{ ...grow, gap: "4px" }}>
-          <text style={{ fontSize: "11px", color: muted }}>After (seconds)</text>
+      <row class={cx(styles.fieldsRow)}>
+        <column class={cx(styles.fieldCol)}>
+          <text class={cx(styles.fieldLabel)}>After (seconds)</text>
           <TextField ariaLabel="Idle timeout seconds" value={String(props.rule().timeout_seconds)}
             onInput={ev => {
               const n = Number.parseInt(ev.value, 10);
               if (Number.isFinite(n) && n >= 0 && n <= 86400) {
                 props.onUpdate(props.rule().name, r => ({ ...r, timeout_seconds: n }));
               }
-            }} style={inputField} />
+            }} class={cx(styles.inputField)} />
         </column>
-        <column style={{ ...grow, gap: "4px" }}>
-          <text style={{ fontSize: "11px", color: muted }}>When locked (s)</text>
+        <column class={cx(styles.fieldCol)}>
+          <text class={cx(styles.fieldLabel)}>When locked (s)</text>
           <TextField ariaLabel="Locked timeout seconds" value={props.rule().locked_timeout_seconds == null ? "" : String(props.rule().locked_timeout_seconds)}
             placeholder="Optional"
             onInput={ev => {
@@ -177,28 +150,28 @@ function RuleEditorCard(props: {
               if (Number.isFinite(n) && n >= 1 && n <= 86400) {
                 props.onUpdate(props.rule().name, r => ({ ...r, locked_timeout_seconds: n }));
               }
-            }} style={inputField} />
+            }} class={cx(styles.inputField)} />
         </column>
-        <column style={{ ...grow, gap: "4px" }}>
-          <text style={{ fontSize: "11px", color: muted }}>Warning (0–60s)</text>
+        <column class={cx(styles.fieldCol)}>
+          <text class={cx(styles.fieldLabel)}>Warning (0–60s)</text>
           <TextField ariaLabel="Warning fade seconds" value={String(props.rule().pre_action_fade_seconds)}
             onInput={ev => {
               const n = Number.parseInt(ev.value, 10);
               if (Number.isFinite(n) && n >= 0 && n <= 60) {
                 props.onUpdate(props.rule().name, r => ({ ...r, pre_action_fade_seconds: n }));
               }
-            }} style={inputField} />
+            }} class={cx(styles.inputField)} />
         </column>
       </row>
 
-      <column style={{ gap: "4px", width: "100%" }}>
-        <text style={{ fontSize: "11px", color: muted }}>Resume command (optional argv, space-separated)</text>
+      <column class={cx(styles.commandSection)}>
+        <text class={cx(styles.fieldLabel)}>Resume command (optional argv, space-separated)</text>
         <TextField ariaLabel="Resume command" placeholder="e.g. niri msg action power-on-monitors"
           value={props.rule().resume_command ? props.rule().resume_command!.join(" ") : ""}
           onInput={ev => {
             const parts = ev.value.trim().split(/\s+/).filter(Boolean);
             props.onUpdate(props.rule().name, r => ({ ...r, resume_command: parts.length > 0 ? parts : null }));
-          }} style={inputField} />
+          }} class={cx(styles.inputField)} />
       </column>
 
       <Show when={props.dirty()}>
@@ -208,10 +181,10 @@ function RuleEditorCard(props: {
             return cmd !== null && cmd.length === 0;
           };
           return (
-            <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", paddingTop: "4px" }}>
-              <row style={{ alignItems: "center", gap: "6px", minWidth: "0px" }}>
-                <box ariaHidden style={{ width: "6px", height: "6px", borderRadius: "3px", "--zgui-corner-shape": "none", backgroundColor: primary, flexShrink: 0 }} />
-                <text style={{ ...clipped, fontSize: "11px", color: muted }}>
+            <row class={cx(styles.dirtyRow)}>
+              <row class={cx(styles.dirtyLead)}>
+                <box ariaHidden class={cx(styles.dirtyDot)} />
+                <text class={cx(styles.dirtyLabel)}>
                   {missingCommand()
                     ? "Enter an action command before applying"
                     : "Unsaved changes · Apply to commit to host idle daemon"}
@@ -221,12 +194,7 @@ function RuleEditorCard(props: {
                 testId="settings-idle-apply"
                 disabled={missingCommand()}
                 onClick={props.onApply}
-                style={{
-                  display: "flex", alignItems: "center", justifyContent: "center", height: "30px",
-                  padding: "0 14px", borderRadius: "10px", backgroundColor: primary, color: onPrimary,
-                  fontSize: "12px", fontWeight: 600, flexShrink: 0,
-                  opacity: missingCommand() ? 0.45 : 1,
-                }}
+                class={cx(styles.applyButton)}
               >
                 <text>Apply</text>
               </Button>
@@ -348,29 +316,26 @@ export function IdlePane(): NativeChild {
   }
 
   return (
-    <column testId="settings-idle-pane" style={{ gap: "12px", width: "100%" }}>
-      <column testId="settings-keep-awake-card" style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "12px 14px", gap: "10px" }}>
-        <row style={{ alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
-          <column style={{ ...grow, gap: "2px" }}>
-            <row style={{ alignItems: "center", gap: "8px" }}>
-              <text style={{ fontSize: "13px", fontWeight: 600 }}>Keep awake</text>
-              <row style={{
-                alignItems: "center", gap: "5px", padding: "2px 8px", borderRadius: "999px", "--zgui-corner-shape": "none",
-                backgroundColor: serviceStatus() === "running" ? primaryContainer : containerHighest,
-                color: serviceStatus() === "running" ? onPrimaryContainer : muted,
-                fontSize: "11px", fontWeight: 600,
-              }}>
-                <box ariaHidden style={{ width: "6px", height: "6px", borderRadius: "3px", backgroundColor: serviceStatus() === "running" ? primary : muted }} />
+    <column testId="settings-idle-pane" class={cx(styles.pane)}>
+      <column testId="settings-keep-awake-card" class={cx(styles.keepAwakeCard)}>
+        <row class={cx(styles.keepAwakeHeader)}>
+          <column class={cx(styles.keepAwakeTitleCol)}>
+            <row class={cx(styles.keepAwakeTitleRow)}>
+              <text class={cx(styles.sectionTitle)}>Keep awake</text>
+              <row class={cx(styles.serviceBadge)} data-running={serviceStatus() === "running" ? "true" : null}>
+                <box ariaHidden class={cx(styles.serviceDot)} data-running={serviceStatus() === "running" ? "true" : null} />
                 <text>{serviceStatus() === "running" ? "Watching" : serviceStatus()}</text>
               </row>
             </row>
-            <text testId="settings-keep-awake-subtitle" style={{ fontSize: "11px", color: muted }}>{keepAwakeSubtitle()}</text>
+            <text testId="settings-keep-awake-subtitle" class={cx(styles.keepAwakeSubtitle)}>{keepAwakeSubtitle()}</text>
           </column>
-          <row style={{ alignItems: "center", gap: "8px", flexShrink: 0 }}>
-            <text testId="settings-keep-awake-status" data-tabular="true" style={{
-              fontFamily: "var(--font-mono)", fontSize: "12px", fontWeight: 500,
-              color: caffeine() ? primary : muted, fontVariantNumeric: "tabular-nums",
-            }}>
+          <row class={cx(styles.keepAwakeControls)}>
+            <text
+              testId="settings-keep-awake-status"
+              data-tabular="true"
+              class={cx(styles.keepAwakeStatus)}
+              data-active={caffeine() ? "true" : null}
+            >
               {keepAwakeStatus()}
             </text>
             <M3Switch
@@ -383,53 +348,47 @@ export function IdlePane(): NativeChild {
         </row>
         <Show when={unavailableSleepBlockReason()}>
           {reason => (
-            <row testId="settings-keep-awake-os-block-warning" style={{
-              alignItems: "center", gap: "8px", padding: "6px 10px", borderRadius: "10px",
-              backgroundColor: "var(--color-error-container)", color: "var(--color-on-error-container)",
-            }}>
-              <text style={{ ...clipped, fontSize: "11px", lineHeight: "15px", fontWeight: 500 }}>
+            <row testId="settings-keep-awake-os-block-warning" class={cx(styles.warningBanner)}>
+              <text class={cx(styles.warningText)}>
                 {`OS sleep block unavailable: ${reason()}`}
               </text>
             </row>
           )}
         </Show>
-        <row style={{ alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
-          <text style={{ fontSize: "11px", color: muted, whiteSpace: "nowrap", flexShrink: 0 }}>
+        <row class={cx(styles.presetRow)}>
+          <text class={cx(styles.presetLabel)}>
             {timedSupported() ? "Auto-expire timer" : "Timed presets require updated z-shelld"}
           </text>
-          <M3SegmentedControl
-            ariaLabel="Keep awake duration preset"
-            compact
-            options={KEEP_AWAKE_PRESETS.map(preset => ({
-              ...preset,
-              disabled: !timedSupported(),
-            }))}
-            value={selectedPreset()}
-            onChange={id => {
-              const preset = KEEP_AWAKE_PRESETS.find(p => p.id === id);
-              if (!preset) return;
-              void invokePublic("idle.caffeine", {
-                enabled: caffeine(),
-                duration_seconds: preset.seconds,
-              });
-            }}
-            style={{ width: "280px", flexShrink: 0 }}
-          />
+          <box class={cx(styles.presetSegmented)}>
+            <M3SegmentedControl
+              ariaLabel="Keep awake duration preset"
+              compact
+              options={KEEP_AWAKE_PRESETS.map(preset => ({
+                ...preset,
+                disabled: !timedSupported(),
+              }))}
+              value={selectedPreset()}
+              onChange={id => {
+                const preset = KEEP_AWAKE_PRESETS.find(p => p.id === id);
+                if (!preset) return;
+                void invokePublic("idle.caffeine", {
+                  enabled: caffeine(),
+                  duration_seconds: preset.seconds,
+                });
+              }}
+            />
+          </box>
         </row>
       </column>
 
-      <column style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "14px", gap: "8px" }}>
-        <row style={{ alignItems: "center", justifyContent: "space-between" }}>
-          <text style={{ fontSize: "13px", fontWeight: 600 }}>Idle rules</text>
-          <Button testId="settings-idle-add" onClick={addRule} style={{
-            display: "flex", alignItems: "center", justifyContent: "center", minHeight: "26px",
-            padding: "4px 10px", borderRadius: "8px", backgroundColor: containerHighest, color: onSurface,
-            fontSize: "11px", fontWeight: 600,
-          }}>
+      <column class={cx(styles.rulesCard)}>
+        <row class={cx(styles.rulesHeader)}>
+          <text class={cx(styles.sectionTitle)}>Idle rules</text>
+          <Button testId="settings-idle-add" onClick={addRule} class={cx(styles.addRuleButton)}>
             <text>+ Add rule</text>
           </Button>
         </row>
-        <For each={draftRules()} keyed={rule => rule.name} fallback={<text style={{ fontSize: "12px", color: muted }}>No declarative idle rules configured</text>}>
+        <For each={draftRules()} keyed={rule => rule.name} fallback={<text class={cx(styles.emptyText)}>No declarative idle rules configured</text>}>
           {rule => {
             const selected = () => selectedName() === rule().name;
             return (
@@ -440,23 +399,16 @@ export function IdlePane(): NativeChild {
                 ariaLabel={formatRuleTitle(rule().action, rule().name)}
                 selected={selected()}
                 onClick={() => selectRule(rule().name)}
-                style={{
-                  borderRadius: "14px", padding: "8px 10px", alignItems: "center", gap: "10px",
-                  backgroundColor: selected() ? primaryContainer : container,
-                  border: selected() ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
-                  color: selected() ? onPrimaryContainer : onSurface,
-                }}
+                class={cx(styles.ruleCard)}
+                data-selected={selected() ? "true" : null}
               >
-                <column style={{ ...grow, gap: "1px", minHeight: "32px", justifyContent: "center" }}>
-                  <text style={{ ...clipped, fontSize: "13px", fontWeight: 600 }}>{formatRuleTitle(rule().action, rule().name)}</text>
-                  <text data-tabular="true" style={{
-                    ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", fontVariantNumeric: "tabular-nums",
-                    color: selected() ? onPrimaryContainer : muted, opacity: selected() ? 0.8 : 1,
-                  }}>
+                <column class={cx(styles.ruleTextCol)}>
+                  <text class={cx(styles.ruleTitle)}>{formatRuleTitle(rule().action, rule().name)}</text>
+                  <text data-tabular="true" class={cx(styles.ruleMeta)} data-selected={selected() ? "true" : null}>
                     {`after ${formatRuleDuration(rule().timeout_seconds)}${rule().locked_timeout_seconds ? ` · locked ${formatRuleDuration(rule().locked_timeout_seconds!)}` : ""}${rule().enabled ? "" : " · Disabled"}`}
                   </text>
                 </column>
-                <M3CardAction style={{ flexShrink: 0 }}>
+                <M3CardAction class={cx(styles.cardAction)}>
                   <M3Switch
                     testId={`settings-idle-switch-${rule().name}`}
                     ariaLabel={`Enable ${rule().name}`}
@@ -488,13 +440,13 @@ export function IdlePane(): NativeChild {
       </Show>
 
       <Show when={(idle.data()?.active_inhibitors.length ?? 0) > 0}>
-        <column style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "14px", gap: "8px" }}>
-          <text style={{ fontSize: "13px", fontWeight: 600 }}>Active inhibitors</text>
+        <column class={cx(styles.inhibitorsCard)}>
+          <text class={cx(styles.sectionTitle)}>Active inhibitors</text>
           <For each={idle.data()?.active_inhibitors} keyed={item => `${item.source.source}:${item.scope}:${item.reason}`}>
             {item => (
-              <row style={{ borderRadius: "10px", backgroundColor: containerHighest, padding: "8px 10px", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-                <text style={{ ...clipped, fontWeight: 500, fontSize: "12px", lineHeight: "16px" }}>{`${item().source.source} · ${item().scope}`}</text>
-                <text style={{ ...clipped, fontSize: "11px", lineHeight: "14px", color: muted }}>{item().reason}</text>
+              <row class={cx(styles.inhibitorRow)}>
+                <text class={cx(styles.inhibitorSource)}>{`${item().source.source} · ${item().scope}`}</text>
+                <text class={cx(styles.inhibitorReason)}>{item().reason}</text>
               </row>
             )}
           </For>

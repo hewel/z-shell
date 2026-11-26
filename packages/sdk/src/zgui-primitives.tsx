@@ -131,11 +131,6 @@ export function M3Switch(props: M3SwitchProps): NativeChild {
     return minLeft + t * (maxLeft - minLeft);
   };
   const checkOpacity = () => Math.max(0, Math.min(1, (progress() - 0.35) / 0.65));
-  const checkColor = () => (
-    props.disabled
-      ? "color-mix(in srgb, var(--color-on-surface) var(--disabled-ink), transparent)"
-      : "var(--color-on-primary-container)"
-  );
 
   const handleKeyDown = (event: NativeKeyEvent) => {
     if (props.disabled) return;
@@ -181,16 +176,9 @@ export function M3Switch(props: M3SwitchProps): NativeChild {
             ariaHidden
             viewBox="0 0 24 24"
             d={CHECK_ICON_PATH}
-            style={{
-              width: "11px",
-              height: "11px",
-              opacity: checkOpacity(),
-              "--zgui-fill": "transparent",
-              "--zgui-stroke": checkColor(),
-              "--zgui-stroke-width": "2.6px",
-              "--zgui-stroke-linecap": "round",
-              "--zgui-stroke-linejoin": "round",
-            }}
+            data-disabled={props.disabled ? "true" : null}
+            class={styles.switchCheck}
+            style={{ opacity: checkOpacity() }}
           />
         </Show>
       </box>
@@ -410,7 +398,7 @@ export function M3SliderRow(props: M3SliderRowProps): NativeChild {
         </text>
       </row>
       <Show when={props.showTrailingSlot !== false}>
-        {props.trailing ?? <box ariaHidden style={{ width: "26px", height: "26px", flexShrink: 0 }} />}
+        {props.trailing ?? <box ariaHidden class={styles.sliderTrailingSpacer} />}
       </Show>
     </row>
   );
@@ -514,27 +502,21 @@ export function M3FilterChip(props: M3FilterChipProps): NativeChild {
       class={styles.filterChip}
       data-selected={props.selected ? "true" : null}
     >
-      <row class={styles.pressInner} style={{ gap: "5px" }}>
+      <row class={styles.pressInner}>
         <Show when={props.selected}>
           <vector
             ariaHidden
             viewBox="0 0 24 24"
             d={CHECK_ICON_PATH}
+            class={styles.filterChipCheck}
             style={{
-              width: "14px",
-              height: "14px",
-              "--zgui-fill": "transparent",
-              "--zgui-stroke": "var(--color-on-primary-container)",
-              "--zgui-stroke-width": "2.2px",
-              "--zgui-stroke-linecap": "round",
-              "--zgui-stroke-linejoin": "round",
               transform: scheme() === "reduced" ? "none" : `scale(${(0.75 + Math.max(0, Math.min(1.12, checkPop())) * 0.25).toFixed(4)})`,
             }}
           />
         </Show>
         <text>{props.label}</text>
         <Show when={props.count !== undefined}>
-          <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", fontVariantNumeric: "tabular-nums" }}>
+          <text data-tabular="true" class={styles.filterChipCount}>
             {props.count}
           </text>
         </Show>
@@ -598,7 +580,7 @@ export function M3Collapsible(props: M3CollapsibleProps): NativeChild {
   };
 
   return (
-    <Show when={presence.mounted()} fallback={<box style={{ display: "none" }} />}>
+    <Show when={presence.mounted()} fallback={<box class={styles.collapsibleHidden} />}>
       <box inert={!props.open} style={clipStyle()}>
         <box ref={setInnerNode} style={innerStyle()}>
           {props.children}

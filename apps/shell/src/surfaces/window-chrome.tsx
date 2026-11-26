@@ -15,10 +15,9 @@ import {
   createOpacityEnter,
   useMotionScheme,
 } from "../motion.ts";
+import styles from "./window-chrome.module.css";
 
 export const NAV_ITEM_PITCH = 37; // 34px item height + 3px column gap
-
-const primaryContainer = "var(--color-primary-container)";
 
 /** M3 Fade Through wrapper for toplevel window detail panes (`opacity 0->1` + `translateY 6px->0`). */
 export function FadeThroughPane(props: {
@@ -29,13 +28,15 @@ export function FadeThroughPane(props: {
   const fade = createOpacityEnter("defaultEffects", scheme);
   const rise = createEnterProgress("fastSpatial", { scheme });
   return (
-    <box style={{
-      width: "100%",
-      opacity: props.animate ? Math.max(0, Math.min(1, fade())) : 1,
-      transform: !props.animate || scheme() === "reduced"
-        ? "none"
-        : `translateY(${((1 - rise()) * 6).toFixed(2)}px)`,
-    }}>
+    <box
+      class={styles.fadeThroughPane}
+      style={{
+        opacity: props.animate ? Math.max(0, Math.min(1, fade())) : 1,
+        transform: !props.animate || scheme() === "reduced"
+          ? "none"
+          : `translateY(${((1 - rise()) * 6).toFixed(2)}px)`,
+      }}
+    >
       {props.children}
     </box>
   );
@@ -75,19 +76,15 @@ export function SlidingNavPill(props: {
     { scheme },
   );
   return (
-    <box ariaHidden style={{
-      position: "absolute",
-      top: "0px",
-      left: "0px",
-      right: "0px",
-      height: `${height()}px`,
-      borderRadius: "10px",
-      backgroundColor: primaryContainer,
-      border: "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)",
-      pointerEvents: "none",
-      opacity: Math.max(0, Math.min(1, pillOpacity())),
-      transform: `translateY(${pillY().toFixed(2)}px)`,
-    }} />
+    <box
+      ariaHidden
+      class={styles.slidingNavPill}
+      style={{
+        height: `${height()}px`,
+        opacity: Math.max(0, Math.min(1, pillOpacity())),
+        transform: `translateY(${pillY().toFixed(2)}px)`,
+      }}
+    />
   );
 }
 

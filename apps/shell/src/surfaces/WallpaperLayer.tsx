@@ -5,6 +5,7 @@ import { createM3Spring, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import { formatSurfaceName, resolveMonitorLogicalSize, resolveMonitorWallpaper, type ActiveWallpaper } from "../topics.ts";
+import styles from "./WallpaperLayer.module.css";
 
 type WallpaperRequest = { readonly wallpaper: ActiveWallpaper };
 type WallpaperSource = { readonly request: WallpaperRequest; readonly src: string };
@@ -67,22 +68,15 @@ function WallpaperContent(props: { readonly monitor: Accessor<Monitor>; readonly
           const fit = props.active()?.fit ?? wallpaper.fit;
           return fit === "center" ? "none" : fit;
         });
-        // The bridge accepts object-fit; the NativeStyle declaration does not list it yet.
-        const style = () => ({
-          position: "fixed",
-          left: "0px",
-          top: "0px",
-          width: "100%",
-          height: "100%",
-          "object-fit": objectFit(),
-          opacity: isCurrent() && previousSrc() ? Math.min(1, Math.max(0, progress())) : 1,
-        });
+        const opacity = () => (isCurrent() && previousSrc() ? Math.min(1, Math.max(0, progress())) : 1);
         return (
           <Show when={isCurrent() || isPrevious()}>
             <Image
               testId={`wallpaper-${isCurrent() ? "image" : "previous"}-${props.monitor().id}`}
               src={media.src()}
-              style={style()}
+              class={styles.wallpaperImage}
+              data-fit={objectFit()}
+              style={{ opacity: opacity() }}
             />
           </Show>
         );

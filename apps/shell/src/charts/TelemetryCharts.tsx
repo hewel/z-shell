@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, type NativeChild } from "@hewel/zgui";
+import { For, Show, createEffect, createMemo, createSignal, cx, onCleanup, type NativeChild } from "@hewel/zgui";
 import { useGlobalMotionScheme } from "@z-shell/sdk/zgui";
 import {
   buildSparklinePaths,
@@ -9,13 +9,10 @@ import {
   type ChartScrollFrame,
 } from "../charts.ts";
 import { ShellIcon } from "../icons.tsx";
+import styles from "./TelemetryCharts.module.css";
 
 const primary = "var(--color-primary)";
-const primaryContainer = "var(--color-primary-container)";
 const tertiary = "var(--color-tertiary)";
-const trackColor = "var(--color-surface-container-highest)";
-const surfaceLowest = "var(--color-surface-container-lowest)";
-const muted = "var(--color-on-surface-variant)";
 
 const ROLLING_SLOT_COUNT = 60;
 const MINI_SPARKLINE_SLOTS = 30;
@@ -40,25 +37,14 @@ export function MiniSparkline(props: {
   const strokeColor = () => props.color ?? primary;
 
   return (
-    <box ariaHidden style={{ position: "relative", width: "36px", height: "16px", flexShrink: 0 }}>
-      <Show when={paths().hasData} fallback={
-        <box ariaHidden style={{
-          position: "absolute", left: "2px", right: "2px", top: "7px", height: "1.5px",
-          borderRadius: "1px", backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 55%, transparent)",
-        }} />
-      }>
+    <box ariaHidden class={styles.miniSparklineRoot}>
+      <Show when={paths().hasData} fallback={<box ariaHidden class={styles.miniSparklineEmpty} />}>
         <vector
           ariaHidden
           viewBox="0 0 36 16"
           d={paths().strokePath}
-          style={{
-            position: "absolute", inset: "0px", width: "36px", height: "16px",
-            "--zgui-fill": "transparent",
-            "--zgui-stroke": strokeColor(),
-            "--zgui-stroke-width": "1.8px",
-            "--zgui-stroke-linecap": "round",
-            "--zgui-stroke-linejoin": "round",
-          }}
+          class={styles.miniSparklineVector}
+          style={{ "--zgui-stroke": strokeColor() }}
         />
       </Show>
     </box>
@@ -73,55 +59,36 @@ export function SplitDualArcGauge(props: {
   readonly iconColor?: string;
 }): NativeChild {
   const size = () => props.size ?? 30;
+  const compact = () => (size() <= 28 ? "true" : "false");
   const arcs = createMemo(() => buildSplitDualArcPaths(props.cpuPercent, props.ramPercent));
-  const strokeWidth = () => (size() <= 28 ? "2.8px" : "2.6px");
+  const vecSizeStyle = () => ({ width: `${size()}px`, height: `${size()}px` });
 
   return (
-    <box ariaHidden style={{
-      position: "relative",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      width: `${size()}px`,
-      height: `${size()}px`,
-      flexShrink: 0,
-    }}>
+    <box ariaHidden class={styles.dualArcRoot} style={vecSizeStyle()}>
       <vector
         ariaHidden
         viewBox="0 0 30 30"
         d={arcs().leftTrack}
-        style={{
-          position: "absolute", inset: "0px", width: `${size()}px`, height: `${size()}px`,
-          "--zgui-fill": "transparent",
-          "--zgui-stroke": trackColor,
-          "--zgui-stroke-width": strokeWidth(),
-          "--zgui-stroke-linecap": "round",
-        }}
+        class={cx(styles.dualArcVector, styles.dualArcTrack)}
+        data-compact={compact()}
+        style={vecSizeStyle()}
       />
       <vector
         ariaHidden
         viewBox="0 0 30 30"
         d={arcs().rightTrack}
-        style={{
-          position: "absolute", inset: "0px", width: `${size()}px`, height: `${size()}px`,
-          "--zgui-fill": "transparent",
-          "--zgui-stroke": trackColor,
-          "--zgui-stroke-width": strokeWidth(),
-          "--zgui-stroke-linecap": "round",
-        }}
+        class={cx(styles.dualArcVector, styles.dualArcTrack)}
+        data-compact={compact()}
+        style={vecSizeStyle()}
       />
       <Show when={arcs().leftFill.length > 0}>
         <vector
           ariaHidden
           viewBox="0 0 30 30"
           d={arcs().leftFill}
-          style={{
-            position: "absolute", inset: "0px", width: `${size()}px`, height: `${size()}px`,
-            "--zgui-fill": "transparent",
-            "--zgui-stroke": primary,
-            "--zgui-stroke-width": strokeWidth(),
-            "--zgui-stroke-linecap": "round",
-          }}
+          class={cx(styles.dualArcVector, styles.dualArcPrimary)}
+          data-compact={compact()}
+          style={vecSizeStyle()}
         />
       </Show>
       <Show when={arcs().rightFill.length > 0}>
@@ -129,13 +96,9 @@ export function SplitDualArcGauge(props: {
           ariaHidden
           viewBox="0 0 30 30"
           d={arcs().rightFill}
-          style={{
-            position: "absolute", inset: "0px", width: `${size()}px`, height: `${size()}px`,
-            "--zgui-fill": "transparent",
-            "--zgui-stroke": tertiary,
-            "--zgui-stroke-width": strokeWidth(),
-            "--zgui-stroke-linecap": "round",
-          }}
+          class={cx(styles.dualArcVector, styles.dualArcTertiary)}
+          data-compact={compact()}
+          style={vecSizeStyle()}
         />
       </Show>
       <ShellIcon name="pulse" size={size() <= 28 ? 11 : 12} color={props.iconColor ?? "var(--color-on-surface)"} />
@@ -226,63 +189,54 @@ export function AreaLineChart(props: {
   };
 
   return (
-    <box testId={props.testId ?? null} style={{
-      position: "relative",
-      width: "100%",
-      height: `${dims().boxHeight}px`,
-      borderRadius: "10px",
-      backgroundColor: surfaceLowest,
-      overflow: "hidden",
-    }}>
+    <box testId={props.testId ?? null} class={styles.chartRoot} style={{ height: `${dims().boxHeight}px` }}>
       {/* Exact 75% / 50% / 25% plot reference hairlines */}
-      <box ariaHidden style={{
-        position: "absolute", left: `${dims().paddingX}px`, right: `${dims().paddingX}px`, top: hairlineY(0.25), height: "1px",
-        backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 30%, transparent)",
-      }} />
-      <box ariaHidden style={{
-        position: "absolute", left: `${dims().paddingX}px`, right: `${dims().paddingX}px`, top: hairlineY(0.5), height: "1px",
-        backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 30%, transparent)",
-      }} />
-      <box ariaHidden style={{
-        position: "absolute", left: `${dims().paddingX}px`, right: `${dims().paddingX}px`, top: hairlineY(0.75), height: "1px",
-        backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 30%, transparent)",
-      }} />
+      <box
+        ariaHidden
+        class={styles.areaHairline}
+        style={{ left: `${dims().paddingX}px`, right: `${dims().paddingX}px`, top: hairlineY(0.25) }}
+      />
+      <box
+        ariaHidden
+        class={styles.areaHairline}
+        style={{ left: `${dims().paddingX}px`, right: `${dims().paddingX}px`, top: hairlineY(0.5) }}
+      />
+      <box
+        ariaHidden
+        class={styles.areaHairline}
+        style={{ left: `${dims().paddingX}px`, right: `${dims().paddingX}px`, top: hairlineY(0.75) }}
+      />
 
       <Show when={paths().hasData} fallback={
-        <box style={{
-          display: "flex", width: "100%", height: "100%",
-          alignItems: "center", justifyContent: "center",
-        }}>
-          <text style={{ fontFamily: "var(--font-mono)", fontSize: "10px", lineHeight: "14px", color: muted }}>
+        <box class={styles.chartEmpty}>
+          <text class={styles.chartEmptyText}>
             {props.emptyLabel ?? "Waiting for samples"}
           </text>
         </box>
       }>
-        <box ariaHidden style={{
-          position: "absolute",
-          left: `${dims().paddingX}px`,
-          right: `${dims().paddingX}px`,
-          top: "0px",
-          bottom: "0px",
-          overflow: "hidden",
-        }}>
-          <box ariaHidden style={{
-            position: "absolute",
-            left: `${-dims().paddingX}px`,
-            right: `${-dims().paddingX}px`,
-            top: "0px",
-            bottom: "0px",
-            ...(shiftPx() > 0.01 ? { transform: `translateX(${shiftPx().toFixed(2)}px)` } : {}),
-          }}>
+        <box
+          ariaHidden
+          class={styles.chartClip}
+          style={{ left: `${dims().paddingX}px`, right: `${dims().paddingX}px` }}
+        >
+          <box
+            ariaHidden
+            class={styles.chartShift}
+            style={{
+              left: `${-dims().paddingX}px`,
+              right: `${-dims().paddingX}px`,
+              ...(shiftPx() > 0.01 ? { transform: `translateX(${shiftPx().toFixed(2)}px)` } : {}),
+            }}
+          >
             <Show when={paths().areaPath.length > 0}>
               <vector
                 ariaHidden
                 viewBox={dims().viewBox}
                 d={paths().areaPath}
+                class={styles.chartAreaVector}
                 style={{
-                  position: "absolute", inset: "0px", width: "100%", height: `${dims().boxHeight}px`,
+                  height: `${dims().boxHeight}px`,
                   "--zgui-fill": `color-mix(in srgb, ${strokeColor()} 18%, transparent)`,
-                  "--zgui-stroke": "transparent",
                 }}
               />
             </Show>
@@ -290,13 +244,10 @@ export function AreaLineChart(props: {
               ariaHidden
               viewBox={dims().viewBox}
               d={paths().strokePath}
+              class={styles.chartStrokeVector}
               style={{
-                position: "absolute", inset: "0px", width: "100%", height: `${dims().boxHeight}px`,
-                "--zgui-fill": "transparent",
+                height: `${dims().boxHeight}px`,
                 "--zgui-stroke": strokeColor(),
-                "--zgui-stroke-width": "2px",
-                "--zgui-stroke-linecap": "round",
-                "--zgui-stroke-linejoin": "round",
               }}
             />
           </box>
@@ -434,58 +385,48 @@ export function DualLineChart(props: {
   };
 
   return (
-    <box testId={props.testId ?? null} style={{
-      position: "relative",
-      width: "100%",
-      height: `${dims().boxHeight}px`,
-      borderRadius: "10px",
-      backgroundColor: surfaceLowest,
-      overflow: "hidden",
-    }}>
+    <box testId={props.testId ?? null} class={styles.chartRoot} style={{ height: `${dims().boxHeight}px` }}>
       {/* Exact 100% ceiling & 50% mid-scale reference hairlines */}
-      <box ariaHidden style={{
-        position: "absolute", left: `${dims().paddingX}px`, right: `${dims().paddingX}px`, top: `${dims().paddingTop}px`, height: "1px",
-        backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 28%, transparent)",
-      }} />
-      <box ariaHidden style={{
-        position: "absolute", left: `${dims().paddingX}px`, right: `${dims().paddingX}px`, top: `${midLineY().toFixed(2)}px`, height: "1px",
-        backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 28%, transparent)",
-      }} />
+      <box
+        ariaHidden
+        class={styles.dualHairline}
+        style={{ left: `${dims().paddingX}px`, right: `${dims().paddingX}px`, top: `${dims().paddingTop}px` }}
+      />
+      <box
+        ariaHidden
+        class={styles.dualHairline}
+        style={{ left: `${dims().paddingX}px`, right: `${dims().paddingX}px`, top: `${midLineY().toFixed(2)}px` }}
+      />
       <Show when={hasAny()} fallback={
-        <box style={{
-          display: "flex", width: "100%", height: "100%",
-          alignItems: "center", justifyContent: "center",
-        }}>
-          <text style={{ fontFamily: "var(--font-mono)", fontSize: "10px", lineHeight: "14px", color: muted }}>
+        <box class={styles.chartEmpty}>
+          <text class={styles.chartEmptyText}>
             {props.emptyLabel ?? "No throughput history"}
           </text>
         </box>
       }>
-        <box ariaHidden style={{
-          position: "absolute",
-          left: `${dims().paddingX}px`,
-          right: `${dims().paddingX}px`,
-          top: "0px",
-          bottom: "0px",
-          overflow: "hidden",
-        }}>
-          <box ariaHidden style={{
-            position: "absolute",
-            left: `${-dims().paddingX}px`,
-            right: `${-dims().paddingX}px`,
-            top: "0px",
-            bottom: "0px",
-            ...(shiftPx() > 0.01 ? { transform: `translateX(${shiftPx().toFixed(2)}px)` } : {}),
-          }}>
+        <box
+          ariaHidden
+          class={styles.chartClip}
+          style={{ left: `${dims().paddingX}px`, right: `${dims().paddingX}px` }}
+        >
+          <box
+            ariaHidden
+            class={styles.chartShift}
+            style={{
+              left: `${-dims().paddingX}px`,
+              right: `${-dims().paddingX}px`,
+              ...(shiftPx() > 0.01 ? { transform: `translateX(${shiftPx().toFixed(2)}px)` } : {}),
+            }}
+          >
             <Show when={primaryPaths().areaPath.length > 0}>
               <vector
                 ariaHidden
                 viewBox={dims().viewBox}
                 d={primaryPaths().areaPath}
+                class={styles.chartAreaVector}
                 style={{
-                  position: "absolute", inset: "0px", width: "100%", height: `${dims().boxHeight}px`,
+                  height: `${dims().boxHeight}px`,
                   "--zgui-fill": `color-mix(in srgb, ${pColor()} 15%, transparent)`,
-                  "--zgui-stroke": "transparent",
                 }}
               />
             </Show>
@@ -494,13 +435,10 @@ export function DualLineChart(props: {
                 ariaHidden
                 viewBox={dims().viewBox}
                 d={secondaryPaths().strokePath}
+                class={styles.dualSecondaryVector}
                 style={{
-                  position: "absolute", inset: "0px", width: "100%", height: `${dims().boxHeight}px`,
-                  "--zgui-fill": "transparent",
+                  height: `${dims().boxHeight}px`,
                   "--zgui-stroke": sColor(),
-                  "--zgui-stroke-width": "1.6px",
-                  "--zgui-stroke-linecap": "round",
-                  "--zgui-stroke-linejoin": "round",
                 }}
               />
             </Show>
@@ -509,13 +447,10 @@ export function DualLineChart(props: {
                 ariaHidden
                 viewBox={dims().viewBox}
                 d={primaryPaths().strokePath}
+                class={styles.dualPrimaryVector}
                 style={{
-                  position: "absolute", inset: "0px", width: "100%", height: `${dims().boxHeight}px`,
-                  "--zgui-fill": "transparent",
+                  height: `${dims().boxHeight}px`,
                   "--zgui-stroke": pColor(),
-                  "--zgui-stroke-width": "1.8px",
-                  "--zgui-stroke-linecap": "round",
-                  "--zgui-stroke-linejoin": "round",
                 }}
               />
             </Show>
@@ -523,28 +458,14 @@ export function DualLineChart(props: {
         </box>
 
         {/* Opaque Y-axis ceiling label */}
-        <box style={{
-          position: "absolute",
-          left: `${dims().paddingX}px`,
-          top: `${Math.max(2, dims().paddingTop - 6)}px`,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "0 4px",
-          borderRadius: "4px",
-          backgroundColor: surfaceLowest,
-          pointerEvents: "none",
-        }}>
+        <box
+          class={styles.scaleBadge}
+          style={{ left: `${dims().paddingX}px`, top: `${Math.max(2, dims().paddingTop - 6)}px` }}
+        >
           <text
             testId={props.testId ? `${props.testId}-scale-max` : null}
             data-tabular="true"
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: "9px",
-              lineHeight: "12px",
-              color: muted,
-              fontVariantNumeric: "tabular-nums",
-            }}
+            class={styles.scaleBadgeText}
           >
             {formatThroughputAxisLabel(scaleCeiling())}
           </text>
@@ -552,28 +473,14 @@ export function DualLineChart(props: {
 
         {/* Opaque 50% mid-scale label on wide charts */}
         <Show when={props.wide}>
-          <box style={{
-            position: "absolute",
-            left: `${dims().paddingX}px`,
-            top: `${Math.round(midLineY() - 6)}px`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "0 4px",
-            borderRadius: "4px",
-            backgroundColor: surfaceLowest,
-            pointerEvents: "none",
-          }}>
+          <box
+            class={styles.scaleBadge}
+            style={{ left: `${dims().paddingX}px`, top: `${Math.round(midLineY() - 6)}px` }}
+          >
             <text
               testId={props.testId ? `${props.testId}-scale-mid` : null}
               data-tabular="true"
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: "9px",
-                lineHeight: "12px",
-                color: muted,
-                fontVariantNumeric: "tabular-nums",
-              }}
+              class={styles.scaleBadgeText}
             >
               {formatThroughputAxisLabel(scaleCeiling() / 2)}
             </text>
@@ -597,12 +504,11 @@ export function PerCoreBarChart(props: {
   });
 
   return (
-    <row style={{
-      width: "100%",
-      height: `${height()}px`,
-      alignItems: "flex-end",
-      gap: visibleCores().length > 16 ? "2px" : "4px",
-    }}>
+    <row
+      class={styles.perCoreRow}
+      data-dense={visibleCores().length > 16 ? "true" : "false"}
+      style={{ height: `${height()}px` }}
+    >
       <For each={visibleCores()} keyed={item => item.index}>
         {item => {
           const pct = () => {
@@ -610,26 +516,15 @@ export function PerCoreBarChart(props: {
             return v === null ? 0 : Math.max(6, Math.min(100, Math.round(v)));
           };
           const busy = () => (item().value ?? 0) >= 35;
+          const barState = () => (item().value === null ? "empty" : busy() ? "busy" : "idle");
           return (
-            <box ariaHidden style={{
-              display: "flex",
-              flexGrow: 1,
-              flexBasis: "0px",
-              minWidth: "2px",
-              height: "100%",
-              alignItems: "flex-end",
-            }}>
+            <box ariaHidden class={styles.perCoreBarTrack}>
               <box
                 data-percent-fill="true"
                 ariaHidden
-                style={{
-                  width: "100%",
-                  height: item().value === null ? "4px" : `${pct()}%`,
-                  borderRadius: "3px",
-                  backgroundColor: item().value === null
-                    ? trackColor
-                    : busy() ? primary : primaryContainer,
-                }}
+                class={styles.perCoreBarFill}
+                data-state={barState()}
+                style={{ height: item().value === null ? "4px" : `${pct()}%` }}
               />
             </box>
           );

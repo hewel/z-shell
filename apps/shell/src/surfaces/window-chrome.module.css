@@ -1,0 +1,14 @@
+.fadeThroughPane {
+  width: 100%;
+}
+
+.slidingNavPill {
+  position: absolute;
+  top: 0px;
+  left: 0px;
+  right: 0px;
+  border-radius: 10px;
+  background-color: var(--color-primary-container);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
+  pointer-events: none;
+}

@@ -2,6 +2,7 @@ import { Button, Show, createMemo, type Accessor, type NativeChild, type NativeN
 import type { ZShellClient } from "@z-shell/sdk";
 import { SPRING_EPSILON, createM3Spring, useGlobalMotionScheme, useTopic } from "@z-shell/sdk/zgui";
 import type { AiUsageSnapshot } from "./service.ts";
+import styles from "./widget.module.css";
 
 function compactReset(reset: string): string {
   const timestamp = Date.parse(reset);
@@ -52,42 +53,31 @@ export default function Widget(props: {
     scheme,
     epsilon: SPRING_EPSILON.px,
   });
-  const ringSize = () => props.vertical ? "24px" : "20px";
 
   return (
-    <Button testId="plugin-ai-usage-widget" ariaLabel={`AI Usage: ${summary().horizontal}`}
+    <Button
+      testId="plugin-ai-usage-widget"
+      ariaLabel={`AI Usage: ${summary().horizontal}`}
+      data-vertical={props.vertical ? "true" : null}
+      data-stale={snapshot()?.stale || snapshot()?.offlineBlocked ? "true" : null}
+      class={styles.widgetButton}
       onClick={event => {
         event.stopPropagation();
         if (props.onOpenPanel) props.onOpenPanel(undefined, event.currentTarget);
         else void props.client()?.invokeCommand("plugin.z-shell.ai-usage.refresh").catch(() => undefined);
       }}
-      style={{
-        display: "flex", alignItems: "center", justifyContent: "center", flexGrow: 1, flexShrink: 0, gap: "6px",
-        width: props.vertical ? "100%" : "auto",
-        minWidth: "24px",
-        height: props.vertical ? "auto" : "100%",
-        minHeight: "24px",
-        borderRadius: "inherit",
-        padding: props.vertical ? "0px" : "0 8px",
-        backgroundColor: "transparent", color: "inherit",
-        opacity: snapshot()?.stale || snapshot()?.offlineBlocked ? 0.55 : 1,
-      }}>
-      <row data-press-visual="compact" style={{ display: "flex", alignItems: "center", gap: "6px", pointerEvents: "none" }}>
-        <box ariaHidden style={{ position: "relative", width: ringSize(), height: ringSize(), flexShrink: 0 }}>
-          <vector svg={TRACK_RING_SVG} style={{
-            position: "absolute", inset: "0px", width: ringSize(), height: ringSize(),
-            color: "var(--color-surface-container-highest)",
-          }} />
-          <vector svg={buildQuotaArcSvg(summary().remaining == null ? null : animatedPercent())} style={{
-            position: "absolute", inset: "0px", width: ringSize(), height: ringSize(),
-            color: "var(--color-primary)",
-          }} />
+    >
+      <row data-press-visual="compact" class={styles.widgetVisual}>
+        <box ariaHidden class={styles.ringBox} data-vertical={props.vertical ? "true" : null}>
+          <vector svg={TRACK_RING_SVG} class={styles.ringTrack} data-vertical={props.vertical ? "true" : null} />
+          <vector
+            svg={buildQuotaArcSvg(summary().remaining == null ? null : animatedPercent())}
+            class={styles.ringArc}
+            data-vertical={props.vertical ? "true" : null}
+          />
         </box>
         <Show when={!props.vertical}>
-          <text data-tabular="true" style={{
-            fontFamily: "var(--font-mono)", fontSize: "11px", fontWeight: 500, whiteSpace: "nowrap",
-            fontVariantNumeric: "tabular-nums",
-          }}>
+          <text data-tabular="true" class={styles.widgetText}>
             {summary().horizontal}
           </text>
         </Show>

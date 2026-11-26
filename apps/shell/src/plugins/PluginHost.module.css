@@ -1,0 +1,28 @@
+.pluginPanelFrame {
+  max-height: 760px;
+}
+
+.pluginPanelScroll {
+  width: 100%;
+  max-height: 760px;
+  overflow: hidden auto;
+}
+
+.widgetSlot {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: center;
+  flex-grow: 1;
+  flex-shrink: 0;
+  width: auto;
+  height: 100%;
+  padding: 0px;
+  border-radius: inherit;
+
+  &[data-vertical="true"] {
+    flex-direction: column;
+    width: 100%;
+    height: auto;
+  }
+}

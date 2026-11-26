@@ -1,25 +1,12 @@
-import { Button, For, LayerSurface, Show, createMemo, type Accessor, type Monitor, type NativeChild, type NativeStyle } from "@hewel/zgui";
+import { Button, For, LayerSurface, Show, createMemo, cx, type Accessor, type Monitor, type NativeChild } from "@hewel/zgui";
 import { ShellIcon } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import { clampOverlayPosition, resolveMonitorLogicalSize, type DesktopImePanelSnapshot, type ImeLookupTable } from "../topics.ts";
+import styles from "./KimpanelPopup.module.css";
 
-const primary = "var(--color-primary)";
-const onSurface = "var(--color-on-surface)";
-const onSurfaceVariant = "var(--color-on-surface-variant)";
-const card = {
-  padding: "10px 12px", gap: "8px", borderRadius: "16px",
-  backgroundColor: "var(--surface-popover)",
-  border: "1px solid var(--border-popover)",
-  color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px", overflow: "hidden",
-} satisfies NativeStyle;
-const clippedText = { minWidth: "0px", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" } as const;
 const candidateHeight = 30;
 const candidateGap = 4;
-const pagerButton = {
-  display: "flex", width: "26px", height: "24px", alignItems: "center", justifyContent: "center",
-  borderRadius: "8px", backgroundColor: "var(--color-surface-container-high)", flexShrink: 0,
-} satisfies NativeStyle;
 
 function CandidateButtons(props: {
   table: ImeLookupTable;
@@ -31,23 +18,23 @@ function CandidateButtons(props: {
       {(text, index) => {
         const active = () => index === props.table.cursor;
         return (
-          <Button testId={`kimpanel-cand-${index}`} data-active={active() ? "true" : "false"}
-            onClick={() => void invokePublic("ime.select-candidate", { index })} style={{
-              display: "flex", alignItems: "center", justifyContent: "flex-start", flexShrink: 0,
-              flexGrow: props.vertical ? 0 : 1, flexBasis: props.vertical ? "auto" : "0px", minWidth: props.vertical ? "0px" : "72px",
-              height: `${candidateHeight}px`, padding: "0 10px", gap: "8px", borderRadius: "10px",
-              backgroundColor: active() ? "var(--color-primary-container)" : "transparent",
-              border: active() ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
-              color: active() ? "var(--color-on-primary-container)" : onSurface,
-            }}>
-            <text data-tabular="true" style={{
-              fontFamily: "var(--font-mono)", fontSize: "11px", fontWeight: active() ? 700 : 500, flexShrink: 0,
-              fontVariantNumeric: "tabular-nums",
-              color: active() ? "var(--color-on-primary-container)" : onSurfaceVariant,
-            }}>
+          <Button
+            testId={`kimpanel-cand-${index}`}
+            data-active={active() ? "true" : "false"}
+            data-layout={props.vertical ? "vertical" : "horizontal"}
+            onClick={() => void invokePublic("ime.select-candidate", { index })}
+            class={styles.candidateButton}
+          >
+            <text
+              data-tabular="true"
+              data-active={active() ? "true" : "false"}
+              class={styles.candidateIndex}
+            >
               {props.table.labels[index] ?? String(index + 1)}
             </text>
-            <text style={{ ...clippedText, fontWeight: active() ? 600 : 400 }}>{text()}</text>
+            <text data-active={active() ? "true" : "false"} class={styles.candidateText}>
+              {text()}
+            </text>
           </Button>
         );
       }}
@@ -87,73 +74,85 @@ function CandidateCard(props: {
   };
 
   return (
-    <column testId="kimpanel-root" data-layout={props.vertical() ? "vertical" : "horizontal"}
-      style={{ ...card, width: `${props.width}px`, height: `${props.height}px` }}
+    <column
+      testId="kimpanel-root"
+      data-layout={props.vertical() ? "vertical" : "horizontal"}
+      class={styles.card}
+      style={{ width: `${props.width}px`, height: `${props.height}px` }}
       onWheel={event => {
         if (event.delta.y !== 0) page(event.delta.y > 0);
-      }}>
+      }}
+    >
       <Show when={panel().preedit.length > 0 || panel().aux.length > 0}>
-        <column style={{
-          gap: "4px",
-          flexShrink: 0,
-          ...(props.vertical() && table().texts.length > 0
-            ? {
-                paddingBottom: "4px",
-                borderBottom: "1px solid color-mix(in srgb, var(--color-outline-variant) 35%, transparent)",
-              }
-            : {}),
-        }}>
+        <column class={cx(styles.header, props.vertical() && table().texts.length > 0 && styles.headerVerticalWithCandidates)}>
           <Show when={panel().preedit.length > 0}>
-            <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", minHeight: inlineHorizontalPager() ? "24px" : "20px" }}>
-              <row testId="kimpanel-preedit" style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", height: "20px", alignItems: "center", overflow: "hidden" }}>
-                <text style={{ ...clippedText, fontWeight: 500 }}>{preedit().before}</text>
-                <box ariaHidden style={{ width: "2px", height: "14px", flexShrink: 0, borderRadius: "1px", backgroundColor: primary }} />
-                <text style={{ ...clippedText, fontWeight: 500 }}>{preedit().after}</text>
+            <row class={styles.preeditRow} data-inline-pager={inlineHorizontalPager() ? "true" : "false"}>
+              <row testId="kimpanel-preedit" class={styles.preedit}>
+                <text class={styles.preeditText}>{preedit().before}</text>
+                <box ariaHidden class={styles.caret} />
+                <text class={styles.preeditText}>{preedit().after}</text>
               </row>
               <Show when={inlineHorizontalPager()}>
-                <row style={{ alignItems: "center", gap: "4px", flexShrink: 0 }}>
-                  <Button testId="kimpanel-prev" ariaLabel="Previous candidate page" disabled={!table().has_prev}
-                    onClick={() => page(false)} style={{ ...pagerButton, opacity: table().has_prev ? 1 : 0.4 }}>
+                <row class={styles.pagerInlineRow}>
+                  <Button
+                    testId="kimpanel-prev"
+                    ariaLabel="Previous candidate page"
+                    disabled={!table().has_prev}
+                    onClick={() => page(false)}
+                    class={styles.pagerButton}
+                  >
                     <ShellIcon name="chevronLeft" size={14} />
                   </Button>
-                  <Button testId="kimpanel-next" ariaLabel="Next candidate page" disabled={!table().has_next}
-                    onClick={() => page(true)} style={{ ...pagerButton, opacity: table().has_next ? 1 : 0.4 }}>
+                  <Button
+                    testId="kimpanel-next"
+                    ariaLabel="Next candidate page"
+                    disabled={!table().has_next}
+                    onClick={() => page(true)}
+                    class={styles.pagerButton}
+                  >
                     <ShellIcon name="chevronRight" size={14} />
                   </Button>
                 </row>
               </Show>
               <Show when={props.vertical() && table().texts.length > 0}>
-                <text data-tabular="true" style={{
-                  fontFamily: "var(--font-mono)", fontSize: "11px", color: onSurfaceVariant,
-                  fontVariantNumeric: "tabular-nums", flexShrink: 0,
-                }}>
+                <text data-tabular="true" class={styles.cursorLabel}>
                   {cursorLabel()}
                 </text>
               </Show>
             </row>
           </Show>
           <Show when={panel().aux.length > 0}>
-            <text testId="kimpanel-aux" style={{ ...clippedText, height: "18px", fontSize: "12px", color: onSurfaceVariant }}>{panel().aux}</text>
+            <text testId="kimpanel-aux" class={styles.auxText}>{panel().aux}</text>
           </Show>
         </column>
       </Show>
       <Show when={table().texts.length > 0}>
-        <scroll style={{ flexGrow: 1, flexBasis: "0px", minHeight: "0px", overflow: "auto" }}>
+        <scroll class={styles.candidatesScroll}>
           <Show when={props.vertical()} fallback={
-            <row style={{ gap: `${candidateGap}px` }}><CandidateButtons table={table()} /></row>
+            <row class={styles.candidatesList}><CandidateButtons table={table()} /></row>
           }>
-            <column style={{ gap: `${candidateGap}px` }}><CandidateButtons table={table()} vertical /></column>
+            <column class={styles.candidatesList}><CandidateButtons table={table()} vertical /></column>
           </Show>
         </scroll>
       </Show>
       <Show when={hasPager() && !inlineHorizontalPager()}>
-        <row style={{ justifyContent: "flex-end", gap: "4px", flexShrink: 0 }}>
-          <Button testId="kimpanel-prev" ariaLabel="Previous candidate page" disabled={!table().has_prev}
-            onClick={() => page(false)} style={{ ...pagerButton, opacity: table().has_prev ? 1 : 0.4 }}>
+        <row class={styles.pagerBottomRow}>
+          <Button
+            testId="kimpanel-prev"
+            ariaLabel="Previous candidate page"
+            disabled={!table().has_prev}
+            onClick={() => page(false)}
+            class={styles.pagerButton}
+          >
             <ShellIcon name="chevronLeft" size={14} />
           </Button>
-          <Button testId="kimpanel-next" ariaLabel="Next candidate page" disabled={!table().has_next}
-            onClick={() => page(true)} style={{ ...pagerButton, opacity: table().has_next ? 1 : 0.4 }}>
+          <Button
+            testId="kimpanel-next"
+            ariaLabel="Next candidate page"
+            disabled={!table().has_next}
+            onClick={() => page(true)}
+            class={styles.pagerButton}
+          >
             <ShellIcon name="chevronRight" size={14} />
           </Button>
         </row>

@@ -1,20 +1,14 @@
-import { Button, For, Show, createMemo, type NativeChild } from "@hewel/zgui";
+import { Button, For, Show, createMemo, cx, type NativeChild } from "@hewel/zgui";
 import { M3IconButton, M3LinearProgress } from "@z-shell/sdk/primitives";
 import { ShellIcon, type ShellIconName } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
 import { PANEL_MAX_HEIGHTS, formatBytesGiB, formatDurationSeconds, maxThermalCelsius, type BatteryState } from "../topics.ts";
+import styles from "./BatteryPanel.module.css";
 
 const primary = "var(--color-primary)";
-const primaryContainer = "var(--color-primary-container)";
 const onPrimaryContainer = "var(--color-on-primary-container)";
 const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
-const containerHigh = "var(--color-surface-container-high)";
-const containerHighest = "var(--color-surface-container-highest)";
-const card = { borderRadius: "16px", backgroundColor: containerHigh, padding: "12px", gap: "10px" } as const;
-const metric = { flexBasis: "0px", flexGrow: 1, minWidth: "0px", borderRadius: "10px", padding: "8px", gap: "2px" } as const;
-const hiddenSection = { display: "none" } as const;
-const clipped = { minWidth: "0px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } as const;
 const defaultProfiles = ["performance", "balanced", "power-saver"] as const;
 
 export const POWER_PROFILE_META: Readonly<Record<string, { readonly label: string; readonly detail: string; readonly shortDetail: string; readonly icon: ShellIconName }>> = {
@@ -39,16 +33,16 @@ function percent(value: number | null | undefined): string {
 
 function TelemetryCard(props: { icon: ShellIconName; label: string; value: string; detail?: string | undefined }) {
   return (
-    <column style={{ ...metric, backgroundColor: containerHigh, borderRadius: "14px", gap: "4px", padding: "10px" }}>
-      <row style={{ alignItems: "center", gap: "4px" }}>
+    <column class={styles.telemetryCard}>
+      <row class={styles.telemetryHeader}>
         <ShellIcon name={props.icon} size={14} color={primary} />
-        <text style={{ color: muted, fontSize: "11px" }}>{props.label}</text>
+        <text class={styles.telemetryLabel}>{props.label}</text>
       </row>
-      <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "15px", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+      <text data-tabular="true" class={styles.telemetryValue}>
         {props.value}
       </text>
-      <Show when={props.detail} fallback={<box style={hiddenSection} />}>
-        <text style={{ color: muted, fontSize: "10px" }}>{props.detail}</text>
+      <Show when={props.detail} fallback={<box class={styles.hiddenSection} />}>
+        <text class={styles.telemetryDetail}>{props.detail}</text>
       </Show>
     </column>
   );
@@ -65,7 +59,7 @@ export function SystemTelemetryCards() {
     return max == null ? "—" : `${max}°C`;
   });
   return (
-    <row ariaLabel="System telemetry" style={{ gap: "8px" }}>
+    <row ariaLabel="System telemetry" class={styles.telemetryRow}>
       <TelemetryCard icon="cpu" label="CPU" value={percent(telemetry.data()?.cpu_usage_percent)} />
       <TelemetryCard icon="memory" label="Memory" value={memory()?.used ?? "—"} detail={memory()?.detail} />
       <TelemetryCard icon="thermometer" label="Heat" value={heat()} />
@@ -97,16 +91,16 @@ export function BatteryPowerContent(props: { onBack?: () => void }): NativeChild
   });
 
   return (
-    <column style={{ width: "100%", gap: "10px", flexDirection: "column" }}>
-      <row style={{ alignItems: "center", gap: "8px" }}>
-        <Show when={props.onBack} fallback={<box style={hiddenSection} />}>
+    <column class={styles.content}>
+      <row class={styles.headerRow}>
+        <Show when={props.onBack} fallback={<box class={styles.hiddenSection} />}>
           {onBack => (
             <M3IconButton testId="qs-back" ariaLabel="Back" variant="filled-tonal" onClick={onBack()}>
               <ShellIcon name="arrowLeft" size={16} color={onSurface} />
             </M3IconButton>
           )}
         </Show>
-        <text role="heading" style={{ flexGrow: 1, flexBasis: "0px", ...clipped, fontSize: "20px", fontWeight: 600 }}>
+        <text role="heading" class={cx(styles.headerTitle, styles.clipped)}>
           Battery & power
         </text>
         <M3IconButton testId="battery-open-settings" ariaLabel="Open power settings" variant="filled-tonal" onClick={() => openSettingsWindow("power")}>
@@ -114,27 +108,21 @@ export function BatteryPowerContent(props: { onBack?: () => void }): NativeChild
         </M3IconButton>
       </row>
 
-      <column style={{ ...card, padding: "14px", gap: "10px" }}>
-        <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-          <row style={{ alignItems: "baseline", gap: "8px" }}>
-            <text testId="battery-percent" data-tabular="true" style={{
-              fontFamily: "var(--font-mono)", fontSize: "34px", fontWeight: 600, lineHeight: "38px",
-              color: primary, fontVariantNumeric: "tabular-nums",
-            }}>
+      <column class={styles.heroCard}>
+        <row class={styles.spaceBetweenRow}>
+          <row class={styles.heroPercentRow}>
+            <text testId="battery-percent" data-tabular="true" class={styles.heroPercent}>
               {percent(battery()?.percentage)}
             </text>
-            <text style={{ fontSize: "13px", fontWeight: 500, color: charging() ? primary : muted }}>
+            <text class={styles.heroState} data-charging={charging() ? "true" : "false"}>
               {battery() ? batteryLabels[battery()!.state] : "No battery"}
             </text>
           </row>
-          <Show when={watts()} fallback={<box style={hiddenSection} />}>
+          <Show when={watts()} fallback={<box class={styles.hiddenSection} />}>
             {w => (
-              <row style={{
-                alignItems: "center", gap: "4px", padding: "4px 8px", borderRadius: "8px",
-                backgroundColor: containerHighest, color: onSurface, flexShrink: 0,
-              }}>
+              <row class={styles.wattsBadge}>
                 <ShellIcon name={charging() ? "batteryCharging" : "battery"} size={14} color={primary} />
-                <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: "14px", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+                <text data-tabular="true" class={styles.wattsText}>
                   {w()}
                 </text>
               </row>
@@ -142,50 +130,45 @@ export function BatteryPowerContent(props: { onBack?: () => void }): NativeChild
           </Show>
         </row>
         <M3LinearProgress value={pctValue()} ariaLabel="Battery level" />
-        <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-          <text style={{ ...clipped, fontSize: "12px", color: muted }}>
+        <row class={styles.spaceBetweenRow}>
+          <text class={cx(styles.remainingText, styles.clipped)}>
             {remaining() ? (charging() ? `${remaining()} until full` : `${remaining()} remaining`) : (power.data()?.on_ac ? "AC power online" : "On battery")}
           </text>
-          <Show when={power.data()?.on_ac !== null} fallback={<box style={hiddenSection} />}>
-            <text style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: muted, flexShrink: 0 }}>
+          <Show when={power.data()?.on_ac !== null} fallback={<box class={styles.hiddenSection} />}>
+            <text class={styles.acLabel}>
               {power.data()?.on_ac ? "AC" : "Battery"}
             </text>
           </Show>
         </row>
       </column>
 
-      <column style={card}>
-        <text role="heading" style={{ fontSize: "13px", fontWeight: 600, color: muted }}>Power profile</text>
-        <column style={{ gap: "6px" }}>
+      <column class={styles.card}>
+        <text role="heading" class={styles.sectionTitle}>Power profile</text>
+        <column class={styles.profileList}>
           <For each={profiles()?.profiles.length ? profiles()!.profiles : defaultProfiles} keyed={name => name}>
             {name => {
               const active = () => name() === profiles()?.active_profile;
               const info = () => profileMeta[name()] ?? { label: name(), detail: "System power profile", icon: "battery" as const };
               return (
-                <Button testId={`battery-profile-${name()}`} selected={active()} disabled={!profiles()?.available}
+                <Button
+                  testId={`battery-profile-${name()}`}
+                  selected={active()}
+                  disabled={!profiles()?.available}
+                  class={styles.profileButton}
+                  data-active={active() ? "true" : "false"}
+                  data-unavailable={profiles()?.available === false ? "true" : "false"}
                   onClick={() => { void invokePublic("power.set-profile", { profile: name() }); }}
-                  style={{
-                    display: "flex", flexDirection: "row", alignItems: "center", gap: "10px",
-                    minHeight: "52px", padding: "8px 10px", borderRadius: "14px",
-                    backgroundColor: active() ? primaryContainer : containerHighest,
-                    border: active() ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)" : "1px solid transparent",
-                    color: active() ? onPrimaryContainer : onSurface,
-                    opacity: profiles()?.available === false ? 0.5 : 1,
-                  }}>
-                  <box ariaHidden style={{
-                    display: "flex", width: "32px", height: "32px", borderRadius: "10px", flexShrink: 0,
-                    alignItems: "center", justifyContent: "center",
-                    backgroundColor: active() ? "color-mix(in srgb, var(--color-primary) 18%, transparent)" : containerHigh,
-                  }}>
+                >
+                  <box ariaHidden class={styles.profileIconWell} data-active={active() ? "true" : "false"}>
                     <ShellIcon name={info().icon} size={16} color={active() ? onPrimaryContainer : muted} />
                   </box>
-                  <column style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", gap: "1px", alignItems: "flex-start" }}>
-                    <text style={{ ...clipped, fontSize: "13px", fontWeight: 600 }}>{info().label}</text>
-                    <text style={{ ...clipped, fontSize: "11px", color: active() ? onPrimaryContainer : muted, opacity: active() ? 0.8 : 1 }}>
+                  <column class={styles.profileTextCol}>
+                    <text class={cx(styles.profileName, styles.clipped)}>{info().label}</text>
+                    <text class={cx(styles.profileDetail, styles.clipped)} data-active={active() ? "true" : "false"}>
                       {info().detail}
                     </text>
                   </column>
-                  <Show when={active()} fallback={<box style={hiddenSection} />}>
+                  <Show when={active()} fallback={<box class={styles.hiddenSection} />}>
                     <ShellIcon name="check" size={16} color={active() ? onPrimaryContainer : muted} />
                   </Show>
                 </Button>
@@ -195,12 +178,9 @@ export function BatteryPowerContent(props: { onBack?: () => void }): NativeChild
         </column>
       </column>
 
-      <row style={{
-        alignItems: "center", justifyContent: "space-between", gap: "8px",
-        borderRadius: "14px", backgroundColor: containerHigh, padding: "10px 12px",
-      }}>
-        <text style={{ fontSize: "12px", lineHeight: "16px", fontWeight: 500, color: muted }}>Battery health</text>
-        <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: "14px", color: onSurface, fontVariantNumeric: "tabular-nums" }}>
+      <row class={styles.healthRow}>
+        <text class={styles.healthLabel}>Battery health</text>
+        <text data-tabular="true" class={styles.healthValue}>
           {healthSummary()}
         </text>
       </row>
@@ -210,11 +190,8 @@ export function BatteryPowerContent(props: { onBack?: () => void }): NativeChild
 
 export function BatteryPanel(): NativeChild {
   return (
-    <scroll testId="panel-battery" style={{
-      width: "100%", maxHeight: `${PANEL_MAX_HEIGHTS.battery}px`, overflow: "hidden auto",
-      backgroundColor: "transparent", color: onSurface, fontFamily: "var(--font-sans)", fontSize: "13px",
-    }}>
-      <column style={{ padding: "14px", flexDirection: "column" }}>
+    <scroll testId="panel-battery" class={styles.panelScroll} style={{ maxHeight: `${PANEL_MAX_HEIGHTS.battery}px` }}>
+      <column class={styles.panelBody}>
         <BatteryPowerContent />
       </column>
     </scroll>
