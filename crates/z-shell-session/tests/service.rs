@@ -430,3 +430,103 @@ async fn topics_publish_non_secret_state_and_hub_inhibitors_sync() {
     service.set_caffeine(Caffeine::Enabled).await;
     assert!(service.idle_snapshot().caffeine);
 }
+
+#[tokio::test]
+async fn idle_caffeine_preset_validation_null_indefinite_and_timer_expiry() {
+    let (service, _, hub) = service(Arc::new(MockAuthenticator::new([])));
+
+    // Default remembered preset is 3600s and disabled.
+    let initial = service.idle_snapshot();
+    assert!(!initial.caffeine);
+    assert_eq!(initial.caffeine_scope, InhibitorScope::Sleep);
+    assert_eq!(initial.caffeine_duration_seconds, Some(3600));
+    assert_eq!(initial.caffeine_expires_at_ms, None);
+
+    // Reject 0 and > 86400 seconds.
+    for invalid in [0_u64, 86_401_u64] {
+        let err = invoke(
+            &hub,
+            ClientRole::Public,
+            "idle.caffeine",
+            json!({ "enabled": true, "duration_seconds": invalid }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidParams);
+    }
+
+    // Set timed duration 1s and verify expiry turns caffeine off while remembering preset 1s.
+    let armed = invoke(
+        &hub,
+        ClientRole::Public,
+        "idle.caffeine",
+        json!({ "enabled": true, "duration_seconds": 1 }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(armed["caffeine"], json!(true));
+    assert_eq!(armed["caffeine_duration_seconds"], json!(1));
+    assert!(armed["caffeine_expires_at_ms"].as_u64().is_some());
+
+    // Re-arming immediately with indefinite `null` cancels the 1s timer so it stays on past 1.2s.
+    let indef = invoke(
+        &hub,
+        ClientRole::Public,
+        "idle.caffeine",
+        json!({ "enabled": true, "duration_seconds": null }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(indef["caffeine"], json!(true));
+    assert_eq!(indef["caffeine_duration_seconds"], json!(null));
+    assert_eq!(indef["caffeine_expires_at_ms"], json!(null));
+
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    assert!(
+        service.idle_snapshot().caffeine,
+        "indefinite Keep awake must stay active past cancelled 1s timer"
+    );
+
+    // Turning off preserves `null` preset; turning back on without `duration_seconds` preserves it.
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "idle.caffeine",
+        json!({ "enabled": false }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(service.idle_snapshot().caffeine_duration_seconds, None);
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "idle.caffeine",
+        json!({ "enabled": true }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(service.idle_snapshot().caffeine_duration_seconds, None);
+    assert_eq!(service.idle_snapshot().caffeine_expires_at_ms, None);
+
+    // Now test actual 1s timed auto-expiry.
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "idle.caffeine",
+        json!({ "enabled": true, "duration_seconds": 1 }),
+    )
+    .await
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if !service.idle_snapshot().caffeine {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("timed Keep awake must auto-expire");
+    assert_eq!(service.idle_snapshot().caffeine_expires_at_ms, None);
+    assert_eq!(service.idle_snapshot().caffeine_duration_seconds, Some(1));
+}

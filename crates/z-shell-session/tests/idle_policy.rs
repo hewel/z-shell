@@ -45,7 +45,7 @@ fn caffeine_and_mpris_playing_cancel_idle_work_and_restart_on_release() {
     let mut policy = IdlePolicy::default();
     let effects = policy
         .configure(IdleConfig {
-            rules: vec![rule("lock", IdleAction::Lock, 0)],
+            rules: vec![rule("suspend", IdleAction::Suspend, 0)],
         })
         .expect("config");
     let token = watch(&effects, 0);
@@ -57,6 +57,7 @@ fn caffeine_and_mpris_playing_cancel_idle_work_and_restart_on_release() {
 
     let inhibited = policy.set_caffeine(Caffeine::Enabled);
     assert!(policy.snapshot().caffeine);
+    assert_eq!(policy.snapshot().caffeine_scope, InhibitorScope::Sleep);
     assert!(
         !inhibited
             .iter()
@@ -81,6 +82,106 @@ fn caffeine_and_mpris_playing_cancel_idle_work_and_restart_on_release() {
         policy.idle(0, token).as_slice(),
         [IdleEffect::RunAction { .. }]
     ));
+}
+
+#[test]
+fn keep_awake_inhibits_only_sleep_and_preserves_screen_off_and_fading_lock() {
+    let mut policy = IdlePolicy::default();
+    let effects = policy
+        .configure(IdleConfig {
+            rules: vec![
+                rule("screen-off", IdleAction::ScreenOff, 0),
+                rule("lock", IdleAction::Lock, 10),
+                rule("suspend", IdleAction::LockAndSuspend, 10),
+            ],
+        })
+        .expect("config");
+
+    let screen_token = watch(&effects, 0);
+    let lock_token = watch(&effects, 1);
+    let suspend_token = watch(&effects, 2);
+
+    // 1. Apply ScreenOff to completion.
+    let screen_action_id = match policy.idle(0, screen_token).as_slice() {
+        [IdleEffect::RunAction { action_id, .. }] => *action_id,
+        other => panic!("expected ScreenOff RunAction, got {other:?}"),
+    };
+    assert!(
+        policy
+            .action_completed(screen_action_id, ActionCompletion::Succeeded)
+            .is_empty()
+    );
+
+    // 2. Start warning fade on Lock AND LockAndSuspend.
+    let lock_fading = policy.idle(1, lock_token);
+    let fade_token = match lock_fading.as_slice() {
+        [IdleEffect::WarningStarted { token, .. }] => *token,
+        other => panic!("expected WarningStarted for lock, got {other:?}"),
+    };
+    assert!(policy.idle(2, suspend_token).is_empty());
+
+    // 3. Enabling Keep awake must NOT wake ScreenOff (ResumeAction) and must NOT cancel Lock's fade!
+    let on_effects = policy.set_caffeine_with_schedule(Caffeine::Enabled, Some(Some(1_800)), 5_000);
+    assert!(
+        !on_effects
+            .iter()
+            .any(|e| matches!(e, IdleEffect::ResumeAction { .. })),
+        "enabling Keep awake must never wake applied ScreenOff: {on_effects:?}"
+    );
+    assert!(
+        !on_effects
+            .iter()
+            .any(|e| matches!(e, IdleEffect::WarningCancelled { .. })),
+        "shared fade must stay active while Lock rule is still fading: {on_effects:?}"
+    );
+    assert!(
+        !on_effects
+            .iter()
+            .any(|e| matches!(e, IdleEffect::CancelWatch { rule_index: 1, .. })),
+        "Lock rule watch/fade must not be reset: {on_effects:?}"
+    );
+    assert!(
+        on_effects
+            .iter()
+            .any(|e| matches!(e, IdleEffect::CancelWatch { rule_index: 2, .. })),
+        "LockAndSuspend watch should be cancelled when Keep awake enables: {on_effects:?}"
+    );
+
+    let snap = policy.snapshot();
+    assert!(snap.caffeine);
+    assert_eq!(snap.caffeine_scope, InhibitorScope::Sleep);
+    assert_eq!(snap.caffeine_duration_seconds, Some(1_800));
+    assert_eq!(snap.caffeine_expires_at_ms, Some(5_000 + 1_800 * 1_000));
+    assert_eq!(snap.active_inhibitors.len(), 1);
+    assert_eq!(snap.active_inhibitors[0].scope, InhibitorScope::Sleep);
+
+    // 4. When fade finishes, ONLY Lock runs (LockAndSuspend was moved out of Fading).
+    let after_fade = policy.fade_complete(fade_token);
+    assert!(matches!(
+        after_fade.as_slice(),
+        [IdleEffect::RunAction {
+            rule_index: 1,
+            action: IdleAction::Lock,
+            ..
+        }]
+    ));
+
+    // 5. Disabling Keep awake still must NOT emit ResumeAction for applied ScreenOff.
+    let off_effects = policy.set_caffeine_with_schedule(Caffeine::Disabled, None, 10_000);
+    assert!(
+        !off_effects
+            .iter()
+            .any(|e| matches!(e, IdleEffect::ResumeAction { .. })),
+        "disabling Keep awake must never wake applied ScreenOff: {off_effects:?}"
+    );
+    assert_eq!(policy.snapshot().caffeine_duration_seconds, Some(1_800));
+    assert_eq!(policy.snapshot().caffeine_expires_at_ms, None);
+    assert!(
+        off_effects
+            .iter()
+            .any(|e| matches!(e, IdleEffect::StartWatch { rule_index: 2, .. })),
+        "LockAndSuspend watch must restart when Keep awake disables: {off_effects:?}"
+    );
 }
 
 #[test]

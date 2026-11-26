@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use z_shell_config::{IdleRuleAction, IdleSettings};
 use z_shell_protocol::{InhibitorEntry, InhibitorScope};
@@ -9,6 +10,8 @@ use z_shell_protocol::{InhibitorEntry, InhibitorScope};
 const MAX_RULES: usize = 64;
 const MAX_TIMEOUT_SECONDS: u32 = 86_400;
 const MAX_FADE_SECONDS: u32 = 60;
+/// Default remembered duration preset for manual Keep awake (`1h`).
+pub const DEFAULT_CAFFEINE_DURATION_SECONDS: u32 = 3_600;
 
 /// Action executed after one idle timeout and optional warning fade.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -226,10 +229,10 @@ impl IdleConfigError {
     }
 }
 
-/// Temporary non-persisted Caffeine state.
+/// Temporary non-persisted Keep awake (Caffeine) state (sleep-only inhibit).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Caffeine {
-    /// Inhibit all automatic idle actions.
+    /// Inhibit automatic sleep actions while permitting screen-off and lock rules.
     Enabled,
     /// Allow configured idle actions.
     Disabled,
@@ -325,8 +328,14 @@ pub enum IdleServiceStatus {
 /// Non-secret idle topic snapshot.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct IdleSnapshot {
-    /// Whether temporary Caffeine is enabled.
+    /// Whether temporary Keep awake is enabled.
     pub caffeine: bool,
+    /// Policy scope inhibited by Keep awake (fixed to sleep-only).
+    pub caffeine_scope: InhibitorScope,
+    /// Remembered Keep awake duration preset in seconds (`None` = indefinite).
+    pub caffeine_duration_seconds: Option<u32>,
+    /// Unix epoch timestamp in milliseconds when timed Keep awake expires (`None` if disabled/indefinite).
+    pub caffeine_expires_at_ms: Option<u64>,
     /// Whether MPRIS currently inhibits idle.
     pub media_playing: bool,
     /// All active Caffeine, media, ScreenSaver, and plugin inhibitors.
@@ -438,6 +447,8 @@ pub struct IdlePolicy {
     serial: u64,
     fade: Option<u64>,
     caffeine: Caffeine,
+    caffeine_duration_seconds: Option<u32>,
+    caffeine_expires_at_ms: Option<u64>,
     media: MediaPlayback,
     lock: LockState,
     sleep: SleepState,
@@ -465,6 +476,8 @@ impl Default for IdlePolicy {
             serial: 0,
             fade: None,
             caffeine: Caffeine::Disabled,
+            caffeine_duration_seconds: Some(DEFAULT_CAFFEINE_DURATION_SECONDS),
+            caffeine_expires_at_ms: None,
             media: MediaPlayback::Idle,
             lock: LockState::Unlocked,
             sleep: SleepState::Awake,
@@ -526,13 +539,56 @@ impl IdlePolicy {
         Ok(effects)
     }
 
-    /// Changes the non-persisted Caffeine toggle.
+    /// Changes the non-persisted Keep awake toggle using the remembered duration preset.
+    ///
+    /// Performs targeted rule-only reconciliation so non-sleep rules (such as applied
+    /// `ScreenOff` or pending/fading `Lock`) are never reset, woken, or postponed.
     pub fn set_caffeine(&mut self, caffeine: Caffeine) -> Vec<IdleEffect> {
+        self.set_caffeine_with_schedule(caffeine, None, current_epoch_ms())
+    }
+
+    /// Updates Keep awake state and optional remembered duration preset (`Some(None)` = indefinite,
+    /// `None` = keep remembered preset) with deterministic `now_ms`, using targeted rule-only
+    /// reconciliation.
+    pub fn set_caffeine_with_schedule(
+        &mut self,
+        caffeine: Caffeine,
+        duration_seconds: Option<Option<u32>>,
+        now_ms: u64,
+    ) -> Vec<IdleEffect> {
+        if let Some(duration) = duration_seconds {
+            self.caffeine_duration_seconds = duration;
+        }
+        self.caffeine_expires_at_ms = match caffeine {
+            Caffeine::Enabled => self
+                .caffeine_duration_seconds
+                .map(|secs| now_ms.saturating_add(u64::from(secs) * 1_000)),
+            Caffeine::Disabled => None,
+        };
         if self.caffeine == caffeine {
             return Vec::new();
         }
+        let prev_inhibited: Vec<bool> = (0..self.states.len())
+            .map(|i| self.rule_inhibited(i))
+            .collect();
         self.caffeine = caffeine;
-        self.reset_all()
+        let mut effects = Vec::new();
+        for (index, was_inhibited) in prev_inhibited.into_iter().enumerate() {
+            if self.rule_inhibited(index) != was_inhibited {
+                self.reset_rule(index, &mut effects);
+                self.rearm(index, &mut effects);
+            }
+        }
+        if let Some(token) = self.fade
+            && !self
+                .states
+                .iter()
+                .any(|state| state.phase == RulePhase::Fading)
+        {
+            self.fade = None;
+            effects.insert(0, IdleEffect::WarningCancelled { token });
+        }
+        effects
     }
 
     /// Updates MPRIS playback inhibition.
@@ -723,8 +779,8 @@ impl IdlePolicy {
         if self.caffeine == Caffeine::Enabled {
             active_inhibitors.push(IdleInhibitor {
                 source: InhibitorSource::Caffeine,
-                scope: InhibitorScope::Idle,
-                reason: "Caffeine is enabled".into(),
+                scope: InhibitorScope::Sleep,
+                reason: "Keep awake is enabled".into(),
             });
         }
         if self.media == MediaPlayback::Playing {
@@ -738,6 +794,9 @@ impl IdlePolicy {
         active_inhibitors.extend(self.plugin_inhibitors.iter().cloned());
         IdleSnapshot {
             caffeine: self.caffeine == Caffeine::Enabled,
+            caffeine_scope: InhibitorScope::Sleep,
+            caffeine_duration_seconds: self.caffeine_duration_seconds,
+            caffeine_expires_at_ms: self.caffeine_expires_at_ms,
             media_playing: self.media == MediaPlayback::Playing,
             active_inhibitors,
             warning: self.fade.map(|token| WarningFade {
@@ -862,13 +921,13 @@ impl IdlePolicy {
     }
 
     fn rule_inhibited(&self, index: usize) -> bool {
-        if self.sleep == SleepState::Sleeping
-            || self.caffeine == Caffeine::Enabled
-            || self.media == MediaPlayback::Playing
-        {
+        if self.sleep == SleepState::Sleeping || self.media == MediaPlayback::Playing {
             return true;
         }
         let action = &self.config.rules[index].action;
+        if self.caffeine == Caffeine::Enabled && action.includes_sleep() {
+            return true;
+        }
         self.screensaver_inhibitors
             .iter()
             .chain(&self.plugin_inhibitors)
@@ -887,6 +946,18 @@ impl IdlePolicy {
             .expect("idle token space exhausted");
         self.serial
     }
+}
+
+/// Returns current wall-clock Unix epoch milliseconds.
+#[must_use]
+pub fn current_epoch_ms() -> u64 {
+    u64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+    )
+    .unwrap_or(u64::MAX)
 }
 
 fn resume_effect(pending: &PendingAction) -> IdleEffect {

@@ -6,10 +6,10 @@ use crate::coordinator::{
 };
 use crate::idle::{
     ActionCompletion, Caffeine, IdleConfig, IdleEffect, IdleInhibitor, IdlePolicy,
-    IdleServiceStatus, IdleSnapshot, LockState, MediaPlayback, SleepState,
+    IdleServiceStatus, IdleSnapshot, LockState, MediaPlayback, SleepState, current_epoch_ms,
 };
 use crate::pam::{Authenticator, Credentials};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 use std::fmt;
 use std::pin::Pin;
@@ -31,7 +31,10 @@ pub const IDLE_TOPIC: &str = "session.idle";
 
 const COMMANDS: [(&str, &str); 10] = [
     ("lock.request", "Request a host-verified session lock"),
-    ("idle.caffeine", "Set the temporary Caffeine toggle"),
+    (
+        "idle.caffeine",
+        "Set the temporary sleep-only Keep awake toggle and optional duration preset",
+    ),
     ("idle.status", "Return current idle policy and inhibitors"),
     ("idle.configure", "Atomically replace named idle rules"),
     (
@@ -57,6 +60,14 @@ const COMMANDS: [(&str, &str); 10] = [
     ("host.suspend", "Lock, await host ACK, and suspend"),
 ];
 
+const MAX_CAFFEINE_DURATION_SECONDS: u32 = 86_400;
+
+#[derive(Debug, Default)]
+struct CaffeineTimer {
+    generation: u64,
+    task: Option<tokio::task::JoinHandle<()>>,
+}
+
 #[derive(Debug)]
 struct Subscription {
     client_id: u64,
@@ -72,6 +83,7 @@ pub struct SessionService {
     sleep_guard: Option<Box<dyn Fn(SleepState) + Send + Sync>>,
     host_client_id: Mutex<Option<u64>>,
     idle: Mutex<IdlePolicy>,
+    caffeine_timer: Mutex<CaffeineTimer>,
     authenticator: Arc<dyn Authenticator>,
     sleep_inhibitor: Arc<dyn SleepInhibitor>,
     hub: Mutex<Option<BusHub>>,
@@ -123,6 +135,7 @@ impl SessionService {
             sleep_guard: None,
             host_client_id: Mutex::new(None),
             idle: Mutex::new(idle),
+            caffeine_timer: Mutex::new(CaffeineTimer::default()),
             authenticator,
             sleep_inhibitor,
             hub: Mutex::new(None),
@@ -287,15 +300,88 @@ impl SessionService {
         self.apply_idle_effects(effects).await;
     }
 
-    /// Applies temporary Caffeine state without persisting it.
+    /// Applies temporary Keep awake state using remembered preset without persisting it.
     pub async fn set_caffeine(self: &Arc<Self>, caffeine: Caffeine) {
-        let effects = self
-            .idle
-            .lock()
-            .expect("idle policy lock poisoned")
-            .set_caffeine(caffeine);
+        self.set_caffeine_schedule(Some(caffeine == Caffeine::Enabled), None)
+            .await;
+    }
+
+    /// Updates Keep awake state and/or remembered duration preset (`Some(None)` = indefinite,
+    /// `None` = preserve remembered preset), scheduling or cancelling the expiry timer.
+    pub async fn set_caffeine_schedule(
+        self: &Arc<Self>,
+        enabled: Option<bool>,
+        duration_seconds: Option<Option<u32>>,
+    ) {
+        let generation = self.cancel_caffeine_timer();
+        let (effects, is_enabled, active_duration) = {
+            let mut policy = self.idle.lock().expect("idle policy lock poisoned");
+            let current_enabled = policy.snapshot().caffeine;
+            let target_enabled = enabled.unwrap_or(current_enabled);
+            let caffeine = if target_enabled {
+                Caffeine::Enabled
+            } else {
+                Caffeine::Disabled
+            };
+            let effects =
+                policy.set_caffeine_with_schedule(caffeine, duration_seconds, current_epoch_ms());
+            let active_duration = policy.snapshot().caffeine_duration_seconds;
+            (effects, target_enabled, active_duration)
+        };
         self.publish_idle();
         self.apply_idle_effects(effects).await;
+
+        if is_enabled
+            && let Some(secs) = active_duration
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
+        {
+            let weak = Arc::downgrade(self);
+            let handle = runtime.spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(u64::from(secs))).await;
+                let Some(service) = weak.upgrade() else {
+                    return;
+                };
+                let effects = {
+                    let mut timer = service
+                        .caffeine_timer
+                        .lock()
+                        .expect("caffeine timer lock poisoned");
+                    if timer.generation != generation {
+                        return;
+                    }
+                    timer.task = None;
+                    drop(timer);
+                    service
+                        .idle
+                        .lock()
+                        .expect("idle policy lock poisoned")
+                        .set_caffeine_with_schedule(Caffeine::Disabled, None, current_epoch_ms())
+                };
+                service.publish_idle();
+                service.apply_idle_effects(effects).await;
+            });
+            let mut timer = self
+                .caffeine_timer
+                .lock()
+                .expect("caffeine timer lock poisoned");
+            if timer.generation == generation {
+                timer.task = Some(handle);
+            } else {
+                handle.abort();
+            }
+        }
+    }
+
+    fn cancel_caffeine_timer(&self) -> u64 {
+        let mut timer = self
+            .caffeine_timer
+            .lock()
+            .expect("caffeine timer lock poisoned");
+        timer.generation = timer.generation.wrapping_add(1);
+        if let Some(task) = timer.task.take() {
+            task.abort();
+        }
+        timer.generation
     }
 
     /// Synchronizes live ScreenSaver cookie state into idle policy.
@@ -358,6 +444,7 @@ impl SessionService {
 
     /// Stops hub synchronization and marks idle integration stopped.
     pub fn shutdown(&self) {
+        self.cancel_caffeine_timer();
         self.stop_inhibitor_sync();
         self.idle
             .lock()
@@ -668,6 +755,7 @@ impl SessionService {
 
 impl Drop for SessionService {
     fn drop(&mut self) {
+        self.cancel_caffeine_timer();
         self.stop_inhibitor_sync();
     }
 }
@@ -742,12 +830,15 @@ async fn dispatch(
         }
         "idle.caffeine" => {
             let params: CaffeineParams = parse_params(call.params.payload)?;
+            if matches!(params.duration_seconds, Some(Some(secs)) if secs == 0 || secs > MAX_CAFFEINE_DURATION_SECONDS)
+            {
+                return Err(RpcError::new(
+                    ErrorCode::InvalidParams,
+                    "duration_seconds must be within 1..=86400 seconds",
+                ));
+            }
             service
-                .set_caffeine(if params.enabled {
-                    Caffeine::Enabled
-                } else {
-                    Caffeine::Disabled
-                })
+                .set_caffeine_schedule(params.enabled, params.duration_seconds)
                 .await;
             Ok(serde_json::to_value(service.idle_snapshot()).expect("idle snapshot serializes"))
         }
@@ -935,10 +1026,19 @@ fn inhibitor_topic_data(message: ServerMessage) -> Option<Value> {
 #[serde(default, deny_unknown_fields)]
 struct EmptyParams {}
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+fn deserialize_double_option<'de, D>(deserializer: D) -> Result<Option<Option<u32>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<u32>::deserialize(deserializer).map(Some)
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 struct CaffeineParams {
-    enabled: bool,
+    enabled: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    duration_seconds: Option<Option<u32>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -975,7 +1075,7 @@ struct SecretPassword(Zeroizing<String>);
 impl<'de> Deserialize<'de> for SecretPassword {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de>,
+        D: Deserializer<'de>,
     {
         String::deserialize(deserializer).map(|password| Self(Zeroizing::new(password)))
     }
