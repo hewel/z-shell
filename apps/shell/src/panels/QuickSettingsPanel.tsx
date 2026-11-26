@@ -1,5 +1,5 @@
 import {
-  Button, For, Image, Show, createEffect, createSignal, getWindowRect, untrack,
+  Button, For, Image, Show, createEffect, createSignal, getWindowRect, onCleanup, untrack,
   type NativeChild, type NativeNode,
 } from "@hewel/zgui";
 import { M3Collapsible, M3SliderRow } from "@z-shell/sdk/primitives";
@@ -10,7 +10,13 @@ import {
 } from "../motion.ts";
 import { SHELL_ROSETTE_CLIP_40, SHELL_ROSETTE_PATH } from "../shapes.ts";
 import { useShellStore } from "../store.ts";
-import { formatDurationSeconds, type BatteryState, type PowerConfirmAction } from "../topics.ts";
+import {
+  formatDurationSeconds,
+  formatKeepAwakeRemaining,
+  supportsTimedKeepAwake,
+  type BatteryState,
+  type PowerConfirmAction,
+} from "../topics.ts";
 import { QuickSettingsIconButton, QuickSettingsSubpage } from "./QuickSettingsSubpages.tsx";
 
 export type QuickSettingsPage = "main" | "wifi" | "bluetooth" | "sound" | "battery";
@@ -335,7 +341,27 @@ function MainPage(props: {
   const adapter = () => bluetooth.data()?.adapters[0];
   const connectedBluetooth = () => bluetooth.data()?.devices.find(device => device.connected && device.adapter === adapter()?.path);
   const caffeine = () => idle.data()?.caffeine ?? false;
-  const ruleCount = () => idle.data()?.rules.length ?? 0;
+  const keepAwakeTimed = () => Boolean(caffeine() && idle.data()?.caffeine_expires_at_ms != null);
+  const [nowMs, setNowMs] = createSignal(Date.now());
+  createEffect(keepAwakeTimed, active => {
+    if (!active) return;
+    let timer: number | undefined;
+    const tick = () => {
+      const now = Date.now();
+      setNowMs(now);
+      timer = setTimeout(tick, 1_000 - (now % 1_000));
+    };
+    tick();
+    onCleanup(() => {
+      if (timer !== undefined) clearTimeout(timer);
+    });
+  });
+  const keepAwakeDetail = () => {
+    const snap = idle.data();
+    if (!caffeine()) return "Off";
+    if (!supportsTimedKeepAwake(snap)) return "On";
+    return formatKeepAwakeRemaining(snap?.caffeine_expires_at_ms, nowMs());
+  };
   const profiles = () => power.data()?.profiles;
   const cycleProfile = () => {
     const current = profiles();
@@ -426,11 +452,10 @@ function MainPage(props: {
             }} open={() => props.navigate("bluetooth")} />
         </row>
         <row style={{ gap: "8px" }}>
-          <QuickTile id="caffeine" label="Nosleep" detail={caffeine() ? "Awake" : `${ruleCount()} ${ruleCount() === 1 ? "rule" : "rules"}`}
-            icon="coffee" active={caffeine()} toggle
+          <QuickTile id="caffeine" label="Keep awake" detail={keepAwakeDetail()}
+            icon="coffee" active={caffeine()} checked={caffeine()} toggle
             outgoing={props.outgoing}
-            onClick={() => void invokePublic("idle.caffeine", { enabled: !caffeine() })}
-            open={() => openSettingsWindow("idle")} />
+            onClick={() => void invokePublic("idle.caffeine", { enabled: !caffeine() })} />
           <QuickTile id="profile" label="Power Profile" detail={profiles()?.active_profile ?? "balanced"}
             icon="battery" active={profiles()?.active_profile === "performance"} disabled={!profiles()?.profiles.length}
             outgoing={props.outgoing} onClick={cycleProfile} />

@@ -164,7 +164,7 @@ Uses GPU-friendly **M3 Shared Axis X** while keeping Wayland `PopupSurface heigh
 
 Uses **M3 Fade Through** + **Sliding Sidebar Indicator** [[M3-Transitions]](#references):
 - **Window Open / Close**: Centered modal enter (`scale 0.96 → 1.0`, `translateY 10px → 0` via `default.spatial`, scrim `0 → 1` via `default.effects`).
-- **Sidebar Tab Switch** (`Appearance` ↔ `Bar & layout` ↔ `Idle & sleep` ↔ `Power & battery` ↔ `AI usage` ↔ `Nosleep` ↔ `Theme bridges` ↔ `Niri overview`):
+- **Sidebar Tab Switch** (`Appearance` ↔ `Bar & layout` ↔ `Idle & sleep` ↔ `Power & battery` ↔ `Plugins` ↔ `AI usage` ↔ `Theme bridges` ↔ `Niri overview`):
   - Active `primary-container` indicator pill slides vertically between nav rows using `fast.spatial` (continuous retargeting if the user presses `↑`/`↓` quickly!).
   - Right content pane (`604px`) uses **M3 Fade Through**: outgoing pane fades `opacity(1 → 0)` in `short2` (`100ms`, `standard-accelerate`), incoming pane enters with `opacity(0 → 1)` (`default.effects`) + subtle `translateY(6px → 0)` (`fast.spatial`). Never slide horizontally between unrelated sidebar tabs—horizontal motion is reserved strictly for parent-child Shared Axis navigation.
 - **Inline Rule Selection** (`22C · Idle & Sleep` selecting a rule to load into the Rule Editor):
@@ -178,16 +178,16 @@ Uses **M3 Fade Through** + **Sliding Sidebar Indicator** [[M3-Transitions]](#ref
 | **`17 · Power Dialog`** & **`23 · Polkit Auth Prompt`** | Scrim `default.effects`; dialog `scale(0.92 → 1.0)` (`default.spatial`) + `opacity(0 → 1)` (`fast.effects`) | `scale(1.0 → 0.94)` + `opacity(1 → 0)` (`fast.effects`) | `23 · Polkit` auth failure runs damped horizontal shake (`±8px`, `expressive.fast.spatial`) and highlights border in `error`. |
 | **`20 · Workspace Overview`** | Backdrop dim `slow.effects`; workspace grid zooms `scale(1.06 → 1.0)` (`slow.spatial`) to echo compositor zoom-out | Zooms back `scale(1.0 → 1.04)` + `opacity(1 → 0)` (`default.spatial`) | Dragging a window thumbnail across workspace slots uses `fast.spatial` lift (`scale 1.04`) and drop snap. |
 
-### 5.6 Transient Overlays (`10 · Dock`, `11 · OSD`, `12 · Notification Popup`)
+### 5.6 Transient Overlays (`10 · Dock`, `11 · OSD`, `12C · Live Notification Stream`)
 
 - **`10 · Dock`**: Auto-hide slides from bottom edge (`translateY(100% + 14px) ↔ 0`, `default.spatial`); active/running indicator dot (`4px → 12px` width) morphs via `fast.spatial`; subtle icon hover lift (`translateY(0 → -3px)`, `fast.spatial`).
 - **`11 · OSD` (Volume / Brightness / IME)**:
   - Appears from `translateY(12px → 0)` + `scale(0.94 → 1.0)` (`fast.spatial`) + `opacity(0 → 1)` (`fast.effects`).
   - **Key-repeat rule**: Repeating volume/brightness keys resets the auto-dismiss timer (`1500ms`) and retargets the straight progress bar fill (`fast.spatial`) without re-playing the entrance animation.
-- **`12 · Notification Popup`**:
-  - Enters from right screen edge (`translateX(24px → 0)` + `opacity 0 → 1`, `default.spatial`).
-  - Dismisses rightward (`translateX(0 → 24px)` + `opacity 1 → 0`, `fast.spatial`).
-  - Stacked toasts reflow vertically using `default.spatial` when a toast is dismissed.
+- **`12C · Live Notification Stream`**:
+  - Caps simultaneous live groups at 3 distinct apps (`app_key`); groups same-app popups with tucked deck peeks and in-place `M3Collapsible` `+N` expansion.
+  - Enters from right screen edge (`translateX(24px → 0)` + `opacity 0 → 1`, `default.spatial`) and dismisses rightward (`fast.spatial`).
+  - Stacked toasts reflow smoothly when an individual popup or collapsed app group is dismissed.
 
 ### 5.7 Hero Expressive Moments (`21 · Lock Screen` & `14 · Media Player`)
 

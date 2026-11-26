@@ -31,6 +31,7 @@ import {
   formatDurationSeconds,
   formatFrequencyMhz,
   formatFullDate,
+  formatKeepAwakeRemaining,
   formatMonthYear,
   formatNotificationBody,
   formatPollInterval,
@@ -38,9 +39,12 @@ import {
   formatSurfaceName,
   formatTrackTimeUs,
   formatUptimeCompact,
+  groupNotificationPopups,
   hasWindowsOnMonitor,
   isImeTrayItem,
   maxThermalCelsius,
+  notificationGroupKey,
+  partitionTrayItems,
   resolveActiveMonitor,
   resolveBarLayout,
   resolveBarPopupAnchor,
@@ -56,8 +60,12 @@ import {
   selectPrimaryGpu,
   selectTelemetryHistoryWindow,
   splitNotificationActions,
+  supportsTimedKeepAwake,
+  trayRuleKey,
   type ActiveWallpaper,
   type BarPosition,
+  type NotificationItem,
+  type TrayItem,
   type BarSettings,
   type DesktopAppSummary,
   type DesktopMediaSnapshot,
@@ -1508,5 +1516,112 @@ describe("System Monitor telemetry helpers, chart paths & backwards compatibilit
       g.requestAnimationFrame = origRaf;
       g.cancelAnimationFrame = origCaf;
     }
+  });
+
+  test("trayRuleKey excludes transient D-Bus IDs and partitionTrayItems respects rules and legacy fallback", () => {
+    const mkTray = (id: string, overrides: Partial<TrayItem> = {}): TrayItem => ({
+      id,
+      app_id: null,
+      title: null,
+      category: null,
+      status: null,
+      icon_name: null,
+      item_is_menu: false,
+      tooltip: null,
+      icon: null,
+      menu: null,
+      ...overrides,
+    });
+    const nm = mkTray(":1.42/org/ayatana/NotificationItem/nm_applet", { app_id: "nm-applet", title: "Network" });
+    const iconOnly = mkTray(":1.50/StatusNotifierItem", { icon_name: "dropboxstatus-idle" });
+    const transient = mkTray(":1.99/StatusNotifierItem", { app_id: "  ", icon_name: "", title: null });
+
+    expect(trayRuleKey(nm)).toBe("nm-applet");
+    expect(trayRuleKey(iconOnly)).toBe("dropboxstatus-idle");
+    expect(trayRuleKey(transient)).toBeNull();
+
+    const hiddenItem = mkTray(":1.77/Menu", { app_id: "steam" });
+    const items = [nm, iconOnly, transient, hiddenItem];
+
+    // Legacy daemon without bar.tray keeps all items visible.
+    expect(partitionTrayItems(items, undefined)).toEqual({
+      visible: items,
+      collapsed: [],
+      hidden: [],
+    });
+
+    // With default_action=collapse and explicit show/hide rules.
+    const partitioned = partitionTrayItems(items, {
+      default_action: "collapse",
+      rules: {
+        "nm-applet": "show",
+        steam: "hide",
+      },
+    });
+    expect(partitioned.visible.map(i => i.id)).toEqual([nm.id]);
+    expect(partitioned.collapsed.map(i => i.id)).toEqual([iconOnly.id, transient.id]);
+    expect(partitioned.hidden.map(i => i.id)).toEqual([hiddenItem.id]);
+  });
+
+  test("supportsTimedKeepAwake and formatKeepAwakeRemaining handle legacy vs timed/indefinite states", () => {
+    expect(supportsTimedKeepAwake(undefined)).toBe(false);
+    expect(supportsTimedKeepAwake({
+      caffeine: false,
+      media_playing: false,
+      active_inhibitors: [],
+      warning: null,
+      rules: [],
+      service_status: { status: "running" },
+    })).toBe(false);
+    expect(supportsTimedKeepAwake({
+      caffeine: true,
+      caffeine_scope: "sleep",
+      caffeine_duration_seconds: 3600,
+      caffeine_expires_at_ms: 1_000_000,
+      media_playing: false,
+      active_inhibitors: [],
+      warning: null,
+      rules: [],
+      service_status: { status: "running" },
+    })).toBe(true);
+
+    expect(formatKeepAwakeRemaining(null, 1_000)).toBe("Always on");
+    expect(formatKeepAwakeRemaining(1_000 + 42 * 60_000, 1_000)).toBe("42m left");
+    expect(formatKeepAwakeRemaining(1_000 + 3600_000, 1_000)).toBe("1h left");
+    expect(formatKeepAwakeRemaining(1_000 + 90 * 60_000, 1_000)).toBe("1h 30m left");
+    expect(formatKeepAwakeRemaining(1_000 + 45_000, 1_000)).toBe("45s left");
+    expect(formatKeepAwakeRemaining(500, 1_000)).toBe("0m left");
+  });
+
+  test("groupNotificationPopups caps at 3 distinct apps and separates identical display names with distinct app_key", () => {
+    const mkNotif = (id: number, app_name: string, app_key?: string): NotificationItem => ({
+      id,
+      revision: id,
+      app_name,
+      ...(app_key ? { app_key } : {}),
+      summary: `Summary ${id}`,
+      body: `Body ${id}`,
+      icon: null,
+      attachment: null,
+      actions: [],
+      urgency: 1,
+    });
+    const popups = [
+      mkNotif(1, "Slack", "desktop:slack-work"),
+      mkNotif(2, "Slack", "desktop:slack-personal"),
+      mkNotif(3, "Discord", "desktop:discord"),
+      mkNotif(4, "Mail", "desktop:thunderbird"),
+      mkNotif(5, "Slack", "desktop:slack-work"),
+    ];
+    expect(notificationGroupKey(mkNotif(9, "   "))).toBe("unnamed:9");
+    const grouped = groupNotificationPopups(popups, 3);
+    expect(grouped.groups.length).toBe(3);
+    expect(grouped.groups.map(g => g.appKey)).toEqual([
+      "desktop:slack-work",
+      "desktop:slack-personal",
+      "desktop:discord",
+    ]);
+    expect(grouped.groups[0]!.items.map(i => i.id)).toEqual([1, 5]);
+    expect(grouped.overflowCount).toBe(1);
   });
 });

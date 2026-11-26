@@ -5,6 +5,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import type { PublishedApplication } from "@hewel/zgui-build";
 import {
   buildShellPreviewFixture,
+  makeSamplePluginsTopicSnapshot,
   makeSampleTelemetrySnapshot,
   makeSolidPngBytes,
   makeTwoActiveNicTelemetrySnapshot,
@@ -24,6 +25,7 @@ import {
   pixel,
   pixelChannelDiff,
   previewAvailable,
+  previewSurfaces,
   previewTest,
   readCapture,
   runPreview,
@@ -3120,17 +3122,18 @@ describe("apps/shell design geometry & pixel lint", () => {
     }
   }, 30_000);
 
-  previewTest("L4 12C Top-Right Notification Stack: Collapsed Layered Deck -> Expand -> Collapse + Pause Auto-Expiry", () => {
+  previewTest("L4 12C Top-Right Notification Stack: 3-App Grouped Stream, In-Place +N Collapse -> Expand -> Collapse + Pause Auto-Expiry", () => {
     const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-design-toast-stack-");
     try {
       const fixture = join(workspace, "fixture.json");
       const scenario = join(workspace, "scenario.json");
       const monitor = { id: "DP-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900, scale: 1 };
-      const popups4 = [
+      const popups6 = [
         {
           id: 301,
           revision: 1,
           app_name: "Discord",
+          app_key: "desktop:discord",
           summary: "QuickFlash (#mobile)",
           body: "I guess for me, I am really not a fan of how iOS looks and would much rather have one unified look.",
           icon: null,
@@ -3141,7 +3144,32 @@ describe("apps/shell design geometry & pixel lint", () => {
         {
           id: 302,
           revision: 1,
+          app_name: "Discord",
+          app_key: "desktop:discord",
+          summary: "Design Review (#shell)",
+          body: "Grouped thread notifications expand inline inside the app card.",
+          icon: null,
+          attachment: null,
+          actions: [],
+          urgency: 1,
+        },
+        {
+          id: 303,
+          revision: 1,
+          app_name: "Discord",
+          app_key: "desktop:discord",
+          summary: "CI Bot (#builds)",
+          body: "Preview build finished in 14s.",
+          icon: null,
+          attachment: null,
+          actions: [],
+          urgency: 1,
+        },
+        {
+          id: 304,
+          revision: 1,
           app_name: "niri",
+          app_key: "desktop:niri",
           summary: "Screenshot captured",
           body: "You can paste the image from the clipboard.",
           icon: null,
@@ -3150,9 +3178,10 @@ describe("apps/shell design geometry & pixel lint", () => {
           urgency: 1,
         },
         {
-          id: 303,
+          id: 305,
           revision: 1,
           app_name: "Ghostty",
+          app_key: "desktop:com.mitchellh.ghostty",
           summary: "Approval requested",
           body: "Antigravity CLI is ready for input",
           icon: null,
@@ -3161,11 +3190,12 @@ describe("apps/shell design geometry & pixel lint", () => {
           urgency: 1,
         },
         {
-          id: 304,
+          id: 306,
           revision: 1,
           app_name: "System",
+          app_key: "name:System",
           summary: "Backup finished",
-          body: "Encrypted snapshot synced to remote",
+          body: "Encrypted snapshot synced to remote (4th app retained in Calendar)",
           icon: null,
           attachment: null,
           actions: [],
@@ -3181,15 +3211,15 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.step({ id: "capture-collapsed", op: "capture", surface: "notification-toasts", captureId: "toast-stack-collapsed" });
 
       const pauseTrueAtMs = timeline.after(20);
-      timeline.step({ id: "expand-toast-stack", op: "pointer.click", target: { surface: "notification-toasts", testId: "toast-expand-toggle" }, button: "primary" });
+      timeline.step({ id: "expand-toast-stack", op: "pointer.click", target: { surface: "notification-toasts", testId: "toast-group-toggle-301" }, button: "primary" });
       timeline.advance("stack-expand-settle", 450);
       timeline.step({ id: "capture-expanded", op: "capture", surface: "notification-toasts", captureId: "toast-stack-expanded" });
 
-      timeline.step({ id: "collapse-toast-stack", op: "pointer.click", target: { surface: "notification-toasts", testId: "toast-collapse-toggle" }, button: "primary" });
-      timeline.advance("stack-collapse-settle", 400);
+      const pauseFalseCollapseAtMs = timeline.after(20);
+      timeline.step({ id: "collapse-toast-stack", op: "pointer.click", target: { surface: "notification-toasts", testId: "toast-group-toggle-301" }, button: "primary" });
+      timeline.advance("stack-collapse-settle", 450);
       timeline.step({ id: "capture-recollapsed", op: "capture", surface: "notification-toasts", captureId: "toast-stack-recollapsed" });
       const clearPopupsAtMs = timeline.after(15);
-      const pauseFalseAtMs = timeline.after(25);
       timeline.advance("stack-clear-settle", 200);
 
       writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
@@ -3206,8 +3236,8 @@ describe("apps/shell design geometry & pixel lint", () => {
           "desktop.notifications": {
             available: true,
             dnd: false,
-            popups: popups4,
-            history: popups4,
+            popups: popups6,
+            history: popups6,
           },
         },
         topicUpdates: [
@@ -3215,7 +3245,7 @@ describe("apps/shell design geometry & pixel lint", () => {
             atMs: clearPopupsAtMs,
             topic: "desktop.notifications",
             revision: 2,
-            data: { available: true, dnd: false, popups: [], history: popups4 },
+            data: { available: true, dnd: false, popups: [], history: popups6 },
           },
         ],
         commands: [
@@ -3229,7 +3259,7 @@ describe("apps/shell design geometry & pixel lint", () => {
             id: 27,
             name: "notifications.set-paused",
             payload: { paused: false },
-            atMs: pauseFalseAtMs,
+            atMs: pauseFalseCollapseAtMs,
           },
         ],
       }), null, 2));
@@ -3244,33 +3274,38 @@ describe("apps/shell design geometry & pixel lint", () => {
       const result = runPreview(published.dist, fixture, scenario, out);
       expectCleanPreview(result, 3, 0);
 
-      // 1. Collapsed state (Form A): main card + 2 tucked deck layers + M3InteractiveCard +3 more footer.
+      // 1. Collapsed 3-app stream: Discord (301 head +2 & 2 deck layers), niri (304), Ghostty (305); 4th app (System 306) omitted from live popups; no global footer/header.
       const collapsed = readCapture(out, "notification-toasts", "toast-stack-collapsed");
       expect(treeNode(collapsed.tree, "toast-card-301").boundsLogical).toBeDefined();
-      expect(treeNode(collapsed.tree, "toast-deck-peek").boundsLogical).toBeDefined();
-      expect(treeNode(collapsed.tree, "toast-deck-layer-1").boundsLogical).toBeDefined();
-      expect(treeNode(collapsed.tree, "toast-deck-layer-2").boundsLogical).toBeDefined();
-      expect(treeNode(collapsed.tree, "toast-more-footer").boundsLogical).toBeDefined();
-      expect(treeNode(collapsed.tree, "toast-expand-toggle").boundsLogical).toBeDefined();
-      expect(collapsed.tree.nodes.some(node => node.text === "+3 more")).toBe(true);
+      expect(treeNode(collapsed.tree, "toast-group-toggle-301").boundsLogical).toBeDefined();
+      expect(treeNode(collapsed.tree, "toast-deck-peek-301").boundsLogical).toBeDefined();
+      expect(treeNode(collapsed.tree, "toast-deck-layer-1-301").boundsLogical).toBeDefined();
+      expect(treeNode(collapsed.tree, "toast-deck-layer-2-301").boundsLogical).toBeDefined();
+      expect(collapsed.tree.nodes.some(node => node.text === "+2")).toBe(true);
+      expect(treeNode(collapsed.tree, "toast-card-304").boundsLogical).toBeDefined();
+      expect(treeNode(collapsed.tree, "toast-card-305").boundsLogical).toBeDefined();
       expect(collapsed.tree.nodes.some(node => node.testId === "toast-card-302")).toBe(false);
+      expect(collapsed.tree.nodes.some(node => node.testId === "toast-card-306")).toBe(false);
+      expect(collapsed.tree.nodes.some(node => node.testId === "toast-more-footer")).toBe(false);
+      expect(collapsed.tree.nodes.some(node => node.testId === "toast-expanded-header")).toBe(false);
 
-      // 2. Expanded state (Form B): top fixed control bar + multiple cards simultaneously visible.
+      // 2. Expanded in-place: Discord 301/302/303 + niri 304 + Ghostty 305 visible, System 306 still capped in Calendar.
       const expanded = readCapture(out, "notification-toasts", "toast-stack-expanded");
-      expect(treeNode(expanded.tree, "toast-expanded-header").boundsLogical).toBeDefined();
-      expect(treeNode(expanded.tree, "toast-collapse-toggle").boundsLogical).toBeDefined();
-      expect(expanded.tree.nodes.some(node => node.text === "4 active")).toBe(true);
+      expect(expanded.tree.nodes.some(node => node.testId === "toast-expanded-header")).toBe(false);
+      expect(treeNode(expanded.tree, "toast-group-toggle-301").boundsLogical).toBeDefined();
       expect(treeNode(expanded.tree, "toast-card-301").boundsLogical).toBeDefined();
       expect(treeNode(expanded.tree, "toast-card-302").boundsLogical).toBeDefined();
       expect(treeNode(expanded.tree, "toast-card-303").boundsLogical).toBeDefined();
       expect(treeNode(expanded.tree, "toast-card-304").boundsLogical).toBeDefined();
-      expect(expanded.image.height, "expanded LayerSurface grows beyond collapsed 456px height").toBeGreaterThan(456);
+      expect(treeNode(expanded.tree, "toast-card-305").boundsLogical).toBeDefined();
+      expect(expanded.tree.nodes.some(node => node.testId === "toast-card-306")).toBe(false);
+      expect(expanded.tree.nodes.some(node => node.testId === "toast-deck-peek-301")).toBe(false);
+      expect(expanded.image.height, "expanded LayerSurface grows beyond 456px height").toBeGreaterThan(456);
 
-      // 3. Re-collapsed state: header and secondary cards dismissed, footer restored.
+      // 3. Re-collapsed state: secondary cards hidden cleanly, deck peeks restored.
       const recollapsed = readCapture(out, "notification-toasts", "toast-stack-recollapsed");
       expect(treeNode(recollapsed.tree, "toast-card-301").boundsLogical).toBeDefined();
-      expect(treeNode(recollapsed.tree, "toast-more-footer").boundsLogical).toBeDefined();
-      expect(recollapsed.tree.nodes.some(node => node.testId === "toast-expanded-header")).toBe(false);
+      expect(treeNode(recollapsed.tree, "toast-deck-peek-301").boundsLogical).toBeDefined();
       expect(recollapsed.tree.nodes.some(node => node.testId === "toast-card-302")).toBe(false);
     } finally {
       cleanup();
@@ -3325,8 +3360,8 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.step({ id: "mutex-sysmon", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-sysmon" }, button: "primary" });
       timeline.advance("mutex-sysmon-settle", 400);
 
-      // 5. Open 22J detailed window from 04C primary button (auto-closes popover)
-      timeline.step({ id: "open-detailed-win", op: "pointer.click", target: { surface: "panel-system-monitor", testId: "sysmon-open-detailed" }, button: "primary" });
+      // 5. Open 22J detailed window from 04C header popout button (auto-closes popover)
+      timeline.step({ id: "open-detailed-win", op: "pointer.click", target: { surface: "panel-system-monitor", testId: "sysmon-popout" }, button: "primary" });
       timeline.advance("win-open-settle", 450);
       timeline.step({ id: "capture-win-overview", op: "capture", surface: "system-monitor-window", captureId: "sysmon-window-overview" });
 
@@ -3461,7 +3496,9 @@ describe("apps/shell design geometry & pixel lint", () => {
         expect(popScroll.scrollMetrics.overflowY, "04C popover fits with zero vertical scroll").toBe(false);
       }
       expect(treeNode(pop.tree, "sysmon-poll-pill").boundsLogical).toBeDefined();
-      expect(treeNode(pop.tree, "sysmon-popover-battery").text).toBe("Battery 84% · 18.4 W");
+      expect(treeNode(pop.tree, "sysmon-popout").boundsLogical).toBeDefined();
+      expect(pop.tree.nodes.some(n => n.testId === "sysmon-popover-battery"), "04C deduplicated footer omits battery row").toBe(false);
+      expect(pop.tree.nodes.some(n => n.testId === "sysmon-open-detailed"), "04C deduplicated footer omits open detailed button").toBe(false);
       expect(treeNode(pop.tree, "sysmon-tile-gpu").boundsLogical).toBeDefined();
       expect(treeNode(pop.tree, "sysmon-tile-thermal").boundsLogical).toBeDefined();
       expect(treeNode(pop.tree, "sysmon-tile-network").boundsLogical).toBeDefined();
@@ -3651,8 +3688,9 @@ describe("apps/shell design geometry & pixel lint", () => {
 
       const lightPop = readCapture(vRun.out, "panel-system-monitor", "sysmon-popover-light");
       expect(treeNode(lightPop.tree, "panel-root-system-monitor").boundsLogical?.width).toBeCloseTo(396, 1);
-      // Unknown energy_rate_watts must omit watts rather than printing "0 W"
-      expect(treeNode(lightPop.tree, "sysmon-popover-battery").text).toBe("Battery 92%");
+      expect(treeNode(lightPop.tree, "sysmon-popout").boundsLogical).toBeDefined();
+      expect(lightPop.tree.nodes.some(n => n.testId === "sysmon-popover-battery")).toBe(false);
+      expect(lightPop.tree.nodes.some(n => n.testId === "sysmon-open-detailed")).toBe(false);
 
       const lightWin = readCapture(vRun.out, "system-monitor-window", "sysmon-window-light");
       expect(lightWin.image.width).toBe(820);
@@ -3677,7 +3715,7 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.step({ id: "open-degraded-popover", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-sysmon" }, button: "primary" });
       timeline.advance("degraded-pop-settle", 450);
       timeline.step({ id: "capture-degraded-popover", op: "capture", surface: "panel-system-monitor", captureId: "sysmon-popover-degraded" });
-      timeline.step({ id: "open-degraded-win", op: "pointer.click", target: { surface: "panel-system-monitor", testId: "sysmon-open-detailed" }, button: "primary" });
+      timeline.step({ id: "open-degraded-win", op: "pointer.click", target: { surface: "panel-system-monitor", testId: "sysmon-popout" }, button: "primary" });
       timeline.advance("degraded-win-settle", 450);
       timeline.step({ id: "capture-degraded-win", op: "capture", surface: "system-monitor-window", captureId: "sysmon-window-degraded" });
 
@@ -4035,10 +4073,7 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.step({ id: "ready", op: "settle" });
       timeline.advance("toast-enter-settle", 450);
 
-      // Expand toast stack so all 3 notifications (single-line, multiline, long URL) render simultaneously.
-      const pauseTrueAtMs = timeline.after(15);
-      timeline.step({ id: "expand-wrap-toasts", op: "pointer.click", target: { surface: "notification-toasts", testId: "toast-expand-toggle" }, button: "primary" });
-      timeline.advance("toast-expand-settle", 450);
+      // 3 distinct app notifications render simultaneously without needing expand toggles.
       timeline.step({ id: "capture-toast-wrap", op: "capture", surface: "notification-toasts", captureId: "toast-wrap" });
 
       // Open CalendarPanel to verify history list wrapping parity.
@@ -4064,14 +4099,7 @@ describe("apps/shell design geometry & pixel lint", () => {
             history: wrapItems,
           },
         },
-        commands: [
-          {
-            id: 26,
-            name: "notifications.set-paused",
-            payload: { paused: true },
-            atMs: pauseTrueAtMs,
-          },
-        ],
+        commands: [],
       }), null, 2));
 
       writeFileSync(scenario, JSON.stringify({
@@ -4156,7 +4184,8 @@ describe("apps/shell design geometry & pixel lint", () => {
       const popups6 = Array.from({ length: 6 }, (_, idx) => ({
         id: 501 + idx,
         revision: 1,
-        app_name: `App ${idx + 1}`,
+        app_name: "ChatApp",
+        app_key: "desktop:chatapp",
         summary: `Notification ${idx + 1}`,
         body: `Body message ${idx + 1} with enough detail to ensure the expanded stack overflows vertically.`,
         icon: null,
@@ -4193,12 +4222,12 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.step({ id: "capture-toast-collapsed-exiting", op: "capture", surface: "notification-toasts", captureId: "toast-collapsed-exiting" });
       timeline.advance("collapsed-exit-finish", 260);
 
-      // 4. Expanded notification stack (ToastExpandedHeader + scrollable cards):
+      // 4. Expanded notification stack (in-place M3Collapsible + scrollable cards):
       //    scroll to half-visible card (clipping & zero gap fill) -> programmatic exit -> blurRegion === "none".
       const expandedPushAtMs = timeline.after(10);
       timeline.advance("expanded-enter-settle", 450);
       const pauseTrueAtMs = timeline.after(15);
-      timeline.step({ id: "expand-stack", op: "pointer.click", target: { surface: "notification-toasts", testId: "toast-expand-toggle" }, button: "primary" });
+      timeline.step({ id: "expand-stack", op: "pointer.click", target: { surface: "notification-toasts", testId: "toast-group-toggle-501" }, button: "primary" });
       timeline.advance("expanded-settle", 450);
       timeline.step({
         id: "scroll-expanded-stack",
@@ -4321,48 +4350,29 @@ describe("apps/shell design geometry & pixel lint", () => {
       );
       expect(dockHidden.frame.blurRegion, "auto-hidden Dock slid off viewport resolves to blurRegion='none'").toBe("none");
 
-      // 3. Collapsed stack: ToastCard + ToastFooter blurred, ToastDeckPeek + gap unblurred, programmatic exit < 0.5 -> "none".
+      // 3. Collapsed group: ToastCard blurred, ToastDeckPeek + gap unblurred, programmatic exit < 0.5 -> "none".
       const collapsedSettled = readCapture(out, "notification-toasts", "toast-collapsed-settled");
       const collapsedCard = treeNode(collapsedSettled.tree, "toast-card-501").boundsLogical!;
-      const collapsedFooter = treeNode(collapsedSettled.tree, "toast-more-footer").boundsLogical!;
+      const collapsedPeek = treeNode(collapsedSettled.tree, "toast-deck-peek-501").boundsLogical!;
       expect(
         blurRegionCoversPoint(collapsedSettled.frame.blurRegion, collapsedCard.x + collapsedCard.width / 2, collapsedCard.y + collapsedCard.height / 2),
         "collapsed ToastCard center covered by blur",
       ).toBe(true);
       expect(
-        blurRegionCoversPoint(collapsedSettled.frame.blurRegion, collapsedFooter.x + collapsedFooter.width / 2, collapsedFooter.y + collapsedFooter.height / 2),
-        "collapsed ToastFooter center covered by blur",
-      ).toBe(true);
-      expect(
         blurRegionIntersectsRect(collapsedSettled.frame.blurRegion, {
-          x: collapsedCard.x,
-          y: collapsedCard.y + collapsedCard.height + 2,
-          width: collapsedCard.width,
-          height: Math.max(1, collapsedFooter.y - (collapsedCard.y + collapsedCard.height) - 4),
+          x: collapsedPeek.x,
+          y: collapsedPeek.y + 1,
+          width: collapsedPeek.width,
+          height: Math.max(1, collapsedPeek.height + 16),
         }),
-        "ToastDeckPeek and card-to-footer gap excluded from blurRegion",
+        "ToastDeckPeek and trailing gap excluded from blurRegion",
       ).toBe(false);
       const collapsedExiting = readCapture(out, "notification-toasts", "toast-collapsed-exiting");
       expect(collapsedExiting.frame.blurRegion, "collapsed stack programmatic exit tail (<0.5 opacity) resolves to blurRegion='none'").toBe("none");
 
-      // 4. Expanded scrolled stack: header blurred, half-visible scrolled card clipped strictly to scroll viewport, gaps unblurred, programmatic exit < 0.5 -> "none".
+      // 4. Expanded scrolled group: half-visible scrolled card clipped strictly to scroll viewport, gaps unblurred, programmatic exit < 0.5 -> "none".
       const expandedScrolled = readCapture(out, "notification-toasts", "toast-expanded-scrolled");
-      const expHeader = treeNode(expandedScrolled.tree, "toast-expanded-header").boundsLogical!;
       const expScroll = treeNode(expandedScrolled.tree, "toast-expanded-scroll").boundsLogical!;
-      expect(
-        blurRegionCoversPoint(expandedScrolled.frame.blurRegion, expHeader.x + expHeader.width / 2, expHeader.y + expHeader.height / 2),
-        "expanded ToastExpandedHeader retains blur while scrolled",
-      ).toBe(true);
-      // Gap between header and scroll viewport must have zero blur fill.
-      expect(
-        blurRegionIntersectsRect(expandedScrolled.frame.blurRegion, {
-          x: expHeader.x,
-          y: expHeader.y + expHeader.height + 1,
-          width: expHeader.width,
-          height: Math.max(1, expScroll.y - (expHeader.y + expHeader.height) - 2),
-        }),
-        "header-to-scroll gap has zero blur fill",
-      ).toBe(false);
 
       const scrolledCards = popups6.map(item => treeNode(expandedScrolled.tree, `toast-card-${item.id}`).boundsLogical!);
       // Top card (501) is scrolled partially above scroll viewport top edge.
@@ -4377,7 +4387,7 @@ describe("apps/shell design geometry & pixel lint", () => {
         ),
         "visible lower portion of scrolled top card retains blur",
       ).toBe(true);
-      // Any blur strip inside scroll region must never escape into the clipped upper band above expScroll.y (between header bottom and scroll top) or below expScroll bottom.
+      // Any blur strip inside scroll region must never escape below expScroll bottom.
       expect(
         blurRegionIntersectsRect(expandedScrolled.frame.blurRegion, {
           x: topCard.x,
@@ -4404,6 +4414,740 @@ describe("apps/shell design geometry & pixel lint", () => {
 
       const expandedExiting = readCapture(out, "notification-toasts", "toast-expanded-exiting");
       expect(expandedExiting.frame.blurRegion, "expanded stack programmatic exit tail (<0.5 opacity) resolves to blurRegion='none'").toBe("none");
+    } finally {
+      cleanup();
+    }
+  }, 30_000);
+
+  previewTest("L4 Bar Q4 Order, Docked Dividers, 01 Keep Awake, 09E Tray Overflow, 22B/22B-2 Tray Rules & 22C/22C-B Keep Awake", () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-design-tray-keepawake-");
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const monitor = { id: "DP-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900, scale: 1 };
+      const trayDropbox = {
+        id: "dropbox-99",
+        app_id: "dropbox",
+        title: "Dropbox",
+        icon_name: "dropbox",
+        icon: null,
+        category: "ApplicationStatus",
+        status: "Active",
+        tooltip: null,
+        item_is_menu: true,
+        menu: {
+          revision: 1,
+          root: {
+            id: 0,
+            label: null,
+            enabled: true,
+            visible: true,
+            separator: false,
+            toggle_type: null,
+            toggle_state: null,
+            icon_name: null,
+            children: [
+              {
+                id: 1,
+                label: "Pause syncing",
+                enabled: true,
+                visible: true,
+                separator: false,
+                toggle_type: null,
+                toggle_state: null,
+                icon_name: null,
+                children: [],
+              },
+            ],
+          },
+        },
+      };
+      const trayDiscord = {
+        id: "discord-1",
+        app_id: "discord",
+        title: "Discord",
+        icon_name: "discord",
+        icon: null,
+        category: "ApplicationStatus",
+        status: "Active",
+        tooltip: null,
+        item_is_menu: false,
+        menu: null,
+      };
+      const trayHidden = {
+        id: "slack-hidden",
+        app_id: "slack-hidden",
+        title: "Hidden App",
+        icon_name: null,
+        icon: null,
+        category: "ApplicationStatus",
+        status: "Passive",
+        tooltip: null,
+        item_is_menu: false,
+        menu: null,
+      };
+      const trayTransient = {
+        id: ":1.88/org/ayatana/NotificationItem/transient",
+        app_id: null,
+        title: "",
+        icon_name: null,
+        icon: null,
+        category: "ApplicationStatus",
+        status: "Active",
+        tooltip: null,
+        item_is_menu: false,
+        menu: null,
+      };
+      const idleExpiresMs = Date.UTC(2023, 10, 15, 0, 0, 0);
+
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+      timeline.step({ id: "capture-bar-docked-tray", op: "capture", surface: "bar-dp-1", captureId: "bar-docked-tray" });
+
+      // Open 01 Main QuickSettings -> Keep awake tile (no split chevron)
+      timeline.step({ id: "open-qs-keepawake", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-audio" }, button: "primary" });
+      timeline.advance("qs-keepawake-settle", 450);
+      timeline.step({ id: "capture-qs-keepawake", op: "capture", surface: "panel-quick-settings", captureId: "qs-keep-awake" });
+      timeline.step({ id: "dismiss-qs-keepawake", op: "key.press", surface: "panel-quick-settings", key: "Escape" });
+      timeline.advance("qs-dismiss-settle", 250);
+
+      // Open 09E Tray Overflow -> capture -> invoke bar-anchored tray-menu handoff
+      timeline.step({ id: "open-tray-overflow", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-tray-overflow-toggle" }, button: "primary" });
+      timeline.advance("overflow-settle", 400);
+      timeline.step({ id: "capture-tray-overflow", op: "capture", surface: "tray-overflow", captureId: "tray-overflow-09e" });
+
+      timeline.step({ id: "click-overflow-dropbox", op: "pointer.click", target: { surface: "tray-overflow", testId: "tray-overflow-item-dropbox-99" }, button: "primary" });
+      timeline.advance("tray-menu-handoff-settle", 400);
+      timeline.step({ id: "capture-tray-menu-handoff", op: "capture", surface: "tray-menu", captureId: "tray-overflow-menu-handoff" });
+      timeline.step({ id: "dismiss-tray-menu-handoff", op: "key.press", surface: "tray-menu", key: "Escape" });
+      timeline.advance("tray-menu-dismiss-settle", 250);
+
+      // Reopen 09E -> click gear to open 22B-2 Tray Rules directly -> back to 22B Bar Layout -> 22C/22C-B Idle Keep awake
+      timeline.step({ id: "reopen-tray-overflow-gear", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-tray-overflow-toggle" }, button: "primary" });
+      timeline.advance("reopen-overflow-settle", 400);
+      timeline.step({ id: "click-overflow-gear", op: "pointer.click", target: { surface: "tray-overflow", testId: "tray-overflow-configure" }, button: "primary" });
+      timeline.advance("tray-rules-open-settle", 400);
+      timeline.step({ id: "capture-tray-rules", op: "capture", surface: "settings-window", captureId: "tray-rules-22b2" });
+
+      timeline.step({ id: "back-to-bar-layout", op: "pointer.click", target: { surface: "settings-window", testId: "settings-tray-rules-back" }, button: "primary" });
+      timeline.advance("bar-layout-settle", 350);
+      timeline.step({ id: "capture-bar-layout", op: "capture", surface: "settings-window", captureId: "bar-layout-22b" });
+
+      timeline.step({ id: "open-settings-idle-keepawake", op: "pointer.click", target: { surface: "settings-window", testId: "settings-nav-idle" }, button: "primary" });
+      timeline.advance("idle-keepawake-settle", 350);
+      timeline.step({ id: "capture-idle-keepawake", op: "capture", surface: "settings-window", captureId: "idle-keep-awake-22cb" });
+
+      timeline.step({ id: "close-settings-keepawake", op: "pointer.click", target: { surface: "settings-window", testId: "settings-window-close" }, button: "primary" });
+      timeline.advance("close-settings-settle", 200);
+
+      // Reopen overflow then drop collapsed item via live tray topicUpdate -> overflow closes automatically
+      timeline.step({ id: "reopen-overflow-live-empty", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-tray-overflow-toggle" }, button: "primary" });
+      timeline.advance("overflow-live-settle", 350);
+      const dropCollapsedAtMs = timeline.after(15);
+      timeline.advance("overflow-empty-close-settle", 300);
+      timeline.step({
+        id: "after-overflow-empty",
+        op: "monitors.set",
+        monitors: [monitor],
+      });
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-design-tray-keepawake",
+        initialTopics: {
+          "wayland.outputs": {
+            capability: "connected",
+            outputs: [{
+              output_instance_id: 1, name: "DP-1", description: "Tray Monitor", make: "Test", model: "1440x900",
+              x: 0, y: 0, width: 1440, height: 900, mode_width: 1440, mode_height: 900, refresh_mhz: 60000, scale: 1,
+              physical_width_mm: null, physical_height_mm: null,
+            }],
+          },
+          settings: {
+            general: { offline_mode: false, log_level: "info" },
+            bar: {
+              position: "top",
+              style: "docked",
+              gaps: 0,
+              edge_overrides: { top: null, right: null, bottom: null, left: null },
+              launcher_enabled: true,
+              dock_enabled: false,
+              clock_24h: true,
+              clock_seconds: false,
+              tray: {
+                default_action: "show",
+                rules: {
+                  dropbox: "collapse",
+                  "slack-hidden": "hide",
+                },
+              },
+            },
+            theme: { mode: "dark", variant: "tonal", seed_color: null, backend: "builtin", gtk_linking: false },
+            ime: { mode: "indicator_only", candidate_layout: "auto", switch_osd: true },
+            polkit: { enabled: true },
+            wallpaper: { directories: [], fit: "cover", sync_theme: true, slideshow_seconds: 300 },
+            pre_action_fade_seconds: 0,
+            configured_plugins: [],
+          },
+          "desktop.media": {
+            available: true,
+            selected_player_id: "spotify",
+            any_playing: true,
+            cover: null,
+            players: [{
+              id: "spotify", identity: "Spotify", playback_status: "playing", position_us: 30_000_000,
+              capabilities: { can_play: true, can_pause: true, can_go_next: true, can_go_previous: true, can_seek: true },
+              metadata: { title: "Flow", artists: ["Synth"], album: "Focus", length_us: 180_000_000 },
+            }],
+          },
+          "system.telemetry": makeSampleTelemetrySnapshot(),
+          "desktop.tray": {
+            available: true,
+            items: [trayDiscord, trayDropbox, trayHidden, trayTransient],
+          },
+          "session.idle": {
+            service_status: { status: "running" },
+            caffeine: true,
+            caffeine_scope: "sleep",
+            caffeine_duration_seconds: 3600,
+            caffeine_expires_at_ms: idleExpiresMs,
+            active_inhibitors: [],
+            warning: null,
+            rules: [
+              { name: "lock", timeout_seconds: 300, locked_timeout_seconds: null, action: "lock", resume_command: null, pre_action_fade_seconds: 2, enabled: true },
+            ],
+          },
+        },
+        topicUpdates: [
+          {
+            atMs: dropCollapsedAtMs,
+            topic: "desktop.tray",
+            revision: 2,
+            data: { available: true, items: [trayDiscord, trayHidden, trayTransient] },
+          },
+        ],
+      }), null, 2));
+
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-tray-keepawake",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(published.dist, fixture, scenario, out);
+      expectCleanPreview(result, 7, 0);
+      expect(previewSurfaces(out, "after-overflow-empty")).not.toContain("tray-overflow");
+
+      // 1. Docked bar Q4 order, 12px gaps, single divider before bar-system, embedded coffee icon
+      const barCap = readCapture(out, "bar-dp-1", "bar-docked-tray");
+      const mediaBounds = treeNode(barCap.tree, "bar-media").boundsLogical!;
+      const sysmonBounds = treeNode(barCap.tree, "bar-sysmon").boundsLogical!;
+      const trayBounds = treeNode(barCap.tree, "bar-tray").boundsLogical!;
+      const sysBounds = treeNode(barCap.tree, "bar-system").boundsLogical!;
+      expect(mediaBounds.x + mediaBounds.width).toBeLessThan(sysmonBounds.x);
+      expect(sysmonBounds.x + sysmonBounds.width).toBeLessThan(trayBounds.x);
+      expect(trayBounds.x + trayBounds.width).toBeLessThan(sysBounds.x);
+      expect(sysmonBounds.x - (mediaBounds.x + mediaBounds.width), "docked group gap == 12px").toBeCloseTo(12, 1);
+      expect(trayBounds.x - (sysmonBounds.x + sysmonBounds.width), "docked group gap == 12px").toBeCloseTo(12, 1);
+      expect(treeNode(barCap.tree, "bar-keep-awake").boundsLogical).toBeDefined();
+      expect(treeNode(barCap.tree, "tray-item-discord-1").boundsLogical).toBeDefined();
+      expect(barCap.tree.nodes.some(n => n.testId === "tray-item-dropbox-99")).toBe(false);
+      expect(barCap.tree.nodes.some(n => n.testId === "tray-item-slack-hidden")).toBe(false);
+      const overflowToggle = treeNode(barCap.tree, "bar-tray-overflow-toggle").boundsLogical!;
+      expect(overflowToggle.width).toBeGreaterThanOrEqual(24);
+      expect(overflowToggle.height).toBeGreaterThanOrEqual(24);
+
+      // 2. 01 Main Keep awake direct tile
+      const qsCap = readCapture(out, "panel-quick-settings", "qs-keep-awake");
+      expect(treeNode(qsCap.tree, "qs-tile-caffeine").boundsLogical).toBeDefined();
+      expect(qsCap.tree.nodes.some(n => n.text === "Keep awake")).toBe(true);
+      expect(qsCap.tree.nodes.some(n => n.testId === "qs-open-caffeine")).toBe(false);
+
+      // 3. 09E Tray Overflow (248px, transparent bleed) -> bar-anchored tray-menu handoff
+      const overflowCap = readCapture(out, "tray-overflow", "tray-overflow-09e");
+      expect(Math.round(treeNode(overflowCap.tree, "tray-overflow-card").boundsLogical!.width)).toBe(248);
+      expect(pixel(overflowCap.image, 0, 0)).toEqual([0, 0, 0, 0]);
+      const dropTile = treeNode(overflowCap.tree, "tray-overflow-item-dropbox-99").boundsLogical!;
+      expect(Math.round(dropTile.width)).toBe(54);
+      expect(Math.round(dropTile.height)).toBe(54);
+      expect(treeNode(overflowCap.tree, "tray-overflow-configure").boundsLogical).toBeDefined();
+
+      const trayMenuCap = readCapture(out, "tray-menu", "tray-overflow-menu-handoff");
+      expect(treeNode(trayMenuCap.tree, "tray-menu-card").boundsLogical).toBeDefined();
+      expect(treeNode(trayMenuCap.tree, "tray-menu-item-1").boundsLogical).toBeDefined();
+
+      // 4. 22B-2 Tray Rules & 22B System Tray card
+      const trayRulesCap = readCapture(out, "settings-window", "tray-rules-22b2");
+      expect(treeNode(trayRulesCap.tree, "settings-tray-rules-view").boundsLogical).toBeDefined();
+      expect(treeNode(trayRulesCap.tree, "tray-rules-default-show").boundsLogical).toBeDefined();
+      expect(treeNode(trayRulesCap.tree, "tray-rule-row-dropbox").boundsLogical).toBeDefined();
+      expect(treeNode(trayRulesCap.tree, "tray-rule-row-transient").boundsLogical).toBeDefined();
+      expect(trayRulesCap.tree.nodes.some(n => n.text === "Session-only (no stable ID)")).toBe(true);
+
+      const barLayoutCap = readCapture(out, "settings-window", "bar-layout-22b");
+      expect(treeNode(barLayoutCap.tree, "settings-bar-tray-card").boundsLogical).toBeDefined();
+
+      // 5. 22C / 22C-B Keep awake card
+      const idleCap = readCapture(out, "settings-window", "idle-keep-awake-22cb");
+      expect(treeNode(idleCap.tree, "settings-keep-awake-card").boundsLogical).toBeDefined();
+      expect(treeNode(idleCap.tree, "settings-keep-awake-30m").boundsLogical).toBeDefined();
+      expect(treeNode(idleCap.tree, "settings-keep-awake-1h").boundsLogical).toBeDefined();
+      expect(treeNode(idleCap.tree, "settings-keep-awake-2h").boundsLogical).toBeDefined();
+      expect(treeNode(idleCap.tree, "settings-keep-awake-inf").boundsLogical).toBeDefined();
+      const statusText = treeNode(idleCap.tree, "settings-keep-awake-status").text ?? "";
+      expect(statusText).not.toBe("Off");
+      expect(statusText).toContain("left");
+    } finally {
+      cleanup();
+    }
+  }, 30_000);
+
+  previewTest("L4 22I/22K Plugin Store (PNG Blobs + Pending Apply) & 12C App-Key Identity + Atomic Dismiss Preservation", () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-design-store-12c-");
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const monitor = { id: "DP-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900, scale: 1 };
+      const greenPng = makeSolidPngBytes(24, 24, 0x22, 0xc5, 0x5e);
+      const bluePng = makeSolidPngBytes(24, 24, 0x3b, 0x82, 0xf6);
+      const shotPng = makeSolidPngBytes(120, 72, 0xea, 0xb3, 0x08);
+
+      const chat1 = {
+        id: 701,
+        revision: 1,
+        app_name: "Chat",
+        app_key: "desktop:chat",
+        summary: "Message 1",
+        body: "First message",
+        icon: null,
+        attachment: null,
+        actions: [],
+        urgency: 1,
+      };
+      const chat2 = {
+        id: 702,
+        revision: 1,
+        app_name: "Chat",
+        app_key: "desktop:chat",
+        summary: "Message 2",
+        body: "Second message",
+        icon: null,
+        attachment: null,
+        actions: [],
+        urgency: 1,
+      };
+      const buildA = {
+        id: 703,
+        revision: 1,
+        app_name: "Build Bot",
+        app_key: "desktop:build-a",
+        summary: "Repo A green",
+        body: "Distinct app_key A",
+        icon: null,
+        attachment: null,
+        actions: [],
+        urgency: 1,
+      };
+      const buildB = {
+        id: 704,
+        revision: 1,
+        app_name: "Build Bot",
+        app_key: "desktop:build-b",
+        summary: "Repo B failed",
+        body: "Distinct app_key B",
+        icon: null,
+        attachment: null,
+        actions: [],
+        urgency: 1,
+      };
+      const mailApp = {
+        id: 705,
+        revision: 1,
+        app_name: "Mail",
+        app_key: "desktop:mail",
+        summary: "4th app retained in Calendar",
+        body: "Omitted from 3-app live stream",
+        icon: null,
+        attachment: null,
+        actions: [],
+        urgency: 1,
+      };
+      const replacedChat1 = {
+        id: 701,
+        revision: 2,
+        app_name: "Chat",
+        app_key: "desktop:chat",
+        summary: "Message 1 replaced mid-dismiss",
+        body: "Bumped revision preserved atomically",
+        icon: null,
+        attachment: null,
+        actions: [],
+        urgency: 1,
+      };
+
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+
+      // Part A: 12C identical app_name with distinct app_keys + atomic dismiss preservation
+      timeline.advance("toasts-settle", 450);
+      timeline.step({ id: "capture-toasts-identity", op: "capture", surface: "notification-toasts", captureId: "toasts-12c-identity" });
+
+      const dismissReplyAtMs = timeline.after(15);
+      const pauseTrueAtMs = timeline.after(16);
+      const replacedTopicAtMs = timeline.after(25);
+      timeline.step({ id: "dismiss-chat-group", op: "pointer.click", target: { surface: "notification-toasts", testId: "toast-dismiss-701" }, button: "primary" });
+      timeline.advance("dismiss-settle", 400);
+      timeline.step({ id: "capture-toasts-replaced", op: "capture", surface: "notification-toasts", captureId: "toasts-12c-replaced" });
+
+      // Clear live toasts before inspecting Settings 22I/22K
+      const clearAllToastsAtMs = timeline.after(10);
+      const pauseFalseAtMs = timeline.after(20);
+      timeline.advance("clear-toasts-settle", 250);
+
+      // Part B: 22I Plugin Store + 22K Plugin Detail + BlobHandle PNG rendering
+      const wallpaperListAtMs = timeline.after(15);
+      timeline.step({
+        id: "open-settings-store",
+        op: "service.emit",
+        channel: "control.message",
+        value: { args: ["settings", "appearance"], reply: { text: "{\"settingsWindowOpen\":true,\"settingsWindowTab\":\"appearance\"}" } },
+      });
+      timeline.advance("settings-appearance-settle", 250);
+      const subscribePluginsAtMs = timeline.after(10);
+      const catalogList1AtMs = timeline.after(12);
+      const catalogList2AtMs = timeline.after(20);
+      const weatherIcon1AtMs = timeline.after(30);
+      timeline.step({ id: "nav-plugins", op: "pointer.click", target: { surface: "settings-window", testId: "settings-nav-plugins" }, button: "primary" });
+      timeline.advance("plugins-installed-settle", 300);
+
+      const weatherIcon2AtMs = timeline.after(10);
+      const pomoIconAtMs = timeline.after(15);
+      timeline.step({ id: "switch-discover", op: "pointer.click", target: { surface: "settings-window", testId: "plugins-mode-discover" }, button: "primary" });
+      timeline.advance("plugins-discover-settle", 300);
+      timeline.step({ id: "capture-plugins-store", op: "capture", surface: "settings-window", captureId: "plugins-store-22i" });
+
+      const catalogDetailAtMs = timeline.after(15);
+      const pluginAuditAtMs = timeline.after(20);
+      const weatherIcon3AtMs = timeline.after(25);
+      const detailShotAtMs = timeline.after(35);
+      timeline.step({ id: "open-weather-detail", op: "pointer.click", target: { surface: "settings-window", testId: "plugin-card-action-acme/weather" }, button: "primary" });
+      timeline.advance("plugin-detail-settle", 350);
+      timeline.step({ id: "capture-plugin-detail", op: "capture", surface: "settings-window", captureId: "plugin-detail-22k" });
+
+      timeline.step({ id: "open-approve-dialog", op: "pointer.click", target: { surface: "settings-window", testId: "plugin-detail-approve" }, button: "primary" });
+      timeline.advance("approve-dialog-settle", 300);
+      timeline.step({ id: "capture-plugin-approve", op: "capture", surface: "settings-window", captureId: "plugin-approve-modal" });
+
+      // Close approve modal + settings window so PluginsPane cleanly unsubscribes during timeline.
+      timeline.step({ id: "close-approve-dialog", op: "pointer.click", target: { surface: "settings-window", testId: "plugin-approval-cancel" }, button: "primary" });
+      timeline.advance("approve-close-settle", 120);
+      const unsubPluginsAtMs = timeline.after(10);
+      timeline.step({ id: "close-settings-store", op: "pointer.click", target: { surface: "settings-window", testId: "settings-window-close" }, button: "primary" });
+      timeline.advance("close-settings-settle", 250);
+
+      const basePlugins = makeSamplePluginsTopicSnapshot();
+      const pendingWeatherPlugin = {
+        ...(basePlugins.plugins[0] as Record<string, unknown>),
+        approved: false,
+        enabled: false,
+      };
+      const storePluginsTopic = makeSamplePluginsTopicSnapshot({
+        plugins: [pendingWeatherPlugin],
+        counts: { total: 1, enabled: 0, approved: 0, pending_approval: 1, revoked: 0 },
+      });
+
+      const catalogItemWeather = {
+        id: "acme/weather",
+        preferred_source_id: "official",
+        name: "Weather Strip",
+        summary: "Menu bar weather forecast pill and daily outlook",
+        category: "widgets",
+        latest_version: "1.3.0",
+        icon: { kind: "blob_handle", token: "plugin-weather-icon", mime: "image/png", byte_len: greenPng.length },
+        has_icon: true,
+        update_available: true,
+        installed: pendingWeatherPlugin,
+        sources: [{
+          source_id: "official",
+          source_name: "Official Registry",
+          priority: 100,
+          latest_version: "1.3.0",
+          yanked: false,
+          advisories: [],
+        }],
+      };
+      const catalogItemPomo = {
+        id: "acme/pomodoro",
+        preferred_source_id: "official",
+        name: "Focus Timer",
+        summary: "Minimal Pomodoro countdown bar widget",
+        category: "productivity",
+        latest_version: "0.4.0",
+        icon: { kind: "blob_handle", token: "plugin-pomo-icon", mime: "image/png", byte_len: bluePng.length },
+        has_icon: true,
+        update_available: false,
+        installed: null,
+        sources: [{
+          source_id: "official",
+          source_name: "Official Registry",
+          priority: 100,
+          latest_version: "0.4.0",
+          yanked: false,
+          advisories: [],
+        }],
+      };
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-design-store-12c",
+        initialTopics: {
+          "wayland.outputs": {
+            capability: "connected",
+            outputs: [{
+              output_instance_id: 1, name: "DP-1", description: "Store Monitor", make: "Test", model: "1440x900",
+              x: 0, y: 0, width: 1440, height: 900, mode_width: 1440, mode_height: 900, refresh_mhz: 60000, scale: 1,
+              physical_width_mm: null, physical_height_mm: null,
+            }],
+          },
+          "desktop.notifications": {
+            available: true,
+            dnd: false,
+            popups: [chat1, chat2, buildA, buildB, mailApp],
+            history: [chat1, chat2, buildA, buildB, mailApp],
+          },
+        },
+        publicTopicSubscriptions: [
+          {
+            topic: "plugins",
+            id: 30,
+            atMs: subscribePluginsAtMs,
+            data: storePluginsTopic,
+          },
+        ],
+        extraPublicSends: [
+          JSON.stringify({ jsonrpc: "2.0", id: 35, method: "topic.unsubscribe", params: { topic: "plugins" } }),
+        ],
+        extraPublicEvents: [
+          {
+            kind: "message",
+            atMs: unsubPluginsAtMs,
+            text: JSON.stringify({ jsonrpc: "2.0", id: 35, result: {} }),
+          },
+        ],
+        topicUpdates: [
+          {
+            atMs: replacedTopicAtMs,
+            topic: "desktop.notifications",
+            revision: 2,
+            data: { available: true, dnd: false, popups: [replacedChat1, buildA, buildB, mailApp], history: [replacedChat1, buildA, buildB, mailApp] },
+          },
+          {
+            atMs: clearAllToastsAtMs,
+            topic: "desktop.notifications",
+            revision: 3,
+            data: { available: true, dnd: false, popups: [], history: [replacedChat1, buildA, buildB, mailApp] },
+          },
+        ],
+        commands: [
+          {
+            id: 26,
+            name: "notifications.dismiss-popups",
+            payload: { items: [{ id: 701, revision: 1 }, { id: 702, revision: 1 }] },
+            atMs: dismissReplyAtMs,
+            result: { data: { dismissed_ids: [702], skipped: 1 } },
+          },
+          {
+            id: 27,
+            name: "notifications.set-paused",
+            payload: { paused: true },
+            atMs: pauseTrueAtMs,
+          },
+          {
+            id: 28,
+            name: "notifications.set-paused",
+            payload: { paused: false },
+            atMs: pauseFalseAtMs,
+          },
+          {
+            id: 29,
+            name: "wallpaper.list",
+            payload: { offset: 0, limit: 16 },
+            atMs: wallpaperListAtMs,
+            result: { data: { items: [], total: 0 } },
+          },
+          {
+            id: 31,
+            name: "plugins.catalog.list",
+            payload: { query: "", offset: 0, limit: 30 },
+            atMs: catalogList1AtMs,
+            result: { data: { total: 2, offset: 0, limit: 30, items: [catalogItemWeather, catalogItemPomo] } },
+          },
+          {
+            id: 32,
+            name: "plugins.catalog.list",
+            payload: { query: "", offset: 0, limit: 30 },
+            atMs: catalogList2AtMs,
+            result: { data: { total: 2, offset: 0, limit: 30, items: [catalogItemWeather, catalogItemPomo] } },
+          },
+          {
+            socket: "host",
+            id: 3,
+            name: "plugins.catalog.fetch-blob",
+            payload: { token: "plugin-weather-icon" },
+            atMs: weatherIcon1AtMs,
+            result: { data: { mime: "image/png", byte_len: greenPng.length, bytes: greenPng } },
+          },
+          {
+            socket: "host",
+            id: 4,
+            name: "plugins.catalog.fetch-blob",
+            payload: { token: "plugin-weather-icon" },
+            atMs: weatherIcon2AtMs,
+            result: { data: { mime: "image/png", byte_len: greenPng.length, bytes: greenPng } },
+          },
+          {
+            socket: "host",
+            id: 5,
+            name: "plugins.catalog.fetch-blob",
+            payload: { token: "plugin-pomo-icon" },
+            atMs: pomoIconAtMs,
+            result: { data: { mime: "image/png", byte_len: bluePng.length, bytes: bluePng } },
+          },
+          {
+            id: 33,
+            name: "plugins.catalog.detail",
+            payload: { id: "acme/weather" },
+            atMs: catalogDetailAtMs,
+            result: {
+              data: {
+                id: "acme/weather",
+                preferred_source_id: "official",
+                name: "Weather Strip",
+                summary: "Menu bar weather forecast pill and daily outlook",
+                category: "widgets",
+                latest_version: "1.3.0",
+                installed: pendingWeatherPlugin,
+                installed_capabilities: {
+                  host: { commands: [], image_prefixes: [], unix_sockets: [], named_sockets: [], shell_surfaces: false, control_channel: false },
+                  bus: { topics_read: ["desktop.notifications"], topics_publish: [], commands_register: ["weather.refresh"], inhibitors: false },
+                },
+                offerings: [{
+                  source_id: "official",
+                  source_name: "Official Registry",
+                  priority: 100,
+                  source_identity: "https://plugins.z-shell.dev/catalog-v1.json",
+                  latest_version: "1.3.0",
+                  yanked: false,
+                  advisories: [],
+                  author: "Acme Org",
+                  summary: "Menu bar weather forecast pill and daily outlook",
+                  tags: ["bar", "weather"],
+                  homepage: "https://plugins.z-shell.dev/acme/weather",
+                  icon: { kind: "blob_handle", token: "plugin-weather-icon", mime: "image/png", byte_len: greenPng.length },
+                  screenshots: [{
+                    media: { kind: "blob_handle", token: "plugin-weather-shot", mime: "image/png", byte_len: shotPng.length },
+                    caption: "Bar widget preview",
+                  }],
+                  releases: [{
+                    version: "1.3.0",
+                    plugin_api: 1,
+                    shared_runtime_abi: "z-shell-plugin-v1",
+                    min_shell_version: null,
+                    content_digest: "sha256:ccc333ddd444",
+                  }],
+                }],
+              },
+            },
+          },
+          {
+            id: 34,
+            name: "plugins.audit",
+            payload: { id: "acme/weather" },
+            atMs: pluginAuditAtMs,
+            result: {
+              data: {
+                plugin: pendingWeatherPlugin,
+                diff: {
+                  host: { commands: [], image_prefixes: [], unix_sockets: [], named_sockets: [], shell_surfaces: false, control_channel: false },
+                  bus: { topics_read: ["desktop.notifications"], topics_publish: [], commands_register: ["weather.refresh"], inhibitors: false },
+                },
+                net_added_host_capabilities: [],
+                current_content_digest: "sha256:aaa111bbb222",
+                digest_matches: true,
+                requested_capabilities: {
+                  host: { commands: [], image_prefixes: [], unix_sockets: [], named_sockets: [], shell_surfaces: false, control_channel: false },
+                  bus: { topics_read: ["desktop.notifications"], topics_publish: [], commands_register: ["weather.refresh"], inhibitors: false },
+                },
+              },
+            },
+          },
+          {
+            socket: "host",
+            id: 6,
+            name: "plugins.catalog.fetch-blob",
+            payload: { token: "plugin-weather-icon" },
+            atMs: weatherIcon3AtMs,
+            result: { data: { mime: "image/png", byte_len: greenPng.length, bytes: greenPng } },
+          },
+          {
+            socket: "host",
+            id: 7,
+            name: "plugins.catalog.fetch-blob",
+            payload: { token: "plugin-weather-shot" },
+            atMs: detailShotAtMs,
+            result: { data: { mime: "image/png", byte_len: shotPng.length, bytes: shotPng } },
+          },
+        ],
+      }), null, 2));
+
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-store-12c",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(published.dist, fixture, scenario, out);
+      expectCleanPreview(result, 5, 0);
+
+      // 1. 12C identical app_name split cleanly by distinct app_key; 4th distinct app omitted
+      const toastsIdentity = readCapture(out, "notification-toasts", "toasts-12c-identity");
+      expect(treeNode(toastsIdentity.tree, "toast-card-701").boundsLogical).toBeDefined();
+      expect(treeNode(toastsIdentity.tree, "toast-group-toggle-701").boundsLogical).toBeDefined();
+      expect(treeNode(toastsIdentity.tree, "toast-deck-peek-701").boundsLogical).toBeDefined();
+      expect(treeNode(toastsIdentity.tree, "toast-card-703").boundsLogical).toBeDefined();
+      expect(treeNode(toastsIdentity.tree, "toast-card-704").boundsLogical).toBeDefined();
+      expect(toastsIdentity.tree.nodes.some(n => n.testId === "toast-card-705")).toBe(false);
+
+      // Atomic dismiss-popups preserves mid-dismiss replacement with bumped revision
+      const toastsReplaced = readCapture(out, "notification-toasts", "toasts-12c-replaced");
+      expect(treeNode(toastsReplaced.tree, "toast-card-701").boundsLogical).toBeDefined();
+      expect(toastsReplaced.tree.nodes.some(n => n.text === "Message 1 replaced mid-dismiss")).toBe(true);
+      expect(toastsReplaced.tree.nodes.some(n => n.testId === "toast-card-702")).toBe(false);
+
+      // 2. 22I Plugin Store (Discover + PNG blob icon + honest Pending apply banner)
+      const storeCap = readCapture(out, "settings-window", "plugins-store-22i");
+      expect(treeNode(storeCap.tree, "settings-plugins-root").boundsLogical).toBeDefined();
+      expect(treeNode(storeCap.tree, "plugins-runtime-banner").boundsLogical).toBeDefined();
+      expect(storeCap.tree.nodes.some(n => (n.text ?? "").includes("bun run build:shell"))).toBe(true);
+      expect(treeNode(storeCap.tree, "plugin-card-acme/weather").boundsLogical).toBeDefined();
+      expect(treeNode(storeCap.tree, "plugin-card-acme/pomodoro").boundsLogical).toBeDefined();
+
+      // 3. 22K Plugin Detail (real PNG icon + screenshot BlobHandle + approval dialog)
+      const detailCap = readCapture(out, "settings-window", "plugin-detail-22k");
+      expect(treeNode(detailCap.tree, "plugin-detail-view").boundsLogical).toBeDefined();
+      const detailIconBounds = treeNode(detailCap.tree, "plugin-detail-icon").boundsDevice!;
+      expect(pixel(detailCap.image, Math.round(detailIconBounds.x + detailIconBounds.width / 2), Math.round(detailIconBounds.y + detailIconBounds.height / 2)))
+        .toEqual([0x22, 0xc5, 0x5e, 255]);
+      const detailShotBounds = treeNode(detailCap.tree, "plugin-detail-screenshot-img").boundsDevice!;
+      expect(pixel(detailCap.image, Math.round(detailShotBounds.x + detailShotBounds.width / 2), Math.round(detailShotBounds.y + detailShotBounds.height / 2)))
+        .toEqual([0xea, 0xb3, 0x08, 255]);
+
+      const approveCap = readCapture(out, "settings-window", "plugin-approve-modal");
+      expect(treeNode(approveCap.tree, "plugin-approval-dialog").boundsLogical).toBeDefined();
     } finally {
       cleanup();
     }

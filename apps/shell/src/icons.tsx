@@ -293,6 +293,30 @@ export const SHELL_ICON_PATHS = {
     viewBox: "0 0 24 24",
     d: "M2 20h20v-4H2v4zm2-3h2v2H4v-2zM2 4v4h20V4H2zm4 3H4V5h2v2zm-4 7h20v-4H2v4zm2-3h2v2H4v-2z",
   },
+  extension: {
+    viewBox: "0 0 24 24",
+    d: "M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5a2.5 2.5 0 00-5 0V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5a2.5 2.5 0 000-5z",
+  },
+  warning: {
+    viewBox: "0 0 24 24",
+    d: "M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z",
+  },
+  verified: {
+    viewBox: "0 0 24 24",
+    d: "M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z",
+  },
+  shield: {
+    viewBox: "0 0 24 24",
+    d: "M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z",
+  },
+  download: {
+    viewBox: "0 0 24 24",
+    d: "M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z",
+  },
+  tune: {
+    viewBox: "0 0 24 24",
+    d: "M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z",
+  },
 } as const;
 
 export type ShellIconName = keyof typeof SHELL_ICON_PATHS;

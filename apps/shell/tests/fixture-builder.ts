@@ -34,7 +34,12 @@ const DEFAULT_FIXTURE_SCHEME = Object.freeze({
   on_error_container: "#FFDAD6",
 });
 
-const DEFAULT_FIXTURE_BAR_SETTINGS = {
+export const DEFAULT_FIXTURE_BAR_TRAY_SETTINGS = {
+  default_action: "show",
+  rules: {} as Readonly<Record<string, "show" | "collapse" | "hide">>,
+} as const;
+
+export const DEFAULT_FIXTURE_BAR_SETTINGS = {
   position: "top",
   gaps: 14,
   edge_overrides: { top: null, right: null, bottom: null, left: null },
@@ -84,10 +89,19 @@ export interface FixtureCommandExpectation {
 }
 
 export interface FixtureTopicUpdate {
-  readonly topic: ShellTopic;
+  readonly topic: ShellTopic | "plugins";
   readonly atMs: number;
   readonly revision: number;
   readonly sourceBaseline?: boolean;
+  readonly data: unknown;
+}
+
+export interface FixtureExtraTopicSubscription {
+  readonly topic: string;
+  readonly topicInstanceId?: number;
+  readonly id: number;
+  readonly atMs: number;
+  readonly revision?: number;
   readonly data: unknown;
 }
 
@@ -97,11 +111,14 @@ export interface ShellPreviewFixtureOptions {
   readonly xdgRuntimeDir?: string;
   readonly initialTopics?: Partial<Record<ShellTopic, unknown>>;
   readonly topicUpdates?: readonly FixtureTopicUpdate[];
+  readonly publicTopicSubscriptions?: readonly FixtureExtraTopicSubscription[];
   readonly commands?: readonly FixtureCommandExpectation[];
   readonly images?: {
     readonly files?: Readonly<Record<string, string>>;
     readonly blobs?: Readonly<Record<string, string>>;
   };
+  readonly extraPublicSends?: readonly string[];
+  readonly extraPublicEvents?: readonly Record<string, unknown>[];
   readonly extraHostSends?: readonly string[];
   readonly extraHostEvents?: readonly Record<string, unknown>[];
   readonly sessionLock?: { readonly outcome: "locked" | "finished" };
@@ -600,6 +617,15 @@ function message(atMs: number, value: unknown) {
   return { kind: "message", atMs, text: JSON.stringify(value) };
 }
 
+function topicSubscribeRequest(topic: string, id: number) {
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    id,
+    method: "topic.subscribe",
+    params: { topic },
+  });
+}
+
 function commandRequest(command: FixtureCommandExpectation, id: number) {
   return JSON.stringify({
     jsonrpc: "2.0",
@@ -670,14 +696,16 @@ export function buildShellPreviewFixture(options: ShellPreviewFixtureOptions = {
     });
   });
 
+  const extraSubs = options.publicTopicSubscriptions ?? [];
   const updateEvents = (options.topicUpdates ?? []).map(update => {
-    const topicIndex = SHELL_TOPIC_ORDER.indexOf(update.topic);
+    const knownIndex = SHELL_TOPIC_ORDER.indexOf(update.topic as ShellTopic);
+    const topicInstanceId = knownIndex >= 0 ? knownIndex + 1 : SHELL_TOPIC_ORDER.length + 1;
     return message(update.atMs, {
       jsonrpc: "2.0",
       method: "topic.update",
       params: {
         daemon_instance_id: DAEMON_INSTANCE_ID,
-        topic_instance_id: topicIndex + 1,
+        topic_instance_id: topicInstanceId,
         topic: update.topic,
         revision: update.revision,
         source_baseline: update.sourceBaseline ?? false,
@@ -685,6 +713,35 @@ export function buildShellPreviewFixture(options: ShellPreviewFixtureOptions = {
       },
     });
   });
+
+  const extraSubEvents = extraSubs.map(sub =>
+    message(sub.atMs, {
+      jsonrpc: "2.0",
+      id: sub.id,
+      result: {
+        daemon_instance_id: DAEMON_INSTANCE_ID,
+        topic_instance_id: sub.topicInstanceId ?? SHELL_TOPIC_ORDER.length + 1,
+        topic: sub.topic,
+        revision: sub.revision ?? 1,
+        data: sub.data,
+      },
+    }),
+  );
+
+  const orderedPublicExtraSends = [
+    ...extraSubs.map((sub, order) => ({
+      id: sub.id,
+      order,
+      line: topicSubscribeRequest(sub.topic, sub.id),
+    })),
+    ...publicCommands.map((command, index) => ({
+      id: publicCommandIds[index]!,
+      order: extraSubs.length + index,
+      line: commandRequest(command, publicCommandIds[index]!),
+    })),
+  ]
+    .sort((a, b) => a.id - b.id || a.order - b.order)
+    .map(entry => entry.line);
 
   const publicCommandEvents = publicCommands.map((command, index) =>
     commandReply(command, publicCommandIds[index]!));
@@ -701,13 +758,9 @@ export function buildShellPreviewFixture(options: ShellPreviewFixtureOptions = {
         method: "bus.hello",
         params: { protocol_version: 1, client_name: "z-shell-ui" },
       }),
-      ...SHELL_TOPIC_ORDER.map((topic, index) => JSON.stringify({
-        jsonrpc: "2.0",
-        id: index + 2,
-        method: "topic.subscribe",
-        params: { topic },
-      })),
-      ...publicCommands.map((command, index) => commandRequest(command, publicCommandIds[index]!)),
+      ...SHELL_TOPIC_ORDER.map((topic, index) => topicSubscribeRequest(topic, index + 2)),
+      ...orderedPublicExtraSends,
+      ...(options.extraPublicSends ?? []),
     ],
     events: [
       message(1, {
@@ -723,7 +776,7 @@ export function buildShellPreviewFixture(options: ShellPreviewFixtureOptions = {
         },
       }),
       ...snapshotEvents,
-      ...sortEvents([...updateEvents, ...publicCommandEvents]),
+      ...sortEvents([...extraSubEvents, ...updateEvents, ...publicCommandEvents, ...(options.extraPublicEvents ?? [])]),
     ],
   };
 
@@ -831,4 +884,50 @@ export function makeSolidPngBytes(width: number, height: number, r: number, g: n
 
 export function makeTinyPngBytes(r: number, g: number, b: number): number[] {
   return makeSolidPngBytes(1, 1, r, g, b);
+}
+
+export function makeSamplePluginsTopicSnapshot(overrides: Record<string, unknown> = {}) {
+  return {
+    desired_revision: 3,
+    applied_desired_revision: null,
+    runtime_overlay_supported: false,
+    offline_mode: false,
+    plugins: [
+      {
+        id: "acme/weather",
+        name: "Weather Strip",
+        version: "1.2.0",
+        plugin_api: 1,
+        shared_runtime_abi: "z-shell-plugin-v1",
+        source_identity: "https://plugins.z-shell.dev/catalog-v1.json",
+        catalog_source_id: "official",
+        content_digest: "sha256:aaa111bbb222",
+        enabled: true,
+        revoked: false,
+        migration_reapproval_required: false,
+        approved: true,
+        runtime_state: "unknown",
+      },
+    ],
+    sources: [
+      {
+        id: "official",
+        name: "Official Registry",
+        kind: "https_json",
+        url: "https://plugins.z-shell.dev/catalog-v1.json",
+        enabled: true,
+        priority: 100,
+        has_local_seed: false,
+        cached: true,
+      },
+    ],
+    counts: {
+      total: 1,
+      enabled: 1,
+      approved: 1,
+      pending_approval: 0,
+      revoked: 0,
+    },
+    ...overrides,
+  };
 }

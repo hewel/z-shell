@@ -1,9 +1,15 @@
 import { Button, For, createMemo, type NativeChild } from "@hewel/zgui";
-import { M3SegmentedControl } from "@z-shell/sdk/primitives";
+import { M3CardAction, M3InteractiveCard, M3SegmentedControl } from "@z-shell/sdk/primitives";
 import { ShellIcon } from "../../icons.tsx";
 import { PrecisionSliderRow } from "../../panels/QuickSettingsPanel.tsx";
 import { useShellStore } from "../../store.ts";
-import type { BarPosition, BarStyle } from "../../topics.ts";
+import {
+  DEFAULT_BAR_TRAY_SETTINGS,
+  isImeTrayItem,
+  partitionTrayItems,
+  type BarPosition,
+  type BarStyle,
+} from "../../topics.ts";
 import {
   SettingsSwitch,
   clipped,
@@ -29,10 +35,21 @@ const BAR_POSITIONS: readonly { readonly id: BarPosition; readonly label: string
 
 const GAP_PRESETS = [0, 8, 14, 20] as const;
 
-export function BarLayoutPane(): NativeChild {
-  const { settings, outputs, monitors, invokeHost } = useShellStore();
+export function BarLayoutPane(props?: { readonly onOpenTrayRules?: () => void }): NativeChild {
+  const { settings, outputs, monitors, tray, ime, invokeHost } = useShellStore();
   const bar = () => settings.data()?.bar;
-  const ime = () => settings.data()?.ime;
+  const imeSettings = () => settings.data()?.ime;
+  const traySettings = () => bar()?.tray ?? DEFAULT_BAR_TRAY_SETTINGS;
+  const showImeIndicator = () => Boolean(ime.data()?.available && ime.data()?.mode !== "disabled");
+  const trayCounts = createMemo(() => {
+    const items = (tray.data()?.items ?? []).filter(item => !(showImeIndicator() && isImeTrayItem(item)));
+    const partitioned = partitionTrayItems(items, traySettings());
+    return {
+      visible: partitioned.visible.length,
+      collapsed: partitioned.collapsed.length,
+      ruleCount: Object.keys(traySettings().rules).length,
+    };
+  });
   const style = (): BarStyle => bar()?.style ?? "floating";
   const position = (): BarPosition => bar()?.position ?? "top";
   const gaps = () => bar()?.gaps ?? 14;
@@ -139,11 +156,36 @@ export function BarLayoutPane(): NativeChild {
         </row>
         <row style={{ gap: "8px", width: "100%" }}>
           <SettingsSwitch testId="settings-ime-osd" label="IME switch OSD" detail="Show popup when active input method changes"
-            checked={ime()?.switch_osd !== false}
-            onToggle={() => patchIme({ switch_osd: !(ime()?.switch_osd !== false) })} />
+            checked={imeSettings()?.switch_osd !== false}
+            onToggle={() => patchIme({ switch_osd: !(imeSettings()?.switch_osd !== false) })} />
           <box ariaHidden style={{ ...grow }} />
         </row>
       </column>
+
+      <M3InteractiveCard
+        layout="row"
+        testId="settings-bar-tray-card"
+        actionTestId="settings-bar-tray-configure"
+        ariaLabel="Configure system tray rules"
+        onClick={() => props?.onOpenTrayRules?.()}
+        style={{
+          borderRadius: "16px", backgroundColor: containerHigh, padding: "12px 14px",
+          alignItems: "center", justifyContent: "space-between", gap: "10px",
+        }}
+      >
+        <column style={{ ...grow, gap: "2px" }}>
+          <text style={{ fontSize: "13px", fontWeight: 600 }}>System tray</text>
+          <text style={{ ...clipped, fontSize: "11px", color: muted }}>
+            {`Default: ${traySettings().default_action === "collapse" ? "Collapse" : "Show"} · ${trayCounts().collapsed} collapsed · ${trayCounts().ruleCount} ${trayCounts().ruleCount === 1 ? "rule" : "rules"}`}
+          </text>
+        </column>
+        <M3CardAction style={{ flexShrink: 0 }}>
+          <row style={{ alignItems: "center", gap: "4px", height: "28px", padding: "0 8px", borderRadius: "8px", backgroundColor: container }}>
+            <text style={{ fontSize: "12px", lineHeight: "16px", fontWeight: 500, color: onPrimaryContainer }}>Configure</text>
+            <ShellIcon name="chevronRight" size={14} color={muted} />
+          </row>
+        </M3CardAction>
+      </M3InteractiveCard>
 
       <row style={{
         alignItems: "center", justifyContent: "space-between", gap: "10px",

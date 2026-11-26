@@ -58,12 +58,12 @@
     },
     {
       "id": "09e-bar-popups",
-      "name": "09E · Bar Popups (Tray, IME & Kimpanel)",
+      "name": "09E · Bar Popups (Tray Overflow, IME & Kimpanel)",
       "theme": "dark",
       "pageId": "p-1-0",
       "nodeId": "D3X-0",
       "refFile": "09e-bar-popups.jpg",
-      "previewRelPath": "z-shell-preview-design-new-states/out/captures/surfaces/kimpanel-popup/kimpanel-09e.png"
+      "previewRelPath": "z-shell-preview-design-tray-keepawake/out/captures/surfaces/tray-overflow/tray-overflow-09e.png"
     },
     {
       "id": "10-dock",
@@ -84,22 +84,13 @@
       "previewRelPath": null
     },
     {
-      "id": "12b-notif-media",
-      "name": "12B · Notification Media & Avatar Layouts (Toast + History)",
-      "theme": "dark",
-      "pageId": "p-1-0",
-      "nodeId": "DAA-0",
-      "refFile": "12b-notif-media.jpg",
-      "previewRelPath": "z-shell-preview-design-new-states/out/captures/surfaces/panel-calendar/cal-notif-media-12b.png"
-    },
-    {
       "id": "12c-toast-stack",
-      "name": "12C · Top-Right Notification Stack (Collapsed vs Expanded)",
+      "name": "12C · Top-Right Notification Stack (3-App Grouped Stream)",
       "theme": "dark",
       "pageId": "p-1-0",
       "nodeId": "DDV-0",
       "refFile": "12c-toast-stack.jpg",
-      "previewRelPath": "z-shell-preview-design-toast-stack/out/captures/surfaces/notification-toasts/toast-stack-expanded.png"
+      "previewRelPath": "z-shell-preview-design-toast-stack/out/captures/surfaces/notification-toasts/toast-stack-collapsed.png"
     },
     {
       "id": "13-cal",
@@ -163,6 +154,42 @@
       "nodeId": "CZF-0",
       "refFile": "22a-wallpaper-library.jpg",
       "previewRelPath": "z-shell-preview-design-new-states/out/captures/surfaces/settings-window/wallpaper-library.png"
+    },
+    {
+      "id": "22b-2-tray-rules",
+      "name": "22B-2 · Settings — System Tray Rules",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "",
+      "refFile": "22b-2-tray-rules.jpg",
+      "previewRelPath": "z-shell-preview-design-tray-keepawake/out/captures/surfaces/settings-window/tray-rules-22b2.png"
+    },
+    {
+      "id": "22c-b-keep-awake",
+      "name": "22C / 22C-B · Settings — Keep Awake Presets",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "",
+      "refFile": "22c-b-keep-awake.jpg",
+      "previewRelPath": "z-shell-preview-design-tray-keepawake/out/captures/surfaces/settings-window/idle-keep-awake-22cb.png"
+    },
+    {
+      "id": "22i-plugin-store",
+      "name": "22I · Settings — Plugin Store",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "",
+      "refFile": "22i-plugin-store.jpg",
+      "previewRelPath": "z-shell-preview-design-store-12c/out/captures/surfaces/settings-window/plugins-store-22i.png"
+    },
+    {
+      "id": "22k-plugin-detail",
+      "name": "22K · Settings — Plugin Detail & Trust Review",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "",
+      "refFile": "22k-plugin-detail.jpg",
+      "previewRelPath": "z-shell-preview-design-store-12c/out/captures/surfaces/settings-window/plugin-detail-22k.png"
     },
     {
       "id": "22j-sysmon-window",

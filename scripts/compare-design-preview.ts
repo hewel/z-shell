@@ -309,16 +309,40 @@ const INTERACTIVE_STATE_SPECS: readonly StateCaptureSpec[] = [
     previewRelPath: "z-shell-preview-design-new-states/out/captures/surfaces/launcher-overlay/launcher-empty.png",
   },
   {
-    id: "toast-notif-media-12b",
-    name: "12B · Toast Avatar + App Badge",
-    description: "40×40 square avatar with 18×18 circular XDG badge cutout",
-    previewRelPath: "z-shell-preview-design-new-states/out/captures/surfaces/notification-toasts/toast-notif-media-12b.png",
+    id: "toast-stack-collapsed-12c",
+    name: "12C · Live Notification Stream (3-App Cap & +N Peek)",
+    description: "Max 3 distinct app groups live; stacked app cards + tucked deck + in-place +N expand",
+    previewRelPath: "z-shell-preview-design-toast-stack/out/captures/surfaces/notification-toasts/toast-stack-collapsed.png",
   },
   {
-    id: "toast-stack-collapsed-12c",
-    name: "12C · Toast Stack Collapsed (Layered Deck)",
-    description: "Main card + 2 tucked deck edges + M3InteractiveCard +3 more footer",
-    previewRelPath: "z-shell-preview-design-toast-stack/out/captures/surfaces/notification-toasts/toast-stack-collapsed.png",
+    id: "tray-overflow-09e",
+    name: "09E · Tray Overflow Popover",
+    description: "248px tray overflow card with 3-col 54px tiles and Tray Rules gear action",
+    previewRelPath: "z-shell-preview-design-tray-keepawake/out/captures/surfaces/tray-overflow/tray-overflow-09e.png",
+  },
+  {
+    id: "tray-rules-22b2",
+    name: "22B-2 · System Tray Rules",
+    description: "Default Show/Collapse segmented control, per-app rules, and session-only transient badges",
+    previewRelPath: "z-shell-preview-design-tray-keepawake/out/captures/surfaces/settings-window/tray-rules-22b2.png",
+  },
+  {
+    id: "idle-keep-awake-22cb",
+    name: "22C / 22C-B · Keep Awake Presets",
+    description: "Built-in sleep-only Keep awake card with 30m/1h/2h/∞ presets & countdown",
+    previewRelPath: "z-shell-preview-design-tray-keepawake/out/captures/surfaces/settings-window/idle-keep-awake-22cb.png",
+  },
+  {
+    id: "plugins-store-22i",
+    name: "22I · Plugin Store",
+    description: "Installed & Discover tabs with real PNG icons and honest Pending apply banner",
+    previewRelPath: "z-shell-preview-design-store-12c/out/captures/surfaces/settings-window/plugins-store-22i.png",
+  },
+  {
+    id: "plugin-detail-22k",
+    name: "22K · Plugin Detail & Trust Audit",
+    description: "Catalog detail view with screenshots, capability diff, and Review & approve modal",
+    previewRelPath: "z-shell-preview-design-store-12c/out/captures/surfaces/settings-window/plugin-detail-22k.png",
   },
 ];
 

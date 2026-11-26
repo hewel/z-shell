@@ -1,5 +1,5 @@
 import { For, Show, createMemo, type NativeChild } from "@hewel/zgui";
-import { M3Button, M3IconButton } from "@z-shell/sdk/primitives";
+import { M3IconButton } from "@z-shell/sdk/primitives";
 import { AreaLineChart } from "../charts/TelemetryCharts.tsx";
 import { ShellIcon } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
@@ -20,7 +20,6 @@ import {
 
 const primary = "var(--color-primary)";
 const primaryContainer = "var(--color-primary-container)";
-const onPrimaryContainer = "var(--color-on-primary-container)";
 const onSurface = "var(--color-on-surface)";
 const muted = "var(--color-on-surface-variant)";
 const containerHigh = "var(--color-surface-container-high)";
@@ -41,7 +40,7 @@ interface HardwareTileData {
  * hiding unverified cadence/history elements on legacy daemon snapshots.
  */
 export function SystemMonitorPanel(): NativeChild {
-  const { telemetry, power, openSystemMonitorWindow } = useShellStore();
+  const { telemetry, openSystemMonitorWindow } = useShellStore();
   const snap = () => telemetry.data();
 
   const cpuPct = () => snap()?.cpu_usage_percent ?? null;
@@ -170,16 +169,6 @@ export function SystemMonitorPanel(): NativeChild {
       rows.push(tiles.slice(i, i + 2));
     }
     return rows;
-  });
-
-  const batteryText = createMemo(() => {
-    const bat = power.data()?.battery;
-    if (!bat || bat.percentage === null || bat.percentage === undefined) return null;
-    const pct = `${Math.round(bat.percentage)}%`;
-    if (bat.energy_rate_watts !== null && bat.energy_rate_watts !== undefined && Number.isFinite(bat.energy_rate_watts)) {
-      return `Battery ${pct} · ${bat.energy_rate_watts.toFixed(1)} W`;
-    }
-    return `Battery ${pct}`;
   });
 
   return (
@@ -385,28 +374,6 @@ export function SystemMonitorPanel(): NativeChild {
             </For>
           </column>
         </Show>
-
-        {/* Footer */}
-        <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", width: "100%", paddingTop: "2px" }}>
-          <Show when={batteryText()} fallback={<box style={{ flexGrow: 1 }} />}>
-            {text => (
-              <text testId="sysmon-popover-battery" data-tabular="true" style={{
-                ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: "15px", color: muted, fontVariantNumeric: "tabular-nums",
-              }}>
-                {text()}
-              </text>
-            )}
-          </Show>
-          <M3Button
-            testId="sysmon-open-detailed"
-            variant="accent-tonal"
-            size="sm"
-            onClick={() => openSystemMonitorWindow("overview")}
-          >
-            <text>Open detailed monitor</text>
-            <ShellIcon name="openInNew" size={14} color={onPrimaryContainer} />
-          </M3Button>
-        </row>
       </column>
     </scroll>
   );

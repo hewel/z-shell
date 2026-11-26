@@ -774,7 +774,12 @@ describe("apps/shell preview", () => {
             atMs: 40,
           },
           { id: 27, name: "notifications.set-paused", payload: { paused: true }, atMs: 40 },
-          { id: 28, name: "notifications.dismiss", payload: { id: 1 }, atMs: 40 },
+          {
+            id: 28,
+            name: "notifications.dismiss-popups",
+            payload: { items: [{ id: 1, revision: 1 }, { id: 2, revision: 1 }] },
+            atMs: 40,
+          },
           { id: 29, name: "ime.select-candidate", payload: { index: 1 }, atMs: 2070 },
           { id: 30, name: "ime.page-down", payload: {}, atMs: 2070 },
         ],
@@ -873,8 +878,10 @@ describe("apps/shell preview", () => {
       expect(pixel(toasts.image, 0, 0)).toEqual([0, 0, 0, 0]);
       expect(treeNode(toasts.tree, "toast-card-1").boundsDevice).toBeDefined();
       expect(treeNode(toasts.tree, "toast-action-1-open").boundsDevice).toBeDefined();
-      expect(treeNode(toasts.tree, "toast-more-footer").boundsDevice).toBeDefined();
-      expect(toasts.tree.nodes.some(node => node.text === "+1 more")).toBe(true);
+      expect(treeNode(toasts.tree, "toast-group-toggle-1").boundsDevice).toBeDefined();
+      expect(treeNode(toasts.tree, "toast-deck-peek-1").boundsDevice).toBeDefined();
+      expect(toasts.tree.nodes.some(node => node.text === "+1")).toBe(true);
+      expect(toasts.tree.nodes.some(node => node.testId === "toast-more-footer")).toBe(false);
       expect(treeNode(osd.tree, "osd-value").text).toBe("80%");
 
       const idleScrim = pixel(idle.image, 0, 0);
@@ -1465,7 +1472,7 @@ describe("apps/shell preview", () => {
       const firstSessionAtMs = timeline.after(10);
       timeline.advance("open-overlays", 450);
       const pauseAtMs = timeline.after(20);
-      click("expand-toasts", toast, "toast-expand-toggle");
+      click("expand-toasts", toast, "toast-group-toggle-2");
       timeline.advance("expanded", 250);
       capture(toast, "initial");
       capture(osd, "initial");
@@ -1539,9 +1546,9 @@ describe("apps/shell preview", () => {
         expect([frame.image.width, frame.image.height], `${surface} ${stage}`).toEqual([width, height]);
         return frame.tree;
       };
-      const initialToasts = checkCapture(toast, "initial", 396, 720);
+      const initialToasts = checkCapture(toast, "initial", 396, 760);
       expect(treeNode(initialToasts, "toast-expanded-scroll").boundsDevice).toBeDefined();
-      const pinnedToasts = checkCapture(toast, "pinned", 396, 720);
+      const pinnedToasts = checkCapture(toast, "pinned", 396, 760);
       for (const id of ["toast-expanded-scroll", "toast-card-1", "toast-card-3"]) {
         expect(treeNode(pinnedToasts, id).boundsDevice).toBeDefined();
       }

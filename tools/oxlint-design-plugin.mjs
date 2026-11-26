@@ -1073,7 +1073,7 @@ const rules = {
       const filename = (context.filename ?? "").replace(/\\/g, "/");
       const inPluginPackage = /(?:^|\/)plugins\/[^/]+\/src\//.test(filename);
       if (inPluginPackage) return {};
-      const PLUGIN_ID_RE = /^(?:z-shell\/)?(?:nosleep|ai-usage|theme-bridges|niri-overview)$/;
+      const PLUGIN_ID_RE = /^(?:z-shell\/)?(?:ai-usage|theme-bridges|niri-overview)$/;
       return {
         Literal(node) {
           if (typeof node.value !== "string") return;

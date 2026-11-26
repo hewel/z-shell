@@ -1,10 +1,17 @@
 import { Button, For, Image, LayerSurface, Show, createEffect, createMemo, createSignal, mountStylesheet, onCleanup, type Accessor, type NativeChild, type NativeNode } from "@hewel/zgui";
-import { M3CardAction, M3InteractiveCard } from "@z-shell/sdk/primitives";
+import { M3CardAction, M3Collapsible, M3InteractiveCard } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
-import { createEnterProgress, createOpacityEnter, createPresence, createRetainedPresence, useMotionScheme, type M3Spring } from "../motion.ts";
+import { createEnterProgress, createOpacityEnter, createRetainedPresence, useMotionScheme, type M3Spring } from "../motion.ts";
 import { usePinnedOutput, useShellStore } from "../store.ts";
-import { formatNotificationBody, resolveMonitorLogicalSize, resolveNotificationMediaLayout, splitNotificationActions, type NotificationItem } from "../topics.ts";
+import {
+  formatNotificationBody,
+  groupNotificationPopups,
+  resolveMonitorLogicalSize,
+  resolveNotificationMediaLayout,
+  splitNotificationActions,
+  type NotificationItem,
+} from "../topics.ts";
 
 const primary = "var(--color-primary)";
 const primaryContainer = "var(--color-primary-container)";
@@ -40,7 +47,19 @@ function trackedRef(track: TrackNode): (node: NativeNode) => void {
   };
 }
 
-function ToastCard({ toast, track, trackBlur, stackSpatial, stackOpacity, promoted, staggerIndex = 0 }: {
+function ToastCard({
+  toast,
+  track,
+  trackBlur,
+  stackSpatial,
+  stackOpacity,
+  promoted,
+  staggerIndex = 0,
+  groupCount = 1,
+  groupExpanded = false,
+  onToggleGroup,
+  onDismissGroup,
+}: {
   toast: Accessor<NotificationItem>;
   track: TrackNode;
   trackBlur: TrackNode;
@@ -48,8 +67,14 @@ function ToastCard({ toast, track, trackBlur, stackSpatial, stackOpacity, promot
   stackOpacity: M3Spring;
   promoted: boolean;
   staggerIndex?: number;
+  groupCount?: Accessor<number> | number;
+  groupExpanded?: Accessor<boolean> | boolean;
+  onToggleGroup?: () => void;
+  onDismissGroup?: () => void;
 }): NativeChild {
   const { hostClient, invokePublic } = useShellStore();
+  const countValue = () => (typeof groupCount === "function" ? groupCount() : groupCount);
+  const expandedValue = () => (typeof groupExpanded === "function" ? groupExpanded() : groupExpanded);
   const mediaLayout = createMemo(() => resolveNotificationMediaLayout(toast()));
   const leading = useDaemonMedia(hostClient, () => mediaLayout().leadingMedia, notificationMedia);
   const badge = useDaemonMedia(hostClient, () => mediaLayout().appBadge, notificationMedia);
@@ -141,10 +166,45 @@ function ToastCard({ toast, track, trackBlur, stackSpatial, stackOpacity, promot
     >
       <row style={{ gap: "10px", alignItems: "flex-start" }}>
         {bodyContent()}
+        <Show when={countValue() > 1 && onToggleGroup !== undefined}>
+          <M3CardAction style={{ flexShrink: 0 }}>
+            <Button
+              testId={`toast-group-toggle-${toast().id}`}
+              ariaLabel={expandedValue()
+                ? `Collapse notifications from ${toast().app_name || "app"}`
+                : `Expand ${countValue() - 1} more notifications from ${toast().app_name || "app"}`}
+              expanded={expandedValue()}
+              style={{
+                display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: "2px",
+                height: "28px", minHeight: "28px", padding: "0 8px",
+                borderRadius: "8px",
+                backgroundColor: primaryContainer, color: onPrimaryContainer,
+              }}
+              onClick={() => onToggleGroup?.()}
+            >
+              <text
+                data-tabular="true"
+                style={{ fontSize: "11px", lineHeight: "14px", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}
+              >
+                {expandedValue() ? `${countValue()}` : `+${countValue() - 1}`}
+              </text>
+              <ShellIcon name={expandedValue() ? "expandLess" : "expandMore"} size={14} color={onPrimaryContainer} />
+            </Button>
+          </M3CardAction>
+        </Show>
         <M3CardAction style={{ flexShrink: 0 }}>
-          <Button ariaLabel="Dismiss notification" testId={`toast-dismiss-${toast().id}`}
+          <Button
+            ariaLabel={!expandedValue() && countValue() > 1 ? `Dismiss all notifications from ${toast().app_name || "app"}` : "Dismiss notification"}
+            testId={`toast-dismiss-${toast().id}`}
             style={{ ...pill, borderRadius: "999px", "--zgui-corner-shape": "none", padding: "0", width: "28px", minHeight: "28px", backgroundColor: containerHigh, color: muted }}
-            onClick={() => { void invokePublic("notifications.dismiss", { id: toast().id }); }}>
+            onClick={() => {
+              if (!expandedValue() && countValue() > 1 && onDismissGroup) {
+                onDismissGroup();
+              } else {
+                void invokePublic("notifications.dismiss", { id: toast().id });
+              }
+            }}
+          >
             <ShellIcon name="close" size={14} color={muted} />
           </Button>
         </M3CardAction>
@@ -180,7 +240,8 @@ function propsOr(cond: boolean, a: number, b: number): number {
   return cond ? a : b;
 }
 
-function ToastDeckPeek({ count, track, onExpand }: {
+function ToastDeckPeek({ headId, count, track, onExpand }: {
+  headId: number;
   count: number;
   track: TrackNode;
   onExpand: () => void;
@@ -209,119 +270,15 @@ function ToastDeckPeek({ count, track, onExpand }: {
   return (
     <column
       ref={inputRef}
-      testId="toast-deck-peek"
+      testId={`toast-deck-peek-${headId}`}
       onClick={onExpand}
       style={{ width: "100%", alignItems: "center", gap: "0px" }}
     >
-      <box ariaHidden testId="toast-deck-layer-1" class="toast-deck-layer-1" />
+      <box ariaHidden testId={`toast-deck-layer-1-${headId}`} class="toast-deck-layer-1" />
       <Show when={count >= 3}>
-        <box ariaHidden testId="toast-deck-layer-2" class="toast-deck-layer-2" />
+        <box ariaHidden testId={`toast-deck-layer-2-${headId}`} class="toast-deck-layer-2" />
       </Show>
     </column>
-  );
-}
-
-function ToastFooter({ count, next, track, trackBlur, inert, progress, opacity, stackOpacity, onExpand }: {
-  count: number;
-  next: NotificationItem;
-  track: TrackNode;
-  trackBlur: TrackNode;
-  inert: boolean;
-  progress: M3Spring;
-  opacity: M3Spring;
-  stackOpacity: M3Spring;
-  onExpand: () => void;
-}): NativeChild {
-  const { invokePublic } = useShellStore();
-  const scheme = useMotionScheme();
-  const inputRef = trackedRef(track);
-  const blurRef = trackedRef(trackBlur);
-  const nextLabel = () => (next.app_name ? `${next.app_name} · ${next.summary}` : next.summary);
-  return (
-    <M3InteractiveCard
-      layout="row"
-      ref={node => { inputRef(node); blurRef(node); }}
-      testId="toast-more-footer"
-      actionTestId="toast-expand-toggle"
-      ariaLabel={`Show ${count - 1} more notifications`}
-      inert={inert}
-      onClick={onExpand}
-      style={{
-        borderRadius: "16px", backgroundColor: container, border: outline, boxShadow: "var(--shadow-level-2)",
-        padding: "6px 10px", gap: "8px", alignItems: "center",
-        opacity: Math.max(0, Math.min(1, opacity() * stackOpacity())),
-        transform: scheme() === "reduced" ? "none" : `translateY(${((1 - progress()) * 10).toFixed(2)}px)`,
-      }}
-    >
-      <row style={{
-        alignItems: "center", justifyContent: "center", gap: "3px", flexShrink: 0,
-        height: "24px", padding: "0 8px", borderRadius: "999px", "--zgui-corner-shape": "none",
-        backgroundColor: primaryContainer, color: onPrimaryContainer,
-      }}>
-        <text style={{ fontSize: "11px", lineHeight: "14px", fontWeight: 600 }}>+{count - 1} more</text>
-        <ShellIcon name="expandMore" size={14} color={onPrimaryContainer} />
-      </row>
-      <text style={{ ...clipped, flexGrow: 1, color: muted, fontSize: "12px" }}>{nextLabel()}</text>
-      <M3CardAction style={{ flexShrink: 0 }}>
-        <Button testId="toast-clear-all" style={{ ...pill, minHeight: "24px", padding: "2px 8px", color: primary, fontSize: "11px" }}
-          onClick={() => { void invokePublic("notifications.clear", {}); }}>
-          <text>Clear all</text>
-        </Button>
-      </M3CardAction>
-    </M3InteractiveCard>
-  );
-}
-
-function ToastExpandedHeader({ count, track, trackBlur, stackOpacity, onCollapse }: {
-  count: Accessor<number>;
-  track: TrackNode;
-  trackBlur: TrackNode;
-  stackOpacity: M3Spring;
-  onCollapse: () => void;
-}): NativeChild {
-  const { invokePublic } = useShellStore();
-  const inputRef = trackedRef(track);
-  const blurRef = trackedRef(trackBlur);
-  return (
-    <row
-      ref={node => { inputRef(node); blurRef(node); }}
-      testId="toast-expanded-header"
-      style={{
-        borderRadius: "16px", backgroundColor: container, border: outline, boxShadow: "var(--shadow-level-2)",
-        padding: "6px 10px", gap: "8px", alignItems: "center",
-        opacity: Math.max(0, Math.min(1, stackOpacity())),
-      }}
-    >
-      <Button
-        testId="toast-collapse-toggle"
-        ariaLabel="Show less notifications"
-        onClick={onCollapse}
-        style={{
-          display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: "4px",
-          flexShrink: 0, height: "26px", padding: "0 10px", borderRadius: "10px",
-          backgroundColor: primaryContainer, color: onPrimaryContainer,
-        }}
-      >
-        <ShellIcon name="expandLess" size={14} color={onPrimaryContainer} />
-        <text style={{ fontSize: "11px", lineHeight: "14px", fontWeight: 600 }}>Show less</text>
-      </Button>
-      <text
-        data-tabular="true"
-        style={{
-          ...clipped, flexGrow: 1, color: muted, fontFamily: "var(--font-mono)",
-          fontSize: "11px", fontVariantNumeric: "tabular-nums",
-        }}
-      >
-        {`${count()} active`}
-      </text>
-      <Button
-        testId="toast-clear-all"
-        style={{ ...pill, minHeight: "24px", padding: "2px 8px", color: primary, fontSize: "11px" }}
-        onClick={() => { void invokePublic("notifications.clear", {}); }}
-      >
-        <text>Clear all</text>
-      </Button>
-    </row>
   );
 }
 
@@ -333,13 +290,14 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
   spatial: M3Spring;
   opacity: M3Spring;
 }): NativeChild {
-  const { settings, invokePublic } = useShellStore();
-  const scheme = useMotionScheme();
+  const { settings, publicClient, invokePublic } = useShellStore();
   const [trackedNodes, setTrackedNodes] = createSignal<readonly NativeNode[]>([]);
   const [blurNodes, setBlurNodes] = createSignal<readonly NativeNode[]>([]);
   const [promoted, setPromoted] = createSignal(false);
-  const [expanded, setExpanded] = createSignal(false);
+  const [expandedKeys, setExpandedKeys] = createSignal<readonly string[]>([]);
   const [hovered, setHovered] = createSignal(false);
+  const grouped = createMemo(() => groupNotificationPopups(popups(), 3));
+
   let lastHeadId: number | undefined;
   createEffect(() => popups()[0]?.id, headId => {
     if (lastHeadId !== undefined && headId !== undefined && headId !== lastHeadId) {
@@ -347,13 +305,17 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
     }
     lastHeadId = headId;
   });
-  createEffect(() => popups().length, len => {
-    if (len <= 1 && expanded()) setExpanded(false);
+
+  createEffect(() => grouped().groups.filter(group => group.items.length > 1).map(group => group.appKey), multiKeys => {
+    setExpandedKeys(prev => {
+      const next = prev.filter(key => multiKeys.includes(key));
+      return next.length === prev.length ? prev : next;
+    });
   });
 
-  // Pause daemon 5s auto-expiry whenever the user is hovering or viewing the expanded stack.
+  // Pause daemon 5s auto-expiry whenever the user is hovering or viewing any expanded app group.
   let lastPaused = false;
-  createEffect(() => visible() && (expanded() || hovered()), paused => {
+  createEffect(() => visible() && (expandedKeys().length > 0 || hovered()), paused => {
     if (paused === lastPaused) return;
     lastPaused = paused;
     void invokePublic("notifications.set-paused", { paused });
@@ -368,20 +330,33 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
     });
   });
 
-  const [retainedFooter, setRetainedFooter] = createSignal<{ readonly count: number; readonly next: NotificationItem } | null>(null);
-  createEffect(() => {
-    const list = popups();
-    return list.length > 1 && list[1] ? { count: list.length, next: list[1] } : null;
-  }, entry => {
-    if (entry) setRetainedFooter(entry);
-  });
-  const isExpandedStack = () => expanded() && popups().length > 1;
-  const footerPresence = createPresence(() => popups().length > 1 && !expanded(), {
-    scheme,
-    enterRole: "fastSpatial",
-    enterOpacityRole: "fastEffects",
-    exitRole: "fastEffects",
-  });
+  const toggleGroup = (appKey: string) => {
+    setExpandedKeys(prev => (prev.includes(appKey) ? prev.filter(key => key !== appKey) : [...prev, appKey]));
+  };
+
+  const dismissGroup = async (items: readonly NotificationItem[]) => {
+    const client = publicClient();
+    if (client) {
+      try {
+        for (let offset = 0; offset < items.length; offset += 64) {
+          const slice = items.slice(offset, offset + 64).map(item => ({ id: item.id, revision: item.revision }));
+          await client.invokeCommand("notifications.dismiss-popups", [], { items: slice });
+        }
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+        const isUnknownCommand =
+          (typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === -32601)
+          || message.includes("unknown command")
+          || message.includes("method not found");
+        if (!isUnknownCommand) return;
+      }
+    }
+    for (const item of items) {
+      void invokePublic("notifications.dismiss", { id: item.id });
+    }
+  };
+
   let disposed = false;
   onCleanup(() => { disposed = true; });
   const track: TrackNode = node => {
@@ -405,12 +380,13 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
     if (bar?.position && bar.position !== "top") return 14;
     return bar?.style === "docked" ? 48 : 58;
   });
+  const anyExpanded = () => expandedKeys().length > 0;
   const surfaceHeight = createMemo(() =>
-    isExpandedStack()
-      ? Math.min(720, Math.max(456, Math.round(monitorHeight() - topMargin() - 20)))
+    anyExpanded() || grouped().groups.length > 1
+      ? Math.min(760, Math.max(456, Math.round(monitorHeight() - topMargin() - 20)))
       : 456,
   );
-  const expandedScrollMaxHeight = createMemo(() => Math.max(240, surfaceHeight() - 78));
+  const scrollMaxHeight = createMemo(() => Math.max(240, surfaceHeight() - 12));
 
   return (
     <LayerSurface name="notification-toasts" output={output} layer="overlay" anchor={["top", "right"]}
@@ -420,70 +396,66 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
         inert={!visible()}
         onPointerEnter={() => setHovered(true)}
         onPointerLeave={() => setHovered(false)}
-        style={{ width: "100%", height: "100%", padding: isExpandedStack() ? "12px 0 0 0" : "12px 14px 28px 22px", gap: "8px" }}
+        style={{ width: "100%", height: "100%", padding: "0px" }}
       >
-        <Show
-          when={isExpandedStack()}
-          fallback={
-            <>
-              <column style={{ width: "100%", gap: "0px" }}>
-                <Show when={popups()[0]?.id} keyed>
-                  {_id => <ToastCard toast={() => popups()[0]!} track={track} trackBlur={trackBlur} stackSpatial={spatial} stackOpacity={opacity} promoted={promoted()} />}
-                </Show>
-                <Show when={popups().length > 1}>
-                  <ToastDeckPeek count={popups().length} track={track} onExpand={() => setExpanded(true)} />
-                </Show>
-              </column>
-              <Show when={footerPresence.mounted() && retainedFooter()}>
-                {footer => (
-                  <ToastFooter
-                    count={footer().count}
-                    next={footer().next}
-                    track={track}
-                    trackBlur={trackBlur}
-                    inert={popups().length <= 1 || expanded()}
-                    progress={footerPresence.progress}
-                    opacity={footerPresence.opacity}
-                    stackOpacity={opacity}
-                    onExpand={() => setExpanded(true)}
-                  />
-                )}
-              </Show>
-            </>
-          }
+        <scroll
+          testId="toast-expanded-scroll"
+          role="scrollView"
+          ariaLabel="Active notifications"
+          style={{ width: "100%", maxHeight: `${scrollMaxHeight()}px`, overflowY: "auto" }}
         >
-          <box style={{ width: "100%", padding: "0 14px 0 22px", flexShrink: 0 }}>
-            <ToastExpandedHeader
-              count={() => popups().length}
-              track={track}
-              trackBlur={trackBlur}
-              stackOpacity={opacity}
-              onCollapse={() => setExpanded(false)}
-            />
-          </box>
-          <scroll
-            testId="toast-expanded-scroll"
-            role="scrollView"
-            ariaLabel="Active notifications"
-            style={{ width: "100%", maxHeight: `${expandedScrollMaxHeight()}px`, overflowY: "auto" }}
-          >
-            <column style={{ width: "100%", padding: "2px 14px 28px 22px", gap: "8px" }}>
-              <For each={popups()} keyed={item => item.id}>
-                {(item, index) => (
-                  <ToastCard
-                    toast={item}
-                    track={track}
-                    trackBlur={trackBlur}
-                    stackSpatial={spatial}
-                    stackOpacity={opacity}
-                    promoted={false}
-                    staggerIndex={index()}
-                  />
-                )}
-              </For>
-            </column>
-          </scroll>
-        </Show>
+          <column style={{ width: "100%", padding: "12px 14px 28px 22px", gap: "8px" }}>
+            <For each={grouped().groups} keyed={group => group.appKey}>
+              {(group, groupIndex) => {
+                const head = () => group().items[0]!;
+                const rest = () => group().items.slice(1);
+                const isMulti = () => group().items.length > 1;
+                const isExpanded = () => isMulti() && expandedKeys().includes(group().appKey);
+                return (
+                  <column testId={`toast-group-${head().id}`} style={{ width: "100%", gap: "0px" }}>
+                    <ToastCard
+                      toast={head}
+                      track={track}
+                      trackBlur={trackBlur}
+                      stackSpatial={spatial}
+                      stackOpacity={opacity}
+                      promoted={groupIndex() === 0 && promoted()}
+                      groupCount={() => group().items.length}
+                      groupExpanded={isExpanded}
+                      onToggleGroup={() => toggleGroup(group().appKey)}
+                      onDismissGroup={() => { void dismissGroup(group().items); }}
+                    />
+                    <Show when={isMulti() && !isExpanded()}>
+                      <ToastDeckPeek
+                        headId={head().id}
+                        count={group().items.length}
+                        track={track}
+                        onExpand={() => toggleGroup(group().appKey)}
+                      />
+                    </Show>
+                    <M3Collapsible open={isExpanded()} estimatedHeight={Math.max(84, rest().length * 96)}>
+                      <column style={{ width: "100%", gap: "8px", paddingTop: "8px" }}>
+                        <For each={rest()} keyed={item => item.id}>
+                          {(item, itemIndex) => (
+                            <ToastCard
+                              toast={item}
+                              track={track}
+                              trackBlur={trackBlur}
+                              stackSpatial={spatial}
+                              stackOpacity={opacity}
+                              promoted={false}
+                              staggerIndex={itemIndex() + 1}
+                            />
+                          )}
+                        </For>
+                      </column>
+                    </M3Collapsible>
+                  </column>
+                );
+              }}
+            </For>
+          </column>
+        </scroll>
       </column>
     </LayerSurface>
   );

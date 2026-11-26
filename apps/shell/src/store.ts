@@ -82,6 +82,14 @@ export type TrayMenuTarget = {
   readonly monitorId?: string;
 };
 
+export type TrayOverflowTarget = {
+  readonly parentSurface: string;
+  readonly anchorRect: NativeWindowRect;
+  readonly monitorId?: string;
+};
+
+export type SettingsSubpage = "wallpaper-library" | "tray-rules" | "plugin-detail";
+
 export type ImeMenuTarget = {
   readonly parentSurface: string;
   readonly anchorRect: NativeWindowRect;
@@ -104,6 +112,7 @@ export type PluginSettingsPageEntry = {
 type BarOverlay =
   | { readonly kind: "panel"; readonly target: PanelTarget }
   | { readonly kind: "tray"; readonly target: TrayMenuTarget }
+  | { readonly kind: "tray-overflow"; readonly target: TrayOverflowTarget }
   | { readonly kind: "ime"; readonly target: ImeMenuTarget }
   | { readonly kind: "plugin"; readonly instanceId: string; readonly monitorId?: string };
 
@@ -177,6 +186,9 @@ export interface ShellStore extends ShellTopics {
   readonly activeTrayMenu: Accessor<TrayMenuTarget | null>;
   openTrayMenu(target: TrayMenuTarget): void;
   closeTrayMenu(): void;
+  readonly activeTrayOverflow: Accessor<TrayOverflowTarget | null>;
+  openTrayOverflow(target: TrayOverflowTarget): void;
+  closeTrayOverflow(): void;
   readonly activeImeMenu: Accessor<ImeMenuTarget | null>;
   openImeMenu(target: ImeMenuTarget): void;
   closeImeMenu(): void;
@@ -189,9 +201,13 @@ export interface ShellStore extends ShellTopics {
   registerPluginBarWidget(slot: PluginBarWidgetSlot): () => void;
   readonly pluginSettingsPages: Accessor<readonly PluginSettingsPageEntry[]>;
   registerPluginSettingsPage(page: PluginSettingsPageEntry): () => void;
+  readonly pluginUpdatesCount: Accessor<number>;
+  setPluginUpdatesCount(count: number): void;
   readonly settingsWindowOpen: Accessor<boolean>;
   readonly settingsWindowTab: Accessor<string>;
-  openSettingsWindow(tab?: string): void;
+  readonly settingsSubpage: Accessor<SettingsSubpage | null>;
+  setSettingsSubpage(subpage: SettingsSubpage | null): void;
+  openSettingsWindow(tab?: string, subpage?: SettingsSubpage | null): void;
   closeSettingsWindow(): void;
   readonly systemMonitorWindowOpen: Accessor<boolean>;
   readonly systemMonitorWindowTab: Accessor<SystemMonitorTab>;
@@ -230,6 +246,10 @@ export function createShellStore(): ShellStore {
   const activeTrayMenu = () => {
     const active = overlay();
     return active?.kind === "tray" ? active.target : null;
+  };
+  const activeTrayOverflow = () => {
+    const active = overlay();
+    return active?.kind === "tray-overflow" ? active.target : null;
   };
   const activeImeMenu = () => {
     const active = overlay();
@@ -351,10 +371,13 @@ export function createShellStore(): ShellStore {
       : pages);
   }
 
+  const [pluginUpdatesCount, setPluginUpdatesCount] = createSignal(0);
   const [settingsWindowOpen, setSettingsWindowOpen] = createSignal(false);
   const [settingsWindowTab, setSettingsWindowTab] = createSignal("appearance");
-  function openSettingsWindow(tab?: string): void {
+  const [settingsSubpage, setSettingsSubpage] = createSignal<SettingsSubpage | null>(null);
+  function openSettingsWindow(tab?: string, subpage?: SettingsSubpage | null): void {
     if (tab) setSettingsWindowTab(tab);
+    setSettingsSubpage(subpage ?? null);
     setOverlay(null);
     setSettingsWindowOpen(true);
   }
@@ -630,6 +653,16 @@ export function createShellStore(): ShellStore {
       setOverlay({ kind: "tray", target });
     },
     closeTrayMenu: () => closeOverlay("tray"),
+    activeTrayOverflow,
+    openTrayOverflow: target => {
+      const monitorId = target.monitorId ?? inferMonitorId(target.parentSurface, monitors());
+      if (monitorId) recordActiveMonitor(monitorId);
+      setOverlay(active => active?.kind === "tray-overflow"
+        && active.target.parentSurface === target.parentSurface
+        ? null
+        : { kind: "tray-overflow", target });
+    },
+    closeTrayOverflow: () => closeOverlay("tray-overflow"),
     activeImeMenu,
     openImeMenu: target => {
       const monitorId = target.monitorId ?? inferMonitorId(target.parentSurface, monitors());
@@ -646,8 +679,12 @@ export function createShellStore(): ShellStore {
     registerPluginBarWidget,
     pluginSettingsPages,
     registerPluginSettingsPage,
+    pluginUpdatesCount,
+    setPluginUpdatesCount,
     settingsWindowOpen,
     settingsWindowTab,
+    settingsSubpage,
+    setSettingsSubpage,
     openSettingsWindow,
     closeSettingsWindow,
     systemMonitorWindowOpen,

@@ -14,7 +14,9 @@ import { useShellTheme } from "../theme.ts";
 import { AppearancePane } from "./settings/AppearancePane.tsx";
 import { BarLayoutPane } from "./settings/BarLayoutPane.tsx";
 import { IdlePane } from "./settings/IdlePane.tsx";
+import { PluginsPane } from "./settings/PluginsPane.tsx";
 import { PowerPane } from "./settings/PowerPane.tsx";
+import { TrayRulesView } from "./settings/TrayRulesView.tsx";
 import { WallpaperLibraryView } from "./settings/WallpaperLibraryView.tsx";
 import {
   clipped,
@@ -32,7 +34,7 @@ import {
 import { FadeThroughPane, SingleInstanceWindowSurface, SlidingNavPill } from "./window-chrome.tsx";
 
 type ShellNavTab = {
-  readonly id: "appearance" | "bar" | "idle" | "power";
+  readonly id: "appearance" | "bar" | "idle" | "power" | "plugins";
   readonly label: string;
   readonly subtitle: string;
   readonly icon: ShellIconName;
@@ -43,6 +45,7 @@ const SHELL_NAV_TABS: readonly ShellNavTab[] = [
   { id: "bar", label: "Bar & layout", subtitle: "Wayland layer-shell edge strut, spacing rhythm, and visible modules", icon: "overview" },
   { id: "idle", label: "Idle & sleep", subtitle: "Automatic actions pause while media is playing · Declarative rules", icon: "sleep" },
   { id: "power", label: "Power & battery", subtitle: "UPower telemetry, power-profiles-daemon switching, and system load", icon: "batteryCharging" },
+  { id: "plugins", label: "Plugins", subtitle: "Installed plugins, catalog sources, capability review, and build state", icon: "extension" },
 ];
 
 /** M3 Shared Axis X wrapper for Settings sub-page drill-down (`Appearance <-> Wallpaper library`). */
@@ -63,12 +66,23 @@ function SharedAxisXPane(props: { readonly direction: 1 | -1; readonly children:
 }
 
 function SettingsWindowContent(): NativeChild {
-  const { theme, pluginSettingsPages, settingsWindowTab, openSettingsWindow, closeSettingsWindow, invokePublic } = useShellStore();
+  const {
+    theme,
+    pluginSettingsPages,
+    pluginUpdatesCount,
+    settingsWindowTab,
+    settingsSubpage,
+    setSettingsSubpage,
+    openSettingsWindow,
+    closeSettingsWindow,
+    invokePublic,
+  } = useShellStore();
   useShellTheme(theme.data);
   const activeTab = () => settingsWindowTab();
   const [animatePane, setAnimatePane] = createSignal(false);
-  const [appearanceSubpage, setAppearanceSubpage] = createSignal<"main" | "wallpaper-library">("main");
   const [returnedFromLibrary, setReturnedFromLibrary] = createSignal(false);
+  const [returnedFromTrayRules, setReturnedFromTrayRules] = createSignal(false);
+  const [selectedPluginId, setSelectedPluginId] = createSignal<string | null>(null);
   let seenInitialTab = false;
   createEffect(activeTab, () => {
     if (!seenInitialTab) {
@@ -76,19 +90,31 @@ function SettingsWindowContent(): NativeChild {
       return;
     }
     setAnimatePane(true);
-    setAppearanceSubpage("main");
     setReturnedFromLibrary(false);
+    setReturnedFromTrayRules(false);
+    if (activeTab() !== "plugins") {
+      setSelectedPluginId(null);
+    }
   });
 
   const openWallpaperLibrary = () => {
     setReturnedFromLibrary(false);
-    setAppearanceSubpage("wallpaper-library");
+    setSettingsSubpage("wallpaper-library");
   };
   const closeWallpaperLibrary = () => {
     setReturnedFromLibrary(true);
-    setAppearanceSubpage("main");
+    setSettingsSubpage(null);
   };
-  const showingWallpaperLibrary = () => activeTab() === "appearance" && appearanceSubpage() === "wallpaper-library";
+  const openTrayRules = () => {
+    setReturnedFromTrayRules(false);
+    setSettingsSubpage("tray-rules");
+  };
+  const closeTrayRules = () => {
+    setReturnedFromTrayRules(true);
+    setSettingsSubpage(null);
+  };
+  const showingWallpaperLibrary = () => activeTab() === "appearance" && settingsSubpage() === "wallpaper-library";
+  const showingTrayRules = () => activeTab() === "bar" && settingsSubpage() === "tray-rules";
 
   const activeShellIndex = () => SHELL_NAV_TABS.findIndex(tab => tab.id === activeTab());
   const activePluginIndex = () => pluginSettingsPages().findIndex(page => page.id === activeTab() || page.pluginId === activeTab());
@@ -134,9 +160,7 @@ function SettingsWindowContent(): NativeChild {
                   const active = () => activeTab() === tab().id;
                   return (
                     <Button testId={`settings-nav-${tab().id}`} data-qs-tile="true" selected={active()} onClick={() => {
-                      if (tab().id === "appearance" && appearanceSubpage() === "wallpaper-library") {
-                        closeWallpaperLibrary();
-                      }
+                      if (tab().id === "plugins") setSelectedPluginId(null);
                       openSettingsWindow(tab().id);
                     }} style={{
                       position: "relative", zIndex: 1,
@@ -146,7 +170,20 @@ function SettingsWindowContent(): NativeChild {
                       color: active() ? onPrimaryContainer : muted, fontSize: "13px", fontWeight: 500,
                     }}>
                       <ShellIcon name={tab().icon} size={15} color={active() ? onPrimaryContainer : muted} />
-                      <text style={clipped}>{tab().label}</text>
+                      <text style={{ ...grow, ...clipped }}>{tab().label}</text>
+                      <Show when={tab().id === "plugins" && pluginUpdatesCount() > 0}>
+                        <box style={{
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          minWidth: "18px", height: "18px", padding: "0 5px",
+                          borderRadius: "999px", "--zgui-corner-shape": "none",
+                          backgroundColor: active() ? containerHigh : primaryContainer,
+                          color: active() ? onSurface : onPrimaryContainer,
+                        }}>
+                          <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "10px", lineHeight: "12px", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+                            {pluginUpdatesCount()}
+                          </text>
+                        </box>
+                      </Show>
                     </Button>
                   );
                 }}
@@ -195,13 +232,25 @@ function SettingsWindowContent(): NativeChild {
       </column>
 
       <column testId="settings-content-pane" style={{
-        ...grow, height: "100%", padding: "18px 22px", gap: "14px", overflow: "hidden",
+        ...grow, height: "100%", padding: "18px 22px", gap: "14px", overflow: "hidden", position: "relative",
       }}>
-        <Show when={!showingWallpaperLibrary()} fallback={
-          <SharedAxisXPane direction={1}>
-            <WallpaperLibraryView onBack={closeWallpaperLibrary} onCloseSettings={closeSettingsWindow} />
-          </SharedAxisXPane>
-        }>
+        <Show
+          when={!showingWallpaperLibrary() && !showingTrayRules()}
+          fallback={
+            <Show
+              when={showingWallpaperLibrary()}
+              fallback={
+                <SharedAxisXPane direction={1}>
+                  <TrayRulesView onBack={closeTrayRules} />
+                </SharedAxisXPane>
+              }
+            >
+              <SharedAxisXPane direction={1}>
+                <WallpaperLibraryView onBack={closeWallpaperLibrary} onCloseSettings={closeSettingsWindow} />
+              </SharedAxisXPane>
+            </Show>
+          }
+        >
           <row style={{ alignItems: "center", justifyContent: "space-between", width: "100%", flexShrink: 0 }}>
             <column style={{ ...grow, gap: "2px" }}>
               <text role="heading" style={{ fontSize: "18px", fontWeight: 600, letterSpacing: "-0.015em", lineHeight: "24px" }}>
@@ -223,9 +272,18 @@ function SettingsWindowContent(): NativeChild {
                   <SharedAxisXPane direction={-1}><AppearancePane onOpenLibrary={openWallpaperLibrary} /></SharedAxisXPane>
                 </Show>
               </Match>
-              <Match when={activeTab() === "bar"}><FadeThroughPane animate={animatePane()}><BarLayoutPane /></FadeThroughPane></Match>
+              <Match when={activeTab() === "bar"}>
+                <Show when={returnedFromTrayRules()} fallback={<FadeThroughPane animate={animatePane()}><BarLayoutPane onOpenTrayRules={openTrayRules} /></FadeThroughPane>}>
+                  <SharedAxisXPane direction={-1}><BarLayoutPane onOpenTrayRules={openTrayRules} /></SharedAxisXPane>
+                </Show>
+              </Match>
               <Match when={activeTab() === "idle"}><FadeThroughPane animate={animatePane()}><IdlePane /></FadeThroughPane></Match>
               <Match when={activeTab() === "power"}><FadeThroughPane animate={animatePane()}><PowerPane /></FadeThroughPane></Match>
+              <Match when={activeTab() === "plugins"}>
+                <FadeThroughPane animate={animatePane()}>
+                  <PluginsPane selectedPluginId={selectedPluginId} onSelectPlugin={setSelectedPluginId} />
+                </FadeThroughPane>
+              </Match>
               <Match when={activePluginPage()}>
                 {page => () => <FadeThroughPane animate={animatePane()}>{page().render()}</FadeThroughPane>}
               </Match>

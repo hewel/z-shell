@@ -25,6 +25,18 @@ export interface WallpaperSnapshot {
 export type BarPosition = "top" | "left" | "right";
 export type BarStyle = "floating" | "docked";
 export type MotionScheme = "standard" | "expressive" | "reduced";
+export type TrayDefaultAction = "show" | "collapse";
+export type TrayItemRule = "show" | "collapse" | "hide";
+
+export interface BarTraySettings {
+  readonly default_action: TrayDefaultAction;
+  readonly rules: Readonly<Record<string, TrayItemRule>>;
+}
+
+export const DEFAULT_BAR_TRAY_SETTINGS: BarTraySettings = {
+  default_action: "show",
+  rules: {},
+};
 
 export interface EdgeOverrides {
   readonly top: number | null;
@@ -42,6 +54,7 @@ export interface BarSettings {
   readonly dock_enabled: boolean;
   readonly clock_24h: boolean;
   readonly clock_seconds: boolean;
+  readonly tray?: BarTraySettings;
 }
 
 export interface PublicSettingsSummary {
@@ -320,6 +333,7 @@ export interface NotificationItem {
   readonly id: number;
   readonly revision: number;
   readonly app_name: string;
+  readonly app_key?: string;
   readonly summary: string;
   readonly body: string;
   readonly icon: string | NotificationMediaRef | null;
@@ -426,6 +440,96 @@ export function isImeTrayItem(item: TrayItem): boolean {
     return true;
   }
   return item.category === "SystemServices" && (item.title === "Input Method" || item.title === "输入法");
+}
+
+/**
+ * Returns the persistent non-transient rule key for an SNI tray item (`app_id`, `icon_name`,
+ * or `title`), or `null` when only the session-scoped D-Bus `item.id` exists.
+ */
+export function trayRuleKey(item: Pick<TrayItem, "app_id" | "icon_name" | "title">): string | null {
+  const appId = item.app_id?.trim();
+  if (appId && appId.length > 0) return appId;
+  const iconName = item.icon_name?.trim();
+  if (iconName && iconName.length > 0) return iconName;
+  const title = item.title?.trim();
+  if (title && title.length > 0) return title;
+  return null;
+}
+
+export interface PartitionedTrayItems {
+  readonly visible: readonly TrayItem[];
+  readonly collapsed: readonly TrayItem[];
+  readonly hidden: readonly TrayItem[];
+}
+
+export function partitionTrayItems(
+  items: readonly TrayItem[],
+  tray?: BarTraySettings,
+): PartitionedTrayItems {
+  if (!tray) {
+    return { visible: items, collapsed: [], hidden: [] };
+  }
+  const visible: TrayItem[] = [];
+  const collapsed: TrayItem[] = [];
+  const hidden: TrayItem[] = [];
+  for (const item of items) {
+    const key = trayRuleKey(item);
+    const rule = (key !== null && Object.hasOwn(tray.rules, key) ? tray.rules[key] : undefined)
+      ?? tray.default_action;
+    if (rule === "hide") hidden.push(item);
+    else if (rule === "collapse") collapsed.push(item);
+    else visible.push(item);
+  }
+  return { visible, collapsed, hidden };
+}
+
+export interface NotificationPopupGroup {
+  readonly appKey: string;
+  readonly appName: string;
+  readonly items: readonly NotificationItem[];
+}
+
+export function notificationGroupKey(
+  item: Pick<NotificationItem, "id" | "app_name" | "app_key">,
+): string {
+  const explicit = item.app_key?.trim();
+  if (explicit && explicit.length > 0) return explicit;
+  const name = item.app_name.trim();
+  return name.length > 0 ? `name:${name}` : `unnamed:${item.id}`;
+}
+
+export function groupNotificationPopups(
+  popups: readonly NotificationItem[],
+  maxGroups = 3,
+): {
+  readonly groups: readonly NotificationPopupGroup[];
+  readonly overflowCount: number;
+} {
+  const orderedKeys: string[] = [];
+  const byKey = new Map<string, { appName: string; items: NotificationItem[] }>();
+  for (const item of popups) {
+    const key = notificationGroupKey(item);
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.items.push(item);
+    } else {
+      orderedKeys.push(key);
+      byKey.set(key, {
+        appName: item.app_name.trim() || "Notification",
+        items: [item],
+      });
+    }
+  }
+  const visibleKeys = orderedKeys.slice(0, Math.max(0, maxGroups));
+  const groups = visibleKeys.map(key => {
+    const bucket = byKey.get(key)!;
+    return { appKey: key, appName: bucket.appName, items: bucket.items };
+  });
+  let overflowCount = 0;
+  for (const key of orderedKeys.slice(visibleKeys.length)) {
+    overflowCount += byKey.get(key)?.items.length ?? 0;
+  }
+  return { groups, overflowCount };
 }
 
 export function splitNotificationActions(actions: readonly NotificationAction[]): {
@@ -964,11 +1068,258 @@ export type IdleServiceStatus =
 
 export interface IdleSnapshot {
   readonly caffeine: boolean;
+  readonly caffeine_scope?: "idle" | "sleep" | "lock";
+  readonly caffeine_duration_seconds?: number | null;
+  readonly caffeine_expires_at_ms?: number | null;
   readonly media_playing: boolean;
   readonly active_inhibitors: readonly IdleInhibitor[];
   readonly warning: WarningFade | null;
   readonly rules: readonly IdleRule[];
   readonly service_status: IdleServiceStatus;
+}
+
+export function supportsTimedKeepAwake(idle: IdleSnapshot | undefined): boolean {
+  return idle !== undefined && (
+    idle.caffeine_scope !== undefined
+    || idle.caffeine_duration_seconds !== undefined
+    || idle.caffeine_expires_at_ms !== undefined
+  );
+}
+
+export function formatKeepAwakeRemaining(
+  expiresAtMs: number | null | undefined,
+  nowMs: number,
+): string {
+  if (expiresAtMs === null || expiresAtMs === undefined) {
+    return "Always on";
+  }
+  const remainingSec = Math.max(0, Math.ceil((expiresAtMs - nowMs) / 1000));
+  if (remainingSec <= 0) return "0m left";
+  if (remainingSec < 60) return `${remainingSec}s left`;
+  const totalMinutes = Math.ceil(remainingSec / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const mins = totalMinutes % 60;
+  if (hours > 0 && mins > 0) return `${hours}h ${mins}m left`;
+  if (hours > 0) return `${hours}h left`;
+  return `${mins}m left`;
+}
+
+export type StoreCategory =
+  | "widgets"
+  | "productivity"
+  | "system"
+  | "appearance"
+  | "compositor"
+  | "launcher";
+
+export type PluginSourceKind = "https_json" | "git_json" | "local_file";
+
+export interface PluginSummaryPublic {
+  readonly id: string;
+  readonly name: string;
+  readonly version: string;
+  readonly plugin_api: number;
+  readonly shared_runtime_abi: string;
+  readonly source_identity: string;
+  readonly catalog_source_id: string | null;
+  readonly content_digest: string;
+  readonly enabled: boolean;
+  readonly revoked: boolean;
+  readonly migration_reapproval_required: boolean;
+  readonly approved: boolean;
+}
+
+export interface PublicPluginEntry extends PluginSummaryPublic {
+  readonly runtime_state: "active" | "unknown" | string;
+}
+
+export interface PublicCatalogSource {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: PluginSourceKind;
+  readonly url: string;
+  readonly enabled: boolean;
+  readonly priority: number;
+  readonly has_local_seed: boolean;
+  readonly cached: boolean;
+}
+
+export interface PluginsTopicSnapshot {
+  readonly desired_revision: number;
+  readonly applied_desired_revision: number | null;
+  readonly runtime_overlay_supported: boolean;
+  readonly offline_mode: boolean;
+  readonly plugins: readonly PublicPluginEntry[];
+  readonly sources: readonly PublicCatalogSource[];
+  readonly counts: {
+    readonly total: number;
+    readonly enabled: number;
+    readonly approved: number;
+    readonly pending_approval: number;
+    readonly revoked: number;
+  };
+}
+
+export interface CapabilityBundle {
+  readonly host: {
+    readonly commands: readonly string[];
+    readonly image_prefixes: readonly string[];
+    readonly unix_sockets: readonly string[];
+    readonly named_sockets: readonly string[];
+    readonly shell_surfaces: boolean;
+    readonly control_channel: boolean;
+  };
+  readonly bus: {
+    readonly topics_read: readonly string[];
+    readonly topics_publish: readonly string[];
+    readonly commands_register: readonly string[];
+    readonly inhibitors: boolean;
+  };
+}
+
+export interface CapabilityDiff {
+  readonly host: {
+    readonly commands: readonly string[];
+    readonly image_prefixes: readonly string[];
+    readonly unix_sockets: readonly string[];
+    readonly named_sockets: readonly string[];
+    readonly shell_surfaces: boolean;
+    readonly control_channel: boolean;
+  };
+  readonly bus: {
+    readonly topics_read: readonly string[];
+    readonly topics_publish: readonly string[];
+    readonly commands_register: readonly string[];
+    readonly inhibitors: boolean;
+  };
+}
+
+export interface CatalogListItem {
+  readonly id: string;
+  readonly preferred_source_id: string;
+  readonly name: string;
+  readonly summary: string;
+  readonly category: StoreCategory;
+  readonly latest_version: string;
+  readonly icon?: MediaRef | null;
+  readonly has_icon: boolean;
+  readonly update_available: boolean;
+  readonly installed?: PluginSummaryPublic | null;
+  readonly sources: readonly {
+    readonly source_id: string;
+    readonly source_name: string;
+    readonly priority: number;
+    readonly latest_version: string;
+    readonly yanked: boolean;
+    readonly advisories: readonly { readonly severity: string; readonly message: string }[];
+  }[];
+}
+
+export interface CatalogListResponse {
+  readonly total: number;
+  readonly offset: number;
+  readonly limit: number;
+  readonly items: readonly CatalogListItem[];
+}
+
+export interface CatalogDetailOffering {
+  readonly source_id: string;
+  readonly source_name: string;
+  readonly priority: number;
+  readonly source_identity: string;
+  readonly latest_version: string;
+  readonly yanked: boolean;
+  readonly advisories: readonly { readonly severity: string; readonly message: string }[];
+  readonly author: string;
+  readonly summary: string;
+  readonly tags: readonly string[];
+  readonly homepage: string | null;
+  readonly icon: MediaRef | null;
+  readonly screenshots: readonly {
+    readonly media: MediaRef;
+    readonly caption: string | null;
+  }[];
+  readonly releases: readonly {
+    readonly version: string;
+    readonly plugin_api: number;
+    readonly shared_runtime_abi: string;
+    readonly min_shell_version?: string | null;
+    readonly content_digest: string;
+    readonly declared_capabilities_preview?: unknown;
+  }[];
+}
+
+export interface CatalogDetailResponse {
+  readonly id: string;
+  readonly preferred_source_id: string;
+  readonly name: string;
+  readonly summary: string;
+  readonly category: StoreCategory;
+  readonly latest_version: string;
+  readonly installed: PluginSummaryPublic | null;
+  readonly installed_capabilities: CapabilityBundle | null;
+  readonly offerings: readonly CatalogDetailOffering[];
+}
+
+export interface PluginAuditResponse {
+  readonly plugin: PluginSummaryPublic;
+  readonly diff: CapabilityDiff;
+  readonly net_added_host_capabilities: readonly string[];
+  readonly current_content_digest: string;
+  readonly digest_matches: boolean;
+  readonly requested_capabilities: CapabilityBundle;
+}
+
+export interface StagedInstallResponse {
+  readonly stage_token: string;
+  readonly staged: {
+    readonly id: string;
+    readonly name: string;
+    readonly version: string;
+    readonly plugin_api: number;
+    readonly shared_runtime_abi: string;
+    readonly content_digest: string;
+    readonly source_identity: string;
+    readonly requested_capabilities: CapabilityBundle;
+    readonly net_added_host_capabilities: readonly string[];
+    readonly resolved_from: string;
+  };
+}
+
+export interface StagedUpgradeResponse {
+  readonly stage_token: string;
+  readonly staged: {
+    readonly id: string;
+    readonly name: string;
+    readonly from_version: string;
+    readonly to_version: string;
+    readonly from_digest: string;
+    readonly to_digest: string;
+    readonly source_identity: string;
+    readonly diff: CapabilityDiff;
+    readonly net_added_host_capabilities: readonly string[];
+    readonly requires_reapproval: boolean;
+    readonly resolved_from: string;
+    readonly was_revoked: boolean;
+  };
+  readonly requested_capabilities: CapabilityBundle;
+}
+
+export interface CatalogSourceSettingsEntry {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: PluginSourceKind;
+  readonly url: string;
+  readonly ref_name?: string;
+  readonly index_path?: string;
+  readonly local_seed_dir?: string;
+  readonly enabled: boolean;
+  readonly priority: number;
+}
+
+export interface CatalogSourceListItem {
+  readonly source: CatalogSourceSettingsEntry;
+  readonly cached: boolean;
 }
 
 export const TOP_BAR_HEIGHT = 32;

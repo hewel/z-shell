@@ -1,8 +1,25 @@
-import { Button, For, Show, TextField, createEffect, createMemo, createSignal, type Accessor, type NativeChild } from "@hewel/zgui";
+import { Button, For, Show, TextField, createEffect, createMemo, createSignal, onCleanup, type Accessor, type NativeChild } from "@hewel/zgui";
 import { M3Button, M3CardAction, M3InteractiveCard, M3SegmentedControl, M3Switch } from "@z-shell/sdk/primitives";
 import { createOpacityEnter, useMotionScheme } from "../../motion.ts";
 import { useShellStore } from "../../store.ts";
-import type { IdleAction } from "../../topics.ts";
+import {
+  formatKeepAwakeRemaining,
+  supportsTimedKeepAwake,
+  type IdleAction,
+} from "../../topics.ts";
+
+const KEEP_AWAKE_PRESETS = [
+  { id: "1800", label: "30m", seconds: 1800, testId: "settings-keep-awake-30m" },
+  { id: "3600", label: "1h", seconds: 3600, testId: "settings-keep-awake-1h" },
+  { id: "7200", label: "2h", seconds: 7200, testId: "settings-keep-awake-2h" },
+  { id: "indefinite", label: "Forever", seconds: null, testId: "settings-keep-awake-inf" },
+] as const;
+
+function presetIdForDuration(seconds: number | null | undefined): string {
+  if (seconds === null) return "indefinite";
+  const matched = KEEP_AWAKE_PRESETS.find(p => p.seconds === seconds);
+  return matched ? matched.id : "3600";
+}
 import {
   clipped,
   container,
@@ -223,6 +240,29 @@ function RuleEditorCard(props: {
 export function IdlePane(): NativeChild {
   const { idle, invokePublic, invokeHost } = useShellStore();
   const caffeine = () => idle.data()?.caffeine ?? false;
+  const timedSupported = () => supportsTimedKeepAwake(idle.data());
+  const keepAwakeTimed = () => Boolean(caffeine() && idle.data()?.caffeine_expires_at_ms != null);
+  const [nowMs, setNowMs] = createSignal(Date.now());
+  createEffect(keepAwakeTimed, active => {
+    if (!active) return;
+    let timer: number | undefined;
+    const tick = () => {
+      const now = Date.now();
+      setNowMs(now);
+      timer = setTimeout(tick, 1_000 - (now % 1_000));
+    };
+    tick();
+    onCleanup(() => {
+      if (timer !== undefined) clearTimeout(timer);
+    });
+  });
+  const keepAwakeStatus = () => {
+    const snap = idle.data();
+    if (!caffeine()) return "Off";
+    if (!timedSupported()) return "Awake";
+    return formatKeepAwakeRemaining(snap?.caffeine_expires_at_ms, nowMs());
+  };
+  const selectedPreset = () => presetIdForDuration(idle.data()?.caffeine_duration_seconds);
   const serviceStatus = () => idle.data()?.service_status?.status ?? "stopped";
   const [draftRules, setDraftRules] = createSignal<EditableIdleRule[]>([]);
   const [selectedName, setSelectedName] = createSignal<string | null>(null);
@@ -294,34 +334,62 @@ export function IdlePane(): NativeChild {
 
   return (
     <column testId="settings-idle-pane" style={{ gap: "12px", width: "100%" }}>
-      <row style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "12px 14px", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
-        <column style={{ ...grow, gap: "2px" }}>
-          <row style={{ alignItems: "center", gap: "8px" }}>
-            <text style={{ fontSize: "13px", fontWeight: 600 }}>Manual Caffeine Protection</text>
-            <row style={{
-              alignItems: "center", gap: "5px", padding: "2px 8px", borderRadius: "999px", "--zgui-corner-shape": "none",
-              backgroundColor: serviceStatus() === "running" ? primaryContainer : containerHighest,
-              color: serviceStatus() === "running" ? onPrimaryContainer : muted,
-              fontSize: "11px", fontWeight: 600,
-            }}>
-              <box ariaHidden style={{ width: "6px", height: "6px", borderRadius: "3px", backgroundColor: serviceStatus() === "running" ? primary : muted }} />
-              <text>{serviceStatus() === "running" ? "Watching" : serviceStatus()}</text>
+      <column testId="settings-keep-awake-card" style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "12px 14px", gap: "10px" }}>
+        <row style={{ alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+          <column style={{ ...grow, gap: "2px" }}>
+            <row style={{ alignItems: "center", gap: "8px" }}>
+              <text style={{ fontSize: "13px", fontWeight: 600 }}>Keep awake</text>
+              <row style={{
+                alignItems: "center", gap: "5px", padding: "2px 8px", borderRadius: "999px", "--zgui-corner-shape": "none",
+                backgroundColor: serviceStatus() === "running" ? primaryContainer : containerHighest,
+                color: serviceStatus() === "running" ? onPrimaryContainer : muted,
+                fontSize: "11px", fontWeight: 600,
+              }}>
+                <box ariaHidden style={{ width: "6px", height: "6px", borderRadius: "3px", backgroundColor: serviceStatus() === "running" ? primary : muted }} />
+                <text>{serviceStatus() === "running" ? "Watching" : serviceStatus()}</text>
+              </row>
             </row>
+            <text style={{ fontSize: "11px", color: muted }}>Manual sleep inhibit · Allow screen-off</text>
+          </column>
+          <row style={{ alignItems: "center", gap: "8px", flexShrink: 0 }}>
+            <text testId="settings-keep-awake-status" data-tabular="true" style={{
+              fontFamily: "var(--font-mono)", fontSize: "12px", fontWeight: 500,
+              color: caffeine() ? primary : muted, fontVariantNumeric: "tabular-nums",
+            }}>
+              {keepAwakeStatus()}
+            </text>
+            <M3Switch
+              testId="settings-idle-caffeine"
+              ariaLabel="Keep awake"
+              checked={caffeine()}
+              onToggle={() => void invokePublic("idle.caffeine", { enabled: !caffeine() })}
+            />
           </row>
-          <text style={{ fontSize: "11px", color: muted }}>Pause automatic screen off and suspend timers</text>
-        </column>
-        <row style={{ alignItems: "center", gap: "8px", flexShrink: 0 }}>
-          <text style={{ fontSize: "12px", fontWeight: 500, color: caffeine() ? primary : muted }}>
-            {caffeine() ? "Awake" : "Normal"}
+        </row>
+        <row style={{ alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+          <text style={{ fontSize: "11px", color: muted, whiteSpace: "nowrap", flexShrink: 0 }}>
+            {timedSupported() ? "Auto-expire timer" : "Timed presets require updated z-shelld"}
           </text>
-          <M3Switch
-            testId="settings-idle-caffeine"
-            ariaLabel="Manual caffeine protection"
-            checked={caffeine()}
-            onToggle={() => void invokePublic("idle.caffeine", { enabled: !caffeine() })}
+          <M3SegmentedControl
+            ariaLabel="Keep awake duration preset"
+            compact
+            options={KEEP_AWAKE_PRESETS.map(preset => ({
+              ...preset,
+              disabled: !timedSupported(),
+            }))}
+            value={selectedPreset()}
+            onChange={id => {
+              const preset = KEEP_AWAKE_PRESETS.find(p => p.id === id);
+              if (!preset) return;
+              void invokePublic("idle.caffeine", {
+                enabled: caffeine(),
+                duration_seconds: preset.seconds,
+              });
+            }}
+            style={{ width: "280px", flexShrink: 0 }}
           />
         </row>
-      </row>
+      </column>
 
       <column style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "14px", gap: "8px" }}>
         <row style={{ alignItems: "center", justifyContent: "space-between" }}>

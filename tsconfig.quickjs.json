@@ -22,7 +22,6 @@
     "plugins/ai-usage/src/service.ts",
     "plugins/niri-overview/src/service.ts",
     "plugins/niri-overview/src/socket.ts",
-    "plugins/nosleep/src/service.ts",
     "plugins/theme-bridges/src/service.ts"
   ]
 }

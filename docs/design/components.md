@@ -124,7 +124,7 @@ Desktop mutually exclusive selectors (`Light / Auto / Dark`, `Standard / Express
   - One-line / compact row: `44px`–`48px` height, `--radius-tile` (`14px`) or `--radius-md` (`10px`).
   - Two-line / connected device row: **`52px` min-height**, `--radius-card` (`16px`), `primary-container` + `on-primary-container` when connected/active, `surface-container-high` at rest, `32×32px` leading icon well, trailing safe action (`Disconnect`, never destructive `Remove/Forget` on connected rows).
 - **Vertical Menu**: `surface-container`, `1px solid outline-variant @ 55%`, `--radius-card` (`16px`), Level 2 popover shadow, `34px` menu rows (`8px` radius), `1px outline-variant @ 45%` section dividers, right-aligned `JetBrains Mono` shortcut hints.
-- **Settings Navigation Rail (`22`–`22H`)**: `216px` fixed width on Level 0 `surface` with `1px outline-variant @ 42%` right hairline; `11px` uppercase section headers (`+0.04em`, `outline`); `34px` nav rows (`10px` radius) with sliding `primary-container` active pill (`fast.spatial`) and `6px` `primary` active-plugin status dots.
+- **Settings Navigation Rail (`22`–`22K`)**: `216px` fixed width on Level 0 `surface` with `1px outline-variant @ 42%` right hairline; `11px` uppercase section headers (`+0.04em`, `outline`); `34px` nav rows (`10px` radius) with sliding `primary-container` active pill (`fast.spatial`), `Plugins` update/count pill, and `6px` `primary` active-plugin status dots.
 
 ### 2.10 Text Fields, Search Bars & Dialogs (`C6`)
 

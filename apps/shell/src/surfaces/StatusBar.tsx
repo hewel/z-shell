@@ -10,7 +10,7 @@ import { useShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import {
   DEFAULT_BAR_SETTINGS, computeMemoryBreakdown, filterWorkspacesForMonitor, findActiveWindowForMonitor,
-  formatBarClock, formatSurfaceName, isImeTrayItem, resolveBarLayout, resolveBarPopupAnchor, resolveDesktopApp, selectActiveMediaPlayer,
+  formatBarClock, formatSurfaceName, isImeTrayItem, partitionTrayItems, resolveBarLayout, resolveBarPopupAnchor, resolveDesktopApp, selectActiveMediaPlayer,
   type ResolvedBarLayout, type TrayItem, type WaylandWindow, type WaylandWorkspace,
 } from "../topics.ts";
 
@@ -592,7 +592,7 @@ function SystemPill(props: {
   layout: ResolvedBarLayout;
   trackBlur: TrackBlurNode;
 }) {
-  const { ime, privacy, network, bluetooth, audio, power, togglePanel, invokePublic, openImeMenu } = useShellStore();
+  const { ime, idle, privacy, network, bluetooth, audio, power, togglePanel, invokePublic, openImeMenu } = useShellStore();
   let systemNode: NativeNode | undefined;
   const blurRef = useBlurRef(props.trackBlur);
   const quickSettings = (event: NativeEvent) => {
@@ -673,6 +673,16 @@ function SystemPill(props: {
           <text>{ime.data()?.active_im?.short_label || "EN"}</text>
         </Button>
         <Divider vertical={props.vertical} />
+      </Show>
+      <Show when={idle.data()?.caffeine}>
+        <box testId="bar-keep-awake" ariaLabel="Keep awake active" style={{
+          ...center,
+          width: props.vertical ? "24px" : "20px",
+          height: props.vertical ? "20px" : "24px",
+          borderRadius: "6px",
+        }}>
+          <ShellIcon name="coffee" size={14} color={props.active && props.docked ? onPrimaryContainer : primary} />
+        </box>
       </Show>
       <Show when={privacy.data()?.audio_capture.state === "active"}>
         <box testId="bar-privacy" ariaLabel="Microphone in use" style={{ ...center, width: "20px", height: "18px", borderRadius: "10px", backgroundColor: "var(--color-error-container)" }}>
@@ -765,6 +775,7 @@ function BarContent(props: {
   const trayItems = createMemo(() =>
     (store.tray.data()?.items ?? []).filter(item => !(showImeIndicator() && isImeTrayItem(item))),
   );
+  const trayPartition = createMemo(() => partitionTrayItems(trayItems(), store.settings.data()?.bar.tray));
   const activateWorkspace = (id: number) => { void invokePublic("wayland.workspace.activate", { workspace_id: id }); };
 
   const rootStyle = createMemo((): StyleObj => {
@@ -806,7 +817,7 @@ function BarContent(props: {
       data-position={props.layout.position} data-bar-style={props.layout.style} data-active-panel={activePanel() ?? "none"}
       onClick={() => dismissOverlay()}
       style={rootStyle()}>
-      <box style={vertical() ? verticalGroup : group}>
+      <box style={{ ...(vertical() ? verticalGroup : group), ...(docked() ? { gap: "12px" } : {}) }}>
         <Show when={props.launcher}>
           {() => {
             const launcherRef = useBlurRef(props.trackBlur);
@@ -864,7 +875,7 @@ function BarContent(props: {
       </box>
       <ClockPill vertical={vertical()} docked={docked()} active={activePanel() === "calendar"}
         clock={props.clock} seconds={props.seconds} monitorId={props.monitor.id} surfaceName={surfaceName()} layout={props.layout} trackBlur={props.trackBlur} />
-      <box style={{ ...(vertical() ? verticalGroup : group), justifyContent: "flex-end" }}>
+      <box style={{ ...(vertical() ? verticalGroup : group), ...(docked() ? { gap: "12px" } : {}), justifyContent: "flex-end" }}>
         <Show when={slots().length > 0}>
           {() => {
             const slotsRef = useBlurRef(props.trackBlur);
@@ -880,8 +891,7 @@ function BarContent(props: {
         <Show when={player()}>
           {active => {
             const mediaRef = useBlurRef(props.trackBlur);
-            return <>
-              <Show when={docked() && slots().length > 0}><Divider vertical={vertical()} /></Show>
+            return (
               <Button ref={mediaRef} testId="bar-media" ariaLabel={mediaLabel()}
                 data-bar-segment={docked() ? "docked" : "floating"}
                 data-active={activePanel() === "media" ? "true" : null}
@@ -917,10 +927,9 @@ function BarContent(props: {
                 <ShellIcon name="mediaEq" size={16} color={primary} />
                 <Show when={!vertical()}><text testId="bar-media-text" style={clippedText}>{mediaLabel()}</text></Show>
               </Button>
-            </>;
+            );
           }}
         </Show>
-        <Show when={docked() && (slots().length > 0 || Boolean(player()))}><Divider vertical={vertical()} /></Show>
         <SystemMonitorTrigger
           vertical={vertical()}
           docked={docked()}
@@ -930,19 +939,51 @@ function BarContent(props: {
           layout={props.layout}
           trackBlur={props.trackBlur}
         />
-        <Show when={trayItems().length > 0}>
+        <Show when={trayPartition().visible.length > 0 || trayPartition().collapsed.length > 0}>
           {() => {
             const trayRef = useBlurRef(props.trackBlur);
-            return <>
-              <Show when={docked()}><Divider vertical={vertical()} /></Show>
+            const overflowActive = () => store.activeTrayOverflow()?.parentSurface === surfaceName();
+            return (
               <box ref={trayRef} testId="bar-tray" style={vertical()
                 ? { ...segmentChrome(true, docked()), width: docked() ? "30px" : "40px", gap: "2px", padding: "8px 0" }
                 : { ...segmentChrome(false, docked()), height: docked() ? "28px" : "32px", gap: "2px", padding: "0 4px" }}>
-                <For each={trayItems()} keyed={item => item.id}>
+                <Show when={trayPartition().collapsed.length > 0}>
+                  <Button
+                    testId="bar-tray-overflow-toggle"
+                    ariaLabel={`Hidden tray icons (${trayPartition().collapsed.length})`}
+                    ariaHasPopup="menu"
+                    expanded={overflowActive()}
+                    onClick={event => {
+                      event.stopPropagation();
+                      store.openTrayOverflow({
+                        monitorId: props.monitor.id,
+                        parentSurface: surfaceName(),
+                        anchorRect: resolveBarPopupAnchor(props.layout, { align: "target", targetRect: getWindowRect(event.currentTarget) }),
+                      });
+                    }}
+                    style={{
+                      ...center,
+                      minWidth: "24px",
+                      minHeight: "24px",
+                      width: vertical() ? "28px" : "24px",
+                      height: "24px",
+                      borderRadius: "8px",
+                      flexShrink: 0,
+                      backgroundColor: overflowActive() ? primaryContainer : "transparent",
+                    }}
+                  >
+                    <ShellIcon
+                      name={overflowActive() ? "expandLess" : "expandMore"}
+                      size={15}
+                      color={overflowActive() ? onPrimaryContainer : muted}
+                    />
+                  </Button>
+                </Show>
+                <For each={trayPartition().visible} keyed={item => item.id}>
                   {item => <TrayButton item={item()} vertical={vertical()} monitorId={props.monitor.id} surfaceName={surfaceName()} layout={props.layout} />}
                 </For>
               </box>
-            </>;
+            );
           }}
         </Show>
         <Show when={docked()}><Divider vertical={vertical()} /></Show>

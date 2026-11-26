@@ -40,12 +40,12 @@ A modular Linux Wayland desktop shell built around a single **Rust Shell daemon*
 | **NDJSON Bus & Config** | Mandatory `bus.hello` handshake, strictly monotonic topic revisions, `SourceBaseline` vs `Live` updates, slow-consumer `topic.reset`, connection-scoped cleanup, and atomic `settings.toml` / `state.toml` separation (`flock` + `0600` temp file + `fsync`). |
 | **Generic Wayland** | Multi-output geometry with instance-generation IDs (`output_gone` on hotplug races), `ext-workspace-v1`, `zwlr_foreign_toplevel_manager_v1`, `zwlr_output_power_manager_v1`, and per-domain capability states (`readable`, `controllable`, `unsupported`, `disconnected`). |
 | **System & Hardware** | Pure-Rust PulseAudio native client (`pipewire-pulse`), NetworkManager (privileged Wi-Fi credentials), BlueZ, UPower, Power Profiles Daemon, `logind`, sysfs backlight, CPU/memory/thermal telemetry, and honest `system.privacy` reporting. |
-| **Desktop Protocols & Fcitx5 IME** | `org.freedesktop.Notifications` (popups + history + DND), SNI `StatusNotifierWatcher` + async `DBusMenu`, MPRIS + bounded offline-aware cover fetching, XDG `.desktop` launcher (`query_id` cancellation + plugin providers), and dual-mode Fcitx5 IME (`indicator_only` via SNI + `Controller1` by default, opt-in `kimpanel` via `org.kde.impanel2` with separate `desktop.ime` / `desktop.ime.panel` topics). |
+| **Desktop Protocols & Fcitx5 IME** | `org.freedesktop.Notifications` (3-app grouped live popups + atomic `notifications.dismiss-popups` + history + DND), SNI `StatusNotifierWatcher` + `[bar.tray]` collapse/overflow rules + async `DBusMenu`, MPRIS + bounded offline-aware cover fetching, XDG `.desktop` launcher (`query_id` cancellation + plugin providers), and dual-mode Fcitx5 IME (`indicator_only` via SNI + `Controller1` by default, opt-in `kimpanel` via `org.kde.impanel2` with separate `desktop.ime` / `desktop.ime.panel` topics). |
 | **Encrypted Clipboard** | Native `ext-data-control-v1` / `wlr-data-control` with verbatim MIME/Latin-1 preservation, `x-kde-passwordManagerHint` rejection, ChaCha20-Poly1305 + Secret Service encrypted history (degrading cleanly to memory-only), revocable out-of-band media handles, and lock-screen read denial. |
-| **Session, PAM, Idle & Polkit** | Isolated `z-shell-pam-helper`, fail-closed cross-process lock & `PrepareForSleep` coordinator (host-verified `ext_session_lock_v1.locked` ACK, single-use scoped unlock approvals, sleep hold, optional `fallback_locker`), declarative `[[idle.rules]]`, Caffeine, `org.freedesktop.ScreenSaver`, `ext-idle-notify-v1`, DPMS screen-off, and session Polkit agent (`session.polkit` + host-only `host.polkit-*` commands). |
+| **Session, PAM, Idle & Polkit** | Isolated `z-shell-pam-helper`, fail-closed cross-process lock & `PrepareForSleep` coordinator (host-verified `ext_session_lock_v1.locked` ACK, single-use scoped unlock approvals, sleep hold, optional `fallback_locker`), declarative `[[idle.rules]]`, built-in sleep-only Keep awake (`idle.caffeine` timed `30m`/`1h`/`2h`/`∞` presets), `org.freedesktop.ScreenSaver`, `ext-idle-notify-v1`, DPMS screen-off, and session Polkit agent (`session.polkit` + host-only `host.polkit-*` commands). |
 | **Theme Engine** | Pure-Rust Material 3 HCT palette generator (31 roles, 6 variants, Dark/Light/Auto), bounded wallpaper seed extraction, optional `matugen` CLI backend with stale-sequence rejection, and reversible GTK 3/4 linking with conflict detection. |
 | **Wallpaper** | Paginated PNG/JPEG/WebP catalog, confined media tokens, durable global and per-output assignments, lock/sleep-aware slideshow, and optional theme linkage. |
-| **Plugin Ecosystem** | Offline-capable `z-shell plugin` CLI (`path` & commit-pinned `git` sources), capability diff audit/approval/revocation, `@z-shell/composer`, QuickJS-safe `@z-shell/sdk` & `@z-shell/plugin-api`, and 4 first-party reference plugins (`ai-usage`, `nosleep`, `theme-bridges`, `niri-overview`). |
+| **Plugin Ecosystem** | Offline-capable `z-shell plugin` CLI + Settings `22I`/`22K` Plugin Store (`https_json`, `git_json`, `local_file` sources with atomic staging & review), capability diff audit/approval/revocation, `@z-shell/composer`, QuickJS-safe `@z-shell/sdk` & `@z-shell/plugin-api`, and 3 first-party reference plugins (`ai-usage`, `theme-bridges`, `niri-overview`). |
 
 ## Repository Layout
 
@@ -72,7 +72,6 @@ packages/
 
 plugins/
   ai-usage/            z-shell/ai-usage (ai-usagebar + optional Codex Resets feed)
-  nosleep/             z-shell/nosleep (manual & agent-working bus sleep inhibition)
   theme-bridges/       z-shell/theme-bridges (ShojiWM UDS + reversible Zen Browser CSS)
   niri-overview/       z-shell/niri-overview (Niri IPC snapshot backfill & viewport layout)
 
@@ -131,13 +130,18 @@ bun run test:ts             # Builds binaries and runs all packages/ and plugins
 ### Managing Plugins
 
 ```bash
-# Add, audit, approve, and enable a local plugin
-./target/debug/z-shell plugin add --path ./plugins/nosleep
-./target/debug/z-shell plugin audit z-shell/nosleep
-./target/debug/z-shell plugin approve z-shell/nosleep
-./target/debug/z-shell plugin enable z-shell/nosleep
+# Add, audit, approve, and enable a local plugin (then rebuild shell bundle to apply TSX code)
+./target/debug/z-shell plugin add --path ./plugins/ai-usage
+./target/debug/z-shell plugin audit z-shell/ai-usage
+./target/debug/z-shell plugin approve z-shell/ai-usage
+./target/debug/z-shell plugin enable z-shell/ai-usage
 ./target/debug/z-shell plugin list
+
+# Upgrading from older checkouts that registered removed z-shell/nosleep:
+./target/debug/z-shell plugin remove z-shell/nosleep
 ```
+
+> **Note (`[bar.tray]` rollback safety)**: When tray collapse rules are at defaults (`default_action = "show"`, `rules = {}`), `settings.toml` omits `[bar.tray]` completely so older daemons can continue reading the config without unknown-field errors.
 
 ## Configuration
 

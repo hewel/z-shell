@@ -404,14 +404,14 @@ describe("zshell oxlint design plugin", () => {
   test("zshell/no-core-plugin-id-branching forbids hardcoded first-party plugin IDs in core shell", () => {
     const badCoreBranch = lintSnippet(
       "apps/shell/src/plugins/PluginHost.tsx",
-      `export const w = (id: string) => id.includes("nosleep") ? 360 : 396;`,
+      `export const w = (id: string) => id.includes("ai-usage") ? 360 : 396;`,
       "zshell/no-core-plugin-id-branching",
     );
     expect(badCoreBranch.status).not.toBe(0);
 
     const allowedInPlugin = lintSnippet(
-      "plugins/nosleep/src/panel.tsx",
-      `export const id = "z-shell/nosleep";`,
+      "plugins/ai-usage/src/panel.tsx",
+      `export const id = "z-shell/ai-usage";`,
       "zshell/no-core-plugin-id-branching",
     );
     expect(allowedInPlugin.status, allowedInPlugin.output).toBe(0);

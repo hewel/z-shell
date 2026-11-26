@@ -36,7 +36,6 @@ import { connectUnixSocket } from "@z-shell/sdk/bun";
 
 import { INITIAL_SNAPSHOT_AT_MS, buildShellPreviewFixture } from "../../../apps/shell/tests/fixture-builder.ts";
 import { expectCleanPreview, runPreview, zguiHost } from "../../../apps/shell/tests/preview-harness.ts";
-import { NOSLEEP_DEFAULTS, createNoSleepPlugin } from "../../../plugins/nosleep/src/service.ts";
 import {
   THEME_BRIDGES_DEFAULTS,
   createThemeBridgesPlugin,
@@ -63,7 +62,7 @@ function resolveBinaries(): { cliBin: string; daemonBin: string } {
 }
 
 describe("First-party reference plugins end-to-end", () => {
-  test("Rust CLI + @z-shell/composer register, approve, enable, and compose all 4 first-party plugins", () => {
+  test("Rust CLI + @z-shell/composer register, approve, enable, and compose all 3 first-party plugins", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "z-shell-first-party-compose-"));
     try {
       const { cliBin } = resolveBinaries();
@@ -77,7 +76,6 @@ describe("First-party reference plugins end-to-end", () => {
 
       const plugins = [
         { id: "z-shell/ai-usage", dir: join(REPO_ROOT, "plugins", "ai-usage") },
-        { id: "z-shell/nosleep", dir: join(REPO_ROOT, "plugins", "nosleep") },
         { id: "z-shell/theme-bridges", dir: join(REPO_ROOT, "plugins", "theme-bridges") },
         { id: "z-shell/niri-overview", dir: join(REPO_ROOT, "plugins", "niri-overview") },
       ] as const;
@@ -108,7 +106,6 @@ describe("First-party reference plugins end-to-end", () => {
       expect(Object.keys(report.pluginDigests).sort()).toEqual([
         "z-shell/ai-usage",
         "z-shell/niri-overview",
-        "z-shell/nosleep",
         "z-shell/theme-bridges",
       ]);
 
@@ -146,7 +143,6 @@ describe("First-party reference plugins end-to-end", () => {
         );
       const plugins = [
         { id: "z-shell/ai-usage", dir: join(REPO_ROOT, "plugins", "ai-usage") },
-        { id: "z-shell/nosleep", dir: join(REPO_ROOT, "plugins", "nosleep") },
         { id: "z-shell/theme-bridges", dir: join(REPO_ROOT, "plugins", "theme-bridges") },
         { id: "z-shell/niri-overview", dir: join(REPO_ROOT, "plugins", "niri-overview") },
       ] as const;
@@ -178,16 +174,6 @@ describe("First-party reference plugins end-to-end", () => {
             instanceId: "ai-quota-panel",
           },
           {
-            pluginId: "z-shell/nosleep",
-            entryId: "z-shell/nosleep:bar-indicator",
-            instanceId: "nosleep-bar",
-          },
-          {
-            pluginId: "z-shell/nosleep",
-            entryId: "z-shell/nosleep:panel",
-            instanceId: "nosleep-panel",
-          },
-          {
             pluginId: "z-shell/niri-overview",
             entryId: "z-shell/niri-overview:overview",
             instanceId: "niri-overview-layer",
@@ -211,7 +197,6 @@ describe("First-party reference plugins end-to-end", () => {
       for (const plugin of plugins) {
         expect(composedSource).toContain(`${plugin.id}:service`);
       }
-      expect(composedSource).toContain('"widthTier": "compact"');
       // This preview fixture mocks daemon-published plugin topics rather than live plugin services
       // (which spawn external commands/sockets; service startup/teardown is tested in
       // apps/shell/tests/plugin-services.test.ts and the live z-shelld test below).
@@ -252,15 +237,6 @@ describe("First-party reference plugins end-to-end", () => {
         offlineBlocked: false,
         backoffMs: 0,
       };
-      const noSleepSnapshot = {
-        active: true,
-        manualActive: true,
-        activeAgents: [],
-        scope: "sleep",
-        cookieHeld: true,
-        lastCheckedAtMs: 1_700_000_000_000,
-        lastError: null,
-      };
       const niriClosedSnapshot = {
         capability: "available",
         resetting: false,
@@ -294,13 +270,11 @@ describe("First-party reference plugins end-to-end", () => {
           }],
         }],
       };
-
       const fixtureValue = buildShellPreviewFixture({ id: "z-shell-first-party-plugins" });
       const publicSocket = fixtureValue.services.sockets[0]!;
       const initialPluginTopics = [
         { id: 26, instanceId: 25, topic: "plugin.z-shell.niri-overview.state", data: niriClosedSnapshot },
         { id: 27, instanceId: 26, topic: "plugin.z-shell.ai-usage.quotas", data: aiUsageSnapshot },
-        { id: 28, instanceId: 27, topic: "plugin.z-shell.nosleep.state", data: noSleepSnapshot },
       ] as const;
       for (const subscription of initialPluginTopics) {
         publicSocket.send.push(JSON.stringify({
@@ -327,7 +301,7 @@ describe("First-party reference plugins end-to-end", () => {
       }
       publicSocket.send.push(JSON.stringify({
         jsonrpc: "2.0",
-        id: 29,
+        id: 28,
         method: "topic.subscribe",
         params: { topic: "plugin.z-shell.ai-usage.quotas" },
       }));
@@ -336,7 +310,7 @@ describe("First-party reference plugins end-to-end", () => {
         atMs: 35,
         text: JSON.stringify({
           jsonrpc: "2.0",
-          id: 29,
+          id: 28,
           result: {
             daemon_instance_id: "preview-daemon",
             topic_instance_id: 26,
@@ -364,7 +338,7 @@ describe("First-party reference plugins end-to-end", () => {
       });
       publicSocket.send.push(JSON.stringify({
         jsonrpc: "2.0",
-        id: 30,
+        id: 29,
         method: "command.invoke",
         params: {
           name: "plugin.z-shell.niri-overview.toggle",
@@ -375,7 +349,7 @@ describe("First-party reference plugins end-to-end", () => {
       publicSocket.events.push({
         kind: "message",
         atMs: 65,
-        text: JSON.stringify({ jsonrpc: "2.0", id: 30, result: {} }),
+        text: JSON.stringify({ jsonrpc: "2.0", id: 29, result: {} }),
       });
       publicSocket.events.push({ kind: "close", atMs: 70, error: null });
 
@@ -417,18 +391,6 @@ describe("First-party reference plugins end-to-end", () => {
             check: { property: "text", equals: "84%" },
           },
           {
-            id: "nosleep-widget-mounted",
-            op: "assert",
-            target: { surface: "bar-dp-1", testId: "plugin-nosleep-widget" },
-            check: { property: "exists", equals: true },
-          },
-          {
-            id: "nosleep-widget-active",
-            op: "assert",
-            target: { surface: "bar-dp-1", testId: "plugin-nosleep-widget" },
-            check: { property: "name", equals: "NoSleep: Awake" },
-          },
-          {
             id: "open-ai-panel",
             op: "pointer.click",
             target: { surface: "bar-dp-1", testId: "plugin-ai-usage-widget" },
@@ -464,14 +426,14 @@ describe("First-party reference plugins end-to-end", () => {
 
       expect(zguiHost && Bun.which(zguiHost)).not.toBeNull();
       const result = runPreview(published.dist, fixture, scenario, previewOut);
-      expectCleanPreview(result, 0, 7);
+      expectCleanPreview(result, 0, 5);
     } finally {
       removeTempTree(tempDir);
     }
   });
 
-  test("z-shell/nosleep drives real z-shelld bus inhibitors and auto-cleans on abrupt disconnect", async () => {
-    const tempDir = mkdtempSync(join(tmpdir(), "z-shell-nosleep-live-"));
+  test("test inhibitor stub drives real z-shelld bus inhibitors and auto-cleans on abrupt disconnect", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "z-shell-inhibitor-stub-live-"));
     const { daemonBin } = resolveBinaries();
     const configDir = join(tempDir, "config");
     const stateDir = join(tempDir, "state");
@@ -507,16 +469,28 @@ describe("First-party reference plugins end-to-end", () => {
       expect(existsSync(hostSock)).toBe(true);
 
       pluginTransport = await connectUnixSocket(publicSock);
-      const pluginClient = await ZShellClient.connect(pluginTransport, "nosleep-plugin");
+      const pluginClient = await ZShellClient.connect(pluginTransport, "inhibitor-stub-plugin");
       observerClient = await ZShellClient.connect(
         await connectUnixSocket(publicSock),
         "observer",
       );
       hostClient = await ZShellClient.connect(await connectUnixSocket(hostSock), "host");
 
-      const plugin = createNoSleepPlugin();
-      const ctx = createPluginContext("z-shell/nosleep", pluginClient, NOSLEEP_DEFAULTS);
-      await plugin.setup(ctx);
+      const ctx = createPluginContext("acme/sleep-stub", pluginClient, {});
+      let heldCookie: number | null = null;
+      await ctx.registerTopic("state", { active: false });
+      await ctx.registerCommand("toggle", "Toggle stub inhibitor", async ({ args }) => {
+        const wantOn = args[0] !== "off";
+        if (wantOn && heldCookie === null) {
+          const acquired = await ctx.acquireInhibitor("sleep", "Stub sleep inhibit");
+          heldCookie = acquired.cookie;
+        } else if (!wantOn && heldCookie !== null) {
+          await ctx.releaseInhibitor(heldCookie);
+          heldCookie = null;
+        }
+        await ctx.publishTopic("state", { active: heldCookie !== null });
+        return { data: { cookieHeld: heldCookie !== null } };
+      });
 
       const latestInhibitors: InhibitorEntry[][] = [];
       const sub = await observerClient.subscribe<InhibitorEntry[]>("inhibitors", (update) => {
@@ -524,13 +498,13 @@ describe("First-party reference plugins end-to-end", () => {
       });
       expect(sub.snapshot.data).toEqual([]);
 
-      // Invoke plugin.z-shell.nosleep.toggle from a second live bus client!
-      const toggleResult = await observerClient.invokeCommand("plugin.z-shell.nosleep.toggle", [
+      // Invoke plugin.acme.sleep-stub.toggle from a second live bus client!
+      const toggleResult = await observerClient.invokeCommand("plugin.acme.sleep-stub.toggle", [
         "on",
       ]);
       expect((toggleResult.data as { cookieHeld: boolean }).cookieHeld).toBe(true);
 
-      // Wait for live inhibitors topic update containing z-shell/nosleep lease.
+      // Wait for live inhibitors topic update containing acme/sleep-stub lease.
       const waitForInhibitor = async (expectedCount: number) => {
         const until = Date.now() + 3000;
         while (Date.now() < until) {
@@ -548,7 +522,7 @@ describe("First-party reference plugins end-to-end", () => {
       const owner = activeList[0]?.owner;
       expect(owner?.kind).toBe("plugin");
       if (owner?.kind === "plugin") {
-        expect(owner.plugin_id).toBe("z-shell/nosleep");
+        expect(owner.plugin_id).toBe("acme/sleep-stub");
       }
       expect(activeList[0]?.scope).toBe("sleep");
 
@@ -559,7 +533,7 @@ describe("First-party reference plugins end-to-end", () => {
       expect(clearedList).toEqual([]);
 
       const topicsAfter = await observerClient.listTopics();
-      expect(topicsAfter.some((entry) => entry.topic === "plugin.z-shell.nosleep.state")).toBe(
+      expect(topicsAfter.some((entry) => entry.topic === "plugin.acme.sleep-stub.state")).toBe(
         false,
       );
 
@@ -611,5 +585,5 @@ describe("First-party reference plugins end-to-end", () => {
       daemon.kill();
       removeTempTree(tempDir);
     }
-  });
+  }, 15_000);
 });
