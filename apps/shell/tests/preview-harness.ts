@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { inflateSync } from "node:zlib";
 
 import { buildShellApplication } from "@z-shell/composer";
@@ -170,6 +171,51 @@ export function createVirtualTimeline() {
   };
 }
 
+function resolvePreviewFontManifest(): string | null {
+  const candidates: string[] = [];
+  try {
+    const req = createRequire(join(repoRoot, "package.json"));
+    const buildPkgDir = realpathSync(dirname(req.resolve("@hewel/zgui-build/package.json")));
+    candidates.push(
+      join(buildPkgDir, "sdk/preview/fonts/fonts.json"),
+      resolve(buildPkgDir, "../../preview/fonts/fonts.json"),
+    );
+  } catch {
+    // Fall through to cargoRoot candidate below.
+  }
+  if (resolvedHost?.cargoRoot) {
+    candidates.push(join(resolvedHost.cargoRoot, "preview/fonts/fonts.json"));
+  }
+  return candidates.find(candidate => existsSync(candidate)) ?? null;
+}
+
+function resolvePreviewProfile(profilePath: string, outDir: string): string {
+  const profile = JSON.parse(readFileSync(profilePath, "utf8")) as {
+    readonly fonts?: { readonly manifest?: string; readonly [k: string]: unknown };
+    readonly [k: string]: unknown;
+  };
+  const manifest = profile.fonts?.manifest;
+  if (!manifest) return profilePath;
+  const manifestAbs = resolve(dirname(profilePath), manifest);
+  if (existsSync(manifestAbs)) return profilePath;
+  const resolvedManifest = resolvePreviewFontManifest();
+  if (!resolvedManifest) return profilePath;
+  const resolvedProfilePath = join(dirname(outDir), "resolved-profile.json");
+  mkdirSync(dirname(resolvedProfilePath), { recursive: true });
+  writeFileSync(
+    resolvedProfilePath,
+    JSON.stringify(
+      {
+        ...profile,
+        fonts: { ...profile.fonts, manifest: relative(dirname(resolvedProfilePath), resolvedManifest) },
+      },
+      null,
+      2,
+    ),
+  );
+  return resolvedProfilePath;
+}
+
 export function runPreview(
   bundleDist: string,
   fixture: string,
@@ -180,10 +226,11 @@ export function runPreview(
   if (zguiHost === null) {
     throw new Error("未找到预览所需的 zgui-host；请运行 bun install 或设置 ZGUI_JS_HOST_EXECUTABLE。");
   }
+  const profilePath = resolvePreviewProfile(options?.profile ?? join(shellDir, "preview/profile.json"), out);
   const args = [
     "preview", "run",
     "--bundle", bundleDist,
-    "--profile", options?.profile ?? join(shellDir, "preview/profile.json"),
+    "--profile", profilePath,
     "--fixture", fixture,
     "--scenario", scenario,
     "--out", out,
