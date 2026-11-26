@@ -1187,6 +1187,53 @@ describe("DESIGN.md token and surface contract sync", () => {
       "zshell/interactive-hover-radius",
     );
     expect(goodSliderControl.status, goodSliderControl.output).toBe(0);
+
+    // zshell/consistent-active-hover-shape catches mismatched active wrapper vs child hover radius,
+    // plugin widget hardcoded pill radius, and offset/mismatched [data-active-indicator].
+    const badSlotPad = lintSnippet(
+      "StatusBar.tsx",
+      `export const x = <box data-active="true" style={{ padding: "2px 0", borderRadius: "8px" }}><Button style={{ borderRadius: "999px" }}>W</Button></box>;`,
+      "zshell/consistent-active-hover-shape",
+    );
+    expect(badSlotPad.status).not.toBe(0);
+
+    const goodSlotInherit = lintSnippet(
+      "StatusBar.tsx",
+      `export const x = <box data-active="true" style={{ padding: "0px", borderRadius: "8px" }}><Button style={{ borderRadius: "inherit" }}>W</Button></box>;`,
+      "zshell/consistent-active-hover-shape",
+    );
+    expect(goodSlotInherit.status, goodSlotInherit.output).toBe(0);
+
+    const badIndicatorInset = lintSnippet(
+      "StatusBar.tsx",
+      `function WsBtn() { return <Button style={{ width: "24px", height: "24px", borderRadius: "6px" }} />; }
+export function Track() { return <box><box data-active-indicator="true" style={{ left: "2px", top: "3px", borderRadius: "999px" }} /><WsBtn /></box>; }`,
+      "zshell/consistent-active-hover-shape",
+    );
+    expect(badIndicatorInset.status).not.toBe(0);
+
+    const goodIndicatorFlush = lintSnippet(
+      "StatusBar.tsx",
+      `function WsBtn() { return <Button style={{ width: "24px", height: "24px", borderRadius: "6px" }} />; }
+export function Track() { return <box><box data-active-indicator="true" style={{ left: "0px", top: "0px", borderRadius: "6px" }} /><WsBtn /></box>; }`,
+      "zshell/consistent-active-hover-shape",
+    );
+    expect(goodIndicatorFlush.status, goodIndicatorFlush.output).toBe(0);
+
+    // zshell/no-child-control-overflow catches child <Button> wider/taller than its enclosing capsule.
+    const badOverflow = lintSnippet(
+      "StatusBar.tsx",
+      `export const x = <box style={{ width: "30px", padding: "0px" }}><Button style={{ width: "32px", height: "24px", borderRadius: "6px" }}>O</Button></box>;`,
+      "zshell/no-child-control-overflow",
+    );
+    expect(badOverflow.status).not.toBe(0);
+
+    const goodContained = lintSnippet(
+      "StatusBar.tsx",
+      `export const x = <box style={{ width: "32px", padding: "0px" }}><Button style={{ width: "24px", height: "24px", borderRadius: "6px" }}>O</Button></box>;`,
+      "zshell/no-child-control-overflow",
+    );
+    expect(goodContained.status, goodContained.output).toBe(0);
   });
 
   test("Smooth Corner Shape Contract: superellipse(2.83) on rounded-rect containers and round inheritance blocks on pills/circles", () => {

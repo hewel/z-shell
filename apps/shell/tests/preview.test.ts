@@ -311,7 +311,7 @@ describe("apps/shell preview", () => {
           {
             id: "open-quick-settings",
             op: "pointer.click",
-            target: { surface: "bar-dp-1", testId: "bar-audio" },
+            target: { surface: "bar-dp-1", testId: "bar-quick-settings" },
             button: "primary",
           },
           { id: "present-quick-settings", op: "clock.advance", byMs: 10 },
@@ -1723,6 +1723,109 @@ describe("apps/shell preview", () => {
       expect([launcher.image.width, launcher.image.height]).toEqual([1280, 720]);
       expect(treeNode(osd.tree, "osd-value").text).toBe("80%");
       expect(treeNode(toasts.tree, "toast-card-1").boundsDevice).toBeDefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  previewTest("Bar popup trigger handoffs retire previous popups cleanly and suppress compositor same-trigger reopen", () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-popup-handoff-");
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const monitor = {
+        id: "dp-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900,
+        scale: 1, refreshRateMilliHz: 60000,
+      };
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+
+      // 1. Open panel-calendar, then immediately switch across popup hosts to ime-menu.
+      timeline.step({ id: "open-calendar", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-clock" }, button: "primary" });
+      timeline.advance("calendar-open-settle", 250);
+      timeline.step({ id: "after-open-cal", op: "monitors.set", monitors: [monitor] });
+
+      timeline.step({ id: "switch-to-ime", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-ime" }, button: "secondary" });
+      timeline.advance("ime-switch-15ms", 15);
+      timeline.step({ id: "after-switch-to-ime-15ms", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("ime-switch-250ms", 250);
+      timeline.step({ id: "after-switch-to-ime-250ms", op: "monitors.set", monitors: [monitor] });
+
+      // Ungrabbed handoff activates the transparent top-layer backdrop so outside clicks dismiss.
+      timeline.step({ id: "click-backdrop-dismiss-ime", op: "pointer.click", target: { surface: "bar-backdrop-dp-1", testId: "bar-popover-backdrop-dp-1" }, button: "primary" });
+      timeline.advance("backdrop-dismiss-settle", 250);
+      timeline.step({ id: "after-backdrop-dismiss-ime", op: "monitors.set", monitors: [monitor] });
+
+      // 2. Simulate compositor PopupDone arriving on pointer press when switching to another panel,
+      // then switch a second time and verify native grab is restored on the 3rd trigger.
+      timeline.step({ id: "reopen-calendar", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-clock" }, button: "primary" });
+      timeline.advance("reopen-cal-settle", 250);
+      timeline.step({ id: "after-reopen-cal", op: "monitors.set", monitors: [monitor] });
+      timeline.step({ id: "compositor-dismiss-cal", op: "popupDone", surface: "panel-calendar" });
+      timeline.advance("compositor-dismiss-cal-gap", 10);
+      timeline.step({ id: "switch-to-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-quick-settings" }, button: "primary" });
+      timeline.advance("qs-switch-250ms", 250);
+      timeline.step({ id: "after-compositor-switch-qs", op: "monitors.set", monitors: [monitor] });
+
+      timeline.step({ id: "switch-qs-to-sysmon", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-sysmon" }, button: "primary" });
+      timeline.advance("sysmon-switch-15ms", 15);
+      timeline.step({ id: "after-switch-qs-to-sysmon-15ms", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("sysmon-switch-250ms", 250);
+      timeline.step({ id: "after-switch-qs-to-sysmon-250ms", op: "monitors.set", monitors: [monitor] });
+
+      // 3. Compositor PopupDone followed immediately by the same trigger must close rather than reopen.
+      timeline.step({ id: "compositor-dismiss-sysmon", op: "popupDone", surface: "panel-system-monitor" });
+      timeline.advance("compositor-dismiss-sysmon-gap", 10);
+      timeline.step({ id: "click-same-sysmon", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-sysmon" }, button: "primary" });
+      timeline.advance("same-trigger-close-settle", 250);
+      timeline.step({ id: "after-same-trigger-close", op: "monitors.set", monitors: [monitor] });
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-popup-handoff",
+        initialTopics: {
+          "desktop.ime": {
+            mode: "indicator_only",
+            candidate_layout: "auto",
+            switch_osd: false,
+            available: true,
+            enabled: true,
+            active_im: { unique_name: "keyboard-us", label: "English", short_label: "EN" },
+            properties: [],
+            group_ims: [
+              { unique_name: "keyboard-us", label: "English", short_label: "EN" },
+              { unique_name: "rime", label: "Rime", short_label: "中" },
+            ],
+            exec_menu: null,
+          },
+        },
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-popup-handoff",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(fixture, scenario, out);
+      expectCleanPreview(result, 0, 0);
+
+      expect(previewSurfaces(out, "after-open-cal")).toContain("panel-calendar");
+      expect(previewSurfaces(out, "after-switch-to-ime-15ms")).not.toContain("panel-calendar");
+      expect(previewSurfaces(out, "after-switch-to-ime-15ms")).toContain("ime-menu");
+      expect(previewSurfaces(out, "after-switch-to-ime-250ms")).toContain("ime-menu");
+      expect(previewSurfaces(out, "after-backdrop-dismiss-ime")).not.toContain("ime-menu");
+
+      expect(previewSurfaces(out, "after-reopen-cal")).toContain("panel-calendar");
+      expect(previewSurfaces(out, "after-compositor-switch-qs")).toContain("panel-quick-settings");
+      expect(previewSurfaces(out, "after-compositor-switch-qs")).not.toContain("panel-calendar");
+
+      expect(previewSurfaces(out, "after-switch-qs-to-sysmon-15ms")).not.toContain("panel-quick-settings");
+      expect(previewSurfaces(out, "after-switch-qs-to-sysmon-15ms")).toContain("panel-system-monitor");
+      expect(previewSurfaces(out, "after-switch-qs-to-sysmon-250ms")).toContain("panel-system-monitor");
+
+      expect(previewSurfaces(out, "after-same-trigger-close")).not.toContain("panel-system-monitor");
     } finally {
       cleanup();
     }

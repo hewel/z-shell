@@ -11,14 +11,22 @@ import { isImeTrayItem, partitionTrayItems, type BarPosition, type BarStyle, typ
 const MENU_MIN_WIDTH = 220;
 const MENU_MAX_WIDTH = 360;
 const MENU_MAX_HEIGHT = 520;
-const TRAY_OVERFLOW_WIDTH = 248;
-const TRAY_OVERFLOW_MAX_HEIGHT = 360;
+const TRAY_OVERFLOW_TILE_SIZE = 36;
+const TRAY_OVERFLOW_GAP = 4;
+const TRAY_OVERFLOW_PAD = 6;
+const TRAY_OVERFLOW_MAX_COLS = 4;
+const TRAY_OVERFLOW_MAX_HEIGHT = 240;
 const primary = "var(--color-primary)";
 const primaryContainer = "var(--color-primary-container)";
 const onPrimaryContainer = "var(--color-on-primary-container)";
 const onSurface = "var(--color-on-surface)";
 const onSurfaceVariant = "var(--color-on-surface-variant)";
 const containerHighest = "var(--color-surface-container-highest)";
+
+function resolveTrayOverflowWidth(count: number): number {
+  const cols = Math.max(1, Math.min(TRAY_OVERFLOW_MAX_COLS, count));
+  return 2 + TRAY_OVERFLOW_PAD * 2 + cols * TRAY_OVERFLOW_TILE_SIZE + (cols - 1) * TRAY_OVERFLOW_GAP;
+}
 const separator = { height: "1px", margin: "5px 4px", flexShrink: 0, backgroundColor: "color-mix(in srgb, var(--color-outline-variant) 55%, transparent)" } as const;
 const indicator = { display: "flex", width: "14px", height: "14px", flexShrink: 0, alignItems: "center", justifyContent: "center" } as const;
 
@@ -261,47 +269,46 @@ function TrayOverflowTile(props: {
       }}
       style={{
         display: "flex",
-        flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: "4px",
-        width: "54px",
-        height: "54px",
-        padding: "6px 4px",
-        borderRadius: "12px",
-        backgroundColor: containerHighest,
+        width: `${TRAY_OVERFLOW_TILE_SIZE}px`,
+        height: `${TRAY_OVERFLOW_TILE_SIZE}px`,
+        padding: "0px",
+        borderRadius: "8px",
+        backgroundColor: "var(--color-surface-container-high)",
         color: onSurface,
         flexShrink: 0,
       }}
     >
-      <Show when={src()} fallback={
-        <Show when={fallbackLetter()} fallback={
-          <box style={{
-            display: "flex", alignItems: "center", justifyContent: "center",
-            width: "20px", height: "20px", borderRadius: "6px", backgroundColor: "var(--color-surface-container-high)",
-          }}>
-            <ShellIcon name="apps" size={14} color={onSurfaceVariant} />
-          </box>
-        }>
-          {letter => (
+      <box data-press-visual="compact" ariaHidden style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        pointerEvents: "none",
+      }}>
+        <Show when={src()} fallback={
+          <Show when={fallbackLetter()} fallback={
             <box style={{
               display: "flex", alignItems: "center", justifyContent: "center",
-              width: "20px", height: "20px", borderRadius: "6px",
-              backgroundColor: primaryContainer, color: onPrimaryContainer, fontWeight: 700, fontSize: "11px",
+              width: "20px", height: "20px", borderRadius: "6px", backgroundColor: containerHighest,
             }}>
-              <text>{letter()}</text>
+              <ShellIcon name="apps" size={14} color={onSurfaceVariant} />
             </box>
-          )}
+          }>
+            {letter => (
+              <box style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: "20px", height: "20px", borderRadius: "6px",
+                backgroundColor: primaryContainer, color: onPrimaryContainer, fontWeight: 700, fontSize: "11px",
+              }}>
+                <text>{letter()}</text>
+              </box>
+            )}
+          </Show>
+        }>
+          {image => <Image src={image()} style={{ width: "20px", height: "20px", borderRadius: "6px", objectFit: "contain" }} />}
         </Show>
-      }>
-        {image => <Image src={image()} style={{ width: "20px", height: "20px", borderRadius: "6px", objectFit: "contain" }} />}
-      </Show>
-      <text style={{
-        width: "46px", textAlign: "center", fontSize: "10px", lineHeight: "12px", color: onSurfaceVariant,
-        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-      }}>
-        {label()}
-      </text>
+      </box>
     </Button>
   );
 }
@@ -309,13 +316,11 @@ function TrayOverflowTile(props: {
 function TrayOverflowCard(props: {
   readonly overflowTarget: TrayOverflowTarget;
   readonly rows: readonly (readonly TrayItem[])[];
-  readonly count: number;
   readonly position: BarPosition;
   readonly inert: boolean;
   readonly spatial: M3Spring;
   readonly opacity: M3Spring;
   readonly cardRef: (node: NativeNode) => void;
-  readonly onConfigure: () => void;
   readonly onExternalContextMenu: (itemId: string) => void;
 }): NativeChild {
   const { theme } = useShellStore();
@@ -329,13 +334,13 @@ function TrayOverflowCard(props: {
         data-theme-rev={String(theme.revision())}
         style={{
           width: "100%",
+          boxSizing: "border-box",
           borderRadius: "16px",
           backgroundColor: "var(--surface-popover)",
           border: "1px solid var(--border-popover)",
           boxShadow: "var(--shadow-level-2)",
           color: onSurface,
           fontFamily: "var(--font-sans)",
-          fontSize: "12px",
           overflow: "hidden",
           ...panelMotionStyle(props.spatial(), props.position, false, {
             opacity: props.opacity(),
@@ -343,60 +348,19 @@ function TrayOverflowCard(props: {
           }),
         }}
       >
-        <column style={{
+        <box style={{
           width: "100%",
           ...popoverContentMotionStyle(props.spatial(), props.opacity(), scheme() === "reduced"),
         }}>
-          <row style={{
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "8px",
-            padding: "10px 10px 6px 14px",
-            width: "100%",
-          }}>
-            <row style={{ alignItems: "center", gap: "6px", flexGrow: 1, minWidth: "0px" }}>
-              <text role="heading" style={{
-                fontSize: "12px", fontWeight: 600, lineHeight: "16px", color: onSurface,
-                overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis",
-              }}>
-                Hidden icons
-              </text>
-              <box style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                minWidth: "18px", height: "18px", padding: "0 5px",
-                borderRadius: "999px", "--zgui-corner-shape": "none",
-                backgroundColor: containerHighest,
-              }}>
-                <text data-tabular="true" style={{
-                  fontFamily: "var(--font-mono)", fontSize: "10px", lineHeight: "12px", color: onSurfaceVariant,
-                  fontVariantNumeric: "tabular-nums",
-                }}>
-                  {props.count}
-                </text>
-              </box>
-            </row>
-            <Button
-              testId="tray-overflow-configure"
-              ariaLabel="Configure tray rules"
-              onClick={props.onConfigure}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: "28px", height: "28px", borderRadius: "8px", flexShrink: 0,
-                backgroundColor: "transparent",
-              }}
-            >
-              <ShellIcon name="settings" size={16} color={onSurfaceVariant} />
-            </Button>
-          </row>
           <scroll style={{
             width: "100%",
-            maxHeight: `${TRAY_OVERFLOW_MAX_HEIGHT - 46}px`,
+            maxHeight: `${TRAY_OVERFLOW_MAX_HEIGHT}px`,
             overflow: "hidden auto",
           }}>
-            <column style={{ padding: "4px 25px 14px 25px", gap: "12px", width: "100%" }}>
+            <column style={{ padding: `${TRAY_OVERFLOW_PAD}px`, gap: `${TRAY_OVERFLOW_GAP}px`, width: "100%" }}>
               <For each={props.rows} keyed={row => row.map(i => i.id).join("|")}>
                 {row => (
-                  <row style={{ gap: "12px", alignItems: "center" }}>
+                  <row style={{ gap: `${TRAY_OVERFLOW_GAP}px`, alignItems: "center" }}>
                     <For each={row()} keyed={item => item.id}>
                       {item => (
                         <TrayOverflowTile
@@ -411,7 +375,7 @@ function TrayOverflowCard(props: {
               </For>
             </column>
           </scroll>
-        </column>
+        </box>
       </box>
     </box>
   );
@@ -438,6 +402,9 @@ type ActiveBarPopup =
 
 export function BarPopups(): NativeChild {
   const {
+    overlayKind,
+    barPopupGrab,
+    dismissBarPopupFromCompositor,
     activeTrayMenu,
     closeTrayMenu,
     activeTrayOverflow,
@@ -447,7 +414,6 @@ export function BarPopups(): NativeChild {
     activeImeMenu,
     closeImeMenu,
     settings,
-    openSettingsWindow,
     invokePublic,
   } = useShellStore();
   const scheme = useMotionScheme();
@@ -469,11 +435,12 @@ export function BarPopups(): NativeChild {
   const overflowRows = createMemo(() => {
     const items = collapsedTrayItems();
     const rows: (readonly TrayItem[])[] = [];
-    for (let i = 0; i < items.length; i += 3) {
-      rows.push(items.slice(i, i + 3));
+    for (let i = 0; i < items.length; i += TRAY_OVERFLOW_MAX_COLS) {
+      rows.push(items.slice(i, i + TRAY_OVERFLOW_MAX_COLS));
     }
     return rows;
   });
+  const overflowWidth = createMemo(() => resolveTrayOverflowWidth(collapsedTrayItems().length));
   const activePopup = createMemo((): ActiveBarPopup | null => {
     const trayMenuTarget = activeTrayMenu();
     if (trayMenuTarget) {
@@ -518,7 +485,7 @@ export function BarPopups(): NativeChild {
     enterRole: "defaultSpatial",
     enterOpacityRole: "fastEffects",
     exitRole: "fastEffects",
-    instantExit: instantExitNext,
+    instantExit: () => instantExitNext() || (overlayKind() !== null && activePopup() === null),
   });
   const mountedKey = createMemo(() => presence.value()?.key ?? null);
   const trayRows = createMemo(() => {
@@ -546,6 +513,7 @@ export function BarPopups(): NativeChild {
     <Show when={mountedKey()} keyed>
       {_key => {
         const entry = untrack(() => presence.value()!);
+        const initialGrab = untrack(barPopupGrab);
         const [cardNode, setCardNode] = createSignal<NativeNode | null>(null);
 
         if (entry.kind === "tray-menu") {
@@ -558,8 +526,8 @@ export function BarPopups(): NativeChild {
               width={trayWidth()} height="auto" minHeight={48} maxHeight={MENU_MAX_HEIGHT}
               geometryInsets={POPOVER_SHADOW_INSETS}
               inputRegion={cardNode() ? [cardNode()!] : []}
-              placement={geometry().placement} offset={geometry().offset} grab blurRegion={cardNode() ? [cardNode()!] : "none"}
-              onDismiss={() => { presence.dismissInstant(); closeTrayMenu(); }}>
+              placement={geometry().placement} offset={geometry().offset} grab={initialGrab} blurRegion={cardNode() ? [cardNode()!] : "none"}
+              onDismiss={() => { presence.dismissInstant(); dismissBarPopupFromCompositor("tray"); }}>
               <PopupContent padding="8px" label={currentLabel()} header={currentLabel()} cardTestId="tray-menu-card" position={position()} inert={!presence.present()} spatial={presence.progress} opacity={presence.opacity}
                 cardRef={setCardNode} onDismiss={closeTrayMenu}>
                 <For each={trayRows()} keyed={row => row.node.id}>
@@ -585,8 +553,8 @@ export function BarPopups(): NativeChild {
               width={imeWidth()} height="auto" minHeight={48} maxHeight={MENU_MAX_HEIGHT}
               geometryInsets={POPOVER_SHADOW_INSETS}
               inputRegion={cardNode() ? [cardNode()!] : []}
-              placement={geometry().placement} offset={geometry().offset} grab blurRegion={cardNode() ? [cardNode()!] : "none"}
-              onDismiss={() => { presence.dismissInstant(); closeImeMenu(); }}>
+              placement={geometry().placement} offset={geometry().offset} grab={initialGrab} blurRegion={cardNode() ? [cardNode()!] : "none"}
+              onDismiss={() => { presence.dismissInstant(); dismissBarPopupFromCompositor("ime"); }}>
               <PopupContent padding="8px" label="Input method" header="Input method" cardTestId="ime-menu-card" position={position()} inert={!presence.present()} spatial={presence.progress} opacity={presence.opacity}
                 cardRef={setCardNode} onDismiss={closeImeMenu}>
                 <For each={ime.data()?.group_ims} keyed={im => im.unique_name}>
@@ -621,25 +589,20 @@ export function BarPopups(): NativeChild {
 
         return (
           <PopupSurface name="tray-overflow" parent={entry.target.parentSurface} anchorRect={entry.target.anchorRect}
-            width={TRAY_OVERFLOW_WIDTH} height="auto" minHeight={88} maxHeight={TRAY_OVERFLOW_MAX_HEIGHT}
+            width={overflowWidth()} height="auto" minHeight={50} maxHeight={TRAY_OVERFLOW_MAX_HEIGHT}
             geometryInsets={POPOVER_SHADOW_INSETS}
             inputRegion={cardNode() ? [cardNode()!] : []}
-            placement={geometry().placement} offset={geometry().offset} grab blurRegion={cardNode() ? [cardNode()!] : "none"}
-            onDismiss={() => { presence.dismissInstant(); closeTrayOverflow(); }}>
+            placement={geometry().placement} offset={geometry().offset} grab={initialGrab} blurRegion={cardNode() ? [cardNode()!] : "none"}
+            onDismiss={() => { presence.dismissInstant(); dismissBarPopupFromCompositor("tray-overflow"); }}>
             <TrayOverflowCard
               overflowTarget={entry.target}
               rows={overflowRows()}
-              count={collapsedTrayItems().length}
               position={position()}
               inert={!presence.present()}
               spatial={presence.progress}
               opacity={presence.opacity}
               cardRef={setCardNode}
               onExternalContextMenu={handleExternalContextMenu}
-              onConfigure={() => {
-                closeTrayOverflow();
-                openSettingsWindow("bar", "tray-rules");
-              }}
             />
           </PopupSurface>
         );

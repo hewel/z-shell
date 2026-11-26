@@ -107,7 +107,7 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
   const {
     publicClient, invokeHostResult, registerPluginBarWidget, registerPluginSettingsPage, pluginSettingsPages, openSettingsWindow,
     monitors, outputs, settings, theme,
-    activePluginPanelId, openPluginPanel, closePluginPanel, recordActiveMonitor,
+    activePluginPanelId, overlayKind, barPopupGrab, togglePluginPanel, closePluginPanel, dismissBarPopupFromCompositor, recordActiveMonitor,
   } = useShellStore();
   const [pluginPanelData, setPluginPanelData] = createSignal<ActivePluginPanel | null>(null);
   let serviceController: ComposedServiceController | undefined;
@@ -123,6 +123,7 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
     enterRole: "defaultSpatial",
     enterOpacityRole: "fastEffects",
     exitRole: "fastEffects",
+    instantExit: () => overlayKind() !== null && activePluginPanel() === null,
   });
   const mountedPanelKey = createMemo(() => {
     const entry = panelPresence.value();
@@ -134,7 +135,8 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
   };
   const dismissPluginPanelInstant = () => {
     panelPresence.dismissInstant();
-    dismissPluginPanel();
+    dismissBarPopupFromCompositor("plugin");
+    setPluginPanelData(null);
   };
 
   if (bundle.services.length > 0) {
@@ -168,11 +170,6 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
     }
     if (!panel) return;
 
-    if (activePluginPanelId() === panel.instanceId && pluginPanelData()?.outputId === outputId) {
-      dismissPluginPanel();
-      return;
-    }
-
     const layout = resolveBarLayout(settings.data()?.bar, monitor, outputs.data());
     const targetRect = anchor ? getWindowRect(anchor) : null;
     setPluginPanelData({
@@ -189,7 +186,9 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
       style: layout.style,
       Component: entryComponent<PanelProps>(bundle, panel),
     });
-    openPluginPanel(panel.instanceId, outputId);
+    if (!togglePluginPanel(panel.instanceId, outputId, panel.pluginId)) {
+      setPluginPanelData(null);
+    }
   }
 
   return (
@@ -247,6 +246,9 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
             onSettled(() => {
               unregister = registerPluginBarWidget({
                 id: instance.instanceId,
+                pluginId: instance.pluginId,
+                entryId: instance.entryId,
+                ...(instance.instanceSlug !== undefined ? { instanceSlug: instance.instanceSlug } : {}),
                 outputId,
                 render: ({ vertical }) => (
                   <box
@@ -269,6 +271,7 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
       <Show when={mountedPanelKey()} keyed>
         {_key => {
           const initial = untrack(() => panelPresence.value()!);
+          const initialGrab = untrack(barPopupGrab);
           const current = () => panelPresence.value() ?? initial;
           const { pluginId, instanceId, outputId, width, Component: PanelComponent } = initial;
           const geometry = createMemo(() => resolvePopoverGeometry(current().position, current().style, false));
@@ -284,7 +287,7 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
               width={width} height="auto" minHeight={80} maxHeight={PANEL_MAX_HEIGHTS.plugin}
               geometryInsets={POPOVER_SHADOW_INSETS}
               inputRegion={cardNode() ? [cardNode()!] : []}
-              placement={geometry().placement} offset={geometry().offset} grab blurRegion={cardNode() ? [cardNode()!] : "none"} onDismiss={dismissPluginPanelInstant}>
+              placement={geometry().placement} offset={geometry().offset} grab={initialGrab} blurRegion={cardNode() ? [cardNode()!] : "none"} onDismiss={dismissPluginPanelInstant}>
               <PluginPanelFrame theme={theme} position={current().position} inert={!panelPresence.present()} spatial={panelPresence.progress} opacity={panelPresence.opacity} cardRef={setCardNode}>
                 <PanelComponent client={publicClient} onClose={dismissPluginPanel} onOpenSettings={onOpenSettings} />
               </PluginPanelFrame>

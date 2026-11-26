@@ -638,9 +638,15 @@ function OutgoingQuickSettingsLayer(props: {
 }
 
 export function QuickSettingsPanel(): NativeChild {
-  const { power, pendingQuickSettingsSubpage, consumeQuickSettingsSubpage } = useShellStore();
+  const {
+    power,
+    quickSettingsPage,
+    setQuickSettingsPage,
+    pendingQuickSettingsSubpage,
+    consumeQuickSettingsSubpage,
+  } = useShellStore();
   const scheme = useMotionScheme();
-  const [page, setPage] = createSignal<QuickSettingsPage>(consumeQuickSettingsSubpage() ?? "main");
+  const [page, setPage] = createSignal<QuickSettingsPage>(consumeQuickSettingsSubpage() ?? quickSettingsPage());
   const [returnedFromSubpage, setReturnedFromSubpage] = createSignal(false);
   const [powerMenuOpen, setPowerMenuOpen] = createSignal(false);
   const [profileMenuOpen, setProfileMenuOpen] = createSignal(false);
@@ -690,6 +696,7 @@ export function QuickSettingsPanel(): NativeChild {
   const transitionTo = (next: QuickSettingsPage) => {
     const current = page();
     if (current === next) return;
+    setQuickSettingsPage(next);
     const isReduced = scheme() === "reduced";
     const prevHeight = activeWrapper ? getWindowRect(activeWrapper)?.height ?? 0 : 0;
     const direction: 1 | -1 = next === "main" ? -1 : 1;
@@ -716,6 +723,10 @@ export function QuickSettingsPanel(): NativeChild {
       });
     }
   };
+
+  createEffect(quickSettingsPage, requested => {
+    if (requested !== page()) transitionTo(requested);
+  });
 
   const subpage = () => {
     const current = page();

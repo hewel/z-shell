@@ -98,6 +98,9 @@ export type ImeMenuTarget = {
 
 export type PluginBarWidgetSlot = {
   readonly id: string;
+  readonly pluginId?: string;
+  readonly entryId?: string;
+  readonly instanceSlug?: string;
   readonly outputId?: string;
   readonly render: (props: { readonly vertical: boolean }) => NativeChild;
 };
@@ -114,7 +117,9 @@ type BarOverlay =
   | { readonly kind: "tray"; readonly target: TrayMenuTarget }
   | { readonly kind: "tray-overflow"; readonly target: TrayOverflowTarget }
   | { readonly kind: "ime"; readonly target: ImeMenuTarget }
-  | { readonly kind: "plugin"; readonly instanceId: string; readonly monitorId?: string };
+  | { readonly kind: "plugin"; readonly instanceId: string; readonly pluginId?: string; readonly monitorId?: string };
+
+export type BarOverlayKind = BarOverlay["kind"];
 
 export function resolveShellSocketPaths(unixSockets: readonly string[]): ShellSocketPaths {
   const find = (kind: "bus" | "host") => {
@@ -155,6 +160,8 @@ interface ShellTopics {
   readonly polkit: TopicState<PolkitSnapshot>;
 }
 
+export type QuickSettingsPageId = "main" | "wifi" | "bluetooth" | "sound" | "battery";
+
 export interface ShellStore extends ShellTopics {
   readonly monitors: Accessor<readonly Monitor[]>;
   readonly activeMonitor: Accessor<Monitor | undefined>;
@@ -174,14 +181,24 @@ export interface ShellStore extends ShellTopics {
   >;
   readonly activePanel: Accessor<PanelId | null>;
   readonly activePanelTarget: Accessor<PanelTarget | null>;
+  readonly overlayKind: Accessor<BarOverlayKind | null>;
+  readonly barPopupGrab: Accessor<boolean>;
+  readonly ungrabbedBarPopupMonitorId: Accessor<string | null>;
+  recordBarPointerDown(): void;
+  dismissBarPopupFromCompositor(kind: BarOverlayKind): void;
   togglePanel(id: PanelId, target?: PanelAnchor): void;
-  readonly pendingQuickSettingsSubpage: Accessor<"wifi" | "bluetooth" | "sound" | "battery" | null>;
-  openQuickSettingsSubpage(page: "wifi" | "bluetooth" | "sound" | "battery"): void;
-  consumeQuickSettingsSubpage(): "wifi" | "bluetooth" | "sound" | "battery" | null;
+  readonly quickSettingsPage: Accessor<QuickSettingsPageId>;
+  setQuickSettingsPage(page: QuickSettingsPageId): void;
+  toggleQuickSettingsPage(page: QuickSettingsPageId, target?: PanelAnchor): void;
+  readonly pendingQuickSettingsSubpage: Accessor<Exclude<QuickSettingsPageId, "main"> | null>;
+  openQuickSettingsSubpage(page: Exclude<QuickSettingsPageId, "main">): void;
+  consumeQuickSettingsSubpage(): Exclude<QuickSettingsPageId, "main"> | null;
   closePanels(): void;
   dismissOverlay(): void;
   readonly activePluginPanelId: Accessor<string | null>;
-  openPluginPanel(instanceId: string, monitorId?: string): void;
+  readonly activePluginPanelTarget: Accessor<{ readonly instanceId: string; readonly pluginId?: string; readonly monitorId?: string } | null>;
+  togglePluginPanel(instanceId: string, monitorId?: string, pluginId?: string): boolean;
+  openPluginPanel(instanceId: string, monitorId?: string, pluginId?: string): void;
   closePluginPanel(): void;
   readonly activeTrayMenu: Accessor<TrayMenuTarget | null>;
   openTrayMenu(target: TrayMenuTarget): void;
@@ -215,6 +232,17 @@ export interface ShellStore extends ShellTopics {
   closeSystemMonitorWindow(): void;
 }
 
+function isBarPopupOverlay(active: BarOverlay | null): boolean {
+  if (!active) return false;
+  if (active.kind !== "panel") return true;
+  return active.target.parentSurface.length > 0
+    && active.target.id !== "launcher"
+    && active.target.id !== "overview"
+    && active.target.id !== "clipboard";
+}
+
+const COMPOSITOR_DISMISS_PRESS_WINDOW_MS = 80;
+
 export function createShellStore(): ShellStore {
   const monitors = useMonitors();
   const { publicSocket, hostSocket } = resolveShellSocketPaths(getResolvedCapabilities().unixSockets);
@@ -223,7 +251,16 @@ export function createShellStore(): ShellStore {
   const [powerDialogMonitorId, setPowerDialogMonitorId] = createSignal<string | null>(null);
   let disposed = false;
   const [overlay, setOverlay] = createSignal<BarOverlay | null>(null);
-  const [pendingQuickSettingsSubpage, setPendingQuickSettingsSubpage] = createSignal<"wifi" | "bluetooth" | "sound" | "battery" | null>(null);
+  const [barPopupGrab, setBarPopupGrab] = createSignal(true);
+  let lastBarPointerDownAtMs: number | null = null;
+  let lastCompositorDismiss: {
+    readonly overlay: BarOverlay;
+    readonly quickSettingsPage: QuickSettingsPageId;
+    readonly atMs: number;
+    fromBarPress: boolean;
+  } | null = null;
+  const [quickSettingsPage, setQuickSettingsPage] = createSignal<QuickSettingsPageId>("main");
+  const [pendingQuickSettingsSubpage, setPendingQuickSettingsSubpage] = createSignal<Exclude<QuickSettingsPageId, "main"> | null>(null);
   const recordActiveMonitor = (monitorId: string) => {
     if (monitorId.length > 0) setLastMonitorId(monitorId);
   };
@@ -255,10 +292,18 @@ export function createShellStore(): ShellStore {
     const active = overlay();
     return active?.kind === "ime" ? active.target : null;
   };
-  const activePluginPanelId = () => {
+  const activePluginPanelTarget = () => {
     const active = overlay();
-    return active?.kind === "plugin" ? active.instanceId : null;
+    return active?.kind === "plugin"
+      ? {
+          instanceId: active.instanceId,
+          ...(active.pluginId !== undefined ? { pluginId: active.pluginId } : {}),
+          ...(active.monitorId !== undefined ? { monitorId: active.monitorId } : {}),
+        }
+      : null;
   };
+  const activePluginPanelId = () => activePluginPanelTarget()?.instanceId ?? null;
+  const overlayKind = () => overlay()?.kind ?? null;
   function inferMonitorId(parentSurface: string | undefined, outputs: readonly Monitor[]): string | undefined {
     if (!parentSurface) return undefined;
     return outputs.find(monitor => formatSurfaceName("bar", monitor.id) === parentSurface)?.id;
@@ -268,6 +313,11 @@ export function createShellStore(): ShellStore {
     if (active.kind === "plugin") return active.monitorId;
     return active.target.monitorId ?? inferMonitorId(active.target.parentSurface, outputs);
   }
+  const ungrabbedBarPopupMonitorId = createMemo((): string | null => {
+    const active = overlay();
+    if (!isBarPopupOverlay(active) || barPopupGrab()) return null;
+    return overlayMonitorId(active, monitors()) ?? activeMonitor()?.id ?? null;
+  });
   function defaultPanelAnchor(
     id: PanelId,
     outputs: readonly Monitor[],
@@ -293,34 +343,159 @@ export function createShellStore(): ShellStore {
   const overviewPluginLayer = composedPlugins.entryInstances.find(
     instance => instance.kind === "layer" && instance.id === "overview",
   );
+  const recordBarPointerDown = () => {
+    const now = Date.now();
+    lastBarPointerDownAtMs = now;
+    if (lastCompositorDismiss) {
+      if (now - lastCompositorDismiss.atMs <= COMPOSITOR_DISMISS_PRESS_WINDOW_MS) {
+        lastCompositorDismiss.fromBarPress = true;
+      } else {
+        lastCompositorDismiss = null;
+      }
+    }
+  };
+  const dismissBarPopupFromCompositor = (kind: BarOverlayKind) => {
+    const active = overlay();
+    if (active?.kind !== kind) return;
+    const now = Date.now();
+    lastCompositorDismiss = {
+      overlay: active,
+      quickSettingsPage: quickSettingsPage(),
+      atMs: now,
+      fromBarPress: lastBarPointerDownAtMs !== null && now - lastBarPointerDownAtMs <= COMPOSITOR_DISMISS_PRESS_WINDOW_MS,
+    };
+    setOverlay(null);
+    setBarPopupGrab(true);
+  };
+  const consumeBarCompositorDismiss = () => {
+    const record = lastCompositorDismiss;
+    lastCompositorDismiss = null;
+    if (!record) return null;
+    return record.fromBarPress || Date.now() - record.atMs <= COMPOSITOR_DISMISS_PRESS_WINDOW_MS
+      ? record
+      : null;
+  };
+  const readOverlayTransition = () => {
+    const current = overlay();
+    const recent = current === null ? consumeBarCompositorDismiss() : ((lastCompositorDismiss = null), null);
+    const effective = current ?? recent?.overlay ?? null;
+    return { current, recent, effective };
+  };
+  const clearOverlayWithGrab = () => {
+    lastCompositorDismiss = null;
+    setBarPopupGrab(true);
+    setOverlay(null);
+  };
+  const commitBarOverlay = (
+    next: BarOverlay,
+    inPlace: boolean,
+    recent: NonNullable<ReturnType<typeof consumeBarCompositorDismiss>> | null,
+    current: BarOverlay | null,
+  ) => {
+    // Switching directly between bar popups skips seat grab on the replacement popup so
+    // Smithay/Niri does not immediately dismiss it against the outgoing popup's press serial.
+    if (!inPlace) {
+      const hadActiveGrab = recent !== null || (isBarPopupOverlay(current) && barPopupGrab());
+      setBarPopupGrab(!hadActiveGrab);
+    }
+    setOverlay(next);
+  };
+  function resolveAnchor(target: PanelAnchor | undefined, id: PanelId, fallbackOverlay: BarOverlay | null): Omit<PanelTarget, "id"> {
+    const currentOutputs = monitors();
+    const explicitMonitorId = target?.monitorId ?? inferMonitorId(target?.parentSurface, currentOutputs);
+    if (explicitMonitorId) recordActiveMonitor(explicitMonitorId);
+    if (target?.parentSurface !== undefined && target.anchorRect !== undefined) {
+      return {
+        parentSurface: target.parentSurface,
+        anchorRect: target.anchorRect,
+        ...(explicitMonitorId ? { monitorId: explicitMonitorId } : {}),
+      };
+    }
+    return defaultPanelAnchor(id, currentOutputs, explicitMonitorId ?? overlayMonitorId(fallbackOverlay, currentOutputs));
+  }
   const togglePanel = (id: PanelId, target?: PanelAnchor) => {
     const currentOutputs = monitors();
     const explicitMonitorId = target?.monitorId ?? inferMonitorId(target?.parentSurface, currentOutputs);
     if (explicitMonitorId) recordActiveMonitor(explicitMonitorId);
     if (id === "overview" && overviewPluginLayer) {
-      setOverlay(null);
+      clearOverlayWithGrab();
       const commandPrefix = `plugin.${overviewPluginLayer.pluginId.replace("/", ".")}`;
       void invoke(publicClient(), `${commandPrefix}.toggle`, {});
       return;
     }
-    setOverlay(active => {
-      const activeMonitorId = overlayMonitorId(active, currentOutputs);
-      const resolved = target?.parentSurface !== undefined && target.anchorRect !== undefined
-        ? {
-          parentSurface: target.parentSurface,
-          anchorRect: target.anchorRect,
-          ...(explicitMonitorId ? { monitorId: explicitMonitorId } : {}),
+    if (id === "launcher" || id === "overview" || id === "clipboard") {
+      lastCompositorDismiss = null;
+      setBarPopupGrab(true);
+      setOverlay(active => {
+        const resolved = resolveAnchor(target, id, active);
+        if (active?.kind === "panel" && active.target.id === id
+          && (target === undefined || active.target.parentSurface === resolved.parentSurface)) {
+          return null;
         }
-        : defaultPanelAnchor(id, currentOutputs, explicitMonitorId ?? activeMonitorId);
-      if (active?.kind === "panel" && active.target.id === id
-        && (target === undefined || active.target.parentSurface === resolved.parentSurface)) {
-        return null;
-      }
-      return { kind: "panel", target: { ...resolved, id } };
-    });
+        return { kind: "panel", target: { ...resolved, id } };
+      });
+      return;
+    }
+    const { current, recent, effective } = readOverlayTransition();
+    const resolved = resolveAnchor(target, id, effective);
+    if (effective?.kind === "panel" && effective.target.id === id
+      && (target === undefined || effective.target.parentSurface === resolved.parentSurface)) {
+      clearOverlayWithGrab();
+      return;
+    }
+    const inPlace = current?.kind === "panel"
+      && current.target.id === id
+      && current.target.parentSurface === resolved.parentSurface;
+    commitBarOverlay({ kind: "panel", target: { ...resolved, id } }, inPlace, recent, current);
+  };
+  const toggleQuickSettingsPage = (page: QuickSettingsPageId, target?: PanelAnchor) => {
+    const { current, recent, effective } = readOverlayTransition();
+    const resolved = resolveAnchor(target, "quick-settings", effective);
+    const effectiveQsPage = current ? quickSettingsPage() : (recent?.quickSettingsPage ?? quickSettingsPage());
+    const sameSurfaceOpen = effective?.kind === "panel"
+      && effective.target.id === "quick-settings"
+      && (target === undefined || effective.target.parentSurface === resolved.parentSurface);
+    if (sameSurfaceOpen && effectiveQsPage === page) {
+      clearOverlayWithGrab();
+      return;
+    }
+    const inPlace = current?.kind === "panel"
+      && current.target.id === "quick-settings"
+      && current.target.parentSurface === resolved.parentSurface;
+    setQuickSettingsPage(page);
+    setPendingQuickSettingsSubpage(page === "main" ? null : page);
+    commitBarOverlay({ kind: "panel", target: { ...resolved, id: "quick-settings" } }, inPlace, recent, current);
   };
   const closeOverlay = (kind: BarOverlay["kind"]) => {
-    setOverlay(active => active?.kind === kind ? null : active);
+    if (overlay()?.kind !== kind) return;
+    clearOverlayWithGrab();
+  };
+  const togglePluginPanel = (instanceId: string, monitorId?: string, pluginId?: string): boolean => {
+    if (monitorId) recordActiveMonitor(monitorId);
+    const { current, recent, effective } = readOverlayTransition();
+    if (
+      effective?.kind === "plugin"
+      && effective.instanceId === instanceId
+      && (monitorId === undefined || effective.monitorId === monitorId)
+    ) {
+      clearOverlayWithGrab();
+      return false;
+    }
+    const inPlace = current?.kind === "plugin"
+      && current.instanceId === instanceId
+      && current.monitorId === monitorId;
+    commitBarOverlay(
+      {
+        kind: "plugin",
+        instanceId,
+        ...(pluginId !== undefined ? { pluginId } : {}),
+        ...(monitorId ? { monitorId } : {}),
+      },
+      inPlace,
+      recent,
+      current,
+    );
+    return true;
   };
 
   const [pendingPowerAction, setPendingPowerAction] = createSignal<PowerConfirmAction | null>(null);
@@ -332,7 +507,7 @@ export function createShellStore(): ShellStore {
       ?? null;
     if (targetMonitorId) recordActiveMonitor(targetMonitorId);
     setPowerDialogMonitorId(targetMonitorId);
-    setOverlay(null);
+    clearOverlayWithGrab();
     setPendingPowerAction(action);
   };
   const closePowerDialog = () => {
@@ -378,7 +553,7 @@ export function createShellStore(): ShellStore {
   function openSettingsWindow(tab?: string, subpage?: SettingsSubpage | null): void {
     if (tab) setSettingsWindowTab(tab);
     setSettingsSubpage(subpage ?? null);
-    setOverlay(null);
+    clearOverlayWithGrab();
     setSettingsWindowOpen(true);
   }
   function closeSettingsWindow(): void {
@@ -389,7 +564,7 @@ export function createShellStore(): ShellStore {
   const [systemMonitorWindowTab, setSystemMonitorWindowTab] = createSignal<SystemMonitorTab>("overview");
   function openSystemMonitorWindow(tab?: SystemMonitorTab): void {
     if (tab) setSystemMonitorWindowTab(tab);
-    setOverlay(null);
+    clearOverlayWithGrab();
     setSystemMonitorWindowOpen(true);
   }
   function closeSystemMonitorWindow(): void {
@@ -568,7 +743,7 @@ export function createShellStore(): ShellStore {
         const panel = PANEL_IDS.find(id => id === args[1]);
         if (args[1] === "close" || panel !== undefined) {
           // Solid commits signal writes after the callback unless we flush before replying.
-          flush(() => panel === undefined ? setOverlay(null) : togglePanel(panel));
+          flush(() => panel === undefined ? clearOverlayWithGrab() : togglePanel(panel));
           return { activePanel: activePanel() };
         }
         break;
@@ -623,51 +798,88 @@ export function createShellStore(): ShellStore {
     },
     activePanel,
     activePanelTarget,
+    overlayKind,
+    barPopupGrab,
+    ungrabbedBarPopupMonitorId,
+    recordBarPointerDown,
+    dismissBarPopupFromCompositor,
     togglePanel,
+    quickSettingsPage,
+    setQuickSettingsPage,
+    toggleQuickSettingsPage,
     pendingQuickSettingsSubpage,
     openQuickSettingsSubpage: page => {
+      const { current, recent, effective } = readOverlayTransition();
+      const resolved = resolveAnchor(undefined, "quick-settings", effective);
+      const inPlace = current?.kind === "panel"
+        && current.target.id === "quick-settings"
+        && current.target.parentSurface === resolved.parentSurface;
+      setQuickSettingsPage(page);
       setPendingQuickSettingsSubpage(page);
-      const currentOutputs = monitors();
-      const active = overlay();
-      const activeMonitorId = overlayMonitorId(active, currentOutputs);
-      const resolved = defaultPanelAnchor("quick-settings", currentOutputs, activeMonitorId);
-      setOverlay({ kind: "panel", target: { ...resolved, id: "quick-settings" } });
+      commitBarOverlay({ kind: "panel", target: { ...resolved, id: "quick-settings" } }, inPlace, recent, current);
     },
     consumeQuickSettingsSubpage: () => {
       const next = pendingQuickSettingsSubpage();
       if (next !== null) setPendingQuickSettingsSubpage(null);
       return next;
     },
-    closePanels: () => setOverlay(active => active?.kind === "panel" || active?.kind === "plugin" ? null : active),
-    dismissOverlay: () => setOverlay(null),
+    closePanels: () => {
+      const kind = overlay()?.kind;
+      if (kind === "panel" || kind === "plugin") clearOverlayWithGrab();
+    },
+    dismissOverlay: () => clearOverlayWithGrab(),
     activePluginPanelId,
-    openPluginPanel: (instanceId, monitorId) => {
+    activePluginPanelTarget,
+    togglePluginPanel,
+    openPluginPanel: (instanceId, monitorId, pluginId) => {
       if (monitorId) recordActiveMonitor(monitorId);
-      setOverlay({ kind: "plugin", instanceId, ...(monitorId ? { monitorId } : {}) });
+      const { current, recent } = readOverlayTransition();
+      const inPlace = current?.kind === "plugin"
+        && current.instanceId === instanceId
+        && current.monitorId === monitorId;
+      commitBarOverlay(
+        {
+          kind: "plugin",
+          instanceId,
+          ...(pluginId !== undefined ? { pluginId } : {}),
+          ...(monitorId ? { monitorId } : {}),
+        },
+        inPlace,
+        recent,
+        current,
+      );
     },
     closePluginPanel: () => closeOverlay("plugin"),
     activeTrayMenu,
     openTrayMenu: target => {
       const monitorId = target.monitorId ?? inferMonitorId(target.parentSurface, monitors());
       if (monitorId) recordActiveMonitor(monitorId);
-      setOverlay({ kind: "tray", target });
+      const { current, recent } = readOverlayTransition();
+      const inPlace = current?.kind === "tray"
+        && current.target.itemId === target.itemId
+        && current.target.parentSurface === target.parentSurface;
+      commitBarOverlay({ kind: "tray", target }, inPlace, recent, current);
     },
     closeTrayMenu: () => closeOverlay("tray"),
     activeTrayOverflow,
     openTrayOverflow: target => {
       const monitorId = target.monitorId ?? inferMonitorId(target.parentSurface, monitors());
       if (monitorId) recordActiveMonitor(monitorId);
-      setOverlay(active => active?.kind === "tray-overflow"
-        && active.target.parentSurface === target.parentSurface
-        ? null
-        : { kind: "tray-overflow", target });
+      const { current, recent, effective } = readOverlayTransition();
+      if (effective?.kind === "tray-overflow" && effective.target.parentSurface === target.parentSurface) {
+        clearOverlayWithGrab();
+        return;
+      }
+      commitBarOverlay({ kind: "tray-overflow", target }, false, recent, current);
     },
     closeTrayOverflow: () => closeOverlay("tray-overflow"),
     activeImeMenu,
     openImeMenu: target => {
       const monitorId = target.monitorId ?? inferMonitorId(target.parentSurface, monitors());
       if (monitorId) recordActiveMonitor(monitorId);
-      setOverlay({ kind: "ime", target });
+      const { current, recent } = readOverlayTransition();
+      const inPlace = current?.kind === "ime" && current.target.parentSurface === target.parentSurface;
+      commitBarOverlay({ kind: "ime", target }, inPlace, recent, current);
     },
     closeImeMenu: () => closeOverlay("ime"),
     pendingPowerAction,

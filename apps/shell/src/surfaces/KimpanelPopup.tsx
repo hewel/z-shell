@@ -93,7 +93,16 @@ function CandidateCard(props: {
         if (event.delta.y !== 0) page(event.delta.y > 0);
       }}>
       <Show when={panel().preedit.length > 0 || panel().aux.length > 0}>
-        <column style={{ gap: "4px", flexShrink: 0 }}>
+        <column style={{
+          gap: "4px",
+          flexShrink: 0,
+          ...(props.vertical() && table().texts.length > 0
+            ? {
+                paddingBottom: "4px",
+                borderBottom: "1px solid color-mix(in srgb, var(--color-outline-variant) 35%, transparent)",
+              }
+            : {}),
+        }}>
           <Show when={panel().preedit.length > 0}>
             <row style={{ alignItems: "center", justifyContent: "space-between", gap: "8px", minHeight: inlineHorizontalPager() ? "24px" : "20px" }}>
               <row testId="kimpanel-preedit" style={{ flexGrow: 1, flexBasis: "0px", minWidth: "0px", height: "20px", alignItems: "center", overflow: "hidden" }}>
@@ -168,7 +177,8 @@ function PopupOnMonitor(props: { monitor: Monitor; panel: Accessor<DesktopImePan
     const inlineHorizontalPager = !vertical() && hasPager && panel.preedit.length > 0;
     const preeditH = panel.preedit.length > 0 ? (inlineHorizontalPager ? 24 : 20) : 0;
     const auxH = panel.aux.length > 0 ? 18 : 0;
-    const header = preeditH + auxH + (preeditH > 0 && auxH > 0 ? 4 : 0);
+    const baseHeader = preeditH + auxH + (preeditH > 0 && auxH > 0 ? 4 : 0);
+    const header = baseHeader + (vertical() && baseHeader > 0 && count > 0 ? 5 : 0);
     const list = count === 0 ? 0 : vertical() ? count * (candidateHeight + candidateGap) - candidateGap : candidateHeight;
     const pager = hasPager && !inlineHorizontalPager ? 24 : 0;
     const sections = Number(header > 0) + Number(list > 0) + Number(pager > 0);

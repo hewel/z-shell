@@ -143,3 +143,7 @@ _Avoid_: Sudo dialog, auth daemon
 **Wallpaper**:
 The daemon-managed desktop background catalog, multi-output assignment, bounded thumbnail and active-image media cache, and optional slideshow feeding native `zgui-js` background surfaces and dynamic theme seed extraction.
 _Avoid_: Background daemon, desktop image
+
+**System tray**:
+The StatusNotifierItem application indicators watched by the shell daemon and partitioned between pinned bar icons, an on-demand overflow grid, and hidden entries under `[bar.tray]` user settings.
+_Avoid_: Notification area, status icons

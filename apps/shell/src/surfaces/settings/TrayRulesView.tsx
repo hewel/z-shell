@@ -1,5 +1,6 @@
-import { Button, For, Show, createMemo, createSignal, type NativeChild } from "@hewel/zgui";
+import { Button, For, Image, Show, createMemo, createSignal, type NativeChild } from "@hewel/zgui";
 import { M3Button, M3SegmentedControl } from "@z-shell/sdk/primitives";
+import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../../icons.tsx";
 import { useShellStore } from "../../store.ts";
 import {
@@ -19,12 +20,13 @@ import {
   muted,
   onPrimaryContainer,
   onSurface,
+  outline,
   primary,
   primaryContainer,
 } from "./shared.tsx";
 
 const DEFAULT_ACTIONS: readonly { readonly id: TrayDefaultAction; readonly label: string; readonly testId: string }[] = [
-  { id: "show", label: "Show", testId: "tray-rules-default-show" },
+  { id: "show", label: "Show in bar", testId: "tray-rules-default-show" },
   { id: "collapse", label: "Collapse", testId: "tray-rules-default-collapse" },
 ];
 
@@ -41,6 +43,41 @@ interface TrayRuleEntry {
   readonly subtitle: string;
   readonly activeItem: TrayItem | null;
   readonly savedRule: TrayItemRule | null;
+  readonly imeManaged: boolean;
+}
+
+function TrayRuleIcon(props: { readonly entry: TrayRuleEntry }): NativeChild {
+  const { hostClient } = useShellStore();
+  const { src } = useDaemonMedia(hostClient, () => props.entry.activeItem?.icon, { fetchCommand: "tray.fetch-blob" });
+  const fallbackLetter = () => {
+    const first = Array.from(props.entry.label.trim())[0];
+    return first && /^[\p{L}\p{N}]$/u.test(first) ? first.toUpperCase() : null;
+  };
+  return (
+    <Show when={src()} fallback={
+      <Show when={!props.entry.imeManaged && fallbackLetter()} fallback={
+        <box style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          width: "24px", height: "24px", borderRadius: "6px", flexShrink: 0,
+          backgroundColor: containerHighest,
+        }}>
+          <ShellIcon name="apps" size={14} color={muted} />
+        </box>
+      }>
+        {letter => (
+          <box style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            width: "24px", height: "24px", borderRadius: "6px", flexShrink: 0,
+            backgroundColor: primaryContainer, color: onPrimaryContainer, fontWeight: 700, fontSize: "11px",
+          }}>
+            <text>{letter()}</text>
+          </box>
+        )}
+      </Show>
+    }>
+      {image => <Image src={image()} style={{ width: "24px", height: "24px", borderRadius: "6px", objectFit: "contain", flexShrink: 0 }} />}
+    </Show>
+  );
 }
 
 export function TrayRulesView(props: { readonly onBack: () => void }): NativeChild {
@@ -49,12 +86,9 @@ export function TrayRulesView(props: { readonly onBack: () => void }): NativeChi
   const traySettings = () => settings.data()?.bar.tray ?? DEFAULT_BAR_TRAY_SETTINGS;
   const showImeIndicator = () => Boolean(ime.data()?.available && ime.data()?.mode !== "disabled");
 
-  const applyTraySettings = async (next: {
-    readonly default_action: TrayDefaultAction;
-    readonly rules: Readonly<Record<string, TrayItemRule>>;
-  }) => {
+  const patchTray = async (trayPatch: unknown) => {
     setErrorMessage(null);
-    const res = await invokeHostResult("settings.patch", { bar: { tray: next } });
+    const res = await invokeHostResult("settings.patch", { bar: { tray: trayPatch } });
     if (!res.ok) {
       setErrorMessage(res.error);
     }
@@ -63,38 +97,37 @@ export function TrayRulesView(props: { readonly onBack: () => void }): NativeChi
   const setDefaultAction = (nextDefault: TrayDefaultAction) => {
     const current = traySettings();
     if (current.default_action === nextDefault) return;
-    void applyTraySettings({
-      default_action: nextDefault,
-      rules: current.rules,
-    });
+    void patchTray({ default_action: nextDefault });
   };
 
   const setAppRule = (key: string, nextRule: TrayItemRule) => {
-    const current = traySettings();
-    void applyTraySettings({
-      default_action: current.default_action,
-      rules: { ...current.rules, [key]: nextRule },
-    });
+    void patchTray({ rules: { [key]: nextRule } });
   };
 
   const clearAppRule = (key: string) => {
-    const current = traySettings();
-    if (!Object.hasOwn(current.rules, key)) return;
-    const nextRules = { ...current.rules };
-    delete nextRules[key];
-    void applyTraySettings({
-      default_action: current.default_action,
-      rules: nextRules,
-    });
+    if (!Object.hasOwn(traySettings().rules, key)) return;
+    void patchTray({ rules: { [key]: null } });
   };
 
+  const resetAllTrayRules = () => {
+    void patchTray(null);
+  };
+
+  const isDefaultTray = () =>
+    traySettings().default_action === "show" && Object.keys(traySettings().rules).length === 0;
+
+  const runningCount = createMemo(() =>
+    (tray.data()?.items ?? []).filter(item => !(showImeIndicator() && isImeTrayItem(item))).length,
+  );
+
   const rows = createMemo((): readonly TrayRuleEntry[] => {
-    const activeItems = (tray.data()?.items ?? []).filter(item => !(showImeIndicator() && isImeTrayItem(item)));
+    const activeItems = tray.data()?.items ?? [];
     const rules = traySettings().rules;
     const seenKeys = new Set<string>();
     const list: TrayRuleEntry[] = [];
 
     for (const item of activeItems) {
+      const imeManaged = showImeIndicator() && isImeTrayItem(item);
       const key = trayRuleKey(item);
       if (key !== null) {
         if (seenKeys.has(key)) continue;
@@ -104,18 +137,20 @@ export function TrayRulesView(props: { readonly onBack: () => void }): NativeChi
           rowKey: `active:${key}`,
           ruleKey: key,
           label: item.title?.trim() || key,
-          subtitle: key,
+          subtitle: imeManaged ? `${key} · Managed by IME` : `${key} · Running`,
           activeItem: item,
           savedRule,
+          imeManaged,
         });
       } else {
         list.push({
           rowKey: `transient:${item.id}`,
           ruleKey: null,
           label: "Unnamed tray item",
-          subtitle: item.id,
+          subtitle: imeManaged ? `${item.id} · Managed by IME` : item.id,
           activeItem: item,
           savedRule: null,
+          imeManaged,
         });
       }
     }
@@ -126,9 +161,10 @@ export function TrayRulesView(props: { readonly onBack: () => void }): NativeChi
         rowKey: `saved:${key}`,
         ruleKey: key,
         label: key,
-        subtitle: "Saved rule (not currently running)",
+        subtitle: "Saved rule · Not running",
         activeItem: null,
         savedRule: rules[key]!,
+        imeManaged: false,
       });
     }
 
@@ -145,18 +181,28 @@ export function TrayRulesView(props: { readonly onBack: () => void }): NativeChi
             onClick={props.onBack}
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
-              width: "32px", height: "32px", borderRadius: "10px", flexShrink: 0,
+              width: "30px", height: "30px", borderRadius: "10px", flexShrink: 0,
               backgroundColor: containerHigh,
             }}
           >
-            <ShellIcon name="arrowLeft" size={16} color={onSurface} />
+            <box data-press-visual="compact" ariaHidden style={{ display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+              <ShellIcon name="arrowLeft" size={16} color={onSurface} />
+            </box>
           </Button>
           <column style={{ ...grow, gap: "2px" }}>
-            <text role="heading" style={{ fontSize: "18px", fontWeight: 600, lineHeight: "24px" }}>
-              System tray rules
-            </text>
-            <text style={{ ...clipped, fontSize: "12px", color: muted, lineHeight: "16px" }}>
-              Control whether tray applications stay on the bar, collapse into overflow, or stay hidden
+            <row style={{ alignItems: "center", gap: "8px" }}>
+              <text role="heading" style={{ fontSize: "18px", fontWeight: 600, letterSpacing: "-0.015em", lineHeight: "24px" }}>
+                System tray
+              </text>
+              <box style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                padding: "2px 7px", borderRadius: "6px", backgroundColor: containerHigh, flexShrink: 0,
+              }}>
+                <text style={{ fontFamily: "var(--font-mono)", fontSize: "10px", lineHeight: "12px", color: muted }}>[bar.tray]</text>
+              </box>
+            </row>
+            <text style={{ ...clipped, fontSize: "11px", color: muted, lineHeight: "15px" }}>
+              Pin important apps, collapse background icons, or hide redundant entries
             </text>
           </column>
         </row>
@@ -177,30 +223,30 @@ export function TrayRulesView(props: { readonly onBack: () => void }): NativeChi
 
       <scroll style={{ ...grow, minHeight: "0px", width: "100%", overflow: "hidden auto" }}>
         <column style={{ gap: "12px", width: "100%" }}>
-          <column style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "14px", gap: "10px" }}>
-            <row style={{ alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+          <column style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "12px 14px", gap: "10px" }}>
+            <row style={{ alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
               <column style={{ ...grow, gap: "2px" }}>
-                <text style={{ fontSize: "13px", fontWeight: 600 }}>New apps default</text>
-                <text style={{ ...clipped, fontSize: "11px", color: muted }}>
-                  Default placement for tray apps without an explicit per-app rule
+                <text style={{ fontSize: "13px", fontWeight: 600, lineHeight: "18px" }}>New tray icons</text>
+                <text style={{ ...clipped, fontSize: "11px", color: muted, lineHeight: "15px" }}>
+                  Default placement for apps not listed below
                 </text>
               </column>
               <M3SegmentedControl
-                ariaLabel="New apps default"
+                ariaLabel="New tray icons"
                 compact
                 options={DEFAULT_ACTIONS}
                 value={traySettings().default_action}
                 onChange={next => setDefaultAction(next)}
-                style={{ width: "176px", flexShrink: 0 }}
+                style={{ width: "196px", flexShrink: 0 }}
               />
             </row>
           </column>
 
-          <column style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "14px", gap: "8px" }}>
+          <column style={{ borderRadius: "16px", backgroundColor: containerHigh, padding: "12px 14px", gap: "8px" }}>
             <row style={{ alignItems: "center", justifyContent: "space-between" }}>
-              <text style={{ fontSize: "13px", fontWeight: 600 }}>Applications & rules</text>
-              <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: muted, fontVariantNumeric: "tabular-nums" }}>
-                {`${Object.keys(traySettings().rules).length} saved`}
+              <text style={{ fontSize: "13px", fontWeight: 600 }}>Application visibility</text>
+              <text data-tabular="true" style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: outline, fontVariantNumeric: "tabular-nums" }}>
+                {`${Object.keys(traySettings().rules).length} rules · ${runningCount()} running`}
               </text>
             </row>
 
@@ -218,64 +264,69 @@ export function TrayRulesView(props: { readonly onBack: () => void }): NativeChi
                 return (
                   <row testId={`tray-rule-row-${entry().ruleKey ?? "transient"}`} style={{
                     alignItems: "center", justifyContent: "space-between", gap: "10px",
-                    padding: "10px 12px", borderRadius: "12px", backgroundColor: container,
+                    padding: "9px 10px", borderRadius: "12px", backgroundColor: container,
                   }}>
-                    <column style={{ ...grow, gap: "2px" }}>
-                      <row style={{ alignItems: "center", gap: "6px" }}>
-                        <text style={{ ...clipped, fontSize: "12px", fontWeight: 600 }}>{entry().label}</text>
-                        <Show when={entry().activeItem && entry().ruleKey !== null}>
-                          <box style={{
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            height: "18px", padding: "0 6px", borderRadius: "6px",
-                            backgroundColor: primaryContainer, color: onPrimaryContainer,
-                          }}>
-                            <text style={{ fontSize: "10px", lineHeight: "14px", fontWeight: 600 }}>Active</text>
-                          </box>
-                        </Show>
-                      </row>
-                      <text style={{ ...clipped, fontFamily: "var(--font-mono)", fontSize: "11px", color: muted }}>
+                    <TrayRuleIcon entry={entry()} />
+                    <column style={{ ...grow, gap: "1px" }}>
+                      <text style={{ ...clipped, fontSize: "12px", fontWeight: 600, lineHeight: "16px" }}>{entry().label}</text>
+                      <text style={{ ...clipped, fontFamily: "var(--font-mono)", fontSize: "10px", color: muted, lineHeight: "14px" }}>
                         {entry().subtitle}
                       </text>
                     </column>
                     <Show
-                      when={entry().ruleKey}
+                      when={!entry().imeManaged}
                       fallback={
-                        <box testId="tray-rule-transient-badge" style={{
+                        <box testId="tray-rule-ime-badge" style={{
                           display: "flex", alignItems: "center", justifyContent: "center",
                           height: "24px", padding: "0 8px", borderRadius: "8px",
                           backgroundColor: containerHighest, flexShrink: 0,
                         }}>
                           <text style={{ fontSize: "11px", lineHeight: "14px", color: muted }}>
-                            Session-only (no stable ID)
+                            Managed by IME
                           </text>
                         </box>
                       }
                     >
-                      {key => (
-                        <row style={{ alignItems: "center", gap: "6px", flexShrink: 0 }}>
-                          <M3SegmentedControl
-                            ariaLabel={`Rule for ${entry().label}`}
-                            compact
-                            options={ITEM_RULE_OPTIONS.map(opt => ({
-                              ...opt,
-                              testId: `tray-rule-set-${key()}-${opt.id}`,
-                            }))}
-                            value={effectiveRule()}
-                            onChange={next => setAppRule(key(), next)}
-                            style={{ width: "224px", flexShrink: 0 }}
-                          />
-                          <Show when={entry().savedRule !== null}>
-                            <M3Button
-                              testId={`tray-rule-reset-${key()}`}
-                              variant="text"
-                              size="sm"
-                              onClick={() => clearAppRule(key())}
-                            >
-                              <text style={{ color: primary }}>Reset</text>
-                            </M3Button>
-                          </Show>
-                        </row>
-                      )}
+                      <Show
+                        when={entry().ruleKey}
+                        fallback={
+                          <box testId="tray-rule-transient-badge" style={{
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            height: "24px", padding: "0 8px", borderRadius: "8px",
+                            backgroundColor: containerHighest, flexShrink: 0,
+                          }}>
+                            <text style={{ fontSize: "11px", lineHeight: "14px", color: muted }}>
+                              Session-only (no stable ID)
+                            </text>
+                          </box>
+                        }
+                      >
+                        {key => (
+                          <row style={{ alignItems: "center", gap: "6px", flexShrink: 0 }}>
+                            <M3SegmentedControl
+                              ariaLabel={`Rule for ${entry().label}`}
+                              compact
+                              options={ITEM_RULE_OPTIONS.map(opt => ({
+                                ...opt,
+                                testId: `tray-rule-set-${key()}-${opt.id}`,
+                              }))}
+                              value={effectiveRule()}
+                              onChange={next => setAppRule(key(), next)}
+                              style={{ width: "212px", flexShrink: 0 }}
+                            />
+                            <Show when={entry().savedRule !== null}>
+                              <M3Button
+                                testId={`tray-rule-reset-${key()}`}
+                                variant="text"
+                                size="sm"
+                                onClick={() => clearAppRule(key())}
+                              >
+                                <text style={{ color: primary }}>Reset</text>
+                              </M3Button>
+                            </Show>
+                          </row>
+                        )}
+                      </Show>
                     </Show>
                   </row>
                 );
@@ -284,6 +335,21 @@ export function TrayRulesView(props: { readonly onBack: () => void }): NativeChi
           </column>
         </column>
       </scroll>
+
+      <row style={{ alignItems: "center", justifyContent: "space-between", flexShrink: 0, paddingTop: "2px", width: "100%" }}>
+        <text style={{ fontFamily: "var(--font-mono)", fontSize: "10px", lineHeight: "14px", color: outline }}>
+          Rules sync live to [bar.tray] in settings.toml
+        </text>
+        <M3Button
+          testId="tray-rules-reset-all"
+          variant="text"
+          size="sm"
+          disabled={isDefaultTray()}
+          onClick={resetAllTrayRules}
+        >
+          <text style={{ color: muted }}>Reset defaults</text>
+        </M3Button>
+      </row>
     </column>
   );
 }

@@ -60,7 +60,7 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.advance("dock-hover-settle", 250);
       timeline.step({ id: "capture-dock-hover", op: "capture", surface: "dock-hdmi-a-1", captureId: "dock-hover" });
 
-      timeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-hdmi-a-1", testId: "bar-audio" }, button: "primary" });
+      timeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-hdmi-a-1", testId: "bar-quick-settings" }, button: "primary" });
       timeline.advance("qs-settle", 450);
       timeline.step({ id: "capture-qs", op: "capture", surface: "panel-quick-settings", captureId: "qs" });
 
@@ -426,11 +426,11 @@ describe("apps/shell design geometry & pixel lint", () => {
       expect(Math.round(treeNode(overview.tree, "overview-card").boundsLogical!.width)).toBe(684);
       expect(treeNode(overview.tree, "overview-ws-2").boundsLogical).toBeDefined();
 
-      // M3 Expressive Slider pixel anatomy on wide Settings slider (Tiling gap = 14px -> 22%):
+      // M3 Expressive Slider pixel anatomy on wide Settings slider (Outer & popover gaps = 14px -> 22%):
       // active fill + 4px transparent gap + 4px vertical handle + 4px transparent gap + inactive track + 4x4px stop dot.
       {
-        const gapSlider = settingsBar.tree.nodes.find(node => node.role === "slider" && node.name === "Tiling gap");
-        expect(gapSlider?.boundsDevice, "settings-bar Tiling gap slider").toBeDefined();
+        const gapSlider = settingsBar.tree.nodes.find(node => node.role === "slider" && node.name === "Outer & popover gaps");
+        expect(gapSlider?.boundsDevice, "settings-bar Outer & popover gaps slider").toBeDefined();
         const bounds = gapSlider!.boundsDevice!;
         const midY = Math.round(bounds.y + bounds.height / 2);
         const bgSample = pixel(settingsBar.image, Math.round(bounds.x + 20), Math.round(bounds.y + 1));
@@ -476,7 +476,7 @@ describe("apps/shell design geometry & pixel lint", () => {
         const switchNodes = settingsBar.tree.nodes.filter(
           node => node.role === "switch" && node.boundsLogical && Math.round(node.boundsLogical.width) === 44 && Math.round(node.boundsLogical.height) === 24,
         );
-        expect(switchNodes.length, "settings-bar 44x24px M3Switch controls").toBeGreaterThanOrEqual(4);
+        expect(switchNodes.length, "settings-bar 44x24px M3Switch controls").toBe(6);
         const cancelBounds = treeNode(power.tree, "power-dialog-cancel").boundsLogical!;
         const confirmBounds = treeNode(power.tree, "power-dialog-confirm").boundsLogical!;
         expect(Math.round(cancelBounds.height), "power-dialog Cancel M3Button height").toBe(34);
@@ -528,17 +528,23 @@ describe("apps/shell design geometry & pixel lint", () => {
       expect(treeNode(settingsIdle.tree, "settings-idle-pane").boundsLogical).toBeDefined();
       expect(treeNode(settingsPower.tree, "settings-power-pane").boundsLogical).toBeDefined();
 
-      // Zero-Scroll Popover Rule verified via upstream zgui-js scrollMetrics (commit 33c0fab+).
+      // Zero-Scroll Popover & Bar Settings Rule verified via upstream zgui-js scrollMetrics (commit 33c0fab+).
       for (const [label, capture, testId] of [
         ["quick-settings", qs, "qs-main"],
         ["calendar", cal, "panel-calendar"],
         ["calendar-list", cal, "cal-notif-scroll"],
+        ["bar-settings-content", settingsBar, "settings-content-pane"],
       ] as const) {
         const node = treeNode(capture.tree, testId);
         if (node.scrollMetrics) {
           expect(node.scrollMetrics.overflowY, `${label} overflowY`).toBe(false);
         }
       }
+      const settingsBarPane = treeNode(settingsBar.tree, "settings-bar-pane").boundsLogical!;
+      expect(settingsBarPane.y + settingsBarPane.height, "settings-bar-pane fits 600px window height").toBeLessThanOrEqual(600);
+      const primaryBadge = settingsBar.tree.nodes.find(node => node.text === "Primary · Bar visible");
+      expect(primaryBadge?.boundsLogical, "settings-bar bottom monitor badge").toBeDefined();
+      expect(primaryBadge!.boundsLogical!.y + primaryBadge!.boundsLogical!.height).toBeLessThanOrEqual(600);
 
       // Media Player Single Hero CTA Guard: active source chip uses calm primary-container (not solid primary),
       // leaving the Play/Pause pill as the sole solid primary fill.
@@ -595,6 +601,22 @@ describe("apps/shell design geometry & pixel lint", () => {
       writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
         id: "z-shell-design-docked-polkit-reduced",
         initialTopics: {
+          "wayland.outputs": {
+            capability: "connected",
+            outputs: [{
+              output_instance_id: 1, name: "DP-1", description: "Docked Monitor", make: "Test", model: "1440x900",
+              x: 0, y: 0, width: 1440, height: 900, mode_width: 1440, mode_height: 900, refresh_mhz: 60000, scale: 1,
+              physical_width_mm: null, physical_height_mm: null,
+            }],
+          },
+          "wayland.workspaces": {
+            capability: "connected",
+            groups: [{ group_id: 1, output_instance_ids: [1] }],
+            workspaces: [
+              { workspace_id: 1, group_id: 1, name: "design", id_str: "1", coordinates: [1], active: false, urgent: false, hidden: false, capabilities: ["activate"] },
+              { workspace_id: 2, group_id: 1, name: "main", id_str: "2", coordinates: [2], active: true, urgent: false, hidden: false, capabilities: ["activate"] },
+            ],
+          },
           settings: {
             general: { offline_mode: false, log_level: "info" },
             bar: {
@@ -705,6 +727,14 @@ describe("apps/shell design geometry & pixel lint", () => {
       // Docked top bar is flush 38px without floating shadow bleed and always solid (blurRegion="none").
       expect([barDocked.image.width, barDocked.image.height]).toEqual([1440, 38]);
       expect(barDocked.frame.blurRegion, "Docked Top Bar (Level 1C) stays solid blurRegion='none'").toBe("none");
+      expect(treeNode(barDocked.tree, "ws-2").text, "default workspace_numbers=true shows index").toBe("2");
+      {
+        const dockedWsBounds = treeNode(barDocked.tree, "bar-workspaces").boundsDevice!;
+        expect(
+          pixel(barDocked.image, Math.round(dockedWsBounds.x + 1), Math.round(dockedWsBounds.y + 4)),
+          "Docked bar-workspaces well differs from bar surface",
+        ).not.toEqual(pixel(barDocked.image, 4, 4));
+      }
 
       // Reduced motion Media panel settles immediately at 396px width with transparent rounded corners
       // and renders a flat horizontal progress track (no vertical sine wave deflection above/below centerline).
@@ -759,7 +789,7 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.advance("daemon-events", 250);
       timeline.step({ id: "ready", op: "settle" });
       timeline.step({ id: "capture-left-bar", op: "capture", surface: "bar-dp-1", captureId: "bar-left" });
-      timeline.step({ id: "open-left-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-audio" }, button: "primary" });
+      timeline.step({ id: "open-left-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-quick-settings" }, button: "primary" });
       timeline.advance("left-qs-settle", 450);
       timeline.step({ id: "capture-left-qs", op: "capture", surface: "panel-quick-settings", captureId: "qs-left" });
       const dockedAtMs = timeline.after(10);
@@ -774,6 +804,21 @@ describe("apps/shell design geometry & pixel lint", () => {
       writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
         id: "z-shell-design-vertical-left-bar",
         initialTopics: {
+          "wayland.workspaces": {
+            capability: "connected",
+            groups: [{ group_id: 1, output_instance_ids: [1] }],
+            workspaces: [1, 2, 3, 4].map(n => ({
+              workspace_id: n,
+              group_id: 1,
+              name: String(n),
+              id_str: null,
+              coordinates: [0, n - 1],
+              active: n === 1,
+              urgent: false,
+              hidden: false,
+              capabilities: ["activate"],
+            })),
+          },
           "desktop.tray": {
             available: true,
             items: [{
@@ -888,6 +933,7 @@ describe("apps/shell design geometry & pixel lint", () => {
                 dock_enabled: false,
                 clock_24h: true,
                 clock_seconds: false,
+                workspace_numbers: false,
               },
               theme: {
                 mode: "dark",
@@ -986,6 +1032,38 @@ describe("apps/shell design geometry & pixel lint", () => {
         const badgeFill = pixel(barLeftDockedActive.image, Math.round(badgeDev.x + 2), Math.round(badgeDev.y + badgeDev.height / 2));
         expect(badgeFill, "active docked clock badge tonally separated from parent primary-container").not.toEqual(clockFill);
       }
+
+      // Square active workspace capsule & child-control containment across vertical Floating and Docked bars.
+      for (const [label, cap] of [
+        ["bar-left", barLeft],
+        ["bar-left-docked-active", barLeftDockedActive],
+      ] as const) {
+        const ws1 = treeNode(cap.tree, "ws-1").boundsLogical!;
+        expect(Math.round(ws1.width), `${label} active workspace square width == height`).toBe(Math.round(ws1.height));
+        const wsTrack = treeNode(cap.tree, "bar-workspaces").boundsLogical!;
+        const ov = treeNode(cap.tree, "bar-overview").boundsLogical!;
+        expect(ov.x, `${label} bar-overview left contained`).toBeGreaterThanOrEqual(wsTrack.x);
+        expect(ov.x + ov.width, `${label} bar-overview right contained`).toBeLessThanOrEqual(wsTrack.x + wsTrack.width);
+      }
+
+      // Textless active workspace renders a centered surface cutout dot matching inactive dot size (6px/8px).
+      {
+        const cutout1 = treeNode(barLeftDockedActive.tree, "ws-cutout-1").boundsLogical!;
+        const dot2 = treeNode(barLeftDockedActive.tree, "ws-dot-2").boundsLogical!;
+        expect(Math.round(cutout1.width)).toBe(6);
+        expect(Math.round(cutout1.height)).toBe(6);
+        expect(Math.round(dot2.width)).toBe(6);
+        expect(Math.round(dot2.height)).toBe(6);
+        const ws1Dev = treeNode(barLeftDockedActive.tree, "ws-1").boundsDevice!;
+        expect(
+          pixel(barLeftDockedActive.image, Math.round(ws1Dev.x + ws1Dev.width / 2), Math.round(ws1Dev.y + ws1Dev.height / 2)),
+          "textless active workspace center renders hollow cutout",
+        ).toEqual([0x27, 0x2a, 0x2f, 255]);
+        expect(
+          pixel(barLeftDockedActive.image, Math.round(ws1Dev.x + 3), Math.round(ws1Dev.y + ws1Dev.height / 2)),
+          "textless active workspace outer ring renders primary fill",
+        ).toEqual([0x7c, 0xd4, 0xff, 255]);
+      }
     } finally {
       cleanup();
     }
@@ -1039,7 +1117,7 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.step({ id: "capture-bar-light", op: "capture", surface: "bar-hdmi-a-1", captureId: "bar-light" });
       timeline.step({ id: "capture-dock-light", op: "capture", surface: "dock-hdmi-a-1", captureId: "dock-light" });
 
-      timeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-hdmi-a-1", testId: "bar-audio" }, button: "primary" });
+      timeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-hdmi-a-1", testId: "bar-quick-settings" }, button: "primary" });
       timeline.advance("qs-settle", 450);
       timeline.step({ id: "capture-qs-light", op: "capture", surface: "panel-quick-settings", captureId: "qs-light" });
 
@@ -1305,13 +1383,22 @@ describe("apps/shell design geometry & pixel lint", () => {
       const scenario = join(workspace, "scenario.json");
       const monitor = { id: "DP-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900, scale: 1 };
 
+      const tallStripPng = makeSolidPngBytes(24, 192, 0x3b, 0x82, 0xf6);
       const history = Array.from({ length: 17 }, (_, index) => ({
         id: index + 1,
         app_name: index === 0 ? "Ghostty" : index % 2 === 0 ? "Screenshot" : "System",
         summary: index === 0 ? "Antigravity CLI is ready" : `Notification item #${index + 1}`,
         body: index === 0 ? "Click card to focus terminal" : `Body text for chaos item ${index + 1}`,
         app_icon: "",
-        icon: null,
+        icon: index === 1
+          ? {
+              kind: "blob_handle",
+              token: "chaos-tall-strip",
+              mime: "image/png",
+              byte_len: tallStripPng.length,
+              dimensions: { width: 82, height: 643 },
+            }
+          : null,
         attachment: null,
         actions: index === 0
           ? [{ key: "default", label: "" }]
@@ -1327,9 +1414,10 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.step({ id: "ready", op: "settle" });
       timeline.step({ id: "capture-bar-chaos", op: "capture", surface: "bar-dp-1", captureId: "bar-chaos" });
       timeline.step({ id: "open-cal-chaos", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-clock" }, button: "primary" });
+      const tallBlobAtMs = timeline.after(15);
       timeline.advance("cal-chaos-settle", 450);
       timeline.step({ id: "capture-cal-chaos", op: "capture", surface: "panel-calendar", captureId: "cal-chaos" });
-      timeline.step({ id: "open-qs-chaos", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-network" }, button: "primary" });
+      timeline.step({ id: "open-qs-chaos", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-quick-settings" }, button: "primary" });
       timeline.advance("qs-chaos-settle", 450);
       timeline.step({ id: "capture-qs-chaos", op: "capture", surface: "panel-quick-settings", captureId: "qs-chaos" });
 
@@ -1388,6 +1476,15 @@ describe("apps/shell design geometry & pixel lint", () => {
             configured_plugins: [],
           },
         },
+        commands: [
+          {
+            socket: "host",
+            name: "notifications.fetch-blob",
+            payload: { token: "chaos-tall-strip" },
+            atMs: tallBlobAtMs,
+            result: { data: { bytes: tallStripPng } },
+          },
+        ],
       }), null, 2));
       writeFileSync(scenario, JSON.stringify({
         schemaVersion: 1,
@@ -1425,9 +1522,16 @@ describe("apps/shell design geometry & pixel lint", () => {
       }
 
       // 3. Empty-label "default" action (Ghostty) renders NO blank pill button, while binding default card click button.
+      //    Tall portrait notification screenshot (82x643) routes to bounded contain preview without overflowing card bottom.
       expect(calChaos.tree.nodes.some(node => node.testId === "cal-notif-action-1-default"), "no blank default pill button").toBe(false);
       expect(treeNode(calChaos.tree, "cal-notif-default-1").boundsLogical, "default action bound to card body").toBeDefined();
       expect(treeNode(calChaos.tree, "cal-notif-action-2-open").boundsLogical, "labelled action buttons preserved").toBeDefined();
+      {
+        const card2 = treeNode(calChaos.tree, "cal-notif-2").boundsLogical!;
+        const preview2 = treeNode(calChaos.tree, "cal-notif-preview-2").boundsLogical!;
+        expect(preview2.height, "tall notification preview contained to <= 140px").toBeLessThanOrEqual(140);
+        expect(preview2.y + preview2.height, "tall notification preview stays strictly inside card bottom").toBeLessThanOrEqual(card2.y + card2.height);
+      }
 
       // 4. Control Center opened via vertical bar-network: Wi-Fi enabled+disconnected while Ethernet online stays neutral
       //    visually (surface-container-high, never active primary-container), while keeping enabled standby copy.
@@ -1479,7 +1583,7 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.step({ id: "capture-media-play-hover", op: "capture", surface: "panel-media", captureId: "media-play-hover" });
 
       // --- 3. QuickSettings tile + seekable slider hover ---
-      timeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-audio" }, button: "primary" });
+      timeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-quick-settings" }, button: "primary" });
       timeline.advance("qs-settle", 450);
       timeline.step({ id: "capture-qs-rest", op: "capture", surface: "panel-quick-settings", captureId: "qs-rest" });
       timeline.step({ id: "hover-qs-tile", op: "pointer.move", target: { surface: "panel-quick-settings", testId: "qs-tile-caffeine" } });
@@ -2553,7 +2657,7 @@ describe("apps/shell design geometry & pixel lint", () => {
         value: { args: ["settings", "bar"], reply: { text: "{\"settingsWindowOpen\":true,\"settingsWindowTab\":\"bar\"}" } },
       });
       liveTimeline.advance("settings-open-settle", 50);
-      liveTimeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-network" }, button: "primary" });
+      liveTimeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-quick-settings" }, button: "primary" });
       liveTimeline.advance("open-settle", 420);
       liveTimeline.step({ id: "capture-bar-solid", op: "capture", surface: "bar-dp-1", captureId: "bar-solid" });
       liveTimeline.step({ id: "capture-dock-solid", op: "capture", surface: "dock-dp-1", captureId: "dock-solid" });
@@ -2645,7 +2749,7 @@ describe("apps/shell design geometry & pixel lint", () => {
         value: { args: ["settings", "bar"], reply: { text: "{\"settingsWindowOpen\":true,\"settingsWindowTab\":\"bar\"}" } },
       });
       bootTimeline.advance("settings-open-settle", 50);
-      bootTimeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-network" }, button: "primary" });
+      bootTimeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-quick-settings" }, button: "primary" });
       bootTimeline.advance("open-settle", 420);
       bootTimeline.step({ id: "capture-bar-boot", op: "capture", surface: "bar-dp-1", captureId: "bar-boot" });
       bootTimeline.step({ id: "capture-dock-boot", op: "capture", surface: "dock-dp-1", captureId: "dock-boot" });
@@ -2737,7 +2841,7 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.step({ id: "capture-clip-forget-hover", op: "capture", surface: "clipboard-overlay", captureId: "clip-forget-hover" });
 
       // 4. QuickSettings: SplitTile left half hover vs right > arrow hover
-      timeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-network" }, button: "primary" });
+      timeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-quick-settings" }, button: "primary" });
       timeline.advance("qs-open-settle", 450);
       timeline.step({ id: "capture-qs-rest", op: "capture", surface: "panel-quick-settings", captureId: "qs-rest" });
       timeline.step({ id: "hover-qs-split-left", op: "pointer.move", target: { surface: "panel-quick-settings", testId: "qs-tile-wifi" } });
@@ -3355,7 +3459,7 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.advance("mutex-cal-settle", 350);
       timeline.step({ id: "mutex-media", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-media" }, button: "primary" });
       timeline.advance("mutex-media-settle", 350);
-      timeline.step({ id: "mutex-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-audio" }, button: "primary" });
+      timeline.step({ id: "mutex-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-quick-settings" }, button: "primary" });
       timeline.advance("mutex-qs-settle", 350);
       timeline.step({ id: "mutex-sysmon", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-sysmon" }, button: "primary" });
       timeline.advance("mutex-sysmon-settle", 400);
@@ -4201,7 +4305,7 @@ describe("apps/shell design geometry & pixel lint", () => {
 
       // 1. Capture revealed Dock at boot (R=22px superellipse), then test mid-flight popover entrance (t ≈ 55ms) vs settled R=22px superellipse(2.83) card.
       timeline.step({ id: "capture-dock-revealed", op: "capture", surface: "dock-dp-1", captureId: "dock-revealed" });
-      timeline.step({ id: "open-qs-mid", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-network" }, button: "primary" });
+      timeline.step({ id: "open-qs-mid", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-quick-settings" }, button: "primary" });
       timeline.advance("qs-midflight-tick", 55);
       timeline.step({ id: "capture-qs-midflight", op: "capture", surface: "panel-quick-settings", captureId: "qs-midflight" });
       timeline.advance("qs-settle-tick", 420);
@@ -4506,12 +4610,24 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.step({ id: "ready", op: "settle" });
       timeline.step({ id: "capture-bar-docked-tray", op: "capture", surface: "bar-dp-1", captureId: "bar-docked-tray" });
 
-      // Open 01 Main QuickSettings -> Keep awake tile (no split chevron)
-      timeline.step({ id: "open-qs-keepawake", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-audio" }, button: "primary" });
+      // Open 01 Main QuickSettings -> Keep awake tile (no split chevron), plus per-icon direct Network/Sound subpage switching
+      timeline.step({ id: "open-qs-keepawake", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-quick-settings" }, button: "primary" });
       timeline.advance("qs-keepawake-settle", 450);
       timeline.step({ id: "capture-qs-keepawake", op: "capture", surface: "panel-quick-settings", captureId: "qs-keep-awake" });
       timeline.step({ id: "dismiss-qs-keepawake", op: "key.press", surface: "panel-quick-settings", key: "Escape" });
       timeline.advance("qs-dismiss-settle", 250);
+
+      timeline.step({ id: "open-qs-network-direct", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-network" }, button: "primary" });
+      timeline.advance("qs-network-settle", 450);
+      timeline.step({ id: "capture-qs-network-direct", op: "capture", surface: "panel-quick-settings", captureId: "qs-network-direct" });
+      timeline.step({ id: "switch-qs-sound-inplace", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-audio" }, button: "primary" });
+      timeline.advance("qs-sound-inplace-settle", 450);
+      timeline.step({ id: "capture-qs-sound-inplace", op: "capture", surface: "panel-quick-settings", captureId: "qs-sound-inplace" });
+      timeline.step({ id: "back-qs-to-main", op: "pointer.click", target: { surface: "panel-quick-settings", testId: "qs-back" }, button: "primary" });
+      timeline.advance("qs-back-main-settle", 450);
+      timeline.step({ id: "capture-qs-back-main", op: "capture", surface: "panel-quick-settings", captureId: "qs-back-main" });
+      timeline.step({ id: "dismiss-qs-direct", op: "key.press", surface: "panel-quick-settings", key: "Escape" });
+      timeline.advance("qs-direct-dismiss-settle", 250);
 
       // Open 09E Tray Overflow -> capture -> invoke bar-anchored tray-menu handoff
       timeline.step({ id: "open-tray-overflow", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-tray-overflow-toggle" }, button: "primary" });
@@ -4524,12 +4640,16 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.step({ id: "dismiss-tray-menu-handoff", op: "key.press", surface: "tray-menu", key: "Escape" });
       timeline.advance("tray-menu-dismiss-settle", 250);
 
-      // Reopen 09E -> click gear to open 22B-2 Tray Rules directly -> back to 22B Bar Layout -> 22C/22C-B Idle Keep awake
-      timeline.step({ id: "reopen-tray-overflow-gear", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-tray-overflow-toggle" }, button: "primary" });
-      timeline.advance("reopen-overflow-settle", 400);
-      timeline.step({ id: "click-overflow-gear", op: "pointer.click", target: { surface: "tray-overflow", testId: "tray-overflow-configure" }, button: "primary" });
+      // Secondary-click bar-tray-overflow-toggle to open 22B-2 Tray Rules directly -> back to 22B Bar Layout -> 22C/22C-B Idle Keep awake
+      timeline.step({ id: "click-overflow-gear", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-tray-overflow-toggle" }, button: "secondary" });
       timeline.advance("tray-rules-open-settle", 400);
       timeline.step({ id: "capture-tray-rules", op: "capture", surface: "settings-window", captureId: "tray-rules-22b2" });
+      timeline.step({ id: "reset-dropbox-rule", op: "pointer.click", target: { surface: "settings-window", testId: "tray-rule-reset-dropbox" }, button: "primary" });
+      const resetSingleAtMs = timeline.after(15);
+      timeline.advance("reset-single-settle", 20);
+      timeline.step({ id: "reset-all-tray-rules", op: "pointer.click", target: { surface: "settings-window", testId: "tray-rules-reset-all" }, button: "primary" });
+      const resetAllAtMs = timeline.after(15);
+      timeline.advance("reset-all-settle", 20);
 
       timeline.step({ id: "back-to-bar-layout", op: "pointer.click", target: { surface: "settings-window", testId: "settings-tray-rules-back" }, button: "primary" });
       timeline.advance("bar-layout-settle", 350);
@@ -4564,6 +4684,14 @@ describe("apps/shell design geometry & pixel lint", () => {
               physical_width_mm: null, physical_height_mm: null,
             }],
           },
+          "wayland.workspaces": {
+            capability: "connected",
+            groups: [{ group_id: 1, output_instance_ids: [1] }],
+            workspaces: [
+              { workspace_id: 1, group_id: 1, name: "design", id_str: "1", coordinates: [1], active: false, urgent: false, hidden: false, capabilities: ["activate"] },
+              { workspace_id: 2, group_id: 1, name: "main", id_str: "2", coordinates: [2], active: true, urgent: false, hidden: false, capabilities: ["activate"] },
+            ],
+          },
           settings: {
             general: { offline_mode: false, log_level: "info" },
             bar: {
@@ -4575,6 +4703,7 @@ describe("apps/shell design geometry & pixel lint", () => {
               dock_enabled: false,
               clock_24h: true,
               clock_seconds: false,
+              workspace_numbers: false,
               tray: {
                 default_action: "show",
                 rules: {
@@ -4600,6 +4729,28 @@ describe("apps/shell design geometry & pixel lint", () => {
               capabilities: { can_play: true, can_pause: true, can_go_next: true, can_go_previous: true, can_seek: true },
               metadata: { title: "Flow", artists: ["Synth"], album: "Focus", length_us: 180_000_000 },
             }],
+          },
+          "system.network": {
+            available: true,
+            connectivity: "full",
+            ethernet: [{
+              id: "/org/freedesktop/NetworkManager/Devices/2",
+              interface: "enp18s0",
+              carrier: true,
+              speed_mbps: 2500,
+              ipv4: "192.168.1.42/24",
+              available_profiles: [{ id: "wired-uuid", name: "Wired 1" }],
+              active_connection: { id: "/org/freedesktop/NetworkManager/ActiveConnection/1", profile_id: "wired-uuid", name: "Wired 1", state: "activated" },
+            }],
+            vpn: [],
+            vpn_profiles: [],
+            wifi: {
+              enabled: true,
+              hardware_enabled: true,
+              scanning: false,
+              devices: [{ id: "wlan0", interface: "wlan0", active_ap_id: null, active_connection: null, access_points: [] }],
+              profiles: [],
+            },
           },
           "system.telemetry": makeSampleTelemetrySnapshot(),
           "desktop.tray": {
@@ -4627,6 +4778,22 @@ describe("apps/shell design geometry & pixel lint", () => {
             data: { available: true, items: [trayDiscord, trayHidden, trayTransient] },
           },
         ],
+        commands: [
+          {
+            socket: "host",
+            name: "settings.patch",
+            payload: { bar: { tray: { rules: { dropbox: null } } } },
+            atMs: resetSingleAtMs,
+            result: {},
+          },
+          {
+            socket: "host",
+            name: "settings.patch",
+            payload: { bar: { tray: null } },
+            atMs: resetAllAtMs,
+            result: {},
+          },
+        ],
       }), null, 2));
 
       writeFileSync(scenario, JSON.stringify({
@@ -4637,11 +4804,12 @@ describe("apps/shell design geometry & pixel lint", () => {
       }, null, 2));
 
       const result = runPreview(published.dist, fixture, scenario, out);
-      expectCleanPreview(result, 7, 0);
+      expectCleanPreview(result, 10, 0);
       expect(previewSurfaces(out, "after-overflow-empty")).not.toContain("tray-overflow");
 
-      // 1. Docked bar Q4 order, 12px gaps, single divider before bar-system, embedded coffee icon
+      // 1. Docked bar Q4 order, 6px gaps, single divider before bar-system, embedded coffee icon, child button containment
       const barCap = readCapture(out, "bar-dp-1", "bar-docked-tray");
+      expect(treeNode(barCap.tree, "ws-2").text, "workspace_numbers=false shows workspace name").toBe("main");
       const mediaBounds = treeNode(barCap.tree, "bar-media").boundsLogical!;
       const sysmonBounds = treeNode(barCap.tree, "bar-sysmon").boundsLogical!;
       const trayBounds = treeNode(barCap.tree, "bar-tray").boundsLogical!;
@@ -4649,9 +4817,10 @@ describe("apps/shell design geometry & pixel lint", () => {
       expect(mediaBounds.x + mediaBounds.width).toBeLessThan(sysmonBounds.x);
       expect(sysmonBounds.x + sysmonBounds.width).toBeLessThan(trayBounds.x);
       expect(trayBounds.x + trayBounds.width).toBeLessThan(sysBounds.x);
-      expect(sysmonBounds.x - (mediaBounds.x + mediaBounds.width), "docked group gap == 12px").toBeCloseTo(12, 1);
-      expect(trayBounds.x - (sysmonBounds.x + sysmonBounds.width), "docked group gap == 12px").toBeCloseTo(12, 1);
+      expect(sysmonBounds.x - (mediaBounds.x + mediaBounds.width), "docked group gap == 6px").toBeCloseTo(6, 1);
+      expect(trayBounds.x - (sysmonBounds.x + sysmonBounds.width), "docked group gap == 6px").toBeCloseTo(6, 1);
       expect(treeNode(barCap.tree, "bar-keep-awake").boundsLogical).toBeDefined();
+      expect(treeNode(barCap.tree, "bar-quick-settings").boundsLogical).toBeDefined();
       expect(treeNode(barCap.tree, "tray-item-discord-1").boundsLogical).toBeDefined();
       expect(barCap.tree.nodes.some(n => n.testId === "tray-item-dropbox-99")).toBe(false);
       expect(barCap.tree.nodes.some(n => n.testId === "tray-item-slack-hidden")).toBe(false);
@@ -4659,20 +4828,39 @@ describe("apps/shell design geometry & pixel lint", () => {
       expect(overflowToggle.width).toBeGreaterThanOrEqual(24);
       expect(overflowToggle.height).toBeGreaterThanOrEqual(24);
 
-      // 2. 01 Main Keep awake direct tile
+      const wsParent = treeNode(barCap.tree, "bar-workspaces").boundsLogical!;
+      const ovBtn = treeNode(barCap.tree, "bar-overview").boundsLogical!;
+      expect(ovBtn.y).toBeGreaterThanOrEqual(wsParent.y);
+      expect(ovBtn.y + ovBtn.height).toBeLessThanOrEqual(wsParent.y + wsParent.height);
+
+      // 2. 01 Main Keep awake direct tile & per-icon Network -> Sound -> Back navigation
       const qsCap = readCapture(out, "panel-quick-settings", "qs-keep-awake");
       expect(treeNode(qsCap.tree, "qs-tile-caffeine").boundsLogical).toBeDefined();
       expect(qsCap.tree.nodes.some(n => n.text === "Keep awake")).toBe(true);
       expect(qsCap.tree.nodes.some(n => n.testId === "qs-open-caffeine")).toBe(false);
 
-      // 3. 09E Tray Overflow (248px, transparent bleed) -> bar-anchored tray-menu handoff
+      const qsNetDirect = readCapture(out, "panel-quick-settings", "qs-network-direct");
+      expect(treeNode(qsNetDirect.tree, "qs-page-wifi").boundsLogical).toBeDefined();
+      expect(qsNetDirect.tree.nodes.some(n => n.text === "Network")).toBe(true);
+      expect(treeNode(qsNetDirect.tree, "net-eth-enp18s0").boundsLogical).toBeDefined();
+      expect(qsNetDirect.tree.nodes.some(n => (n.text ?? "").includes("192.168.1.42/24"))).toBe(true);
+
+      const qsSoundInplace = readCapture(out, "panel-quick-settings", "qs-sound-inplace");
+      expect(treeNode(qsSoundInplace.tree, "qs-page-sound").boundsLogical).toBeDefined();
+
+      const qsBackMain = readCapture(out, "panel-quick-settings", "qs-back-main");
+      expect(treeNode(qsBackMain.tree, "qs-main").boundsLogical).toBeDefined();
+
+      // 3. 09E Tray Overflow (headerless/footerless 50px 1-icon grid, transparent bleed) -> bar-anchored tray-menu handoff
       const overflowCap = readCapture(out, "tray-overflow", "tray-overflow-09e");
-      expect(Math.round(treeNode(overflowCap.tree, "tray-overflow-card").boundsLogical!.width)).toBe(248);
+      expect(Math.round(treeNode(overflowCap.tree, "tray-overflow-card").boundsLogical!.width)).toBe(50);
       expect(pixel(overflowCap.image, 0, 0)).toEqual([0, 0, 0, 0]);
       const dropTile = treeNode(overflowCap.tree, "tray-overflow-item-dropbox-99").boundsLogical!;
-      expect(Math.round(dropTile.width)).toBe(54);
-      expect(Math.round(dropTile.height)).toBe(54);
-      expect(treeNode(overflowCap.tree, "tray-overflow-configure").boundsLogical).toBeDefined();
+      expect(Math.round(dropTile.width)).toBe(36);
+      expect(Math.round(dropTile.height)).toBe(36);
+      expect(overflowCap.tree.nodes.some(n => n.testId === "tray-overflow-heading")).toBe(false);
+      expect(overflowCap.tree.nodes.some(n => n.testId === "tray-overflow-hint")).toBe(false);
+      expect(overflowCap.tree.nodes.some(n => n.testId === "tray-overflow-configure")).toBe(false);
 
       const trayMenuCap = readCapture(out, "tray-menu", "tray-overflow-menu-handoff");
       expect(treeNode(trayMenuCap.tree, "tray-menu-card").boundsLogical).toBeDefined();
@@ -4684,6 +4872,8 @@ describe("apps/shell design geometry & pixel lint", () => {
       expect(treeNode(trayRulesCap.tree, "tray-rules-default-show").boundsLogical).toBeDefined();
       expect(treeNode(trayRulesCap.tree, "tray-rule-row-dropbox").boundsLogical).toBeDefined();
       expect(treeNode(trayRulesCap.tree, "tray-rule-row-transient").boundsLogical).toBeDefined();
+      expect(treeNode(trayRulesCap.tree, "tray-rules-reset-all").boundsLogical).toBeDefined();
+      expect(trayRulesCap.tree.nodes.some(n => n.text === "[bar.tray]")).toBe(true);
       expect(trayRulesCap.tree.nodes.some(n => n.text === "Session-only (no stable ID)")).toBe(true);
 
       const barLayoutCap = readCapture(out, "settings-window", "bar-layout-22b");
@@ -5216,7 +5406,7 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.step({ id: "ready", op: "settle" });
 
       // Part (b): Batteryless desktop Quick Settings -> expand Power Profile drawer inline, select, live update, cycle, and auto-collapse to Unavailable.
-      timeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-audio" }, button: "primary" });
+      timeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-quick-settings" }, button: "primary" });
       timeline.advance("qs-open-settle", 450);
       timeline.step({ id: "capture-qs-desktop-collapsed", op: "capture", surface: "panel-quick-settings", captureId: "qs-desktop-collapsed" });
 
@@ -5563,6 +5753,7 @@ describe("apps/shell design geometry & pixel lint", () => {
 
       // Verify Part (c): Hidden-tray secondary-click handoff & menu-less single context-menu dispatch
       const overflowCap = readCapture(out, "tray-overflow", "tray-overflow-1");
+      expect(Math.round(treeNode(overflowCap.tree, "tray-overflow-card").boundsLogical!.width)).toBe(90);
       expect(treeNode(overflowCap.tree, "tray-overflow-item-dropbox-99").boundsLogical).toBeDefined();
       expect(treeNode(overflowCap.tree, "tray-overflow-item-steam-42").boundsLogical).toBeDefined();
 

@@ -44,6 +44,7 @@ import {
   isImeTrayItem,
   maxThermalCelsius,
   notificationGroupKey,
+  partitionPluginBarWidgets,
   partitionTrayItems,
   resolveActiveMonitor,
   resolveBarLayout,
@@ -54,6 +55,7 @@ import {
   resolveMonitorWallpaper,
   resolveNotificationMediaLayout,
   resolvePinnedOutput,
+  resolveWorkspaceLabel,
   selectActiveMediaPlayer,
   selectHeadlineTempCelsius,
   selectNetworkDisplay,
@@ -1007,16 +1009,18 @@ describe("resolveNotificationMediaLayout (12B)", () => {
       leadingKind: "avatar",
       appBadge: discordIcon,
       previewBanner: null,
+      previewFit: "cover",
       fallbackKind: "bell",
     });
   });
 
-  test("routes Form B wide screenshots from either attachment or app_icon to full-width cover preview", () => {
+  test("routes Form B wide and tall portrait screenshots from either attachment or app_icon to bounded preview", () => {
     expect(resolveNotificationMediaLayout({ icon: discordIcon, attachment: wideShot })).toEqual({
       leadingMedia: discordIcon,
       leadingKind: "app-icon",
       appBadge: null,
       previewBanner: wideShot,
+      previewFit: "cover",
       fallbackKind: "image",
     });
     expect(resolveNotificationMediaLayout({ icon: wideShot, attachment: null })).toEqual({
@@ -1024,6 +1028,30 @@ describe("resolveNotificationMediaLayout (12B)", () => {
       leadingKind: null,
       appBadge: null,
       previewBanner: wideShot,
+      previewFit: "cover",
+      fallbackKind: "image",
+    });
+    const tallStripShot = {
+      kind: "blob_handle" as const,
+      token: "tall-strip",
+      mime: "image/png",
+      revision: 3,
+      dimensions: { width: 82, height: 643 },
+    };
+    expect(resolveNotificationMediaLayout({ icon: tallStripShot, attachment: null })).toEqual({
+      leadingMedia: null,
+      leadingKind: null,
+      appBadge: null,
+      previewBanner: tallStripShot,
+      previewFit: "contain",
+      fallbackKind: "image",
+    });
+    expect(resolveNotificationMediaLayout({ icon: discordIcon, attachment: tallStripShot })).toEqual({
+      leadingMedia: discordIcon,
+      leadingKind: "app-icon",
+      appBadge: null,
+      previewBanner: tallStripShot,
+      previewFit: "contain",
       fallbackKind: "image",
     });
   });
@@ -1034,6 +1062,7 @@ describe("resolveNotificationMediaLayout (12B)", () => {
       leadingKind: "app-icon",
       appBadge: null,
       previewBanner: null,
+      previewFit: "cover",
       fallbackKind: "bell",
     });
     expect(resolveNotificationMediaLayout({ icon: null, attachment: null })).toEqual({
@@ -1041,6 +1070,7 @@ describe("resolveNotificationMediaLayout (12B)", () => {
       leadingKind: null,
       appBadge: null,
       previewBanner: null,
+      previewFit: "cover",
       fallbackKind: "bell",
     });
   });
@@ -1639,5 +1669,67 @@ describe("System Monitor telemetry helpers, chart paths & backwards compatibilit
     ]);
     expect(grouped.groups[0]!.items.map(i => i.id)).toEqual([1, 5]);
     expect(grouped.overflowCount).toBe(1);
+  });
+
+  test("resolveWorkspaceLabel respects workspace_numbers and partitionPluginBarWidgets places left/center/right/hidden zones", () => {
+    const wsNamed = {
+      workspace_id: 2,
+      group_id: 1,
+      name: "main",
+      id_str: "2",
+      coordinates: [2],
+      active: true,
+      urgent: false,
+      hidden: false,
+      capabilities: ["activate"] as const,
+    };
+    expect(resolveWorkspaceLabel(wsNamed, true)).toBe("2");
+    expect(resolveWorkspaceLabel(wsNamed, false)).toBe("main");
+    expect(resolveWorkspaceLabel({ ...wsNamed, coordinates: [1] }, true)).toBe("2");
+
+    // Niri 0-based single-column coordinates ([0, 0]..[0, 3]) with id_str: null and unnamed numeric names
+    const niriUnnamed = [1, 2, 3, 4].map((num, idx) => ({
+      workspace_id: 12 + num,
+      group_id: 20,
+      name: String(num),
+      id_str: null,
+      coordinates: [0, idx],
+      active: num === 1,
+      urgent: false,
+      hidden: false,
+      capabilities: ["activate"] as const,
+    }));
+    expect(niriUnnamed.map((ws, idx) => resolveWorkspaceLabel(ws, true, idx))).toEqual(["1", "2", "3", "4"]);
+    expect(niriUnnamed.map((ws, idx) => resolveWorkspaceLabel(ws, false, idx))).toEqual(["", "", "", ""]);
+    expect(resolveWorkspaceLabel({ ...niriUnnamed[2]!, name: "work" }, false, 2)).toBe("work");
+
+    const slots = [
+      { id: "ai-default", entryId: "z-shell/ai-usage:bar-quota", instanceSlug: "default", outputId: "DP-1" },
+      { id: "ai-primary", entryId: "z-shell/ai-usage:bar-quota", instanceSlug: "primary", outputId: "DP-1" },
+      { id: "ai-hdmi", entryId: "z-shell/ai-usage:bar-quota", instanceSlug: "secondary", outputId: "HDMI-A-1" },
+      { id: "weather", entryId: "acme/weather:bar-temp", instanceSlug: "default", outputId: "DP-1" },
+      { id: "clock-extra", entryId: "acme/extra:widget", instanceSlug: "default", outputId: "DP-1" },
+    ] as const;
+
+    // Default (no [bar.plugins]): non-hidden widgets fall back to right zone in registration order.
+    const defaultZones = partitionPluginBarWidgets(slots, undefined, { id: "DP-1", name: "DP-1" });
+    expect(defaultZones.left).toEqual([]);
+    expect(defaultZones.center).toEqual([]);
+    expect(defaultZones.right.map(s => s.id)).toEqual(["ai-default", "ai-primary", "weather", "clock-extra"]);
+
+    // Configured [bar.plugins]: explicit left/center/right/hidden + output matching, unassigned falls back to right.
+    const configured = partitionPluginBarWidgets(
+      slots,
+      {
+        left: ["z-shell/ai-usage:bar-quota"],
+        center: [{ entry: "z-shell/ai-usage:bar-quota", instance: "primary", output: "DP-1" }],
+        right: [],
+        hidden: ["acme/weather:bar-temp"],
+      },
+      { id: "dp-1", name: "DP-1" },
+    );
+    expect(configured.left.map(s => s.id)).toEqual(["ai-default"]);
+    expect(configured.center.map(s => s.id)).toEqual(["ai-primary"]);
+    expect(configured.right.map(s => s.id)).toEqual(["clock-extra"]);
   });
 });

@@ -174,7 +174,7 @@ function hasDisallowedRawColor(text, allowShadowBlack) {
 
 function checkRadiusValue(value) {
   const trimmed = value.trim();
-  if (trimmed === "0" || trimmed === "0px" || trimmed === "50%" || /^var\(--radius-[a-z0-9-]+\)$/.test(trimmed)) {
+  if (trimmed === "0" || trimmed === "0px" || trimmed === "50%" || trimmed === "inherit" || /^var\(--radius-[a-z0-9-]+\)$/.test(trimmed)) {
     return true;
   }
   const parts = trimmed.split(/\s+/);
@@ -231,6 +231,12 @@ function isEnclosingJsxElementWithAttr(node, attrName) {
     cur = cur.parent;
   }
   return false;
+}
+
+function getAttr(opening, name) {
+  return (opening?.attributes ?? []).find(
+    attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === name,
+  );
 }
 
 const rules = {
@@ -1451,10 +1457,6 @@ const rules = {
       const basename = path.basename(context.filename ?? "");
       if (basename !== "DockSurface.tsx" && basename !== "QuickSettingsPanel.tsx" && basename !== "StatusBar.tsx") return {};
       let aliases = new Map();
-      const getAttr = (opening, name) =>
-        (opening?.attributes ?? []).find(
-          attr => attr.type === "JSXAttribute" && attr.name?.type === "JSXIdentifier" && attr.name.name === name,
-        );
       const getStringAttr = (opening, name) => {
         const attr = getAttr(opening, name);
         if (!attr?.value) return null;
@@ -2074,6 +2076,373 @@ const rules = {
               node: styleAttr,
               message: `Partial Card Hover Rule: <${tag}> must not use negative margin (${hit.key}: ${hit.value}) to stretch hover hits inside a card — this causes clipped box-in-box hover highlights. Use M3InteractiveCard (stretched full-card hit layer) or SplitTile instead.`,
             });
+          }
+        },
+      };
+    },
+  },
+
+  "consistent-active-hover-shape": {
+    meta: {
+      type: "problem",
+      docs: { description: "Enforce identical outer contour between [data-active] / [data-active-indicator] active chrome and interactive hover <Button> hit boxes" },
+      schema: [],
+    },
+    create(context) {
+      const filename = (context.filename ?? "").replace(/\\/g, "/");
+      const isPluginWidget = /(?:^|\/)plugins\/[^/]+\/src\/widget\.tsx$/.test(filename);
+      let aliases = new Map();
+      const functionMap = new Map();
+
+      const unwrap = expr =>
+        expr && (expr.type === "TSSatisfiesExpression" || expr.type === "TSAsExpression") ? expr.expression : expr;
+
+      const parsePaddingEdges = valueExpr => {
+        const text = resolveStaticText(unwrap(valueExpr), aliases);
+        if (text === null) return null;
+        const parts = text.trim().split(/\s+/).map(part => {
+          if (part === "0") return 0;
+          const m = /^(-?\d+(?:\.\d+)?)px$/i.exec(part);
+          return m ? Number(m[1]) : null;
+        });
+        if (parts.some(v => v === null)) return null;
+        if (parts.length === 1) return { top: parts[0], right: parts[0], bottom: parts[0], left: parts[0] };
+        if (parts.length === 2) return { top: parts[0], right: parts[1], bottom: parts[0], left: parts[1] };
+        if (parts.length === 3) return { top: parts[0], right: parts[1], bottom: parts[2], left: parts[1] };
+        if (parts.length === 4) return { top: parts[0], right: parts[1], bottom: parts[2], left: parts[3] };
+        return null;
+      };
+
+      const hasNonZeroPadding = styleExpr => {
+        let hit = false;
+        visitValueBranches(unwrap(styleExpr), branch => {
+          const obj = unwrap(branch);
+          if (!obj || obj.type !== "ObjectExpression") return;
+          const { map } = getStyleProps(obj);
+          for (const key of ["padding", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft"]) {
+            const val = map.get(key);
+            if (!val) continue;
+            visitValueBranches(val, leaf => {
+              const edges = parsePaddingEdges(leaf);
+              if (edges && (edges.top > 0 || edges.right > 0 || edges.bottom > 0 || edges.left > 0)) {
+                hit = true;
+              }
+            });
+          }
+        });
+        return hit;
+      };
+
+      const collectRadiusStrings = (styleExpr, out = []) => {
+        visitValueBranches(unwrap(styleExpr), branch => {
+          const obj = unwrap(branch);
+          if (!obj || obj.type !== "ObjectExpression") return;
+          const { map } = getStyleProps(obj);
+          const radius = map.get("borderRadius") ?? map.get("border-radius");
+          if (!radius) return;
+          visitValueBranches(radius, leaf => {
+            const str = resolveStaticText(unwrap(leaf), aliases);
+            if (str !== null) out.push(str.trim());
+          });
+        });
+        return out;
+      };
+
+      const collectJsxElements = (root, cb) => {
+        const walk = node => {
+          if (!node || typeof node !== "object") return;
+          if (node.type === "JSXElement") {
+            cb(node);
+            for (const child of node.children ?? []) walk(child);
+            for (const attr of node.openingElement?.attributes ?? []) {
+              if (attr.type === "JSXAttribute" && attr.value?.type === "JSXExpressionContainer") {
+                walk(attr.value.expression);
+              }
+            }
+            return;
+          }
+          for (const key of Object.keys(node)) {
+            if (key === "parent") continue;
+            const val = node[key];
+            if (Array.isArray(val)) {
+              for (const item of val) walk(item);
+            } else if (val && typeof val === "object" && val.type) {
+              walk(val);
+            }
+          }
+        };
+        walk(root);
+      };
+
+      const findPropExpr = (opening, name) => {
+        const attr = getAttr(opening, name);
+        return attr?.value?.type === "JSXExpressionContainer" ? attr.value.expression : attr?.value ?? null;
+      };
+
+      return {
+        Program(program) {
+          aliases = collectStringAliases(program);
+          for (const stmt of program.body ?? []) {
+            if (stmt.type === "FunctionDeclaration" && stmt.id?.name) {
+              functionMap.set(stmt.id.name, stmt);
+            }
+          }
+        },
+        JSXElement(element) {
+          const opening = element.openingElement;
+          if (opening?.name?.type !== "JSXIdentifier") return;
+          const tag = opening.name.name;
+          const styleExpr = findPropExpr(opening, "style");
+
+          if (isPluginWidget && tag === "Button" && styleExpr) {
+            const radii = collectRadiusStrings(styleExpr);
+            if (radii.some(r => r !== "inherit")) {
+              context.report({
+                node: styleExpr,
+                message: `Consistent Active/Hover Shape Rule: plugin widget root <Button> must use borderRadius: "inherit" so its hover highlight matches the host slot active capsule (found ${radii.join(", ")}).`,
+              });
+            }
+          }
+
+          if ((tag === "box" || tag === "row" || tag === "column") && getAttr(opening, "data-active") && styleExpr) {
+            if (hasNonZeroPadding(styleExpr)) {
+              context.report({
+                node: styleExpr,
+                message: "Consistent Active/Hover Shape Rule: non-interactive [data-active] wrapper must use zero padding (padding: 0px) so child interactive hover fills the full active surface.",
+              });
+            }
+            for (const child of element.children ?? []) {
+              collectJsxElements(child, desc => {
+                const descTag = desc.openingElement?.name?.name;
+                if (descTag !== "Button" && descTag !== "control") return;
+                const btnStyle = findPropExpr(desc.openingElement, "style");
+                if (!btnStyle) return;
+                const radii = collectRadiusStrings(btnStyle);
+                if (radii.some(r => r !== "inherit")) {
+                  context.report({
+                    node: btnStyle,
+                    message: `Consistent Active/Hover Shape Rule: <${descTag}> inside [data-active] wrapper must use borderRadius: "inherit" so hover and active shapes match (found ${radii.join(", ")}).`,
+                  });
+                }
+              });
+            }
+          }
+
+          if (getAttr(opening, "data-active-indicator") && styleExpr) {
+            const indicatorRadii = collectRadiusStrings(styleExpr);
+            let badInset = false;
+            visitValueBranches(unwrap(styleExpr), branch => {
+              const obj = unwrap(branch);
+              if (!obj || obj.type !== "ObjectExpression") return;
+              const { map } = getStyleProps(obj);
+              for (const edge of ["left", "top"]) {
+                const edgeVal = map.get(edge);
+                if (!edgeVal) continue;
+                visitValueBranches(edgeVal, leaf => {
+                  const px = parsePx(leaf, aliases);
+                  if (px !== null && px !== 0) badInset = true;
+                });
+              }
+            });
+            if (badInset) {
+              context.report({
+                node: styleExpr,
+                message: "Consistent Active/Hover Shape Rule: [data-active-indicator] must align flush (left: 0px, top: 0px) with its target <Button> hit box instead of shrinking inward.",
+              });
+            }
+            const parentEl = element.parent?.type === "JSXElement" ? element.parent : null;
+            if (parentEl && indicatorRadii.length > 0) {
+              const pairedBtnRadii = [];
+              collectJsxElements(parentEl, desc => {
+                const descTag = desc.openingElement?.name?.name;
+                if (descTag === "Button" || descTag === "control") {
+                  const btnStyle = findPropExpr(desc.openingElement, "style");
+                  if (btnStyle) pairedBtnRadii.push(...collectRadiusStrings(btnStyle));
+                } else if (descTag && /^[A-Z]/.test(descTag) && functionMap.has(descTag)) {
+                  collectJsxElements(functionMap.get(descTag), fnEl => {
+                    const fnTag = fnEl.openingElement?.name?.name;
+                    if (fnTag === "Button" || fnTag === "control") {
+                      const btnStyle = findPropExpr(fnEl.openingElement, "style");
+                      if (btnStyle) pairedBtnRadii.push(...collectRadiusStrings(btnStyle));
+                    }
+                  });
+                }
+              });
+              if (
+                pairedBtnRadii.length > 0
+                && JSON.stringify([...new Set(indicatorRadii)].sort()) !== JSON.stringify([...new Set(pairedBtnRadii)].sort())
+              ) {
+                context.report({
+                  node: styleExpr,
+                  message: `Consistent Active/Hover Shape Rule: [data-active-indicator] borderRadius (${[...new Set(indicatorRadii)].join(", ")}) must match its paired <Button> borderRadius (${[...new Set(pairedBtnRadii)].join(", ")}).`,
+                });
+              }
+            }
+          }
+        },
+      };
+    },
+  },
+
+  "no-child-control-overflow": {
+    meta: {
+      type: "problem",
+      docs: { description: "Disallow interactive <Button>/<control> children whose static width/height exceeds their enclosing bar container's cross-axis bounds" },
+      schema: [],
+    },
+    create(context) {
+      let aliases = new Map();
+      const styleConsts = new Map();
+
+      const unwrap = expr =>
+        expr && (expr.type === "TSSatisfiesExpression" || expr.type === "TSAsExpression") ? expr.expression : expr;
+
+      const resolveConstProps = (expr, branches) => {
+        const node = unwrap(expr);
+        if (!node) return null;
+        if (node.type === "Identifier") {
+          const cached = styleConsts.get(node.name);
+          return cached ? resolveConstProps(cached, branches) : null;
+        }
+        if (node.type === "ConditionalExpression") {
+          const cond = node.test?.type === "CallExpression" && node.test.callee?.type === "Identifier"
+            ? node.test.callee.name
+            : null;
+          if (cond === "vertical" || cond === "docked") {
+            const key = `${cond}:${branches[cond] ?? "true"}`;
+            const pick = key.endsWith(":true") ? node.consequent : node.alternate;
+            return resolveConstProps(pick, branches);
+          }
+          return null;
+        }
+        if (node.type !== "ObjectExpression") return null;
+        const merged = new Map();
+        for (const prop of node.properties ?? []) {
+          if (prop.type === "SpreadElement") {
+            const sub = resolveConstProps(prop.argument, branches);
+            if (sub) {
+              for (const [k, v] of sub) merged.set(k, v);
+            }
+            continue;
+          }
+          const k = propertyName(prop);
+          if (k) merged.set(k, prop.value);
+        }
+        return merged;
+      };
+
+      const evalPxProp = (propExpr, branches) => {
+        const node = unwrap(propExpr);
+        if (!node) return null;
+        if (node.type === "ConditionalExpression") {
+          const cond = node.test?.type === "CallExpression" && node.test.callee?.type === "Identifier"
+            ? node.test.callee.name
+            : null;
+          if (cond === "vertical" || cond === "docked") {
+            const pick = branches[cond] ? node.consequent : node.alternate;
+            return evalPxProp(pick, branches);
+          }
+          return null;
+        }
+        return parsePx(node, aliases);
+      };
+
+      const evalPadding = (map, branches) => {
+        const padNode = map.get("padding");
+        if (!padNode) return { x: 0, y: 0 };
+        const str = (() => {
+          const node = unwrap(padNode);
+          if (node?.type === "ConditionalExpression") {
+            const cond = node.test?.type === "CallExpression" && node.test.callee?.type === "Identifier"
+              ? node.test.callee.name
+              : null;
+            if (cond === "vertical" || cond === "docked") {
+              return resolveStaticText(unwrap(branches[cond] ? node.consequent : node.alternate), aliases);
+            }
+          }
+          return resolveStaticText(node, aliases);
+        })();
+        if (str === null) return { x: 0, y: 0 };
+        const nums = str.trim().split(/\s+/).map(p => (p === "0" ? 0 : (/^(\d+(?:\.\d+)?)px$/i.exec(p)?.[1] ? Number(/^(\d+(?:\.\d+)?)px$/i.exec(p)[1]) : null)));
+        if (nums.some(n => n === null)) return { x: 0, y: 0 };
+        if (nums.length === 1) return { x: nums[0] * 2, y: nums[0] * 2 };
+        if (nums.length === 2) return { x: nums[1] * 2, y: nums[0] * 2 };
+        if (nums.length === 3) return { x: nums[1] * 2, y: nums[0] + nums[2] };
+        if (nums.length === 4) return { x: nums[1] + nums[3], y: nums[0] + nums[2] };
+        return { x: 0, y: 0 };
+      };
+
+      const findDirectChildButtons = (children, out = []) => {
+        for (const child of children ?? []) {
+          if (child.type !== "JSXElement") continue;
+          const tag = child.openingElement?.name?.name;
+          if (tag === "Button" || tag === "control") {
+            out.push(child.openingElement);
+          } else if (tag === "Show" || tag === "For" || tag === "Match" || tag === "Switch") {
+            findDirectChildButtons(child.children, out);
+          }
+        }
+        return out;
+      };
+
+      return {
+        Program(program) {
+          aliases = collectStringAliases(program);
+          for (const stmt of program.body ?? []) {
+            const decl = stmt.type === "ExportNamedDeclaration" ? stmt.declaration : stmt;
+            if (decl?.type === "VariableDeclaration" && decl.kind === "const") {
+              for (const item of decl.declarations ?? []) {
+                if (item.id?.type === "Identifier" && item.init) styleConsts.set(item.id.name, item.init);
+              }
+            }
+          }
+        },
+        JSXElement(element) {
+          const opening = element.openingElement;
+          if (opening?.name?.type !== "JSXIdentifier") return;
+          const tag = opening.name.name;
+          if (tag !== "box" && tag !== "row" && tag !== "column") return;
+          const styleAttr = getAttr(opening, "style");
+          const styleExpr = styleAttr?.value?.type === "JSXExpressionContainer" ? styleAttr.value.expression : null;
+          if (!styleExpr) return;
+
+          const childButtons = findDirectChildButtons(element.children);
+          if (childButtons.length === 0) return;
+
+          for (const vertical of [false, true]) {
+            for (const docked of [false, true]) {
+              const branches = { vertical, docked };
+              const parentProps = resolveConstProps(styleExpr, branches);
+              if (!parentProps) continue;
+              const pw = parentProps.has("width") ? evalPxProp(parentProps.get("width"), branches) : null;
+              const ph = parentProps.has("height") ? evalPxProp(parentProps.get("height"), branches) : null;
+              if (pw === null && ph === null) continue;
+              const pad = evalPadding(parentProps, branches);
+
+              for (const btn of childButtons) {
+                const btnStyleAttr = getAttr(btn, "style");
+                const btnStyleExpr = btnStyleAttr?.value?.type === "JSXExpressionContainer" ? btnStyleAttr.value.expression : null;
+                if (!btnStyleExpr) continue;
+                const btnProps = resolveConstProps(btnStyleExpr, branches);
+                if (!btnProps) continue;
+                const cw = btnProps.has("width") ? evalPxProp(btnProps.get("width"), branches) : null;
+                const ch = btnProps.has("height") ? evalPxProp(btnProps.get("height"), branches) : null;
+                if (pw !== null && cw !== null && cw + pad.x > pw) {
+                  context.report({
+                    node: btnStyleAttr,
+                    message: `Child Control Overflow Rule: child <${btn.name.name}> width (${cw}px + ${pad.x}px padding) exceeds parent <${tag}> width (${pw}px) in ${vertical ? "vertical" : "horizontal"} ${docked ? "docked" : "floating"} mode.`,
+                  });
+                  return;
+                }
+                if (ph !== null && ch !== null && ch + pad.y > ph) {
+                  context.report({
+                    node: btnStyleAttr,
+                    message: `Child Control Overflow Rule: child <${btn.name.name}> height (${ch}px + ${pad.y}px padding) exceeds parent <${tag}> height (${ph}px) in ${vertical ? "vertical" : "horizontal"} ${docked ? "docked" : "floating"} mode.`,
+                  });
+                  return;
+                }
+              }
+            }
           }
         },
       };

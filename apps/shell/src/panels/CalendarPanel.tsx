@@ -20,7 +20,13 @@ const pill = {
 } as const;
 const imageTile = { width: "36px", height: "36px", borderRadius: "10px", flexShrink: 0 } as const;
 const previewFrame = {
-  width: "100%", height: "104px", borderRadius: "10px", overflow: "hidden",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: "100%",
+  borderRadius: "10px",
+  overflow: "hidden",
+  backgroundColor: "var(--color-surface-container-lowest)",
   border: "1px solid color-mix(in srgb, var(--color-outline-variant) 42%, transparent)",
 } as const;
 const gridCell = { display: "flex", flexBasis: "0px", flexGrow: 1, minWidth: "0px", height: "30px", alignItems: "center", justifyContent: "center" } as const;
@@ -52,15 +58,22 @@ function NotificationRow(props: { item: Accessor<NotificationItem> }) {
             />
           </box>
         }>
-          <Image
-            testId={`cal-notif-avatar-${item().id}`}
-            src={leading.src()}
-            style={{
-              ...imageTile,
-              objectFit: mediaLayout().leadingKind === "avatar" ? "cover" : "contain",
-              overflow: "hidden",
-            }}
-          />
+          <box style={{ ...imageTile, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Image
+              testId={`cal-notif-avatar-${item().id}`}
+              src={leading.src()}
+              style={{
+                width: "100%",
+                height: "100%",
+                minWidth: "0px",
+                minHeight: "0px",
+                maxWidth: "100%",
+                maxHeight: "100%",
+                borderRadius: "10px",
+                objectFit: "cover",
+              }}
+            />
+          </box>
         </Show>
         <Show when={badge.src()}>
           <box
@@ -113,8 +126,20 @@ function NotificationRow(props: { item: Accessor<NotificationItem> }) {
         </M3CardAction>
       </row>
       <Show when={preview.src()}>
-        <box testId={`cal-notif-preview-${item().id}`} style={previewFrame}>
-          <Image src={preview.src()} style={{ width: "100%", height: "100%", borderRadius: "10px", objectFit: "cover" }} />
+        <box testId={`cal-notif-preview-${item().id}`} style={{
+          ...previewFrame,
+          height: mediaLayout().previewFit === "contain" ? "132px" : "104px",
+        }}>
+          <Image src={preview.src()} style={{
+            width: "100%",
+            height: "100%",
+            minWidth: "0px",
+            minHeight: "0px",
+            maxWidth: "100%",
+            maxHeight: "100%",
+            borderRadius: "10px",
+            objectFit: mediaLayout().previewFit,
+          }} />
         </box>
       </Show>
       <Show when={actions().buttonActions.length > 0}>

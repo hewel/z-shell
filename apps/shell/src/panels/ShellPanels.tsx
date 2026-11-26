@@ -114,7 +114,7 @@ function PanelContent(props: {
 }
 
 export function ShellPanels(): NativeChild {
-  const { activePanelTarget, closePanels, theme, settings } = useShellStore();
+  const { activePanelTarget, overlayKind, barPopupGrab, dismissBarPopupFromCompositor, theme, settings } = useShellStore();
   const scheme = useMotionScheme();
   const popup = createMemo(() => {
     const target = activePanelTarget();
@@ -126,6 +126,7 @@ export function ShellPanels(): NativeChild {
     enterRole: "defaultSpatial",
     enterOpacityRole: "fastEffects",
     exitRole: "fastEffects",
+    instantExit: () => overlayKind() !== null && popup() === null,
   });
   const mountedKey = createMemo(() => {
     const entry = presence.value();
@@ -136,6 +137,7 @@ export function ShellPanels(): NativeChild {
     <Show when={mountedKey()} keyed>
       {_key => {
         const entry = untrack(() => presence.value()!);
+        const initialGrab = untrack(barPopupGrab);
         const { target, panel: { width, maxHeight, Component } } = entry;
         const centered = target.id === "calendar";
         const position = (): BarPosition => settings.data()?.bar.position ?? "top";
@@ -143,7 +145,7 @@ export function ShellPanels(): NativeChild {
         const geometry = createMemo(() => resolvePopoverGeometry(position(), barStyle(), centered));
         const handleDismiss = () => {
           presence.dismissInstant();
-          closePanels();
+          dismissBarPopupFromCompositor("panel");
         };
         const [cardNode, setCardNode] = createSignal<NativeNode | null>(null);
         return (
@@ -151,7 +153,7 @@ export function ShellPanels(): NativeChild {
             width={width} height="auto" minHeight={80} maxHeight={maxHeight}
             geometryInsets={POPOVER_SHADOW_INSETS}
             inputRegion={cardNode() ? [cardNode()!] : []}
-            placement={geometry().placement} offset={geometry().offset} grab blurRegion={cardNode() ? [cardNode()!] : "none"} onDismiss={handleDismiss}>
+            placement={geometry().placement} offset={geometry().offset} grab={initialGrab} blurRegion={cardNode() ? [cardNode()!] : "none"} onDismiss={handleDismiss}>
             <PanelContent id={target.id} maxHeight={maxHeight} position={position()} centered={centered}
               inert={!presence.present()} theme={theme} spatial={presence.progress} opacity={presence.opacity} cardRef={setCardNode}>
               <Component />

@@ -21,13 +21,16 @@ export function SettingsSwitch(props: {
   detail?: string;
   checked: boolean;
   disabled?: boolean;
+  compact?: boolean;
   testId?: string;
   onToggle: () => void;
 }): NativeChild {
   return (
     <row style={{
       ...grow, alignItems: "center", justifyContent: "space-between", gap: "10px",
-      padding: "10px 12px", borderRadius: "14px", backgroundColor: container,
+      padding: props.compact ? "8px 12px" : "10px 12px",
+      borderRadius: props.compact ? "12px" : "14px",
+      backgroundColor: container,
     }}>
       <column style={{ ...grow, gap: "1px" }}>
         <text style={{ ...clipped, fontSize: "12px", fontWeight: 500 }}>{props.label}</text>

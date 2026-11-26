@@ -28,7 +28,13 @@ const pill = {
 } as const;
 const iconTile = { width: "40px", height: "40px", borderRadius: "10px", flexShrink: 0 } as const;
 const previewFrame = {
-  width: "100%", height: "120px", borderRadius: "12px", overflow: "hidden",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: "100%",
+  borderRadius: "12px",
+  overflow: "hidden",
+  backgroundColor: "var(--color-surface-container-lowest)",
   border: "1px solid color-mix(in srgb, var(--color-outline-variant) 42%, transparent)",
 } as const;
 const notificationMedia = { fetchCommand: "notifications.fetch-blob" } as const;
@@ -102,12 +108,18 @@ function ToastCard({
             />
           </box>
         }>
-          <box testId={`toast-icon-${toast().id}`} style={{ ...iconTile, overflow: "hidden" }}>
+          <box testId={`toast-icon-${toast().id}`} style={{ ...iconTile, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <Image
               src={leading.src()}
               style={{
-                width: "100%", height: "100%", borderRadius: "10px",
-                objectFit: mediaLayout().leadingKind === "avatar" ? "cover" : "cover",
+                width: "100%",
+                height: "100%",
+                minWidth: "0px",
+                minHeight: "0px",
+                maxWidth: "100%",
+                maxHeight: "100%",
+                borderRadius: "10px",
+                objectFit: "cover",
               }}
             />
           </box>
@@ -210,8 +222,20 @@ function ToastCard({
         </M3CardAction>
       </row>
       <Show when={preview.src()}>
-        <box testId={`toast-attachment-${toast().id}`} style={previewFrame}>
-          <Image src={preview.src()} style={{ width: "100%", height: "100%", borderRadius: "12px", objectFit: "cover" }} />
+        <box testId={`toast-attachment-${toast().id}`} style={{
+          ...previewFrame,
+          height: mediaLayout().previewFit === "contain" ? "136px" : "120px",
+        }}>
+          <Image src={preview.src()} style={{
+            width: "100%",
+            height: "100%",
+            minWidth: "0px",
+            minHeight: "0px",
+            maxWidth: "100%",
+            maxHeight: "100%",
+            borderRadius: "12px",
+            objectFit: mediaLayout().previewFit,
+          }} />
         </box>
       </Show>
       <Show when={actions().buttonActions.length > 0}>

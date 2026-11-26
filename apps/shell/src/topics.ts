@@ -27,6 +27,22 @@ export type BarStyle = "floating" | "docked";
 export type MotionScheme = "standard" | "expressive" | "reduced";
 export type TrayDefaultAction = "show" | "collapse";
 export type TrayItemRule = "show" | "collapse" | "hide";
+export type BarPluginZone = "left" | "center" | "right";
+
+export interface BarPluginInstanceConfig {
+  readonly entry: string;
+  readonly instance: string;
+  readonly output?: string | null;
+}
+
+export type BarPluginSlotConfig = string | BarPluginInstanceConfig;
+
+export interface BarPluginsSettings {
+  readonly left: readonly BarPluginSlotConfig[];
+  readonly center: readonly BarPluginSlotConfig[];
+  readonly right: readonly BarPluginSlotConfig[];
+  readonly hidden: readonly BarPluginSlotConfig[];
+}
 
 export interface BarTraySettings {
   readonly default_action: TrayDefaultAction;
@@ -54,6 +70,8 @@ export interface BarSettings {
   readonly dock_enabled: boolean;
   readonly clock_24h: boolean;
   readonly clock_seconds: boolean;
+  readonly workspace_numbers?: boolean;
+  readonly plugins?: BarPluginsSettings;
   readonly tray?: BarTraySettings;
 }
 
@@ -98,6 +116,7 @@ export const DEFAULT_BAR_SETTINGS: BarSettings = {
   dock_enabled: true,
   clock_24h: true,
   clock_seconds: false,
+  workspace_numbers: true,
 };
 
 export type CapabilityState = "readable" | "controllable" | "unsupported" | "disconnected";
@@ -347,13 +366,21 @@ export interface NotificationMediaLayout {
   readonly leadingKind: "avatar" | "app-icon" | null;
   readonly appBadge: NotificationMediaRef | null;
   readonly previewBanner: NotificationMediaRef | null;
+  readonly previewFit: "cover" | "contain";
   readonly fallbackKind: "image" | "bell";
 }
 
-function isWideNotificationPreview(media: NotificationMediaRef | null | undefined): boolean {
+function isBannerNotificationPreview(media: NotificationMediaRef | null | undefined): boolean {
   const dims = media?.dimensions;
   if (!dims || dims.width <= 0 || dims.height <= 0) return false;
-  return dims.width / dims.height > 1.35 && dims.width > 160;
+  const ratio = dims.width / dims.height;
+  return (ratio > 1.35 && dims.width > 160) || (ratio < 0.75 && dims.height > 160);
+}
+
+function resolvePreviewFit(media: NotificationMediaRef | null | undefined): "cover" | "contain" {
+  const dims = media?.dimensions;
+  if (!dims || dims.width <= 0 || dims.height <= 0) return "cover";
+  return dims.width / dims.height < 1.15 ? "contain" : "cover";
 }
 
 function isAvatarOrSquareMedia(media: NotificationMediaRef | null | undefined): boolean {
@@ -366,7 +393,8 @@ function isAvatarOrSquareMedia(media: NotificationMediaRef | null | undefined): 
 /**
  * Aspect-aware media routing shared by NotificationToasts and CalendarPanel (12B):
  * - Form A (square/avatar/small <= 160px attachment): route to leading avatar/cover slot + circular XDG app badge.
- * - Form B (wide screenshot/photo > 1.35 & width > 160px in attachment OR app_icon): promote to full-width cover banner.
+ * - Form B (wide > 1.35 & width > 160px, or tall portrait < 0.75 & height > 160px in attachment OR app_icon):
+ *   promote to bounded preview banner (`contain` for portrait/near-square, `cover` for landscape).
  */
 export function resolveNotificationMediaLayout(
   item: Pick<NotificationItem, "icon" | "attachment">,
@@ -379,27 +407,30 @@ export function resolveNotificationMediaLayout(
       return {
         leadingMedia: attachmentMedia,
         leadingKind: "avatar",
-        appBadge: iconMedia && !isWideNotificationPreview(iconMedia) ? iconMedia : null,
+        appBadge: iconMedia && !isBannerNotificationPreview(iconMedia) ? iconMedia : null,
         previewBanner: null,
+        previewFit: "cover",
         fallbackKind: "bell",
       };
     }
-    const usableAppIcon = iconMedia && !isWideNotificationPreview(iconMedia) ? iconMedia : null;
+    const usableAppIcon = iconMedia && !isBannerNotificationPreview(iconMedia) ? iconMedia : null;
     return {
       leadingMedia: usableAppIcon,
       leadingKind: usableAppIcon ? "app-icon" : null,
       appBadge: null,
       previewBanner: attachmentMedia,
+      previewFit: resolvePreviewFit(attachmentMedia),
       fallbackKind: "image",
     };
   }
 
-  if (iconMedia && isWideNotificationPreview(iconMedia)) {
+  if (iconMedia && isBannerNotificationPreview(iconMedia)) {
     return {
       leadingMedia: null,
       leadingKind: null,
       appBadge: null,
       previewBanner: iconMedia,
+      previewFit: resolvePreviewFit(iconMedia),
       fallbackKind: "image",
     };
   }
@@ -410,6 +441,7 @@ export function resolveNotificationMediaLayout(
       leadingKind: "app-icon",
       appBadge: null,
       previewBanner: null,
+      previewFit: "cover",
       fallbackKind: "bell",
     };
   }
@@ -419,6 +451,7 @@ export function resolveNotificationMediaLayout(
     leadingKind: null,
     appBadge: null,
     previewBanner: null,
+    previewFit: "cover",
     fallbackKind: "bell",
   };
 }
@@ -685,9 +718,13 @@ export interface SystemNetworkSnapshot {
     readonly id: string;
     readonly interface: string;
     readonly carrier: boolean;
+    readonly speed_mbps?: number | null;
+    readonly ipv4?: string | null;
+    readonly available_profiles?: readonly { readonly id: string; readonly name: string }[];
     readonly active_connection: ActiveConnection | null;
   }[];
   readonly vpn: readonly ActiveConnection[];
+  readonly vpn_profiles?: readonly { readonly id: string; readonly name: string; readonly kind: string }[];
 }
 
 export interface BluetoothAdapter {
@@ -2341,4 +2378,96 @@ export function resolveClipboardSelection<T extends { readonly id: number }>(
   }
   const index = Math.max(0, Math.min(fallbackIndex, entries.length - 1));
   return { index, entry: entries[index]! };
+}
+
+/**
+ * Formats a workspace pill label honoring `[bar].workspace_numbers` (default true).
+ */
+export function resolveWorkspaceLabel(
+  workspace: WaylandWorkspace,
+  workspaceNumbers = true,
+  ordinalIndex?: number,
+): string {
+  if (workspaceNumbers) {
+    if (ordinalIndex !== undefined && ordinalIndex >= 0) {
+      return String(ordinalIndex + 1);
+    }
+    if (workspace.id_str && /^\d+$/.test(workspace.id_str)) {
+      return workspace.id_str;
+    }
+    const trimmedName = workspace.name?.trim() ?? "";
+    if (/^\d+$/.test(trimmedName)) {
+      return trimmedName;
+    }
+    if (workspace.coordinates.length > 1) {
+      return String(workspace.coordinates[1]! + 1);
+    }
+    return String(workspace.coordinates[0] ?? workspace.workspace_id);
+  }
+  const trimmedName = workspace.name?.trim() ?? "";
+  return trimmedName && !/^\d+$/.test(trimmedName) ? trimmedName : "";
+}
+
+function barPluginOutputMatches(
+  selector: string | null | undefined,
+  monitor: { readonly id: string; readonly name?: string },
+): boolean {
+  if (selector == null) return true;
+  return selector === monitor.id || (monitor.name !== undefined && selector === monitor.name);
+}
+
+function barPluginSlotMatchesRule(
+  slot: { readonly id: string; readonly entryId?: string; readonly instanceSlug?: string; readonly outputId?: string },
+  rule: BarPluginSlotConfig,
+  monitor: { readonly id: string; readonly name?: string },
+): boolean {
+  if (typeof rule === "string") {
+    return slot.entryId === rule && (slot.instanceSlug == null || slot.instanceSlug === "default");
+  }
+  if (slot.entryId !== rule.entry) return false;
+  if (!barPluginOutputMatches(rule.output, monitor)) return false;
+  return slot.instanceSlug === rule.instance
+    || (rule.instance === "default" && (slot.instanceSlug == null || slot.instanceSlug === "default"))
+    || slot.id === rule.instance;
+}
+
+/**
+ * Partitions registered plugin bar widgets across `left`, `center`, and `right` bar zones
+ * according to `[bar.plugins]` (`left`, `center`, `right`, `hidden`), falling back to `right`.
+ */
+export function partitionPluginBarWidgets<
+  T extends { readonly id: string; readonly entryId?: string; readonly instanceSlug?: string; readonly outputId?: string },
+>(
+  slots: readonly T[],
+  pluginsConfig: BarPluginsSettings | undefined,
+  monitor: { readonly id: string; readonly name?: string },
+): { readonly left: readonly T[]; readonly center: readonly T[]; readonly right: readonly T[] } {
+  const monitorSlots = slots.filter(slot => barPluginOutputMatches(slot.outputId, monitor));
+  const hiddenRules = pluginsConfig?.hidden ?? [];
+  const visible = monitorSlots.filter(slot => !hiddenRules.some(rule => barPluginSlotMatchesRule(slot, rule, monitor)));
+  const remaining = [...visible];
+
+  const takeForZone = (rules: readonly BarPluginSlotConfig[] | undefined): T[] => {
+    const zoneSlots: T[] = [];
+    if (!rules) return zoneSlots;
+    for (const rule of rules) {
+      for (let idx = 0; idx < remaining.length; ) {
+        const candidate = remaining[idx]!;
+        if (barPluginSlotMatchesRule(candidate, rule, monitor)) {
+          zoneSlots.push(candidate);
+          remaining.splice(idx, 1);
+        } else {
+          idx += 1;
+        }
+      }
+    }
+    return zoneSlots;
+  };
+
+  const left = takeForZone(pluginsConfig?.left);
+  const center = takeForZone(pluginsConfig?.center);
+  const right = takeForZone(pluginsConfig?.right);
+  right.push(...remaining);
+
+  return { left, center, right };
 }

@@ -156,11 +156,20 @@
       "previewRelPath": "z-shell-preview-design-new-states/out/captures/surfaces/settings-window/wallpaper-library.png"
     },
     {
+      "id": "22b-bar-layout",
+      "name": "22B · Settings — Bar & Layout",
+      "theme": "dark",
+      "pageId": "p-1-0",
+      "nodeId": "84X-0",
+      "refFile": "22b-bar-layout.jpg",
+      "previewRelPath": "z-shell-preview-design-tray-keepawake/out/captures/surfaces/settings-window/bar-layout-22b.png"
+    },
+    {
       "id": "22b-2-tray-rules",
       "name": "22B-2 · Settings — System Tray Rules",
       "theme": "dark",
       "pageId": "p-1-0",
-      "nodeId": "",
+      "nodeId": "E1A-0",
       "refFile": "22b-2-tray-rules.jpg",
       "previewRelPath": "z-shell-preview-design-tray-keepawake/out/captures/surfaces/settings-window/tray-rules-22b2.png"
     },

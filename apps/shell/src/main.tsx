@@ -3,6 +3,7 @@ import { ShellPanels } from "./panels/ShellPanels.tsx";
 import { PluginHost } from "./plugins/PluginHost.tsx";
 import { createShellStore, ShellProvider } from "./store.ts";
 import { BarPopups } from "./surfaces/BarPopups.tsx";
+import { BarPopoverBackdrop } from "./surfaces/BarPopoverBackdrop.tsx";
 import { ClipboardOverlay } from "./surfaces/ClipboardOverlay.tsx";
 import { DockSurface } from "./surfaces/DockSurface.tsx";
 import { KimpanelPopup } from "./surfaces/KimpanelPopup.tsx";
@@ -26,6 +27,7 @@ function ShellApp() {
     <ShellProvider value={store}>
       <PluginHost />
       <WallpaperLayer />
+      <BarPopoverBackdrop />
       <StatusBar />
       <DockSurface />
       <BarPopups />

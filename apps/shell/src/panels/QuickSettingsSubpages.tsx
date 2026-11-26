@@ -10,7 +10,7 @@ import { PrecisionSliderRow, type QuickSettingsPage } from "./QuickSettingsPanel
 type Subpage = Exclude<QuickSettingsPage, "main">;
 
 const titles: Record<Exclude<Subpage, "battery">, string> = {
-  wifi: "Wi-Fi", bluetooth: "Bluetooth", sound: "Sound",
+  wifi: "Network", bluetooth: "Bluetooth", sound: "Sound",
 };
 const primary = "var(--color-primary)";
 const onSurface = "var(--color-on-surface)";
@@ -176,6 +176,12 @@ function WifiExpandChevron(props: { readonly open: boolean }): NativeChild {
 function WifiPage(props: { onBack: () => void; outgoing?: boolean | undefined }): NativeChild {
   const { network, invokePublic, invokeHost } = useShellStore();
   const wifi = () => network.data()?.wifi;
+  const ethernet = () => network.data()?.ethernet ?? [];
+  const activeVpn = () => network.data()?.vpn ?? [];
+  const availableVpnProfiles = createMemo(() => {
+    const activeIds = new Set(activeVpn().map(item => item.profile_id));
+    return (network.data()?.vpn_profiles ?? []).filter(prof => !activeIds.has(prof.id));
+  });
   const enabled = () => wifi()?.enabled ?? false;
   const [selectedAp, setSelectedAp] = createSignal<string>();
   return (
@@ -191,6 +197,114 @@ function WifiPage(props: { onBack: () => void; outgoing?: boolean | undefined })
           onClick={() => void invokePublic("network.wifi.scan", {})} />
       </>
     }>
+      <Show when={ethernet().length > 0}>
+        <Section title="Wired">
+          <For each={ethernet()} keyed={device => device.id}>
+            {device => {
+              const active = () => device().active_connection;
+              const connected = () => Boolean(active());
+              const summaryParts = () => {
+                const items: string[] = [];
+                if (active()) {
+                  items.push(device().interface);
+                  if (device().ipv4) items.push(device().ipv4!);
+                  if (device().speed_mbps) items.push(`${device().speed_mbps} Mb/s`);
+                } else if (device().carrier) {
+                  items.push("Cable plugged", "Disconnected");
+                } else {
+                  items.push("Cable unplugged");
+                }
+                return items.join(" · ");
+              };
+              const preferredProfile = () => device().available_profiles?.[0];
+              return (
+                <Show
+                  when={connected()}
+                  fallback={
+                    <row testId={props.outgoing ? null : `net-eth-${device().interface}`} style={{ ...itemCard, ...row }}>
+                      <ShellIcon name="ethernet" size={18} color={device().carrier ? primary : muted} />
+                      <column style={{ ...grow, gap: "2px" }}>
+                        <text style={{ ...clipped, fontWeight: 500 }}>{device().interface}</text>
+                        <text style={detail}>{summaryParts()}</text>
+                      </column>
+                      <Show when={device().carrier}>
+                        <Action
+                          {...(props.outgoing ? {} : { testId: `net-eth-connect-${device().interface}` })}
+                          label="Connect"
+                          onClick={() => void invokePublic("network.ethernet.connect", {
+                            device_id: device().id,
+                            ...(preferredProfile() ? { profile_id: preferredProfile()!.id } : {}),
+                          })}
+                        />
+                      </Show>
+                    </row>
+                  }
+                >
+                  <row testId={props.outgoing ? null : `net-eth-${device().interface}`} style={{
+                    ...row, minHeight: "52px", padding: "8px 10px", borderRadius: "16px",
+                    backgroundColor: selectedFill, color: selectedInk,
+                    border: "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)",
+                  }}>
+                    <ShellIcon name="ethernet" size={18} color={selectedInk} />
+                    <column style={{ ...grow, gap: "2px" }}>
+                      <text style={{ ...clipped, fontWeight: 600 }}>{active()?.name || device().interface}</text>
+                      <text style={{ ...clipped, fontSize: "11px", color: selectedInk, opacity: 0.78 }}>{summaryParts()}</text>
+                    </column>
+                    <QuickSettingsIconButton
+                      testId={props.outgoing ? undefined : `net-eth-disconnect-${device().interface}`}
+                      label="Disconnect"
+                      icon="linkOff"
+                      size={30}
+                      fill="color-mix(in srgb, var(--color-primary) 18%, transparent)"
+                      color={selectedInk}
+                      onClick={() => void invokePublic("network.ethernet.disconnect", { device_id: device().id })}
+                    />
+                  </row>
+                </Show>
+              );
+            }}
+          </For>
+        </Section>
+      </Show>
+      <Show when={activeVpn().length > 0 || availableVpnProfiles().length > 0}>
+        <Section title="VPN">
+          <For each={activeVpn()} keyed={conn => conn.id}>
+            {conn => (
+              <row testId={props.outgoing ? null : `net-vpn-active-${conn().profile_id}`} style={{
+                ...row, minHeight: "48px", padding: "8px 10px", borderRadius: "14px",
+                backgroundColor: selectedFill, color: selectedInk,
+                border: "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)",
+              }}>
+                <ShellIcon name="shield" size={18} color={selectedInk} />
+                <column style={{ ...grow, gap: "2px" }}>
+                  <text style={{ ...clipped, fontWeight: 600 }}>{conn().name}</text>
+                  <text style={{ ...clipped, fontSize: "11px", color: selectedInk, opacity: 0.78 }}>Connected</text>
+                </column>
+                <QuickSettingsIconButton
+                  label="Disconnect VPN"
+                  icon="linkOff"
+                  size={30}
+                  fill="color-mix(in srgb, var(--color-primary) 18%, transparent)"
+                  color={selectedInk}
+                  onClick={() => void invokePublic("network.vpn.disconnect", { id: conn().id })}
+                />
+              </row>
+            )}
+          </For>
+          <For each={availableVpnProfiles()} keyed={prof => prof.id}>
+            {prof => (
+              <row testId={props.outgoing ? null : `net-vpn-profile-${prof().id}`} style={{ ...itemCard, ...row }}>
+                <ShellIcon name="shield" size={18} color={primary} />
+                <column style={{ ...grow, gap: "2px" }}>
+                  <text style={clipped}>{prof().name}</text>
+                  <text style={detail}>{prof().kind === "wireguard" ? "WireGuard" : "VPN"}</text>
+                </column>
+                <Action label="Connect" onClick={() => void invokePublic("network.vpn.connect", { profile_id: prof().id })} />
+              </row>
+            )}
+          </For>
+        </Section>
+      </Show>
       <Show when={enabled()} fallback={<text style={detail}>{network.data()?.available ? "Wi-Fi is off" : "Wi-Fi is unavailable"}</text>}>
         <For each={wifi()?.devices} keyed={device => device.id} fallback={<text style={detail}>No Wi-Fi adapters</text>}>
           {device => {

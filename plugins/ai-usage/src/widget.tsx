@@ -63,29 +63,35 @@ export default function Widget(props: {
       }}
       style={{
         display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, gap: "6px",
-        width: props.vertical ? "28px" : "auto", height: props.vertical ? "28px" : "26px", borderRadius: "999px", "--zgui-corner-shape": "none",
-        padding: props.vertical ? "0" : "0 6px",
-        backgroundColor: "transparent", color: "var(--color-on-surface)",
+        width: props.vertical ? "100%" : "auto",
+        minWidth: props.vertical ? "30px" : "24px",
+        height: "100%",
+        minHeight: props.vertical ? "30px" : "28px",
+        borderRadius: "inherit",
+        padding: props.vertical ? "0px" : "0 8px",
+        backgroundColor: "transparent", color: "inherit",
         opacity: snapshot()?.stale || snapshot()?.offlineBlocked ? 0.55 : 1,
       }}>
-      <box ariaHidden style={{ position: "relative", width: ringSize(), height: ringSize(), flexShrink: 0 }}>
-        <vector svg={TRACK_RING_SVG} style={{
-          position: "absolute", inset: "0px", width: ringSize(), height: ringSize(),
-          color: "var(--color-surface-container-highest)",
-        }} />
-        <vector svg={buildQuotaArcSvg(summary().remaining == null ? null : animatedPercent())} style={{
-          position: "absolute", inset: "0px", width: ringSize(), height: ringSize(),
-          color: "var(--color-primary)",
-        }} />
-      </box>
-      <Show when={!props.vertical}>
-        <text data-tabular="true" style={{
-          fontFamily: "var(--font-mono)", fontSize: "11px", fontWeight: 500, whiteSpace: "nowrap",
-          fontVariantNumeric: "tabular-nums",
-        }}>
-          {summary().horizontal}
-        </text>
-      </Show>
+      <row data-press-visual="compact" style={{ display: "flex", alignItems: "center", gap: "6px", pointerEvents: "none" }}>
+        <box ariaHidden style={{ position: "relative", width: ringSize(), height: ringSize(), flexShrink: 0 }}>
+          <vector svg={TRACK_RING_SVG} style={{
+            position: "absolute", inset: "0px", width: ringSize(), height: ringSize(),
+            color: "var(--color-surface-container-highest)",
+          }} />
+          <vector svg={buildQuotaArcSvg(summary().remaining == null ? null : animatedPercent())} style={{
+            position: "absolute", inset: "0px", width: ringSize(), height: ringSize(),
+            color: "var(--color-primary)",
+          }} />
+        </box>
+        <Show when={!props.vertical}>
+          <text data-tabular="true" style={{
+            fontFamily: "var(--font-mono)", fontSize: "11px", fontWeight: 500, whiteSpace: "nowrap",
+            fontVariantNumeric: "tabular-nums",
+          }}>
+            {summary().horizontal}
+          </text>
+        </Show>
+      </row>
     </Button>
   );
 }
