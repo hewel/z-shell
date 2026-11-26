@@ -6,7 +6,8 @@ use crate::coordinator::{
 };
 use crate::idle::{
     ActionCompletion, Caffeine, IdleConfig, IdleEffect, IdleInhibitor, IdlePolicy,
-    IdleServiceStatus, IdleSnapshot, LockState, MediaPlayback, SleepState, current_epoch_ms,
+    IdleServiceStatus, IdleSnapshot, LockState, MediaPlayback, SleepBlockStatus, SleepState,
+    current_epoch_ms,
 };
 use crate::pam::{Authenticator, Credentials};
 use serde::{Deserialize, Deserializer};
@@ -14,6 +15,7 @@ use serde_json::{Value, json};
 use std::fmt;
 use std::pin::Pin;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use z_shell_bus::{BusHub, CommandCall, CommandHandler, UpdateKind};
 use z_shell_config::IdleSettings;
@@ -75,6 +77,21 @@ struct Subscription {
     disconnect_task: tokio::task::JoinHandle<()>,
 }
 
+struct ExplicitSuspendGuard<'a>(&'a AtomicUsize);
+
+impl<'a> ExplicitSuspendGuard<'a> {
+    fn enter(counter: &'a AtomicUsize) -> Self {
+        counter.fetch_add(1, Ordering::SeqCst);
+        Self(counter)
+    }
+}
+
+impl Drop for ExplicitSuspendGuard<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// Owns session state and all public/privileged bus command handlers.
 pub struct SessionService {
     coordinator: tokio::sync::Mutex<Coordinator>,
@@ -84,6 +101,9 @@ pub struct SessionService {
     host_client_id: Mutex<Option<u64>>,
     idle: Mutex<IdlePolicy>,
     caffeine_timer: Mutex<CaffeineTimer>,
+    sleep_block_sync: tokio::sync::Mutex<()>,
+    shutting_down: AtomicBool,
+    explicit_suspend_in_flight: AtomicUsize,
     authenticator: Arc<dyn Authenticator>,
     sleep_inhibitor: Arc<dyn SleepInhibitor>,
     hub: Mutex<Option<BusHub>>,
@@ -136,6 +156,9 @@ impl SessionService {
             host_client_id: Mutex::new(None),
             idle: Mutex::new(idle),
             caffeine_timer: Mutex::new(CaffeineTimer::default()),
+            sleep_block_sync: tokio::sync::Mutex::new(()),
+            shutting_down: AtomicBool::new(false),
+            explicit_suspend_in_flight: AtomicUsize::new(0),
             authenticator,
             sleep_inhibitor,
             hub: Mutex::new(None),
@@ -246,14 +269,16 @@ impl SessionService {
     ///
     /// Returns an [`RpcError`] if an immediate fallback action fails.
     pub async fn request_lock(self: &Arc<Self>) -> Result<Value, RpcError> {
-        let actions = {
+        let (actions, hold_generation) = {
             let mut coordinator = self.coordinator.lock().await;
             let actions = coordinator.request_lock();
+            let hold_generation = coordinator.sleep_hold_generation();
             let snapshot = coordinator.snapshot();
             self.publish_lock(snapshot);
-            actions
+            (actions, hold_generation)
         };
-        self.finish_coordinator_actions(actions).await
+        self.finish_coordinator_actions(actions, hold_generation)
+            .await
     }
 
     /// Acquires the initial logind delay FD before sleep monitoring begins.
@@ -265,13 +290,71 @@ impl SessionService {
         self.coordinator.lock().await.arm_sleep_delay().await
     }
 
+    /// Reconciles the OS-level `systemd-logind` `sleep:block` FD with active sleep blockers.
+    ///
+    /// Serialized under `sleep_block_sync` and rechecked across the async acquisition boundary so
+    /// rapid toggles, timed expiry, shutdown, or explicit `host.suspend` never leak or reinstall
+    /// the block FD.
+    pub async fn sync_sleep_block_inhibitor(&self) {
+        let _sync = self.sleep_block_sync.lock().await;
+        let Some(reason) = self.desired_sleep_block_reason() else {
+            self.sleep_inhibitor.release_sleep_block();
+            self.update_sleep_block_status(SleepBlockStatus::Inactive);
+            return;
+        };
+        if self.sleep_inhibitor.is_sleep_block_held() {
+            self.update_sleep_block_status(SleepBlockStatus::Held);
+            return;
+        }
+        let result = self.sleep_inhibitor.acquire_sleep_block(&reason).await;
+        if self.desired_sleep_block_reason().is_none() {
+            self.sleep_inhibitor.release_sleep_block();
+            self.update_sleep_block_status(SleepBlockStatus::Inactive);
+            return;
+        }
+        match result {
+            Ok(()) => self.update_sleep_block_status(SleepBlockStatus::Held),
+            Err(error) => {
+                tracing::warn!(%error, "could not acquire logind sleep block inhibitor");
+                self.sleep_inhibitor.release_sleep_block();
+                self.update_sleep_block_status(SleepBlockStatus::Unavailable {
+                    reason: error.to_string(),
+                });
+            }
+        }
+    }
+
+    fn desired_sleep_block_reason(&self) -> Option<String> {
+        if self.shutting_down.load(Ordering::SeqCst)
+            || self.explicit_suspend_in_flight.load(Ordering::SeqCst) > 0
+        {
+            return None;
+        }
+        self.idle
+            .lock()
+            .expect("idle policy lock poisoned")
+            .sleep_block_reason()
+    }
+
+    fn update_sleep_block_status(&self, status: SleepBlockStatus) {
+        let changed = self
+            .idle
+            .lock()
+            .expect("idle policy lock poisoned")
+            .set_sleep_block_status(status);
+        if changed {
+            self.publish_idle();
+        }
+    }
+
     /// Applies a logind `PrepareForSleep` or wake transition.
     pub async fn handle_sleep_signal(self: &Arc<Self>, signal: SleepSignal) {
-        let actions = {
+        let (actions, hold_generation) = {
             let mut coordinator = self.coordinator.lock().await;
             let actions = coordinator.on_sleep_signal(signal).await;
+            let hold_generation = coordinator.sleep_hold_generation();
             self.publish_lock(coordinator.snapshot());
-            actions
+            (actions, hold_generation)
         };
         let sleep = match signal {
             SleepSignal::PrepareForSleep => SleepState::Sleeping,
@@ -284,8 +367,14 @@ impl SessionService {
             .set_sleep_state(sleep);
         self.publish_idle();
         self.apply_idle_effects(effects).await;
-        if let Err(error) = self.execute_coordinator_actions(actions).await {
+        if let Err(error) = self
+            .execute_coordinator_actions(actions, hold_generation)
+            .await
+        {
             tracing::warn!(%error, "sleep transition action failed");
+        }
+        if signal == SleepSignal::Wake {
+            self.sync_sleep_block_inhibitor().await;
         }
     }
 
@@ -330,8 +419,10 @@ impl SessionService {
         };
         self.publish_idle();
         self.apply_idle_effects(effects).await;
+        self.sync_sleep_block_inhibitor().await;
 
         if is_enabled
+            && !self.shutting_down.load(Ordering::SeqCst)
             && let Some(secs) = active_duration
             && let Ok(runtime) = tokio::runtime::Handle::try_current()
         {
@@ -359,6 +450,7 @@ impl SessionService {
                 };
                 service.publish_idle();
                 service.apply_idle_effects(effects).await;
+                service.sync_sleep_block_inhibitor().await;
             });
             let mut timer = self
                 .caffeine_timer
@@ -442,14 +534,17 @@ impl SessionService {
         self.publish_idle();
     }
 
-    /// Stops hub synchronization and marks idle integration stopped.
+    /// Stops hub synchronization, releases OS sleep-block inhibition, and marks idle stopped.
     pub fn shutdown(&self) {
+        self.shutting_down.store(true, Ordering::SeqCst);
         self.cancel_caffeine_timer();
         self.stop_inhibitor_sync();
-        self.idle
-            .lock()
-            .expect("idle policy lock poisoned")
-            .set_service_status(IdleServiceStatus::Stopped);
+        self.sleep_inhibitor.release_sleep_block();
+        {
+            let mut policy = self.idle.lock().expect("idle policy lock poisoned");
+            policy.set_service_status(IdleServiceStatus::Stopped);
+            policy.set_sleep_block_status(SleepBlockStatus::Inactive);
+        }
         self.publish_idle();
     }
 
@@ -504,6 +599,7 @@ impl SessionService {
                     .sync_plugin_inhibitors(&entries);
                 service.publish_idle();
                 service.apply_idle_effects(effects).await;
+                service.sync_sleep_block_inhibitor().await;
             }
         });
         let weak_disconnect = Arc::downgrade(self);
@@ -550,14 +646,18 @@ impl SessionService {
     /// Marks the active privileged host disconnected, immediately invalidating any pending unlock
     /// approval and aborting engaging suspends while keeping acknowledged locks fail-closed.
     pub async fn handle_host_disconnected(self: &Arc<Self>) {
-        let actions = {
+        let (actions, hold_generation) = {
             let mut coordinator = self.coordinator.lock().await;
             let actions = coordinator.host_disconnected();
+            let hold_generation = coordinator.sleep_hold_generation();
             let snapshot = coordinator.snapshot();
             self.publish_lock(snapshot);
-            actions
+            (actions, hold_generation)
         };
-        if let Err(error) = self.finish_coordinator_actions(actions).await {
+        if let Err(error) = self
+            .finish_coordinator_actions(actions, hold_generation)
+            .await
+        {
             tracing::warn!(%error, "host disconnect coordinator action reported error");
         }
     }
@@ -611,6 +711,7 @@ impl SessionService {
     async fn finish_coordinator_actions(
         self: &Arc<Self>,
         actions: Vec<CoordinatorAction>,
+        hold_generation: u64,
     ) -> Result<Value, RpcError> {
         let locked = self.lock_snapshot().phase == LockPhaseName::Locked;
         let effects = self
@@ -625,22 +726,77 @@ impl SessionService {
         self.publish_idle();
         self.apply_idle_effects(effects).await;
         let value = serde_json::to_value(&actions).expect("coordinator actions serialize");
-        self.execute_coordinator_actions(actions).await?;
+        self.execute_coordinator_actions(actions, hold_generation)
+            .await?;
         Ok(value)
     }
 
     async fn execute_coordinator_actions(
         &self,
         actions: Vec<CoordinatorAction>,
+        hold_generation: u64,
     ) -> Result<(), RpcError> {
         for action in actions {
             match action {
                 CoordinatorAction::SpawnFallback(argv) => spawn_argv(&argv)?,
-                CoordinatorAction::Suspend => self
-                    .sleep_inhibitor
-                    .suspend()
-                    .await
-                    .map_err(|error| internal(error.to_string()))?,
+                CoordinatorAction::Suspend => {
+                    let _in_flight = ExplicitSuspendGuard::enter(&self.explicit_suspend_in_flight);
+                    {
+                        let _sync = self.sleep_block_sync.lock().await;
+                        self.sleep_inhibitor.release_sleep_block();
+                        self.update_sleep_block_status(SleepBlockStatus::Inactive);
+                    }
+                    let result = self.sleep_inhibitor.suspend().await;
+                    drop(_in_flight);
+                    if let Err(error) = result {
+                        let message = error.to_string();
+                        let recovered = {
+                            let mut coordinator = self.coordinator.lock().await;
+                            let recovery = coordinator
+                                .on_suspend_failed(hold_generation, message.clone())
+                                .await;
+                            let snapshot = coordinator.snapshot();
+                            self.publish_lock(snapshot);
+                            !recovery.is_empty()
+                        };
+                        if recovered {
+                            self.sync_sleep_block_inhibitor().await;
+                        }
+                        return Err(internal(message));
+                    }
+                }
+                CoordinatorAction::IdleSuspend => {
+                    let inhibited = self
+                        .idle
+                        .lock()
+                        .expect("idle policy lock poisoned")
+                        .is_idle_sleep_inhibited();
+                    if inhibited {
+                        {
+                            let mut coordinator = self.coordinator.lock().await;
+                            let _ = coordinator
+                                .on_suspend_failed(
+                                    hold_generation,
+                                    "idle suspend cancelled by active sleep inhibitor",
+                                )
+                                .await;
+                            let snapshot = coordinator.snapshot();
+                            self.publish_lock(snapshot);
+                        }
+                        self.sync_sleep_block_inhibitor().await;
+                    } else if let Err(error) = self.sleep_inhibitor.suspend().await {
+                        let message = error.to_string();
+                        {
+                            let mut coordinator = self.coordinator.lock().await;
+                            let _ = coordinator
+                                .on_suspend_failed(hold_generation, message.clone())
+                                .await;
+                            let snapshot = coordinator.snapshot();
+                            self.publish_lock(snapshot);
+                        }
+                        return Err(internal(message));
+                    }
+                }
                 CoordinatorAction::AbortSuspend { reason } => {
                     tracing::warn!(%reason, "shell-initiated suspend aborted");
                     return Err(RpcError::new(ErrorCode::Disabled, reason));
@@ -694,31 +850,50 @@ impl SessionService {
                     } => {
                         let completion = match action {
                             crate::idle::IdleAction::Lock => {
-                                let actions = {
+                                let (actions, hold_generation) = {
                                     let mut coordinator = self.coordinator.lock().await;
                                     let actions = coordinator.request_lock();
+                                    let hold_generation = coordinator.sleep_hold_generation();
                                     let snapshot = coordinator.snapshot();
                                     self.publish_lock(snapshot);
-                                    actions
+                                    (actions, hold_generation)
                                 };
-                                action_completion(self.finish_coordinator_actions(actions).await)
+                                action_completion(
+                                    self.finish_coordinator_actions(actions, hold_generation)
+                                        .await,
+                                )
                             }
                             crate::idle::IdleAction::LockAndSuspend => {
-                                let actions = {
+                                let (actions, hold_generation) = {
                                     let mut coordinator = self.coordinator.lock().await;
-                                    let actions = coordinator.request_suspend();
+                                    let actions = coordinator.request_idle_suspend();
+                                    let hold_generation = coordinator.sleep_hold_generation();
                                     let snapshot = coordinator.snapshot();
                                     self.publish_lock(snapshot);
-                                    actions
+                                    (actions, hold_generation)
                                 };
-                                action_completion(self.finish_coordinator_actions(actions).await)
+                                action_completion(
+                                    self.finish_coordinator_actions(actions, hold_generation)
+                                        .await,
+                                )
                             }
-                            crate::idle::IdleAction::Suspend => action_completion(
-                                self.sleep_inhibitor
-                                    .suspend()
-                                    .await
-                                    .map_err(|e| internal(e.to_string())),
-                            ),
+                            crate::idle::IdleAction::Suspend => {
+                                if self
+                                    .idle
+                                    .lock()
+                                    .expect("idle policy lock poisoned")
+                                    .is_idle_sleep_inhibited()
+                                {
+                                    ActionCompletion::Failed
+                                } else {
+                                    action_completion(
+                                        self.sleep_inhibitor
+                                            .suspend()
+                                            .await
+                                            .map_err(|e| internal(e.to_string())),
+                                    )
+                                }
+                            }
                             crate::idle::IdleAction::CustomCommand(argv) => {
                                 action_completion(spawn_argv(&argv))
                             }
@@ -755,8 +930,10 @@ impl SessionService {
 
 impl Drop for SessionService {
     fn drop(&mut self) {
+        self.shutting_down.store(true, Ordering::SeqCst);
         self.cancel_caffeine_timer();
         self.stop_inhibitor_sync();
+        self.sleep_inhibitor.release_sleep_block();
     }
 }
 
@@ -865,41 +1042,50 @@ async fn dispatch(
                 .host_client_id
                 .lock()
                 .expect("host client id lock poisoned") = Some(call.caller.client_id);
-            let actions = {
+            let (actions, hold_generation) = {
                 let mut coordinator = service.coordinator.lock().await;
                 let actions = coordinator.register_host(params.ui_session_generation);
+                let hold_generation = coordinator.sleep_hold_generation();
                 let snapshot = coordinator.snapshot();
                 service.publish_lock(snapshot);
-                actions
+                (actions, hold_generation)
             };
-            service.finish_coordinator_actions(actions).await?;
+            service
+                .finish_coordinator_actions(actions, hold_generation)
+                .await?;
             Ok(serde_json::to_value(service.lock_snapshot()).expect("lock snapshot serializes"))
         }
         "host.lock-ack" => {
             let params: LockAckParams = parse_params(call.params.payload)?;
-            let actions = {
+            let (actions, hold_generation) = {
                 let mut coordinator = service.coordinator.lock().await;
                 let actions = coordinator
                     .on_host_lock_acknowledged(params.lock_id, params.ui_session_generation)
                     .map_err(coordinator_error)?;
+                let hold_generation = coordinator.sleep_hold_generation();
                 let snapshot = coordinator.snapshot();
                 service.publish_lock(snapshot);
-                actions
+                (actions, hold_generation)
             };
-            service.finish_coordinator_actions(actions).await
+            service
+                .finish_coordinator_actions(actions, hold_generation)
+                .await
         }
         "host.lock-failed" => {
             let params: LockFailedParams = parse_params(call.params.payload)?;
-            let actions = {
+            let (actions, hold_generation) = {
                 let mut coordinator = service.coordinator.lock().await;
                 let actions = coordinator
                     .on_host_lock_failed(params.lock_id, params.reason)
                     .map_err(coordinator_error)?;
+                let hold_generation = coordinator.sleep_hold_generation();
                 let snapshot = coordinator.snapshot();
                 service.publish_lock(snapshot);
-                actions
+                (actions, hold_generation)
             };
-            service.finish_coordinator_actions(actions).await
+            service
+                .finish_coordinator_actions(actions, hold_generation)
+                .await
         }
         "host.lock-authenticate" => {
             let params: AuthenticateParams = parse_params(call.params.payload)?;
@@ -945,14 +1131,17 @@ async fn dispatch(
         }
         "host.suspend" => {
             parse_params::<EmptyParams>(call.params.payload)?;
-            let actions = {
+            let (actions, hold_generation) = {
                 let mut coordinator = service.coordinator.lock().await;
                 let actions = coordinator.request_suspend();
+                let hold_generation = coordinator.sleep_hold_generation();
                 let snapshot = coordinator.snapshot();
                 service.publish_lock(snapshot);
-                actions
+                (actions, hold_generation)
             };
-            service.finish_coordinator_actions(actions).await
+            service
+                .finish_coordinator_actions(actions, hold_generation)
+                .await
         }
         _ => Err(RpcError::new(
             ErrorCode::MethodNotFound,

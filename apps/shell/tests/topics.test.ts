@@ -60,6 +60,7 @@ import {
   selectPrimaryGpu,
   selectTelemetryHistoryWindow,
   splitNotificationActions,
+  supportsOsSleepBlock,
   supportsTimedKeepAwake,
   trayRuleKey,
   type ActiveWallpaper,
@@ -1563,26 +1564,41 @@ describe("System Monitor telemetry helpers, chart paths & backwards compatibilit
     expect(partitioned.hidden.map(i => i.id)).toEqual([hiddenItem.id]);
   });
 
-  test("supportsTimedKeepAwake and formatKeepAwakeRemaining handle legacy vs timed/indefinite states", () => {
+  test("supportsTimedKeepAwake, supportsOsSleepBlock, and formatKeepAwakeRemaining handle mixed daemon versions", () => {
     expect(supportsTimedKeepAwake(undefined)).toBe(false);
-    expect(supportsTimedKeepAwake({
+    expect(supportsOsSleepBlock(undefined)).toBe(false);
+
+    // 8376421 legacy daemon snapshot: no timed Keep awake fields and no sleep_block_status.
+    const legacy8376421 = {
       caffeine: false,
       media_playing: false,
       active_inhibitors: [],
       warning: null,
       rules: [],
-      service_status: { status: "running" },
-    })).toBe(false);
-    expect(supportsTimedKeepAwake({
+      service_status: { status: "running" as const },
+    };
+    expect(supportsTimedKeepAwake(legacy8376421)).toBe(false);
+    expect(supportsOsSleepBlock(legacy8376421)).toBe(false);
+
+    // 168f8bf daemon snapshot: timed Keep awake present, no OS sleep_block_status yet.
+    const baseline168f8bf = {
+      ...legacy8376421,
       caffeine: true,
-      caffeine_scope: "sleep",
+      caffeine_scope: "sleep" as const,
       caffeine_duration_seconds: 3600,
       caffeine_expires_at_ms: 1_000_000,
-      media_playing: false,
-      active_inhibitors: [],
-      warning: null,
-      rules: [],
-      service_status: { status: "running" },
+    };
+    expect(supportsTimedKeepAwake(baseline168f8bf)).toBe(true);
+    expect(supportsOsSleepBlock(baseline168f8bf)).toBe(false);
+
+    // Current daemon snapshot with OS sleep_block_status.
+    expect(supportsOsSleepBlock({
+      ...baseline168f8bf,
+      sleep_block_status: { status: "held" },
+    })).toBe(true);
+    expect(supportsOsSleepBlock({
+      ...baseline168f8bf,
+      sleep_block_status: { status: "unavailable", reason: "logind denied" },
     })).toBe(true);
 
     expect(formatKeepAwakeRemaining(null, 1_000)).toBe("Always on");

@@ -75,7 +75,7 @@ pub struct DaemonApp {
     _clipboard: Arc<ClipboardService>,
     wallpaper: Arc<WallpaperService>,
     desktop: Option<Arc<DesktopSlot>>,
-    _session: Arc<SessionService>,
+    session: Arc<SessionService>,
     session_drivers: Option<SessionRuntimeDrivers>,
     _polkit: Arc<PolkitService>,
     plugins: Arc<plugins::PluginService>,
@@ -271,7 +271,7 @@ impl DaemonApp {
             _clipboard: clipboard,
             wallpaper,
             desktop,
-            _session: session,
+            session,
             session_drivers,
             _polkit: polkit,
             plugins: plugins_service,
@@ -300,6 +300,7 @@ impl DaemonApp {
         self.wallpaper_theme.start();
         let result = self.server.serve().await.context("serving z-shelld bus");
         self.plugins.shutdown();
+        self.session.shutdown();
         drop(self.wallpaper);
         drop(self.wallpaper_theme);
         drop(self.bridge);
@@ -933,6 +934,28 @@ impl SleepInhibitor for LazyLogindSleepInhibitor {
         self.inner.get().is_some_and(SleepInhibitor::is_held)
     }
 
+    fn acquire_sleep_block(&self, reason: &str) -> InhibitorFuture<'_> {
+        let reason = reason.to_owned();
+        Box::pin(async move {
+            self.get_or_connect()
+                .await?
+                .acquire_sleep_block(&reason)
+                .await
+        })
+    }
+
+    fn release_sleep_block(&self) {
+        if let Some(inhibitor) = self.inner.get() {
+            inhibitor.release_sleep_block();
+        }
+    }
+
+    fn is_sleep_block_held(&self) -> bool {
+        self.inner
+            .get()
+            .is_some_and(SleepInhibitor::is_sleep_block_held)
+    }
+
     fn suspend(&self) -> InhibitorFuture<'_> {
         Box::pin(async move { self.get_or_connect().await?.suspend().await })
     }
@@ -940,6 +963,7 @@ impl SleepInhibitor for LazyLogindSleepInhibitor {
 
 struct SessionRuntimeDrivers {
     stop: watch::Sender<bool>,
+    sleep_inhibitor: Arc<LazyLogindSleepInhibitor>,
     _wayland_idle: Option<WaylandIdleDriver>,
     polkit: Option<PolkitRegistration>,
     tasks: Vec<tokio::task::JoinHandle<()>>,
@@ -1075,15 +1099,16 @@ impl SessionRuntimeDrivers {
             }));
         }
 
-        // 3. systemd-logind delay inhibitor + PrepareForSleep + Session.Lock monitor.
+        // 3. systemd-logind delay & block inhibitors + PrepareForSleep + Session.Lock monitor.
         {
             let session_weak = Arc::downgrade(&session);
+            let sleep_inhibitor_task = Arc::clone(&sleep_inhibitor);
             let mut stop_logind = stop_rx;
             tasks.push(runtime.spawn(async move {
                 let logind = tokio::select! {
                     biased;
                     _ = stop_logind.changed() => return,
-                    res = sleep_inhibitor.get_or_connect() => match res {
+                    res = sleep_inhibitor_task.get_or_connect() => match res {
                         Ok(logind) => logind,
                         Err(error) => {
                             tracing::info!(%error, "systemd-logind unavailable; sleep/lock signals inactive");
@@ -1091,10 +1116,11 @@ impl SessionRuntimeDrivers {
                         }
                     }
                 };
-                if let Some(svc) = session_weak.upgrade()
-                    && let Err(error) = svc.arm_sleep_delay().await
-                {
-                    tracing::info!(%error, "could not acquire initial logind sleep delay inhibitor");
+                if let Some(svc) = session_weak.upgrade() {
+                    if let Err(error) = svc.arm_sleep_delay().await {
+                        tracing::info!(%error, "could not acquire initial logind sleep delay inhibitor");
+                    }
+                    svc.sync_sleep_block_inhibitor().await;
                 }
                 let (tx, mut rx) = tokio::sync::mpsc::channel(16);
                 let monitor = logind.monitor_events(tx);
@@ -1132,12 +1158,14 @@ impl SessionRuntimeDrivers {
                         }
                     }
                 }
-                sleep_inhibitor.release();
+                sleep_inhibitor_task.release();
+                sleep_inhibitor_task.release_sleep_block();
             }));
         }
 
         Some(Self {
             stop,
+            sleep_inhibitor,
             _wayland_idle: wayland_idle,
             polkit: Some(polkit),
             tasks,
@@ -1157,6 +1185,8 @@ impl Drop for SessionRuntimeDrivers {
         for task in &self.tasks {
             task.abort();
         }
+        self.sleep_inhibitor.release();
+        self.sleep_inhibitor.release_sleep_block();
     }
 }
 

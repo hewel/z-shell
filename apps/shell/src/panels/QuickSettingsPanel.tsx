@@ -17,6 +17,7 @@ import {
   type BatteryState,
   type PowerConfirmAction,
 } from "../topics.ts";
+import { POWER_PROFILE_META } from "./BatteryPanel.tsx";
 import { QuickSettingsIconButton, QuickSettingsSubpage } from "./QuickSettingsSubpages.tsx";
 
 export type QuickSettingsPage = "main" | "wifi" | "bluetooth" | "sound" | "battery";
@@ -62,6 +63,7 @@ export function PrecisionSliderRow(props: {
   label: string;
   icon: ShellIconName;
   iconLabel?: string;
+  sliderTestId?: string;
   value: number;
   disabled?: boolean;
   onIconClick?: () => void;
@@ -78,6 +80,7 @@ export function PrecisionSliderRow(props: {
       value={props.value}
       {...(props.valueLabel !== undefined ? { valueLabel: props.valueLabel } : {})}
       {...(props.disabled !== undefined ? { disabled: props.disabled } : {})}
+      {...(props.sliderTestId !== undefined ? { sliderTestId: props.sliderTestId } : {})}
       {...(props.iconLabel !== undefined ? { iconLabel: props.iconLabel } : {})}
       {...(props.onIconClick ? { onIconClick: props.onIconClick } : {})}
       {...(props.showTrailingSlot !== undefined ? { showTrailingSlot: props.showTrailingSlot } : {})}
@@ -122,9 +125,13 @@ function QuickTile(props: {
   outgoing?: boolean | undefined;
   onClick: () => void;
   open?: () => void;
+  openMode?: "navigate" | "expand";
+  expanded?: boolean;
+  openDisabled?: boolean;
 }): NativeChild {
   const scheme = useMotionScheme();
   const iconPop = createM3Spring(() => 1, "fastSpatial", { scheme, overrideScheme: "expressive" });
+  const chevronProgress = createM3Spring(() => (props.expanded ? 1 : 0), "fastSpatial", { scheme });
   let prevActive = untrack(() => Boolean(props.active));
   createEffect(() => Boolean(props.active), next => {
     if (next === prevActive) return;
@@ -133,6 +140,13 @@ function QuickTile(props: {
   });
   const ink = () => props.active ? onPrimaryContainer : onSurface;
   const subInk = () => props.active ? onPrimaryContainer : muted;
+  const isExpand = () => props.openMode === "expand";
+  const splitDisabled = () => props.openDisabled ?? false;
+  const chevronRotation = () => {
+    if (scheme() === "reduced") return "none";
+    const deg = Math.max(0, Math.min(180, chevronProgress() * 180));
+    return `rotate(${deg.toFixed(2)}deg)`;
+  };
   return (
     <row testId={props.outgoing ? null : `qs-tile-card-${props.id}`} data-qs-tile="true" style={{
       ...grow, height: "50px", borderRadius: "14px", alignItems: "center",
@@ -168,10 +182,32 @@ function QuickTile(props: {
             ? "color-mix(in srgb, var(--color-on-primary-container) 22%, transparent)"
             : "var(--color-outline-variant)",
         }} />
-        <QuickSettingsIconButton testId={props.outgoing ? undefined : `qs-open-${props.id}`} label={`Open ${props.label}`} icon="chevronRight"
-          size={26} fill="transparent"
-          color={props.active ? onPrimaryContainer : muted}
-          onClick={() => props.open?.()} />
+        <Show when={isExpand()} fallback={
+          <QuickSettingsIconButton testId={props.outgoing ? undefined : `qs-open-${props.id}`} label={`Open ${props.label}`} icon="chevronRight"
+            size={26} fill="transparent" disabled={splitDisabled()}
+            color={props.active ? onPrimaryContainer : muted}
+            onClick={() => props.open?.()} />
+        }>
+          <Button
+            testId={props.outgoing ? null : `qs-open-${props.id}`}
+            ariaLabel={props.expanded ? `Collapse ${props.label}` : `Expand ${props.label}`}
+            expanded={props.expanded ?? false}
+            disabled={splitDisabled()}
+            onClick={() => props.open?.()}
+            style={{
+              display: "flex", width: "26px", height: "26px", borderRadius: "10px", flexShrink: 0,
+              alignItems: "center", justifyContent: "center", backgroundColor: "transparent",
+              opacity: splitDisabled() ? 0.45 : 1,
+            }}
+          >
+            <box data-press-visual="compact" style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              transform: chevronRotation(),
+            }}>
+              <ShellIcon name="expandMore" size={16} color={props.active ? onPrimaryContainer : muted} />
+            </box>
+          </Button>
+        </Show>
         <box style={{ width: "4px", flexShrink: 0 }} />
       </Show>
     </row>
@@ -316,12 +352,80 @@ function PowerMenuRow(props: { onSelect: (action: PowerConfirmAction) => void; o
   );
 }
 
+function PowerProfileDrawer(props: {
+  readonly profiles: readonly string[];
+  readonly activeProfile: string | null;
+  readonly onSelect: (profile: string) => void;
+  readonly outgoing?: boolean | undefined;
+}): NativeChild {
+  return (
+    <column testId={props.outgoing ? null : "qs-profile-menu"} style={{
+      borderRadius: "16px", backgroundColor: containerHigh, padding: "6px", gap: "4px", width: "100%",
+    }}>
+      <For each={props.profiles} keyed={name => name}>
+        {name => {
+          const active = () => name() === props.activeProfile;
+          const meta = () => POWER_PROFILE_META[name()] ?? {
+            label: name(),
+            detail: "System power profile",
+            shortDetail: "System power profile",
+            icon: "battery" as const,
+          };
+          return (
+            <Button
+              testId={props.outgoing ? null : `qs-profile-option-${name()}`}
+              ariaLabel={meta().label}
+              selected={active()}
+              onClick={() => props.onSelect(name())}
+              style={{
+                display: "flex", flexDirection: "row", alignItems: "center", gap: "10px",
+                minHeight: "42px", padding: "6px 10px", borderRadius: "10px",
+                backgroundColor: active() ? primaryContainer : containerHighest,
+                border: active()
+                  ? "1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)"
+                  : "1px solid transparent",
+                color: active() ? onPrimaryContainer : onSurface,
+              }}
+            >
+              <row data-press-visual="card" style={{ alignItems: "center", gap: "10px", ...grow }}>
+                <box ariaHidden style={{
+                  display: "flex", width: "28px", height: "28px", borderRadius: "8px", flexShrink: 0,
+                  alignItems: "center", justifyContent: "center",
+                  backgroundColor: active()
+                    ? "color-mix(in srgb, var(--color-primary) 18%, transparent)"
+                    : containerHigh,
+                }}>
+                  <ShellIcon name={meta().icon} size={16} color={active() ? onPrimaryContainer : muted} />
+                </box>
+                <column style={{ ...grow, gap: "1px", alignItems: "flex-start" }}>
+                  <text style={{ ...clipped, fontSize: "13px", fontWeight: 600, lineHeight: "17px" }}>{meta().label}</text>
+                  <text style={{
+                    ...clipped, fontSize: "11px", lineHeight: "14px",
+                    color: active() ? onPrimaryContainer : muted, opacity: active() ? 0.8 : 1,
+                  }}>
+                    {meta().shortDetail}
+                  </text>
+                </column>
+                <Show when={active()} fallback={<box style={hiddenSection} />}>
+                  <ShellIcon name="check" size={16} color={active() ? onPrimaryContainer : muted} />
+                </Show>
+              </row>
+            </Button>
+          );
+        }}
+      </For>
+    </column>
+  );
+}
+
 function MainPage(props: {
   navigate: (page: QuickSettingsPage) => void;
   fromSubpage: boolean;
   powerMenuOpen: boolean;
   togglePowerMenu: () => void;
   closePowerMenu: () => void;
+  profileMenuOpen: boolean;
+  toggleProfileMenu: () => void;
   outgoing?: boolean | undefined;
 }): NativeChild {
   const scheme = useMotionScheme();
@@ -363,9 +467,16 @@ function MainPage(props: {
     return formatKeepAwakeRemaining(snap?.caffeine_expires_at_ms, nowMs());
   };
   const profiles = () => power.data()?.profiles;
+  const hasProfiles = () => Boolean(profiles()?.available && profiles()?.profiles.length);
+  const profileDetail = () => {
+    const current = profiles();
+    const active = current?.active_profile;
+    if (active) return POWER_PROFILE_META[active]?.label ?? active;
+    return current?.available ? "None" : "Unavailable";
+  };
   const cycleProfile = () => {
     const current = profiles();
-    if (!current?.profiles.length) return;
+    if (!current?.available || !current.profiles.length) return;
     const index = current.active_profile === null ? -1 : current.profiles.indexOf(current.active_profile);
     void invokePublic("power.set-profile", { profile: current.profiles[(index + 1) % current.profiles.length] });
   };
@@ -456,10 +567,19 @@ function MainPage(props: {
             icon="coffee" active={caffeine()} checked={caffeine()} toggle
             outgoing={props.outgoing}
             onClick={() => void invokePublic("idle.caffeine", { enabled: !caffeine() })} />
-          <QuickTile id="profile" label="Power Profile" detail={profiles()?.active_profile ?? "balanced"}
-            icon="battery" active={profiles()?.active_profile === "performance"} disabled={!profiles()?.profiles.length}
-            outgoing={props.outgoing} onClick={cycleProfile} />
+          <QuickTile id="profile" label="Power Profile" detail={profileDetail()}
+            icon="battery" active={profiles()?.active_profile === "performance"} disabled={!hasProfiles()}
+            outgoing={props.outgoing} onClick={cycleProfile}
+            open={props.toggleProfileMenu} openMode="expand" expanded={props.profileMenuOpen} openDisabled={!hasProfiles()} />
         </row>
+        <M3Collapsible open={props.profileMenuOpen && hasProfiles()} estimatedHeight={156}>
+          <PowerProfileDrawer
+            profiles={profiles()?.profiles ?? []}
+            activeProfile={profiles()?.active_profile ?? null}
+            onSelect={profile => { void invokePublic("power.set-profile", { profile }); }}
+            outgoing={props.outgoing}
+          />
+        </M3Collapsible>
         <row style={{ gap: "8px" }}>
           <QuickTile id="wallpaper" label="Wallpaper" detail={`${wallpaper.data()?.catalog_count ?? 0} wallpapers`}
             icon="wallpaper" outgoing={props.outgoing} onClick={() => openSettingsWindow("appearance")} />
@@ -482,6 +602,7 @@ interface OutgoingQuickSettings {
 function OutgoingQuickSettingsLayer(props: {
   readonly entry: OutgoingQuickSettings;
   readonly powerMenuOpen: boolean;
+  readonly profileMenuOpen: boolean;
   readonly onDone: () => void;
 }): NativeChild {
   const scheme = useMotionScheme();
@@ -499,7 +620,16 @@ function OutgoingQuickSettingsLayer(props: {
       transform: scheme() === "reduced" ? "none" : `translateX(${((1 - progress()) * -14 * props.entry.direction).toFixed(2)}px)`,
     }}>
       <Show when={props.entry.page !== "main"} fallback={
-        <MainPage navigate={noop} fromSubpage={false} powerMenuOpen={props.powerMenuOpen} togglePowerMenu={noop} closePowerMenu={noop} outgoing />
+        <MainPage
+          navigate={noop}
+          fromSubpage={false}
+          powerMenuOpen={props.powerMenuOpen}
+          togglePowerMenu={noop}
+          closePowerMenu={noop}
+          profileMenuOpen={props.profileMenuOpen}
+          toggleProfileMenu={noop}
+          outgoing
+        />
       }>
         <QuickSettingsSubpage page={props.entry.page as Exclude<QuickSettingsPage, "main">} onBack={noop} outgoing />
       </Show>
@@ -508,11 +638,12 @@ function OutgoingQuickSettingsLayer(props: {
 }
 
 export function QuickSettingsPanel(): NativeChild {
-  const { pendingQuickSettingsSubpage, consumeQuickSettingsSubpage } = useShellStore();
+  const { power, pendingQuickSettingsSubpage, consumeQuickSettingsSubpage } = useShellStore();
   const scheme = useMotionScheme();
   const [page, setPage] = createSignal<QuickSettingsPage>(consumeQuickSettingsSubpage() ?? "main");
   const [returnedFromSubpage, setReturnedFromSubpage] = createSignal(false);
   const [powerMenuOpen, setPowerMenuOpen] = createSignal(false);
+  const [profileMenuOpen, setProfileMenuOpen] = createSignal(false);
   const [outgoing, setOutgoing] = createSignal<OutgoingQuickSettings | null>(null);
   const [targetHeight, setTargetHeight] = createSignal<number | null>(null);
   let activeWrapper: NativeNode | undefined;
@@ -523,6 +654,29 @@ export function QuickSettingsPanel(): NativeChild {
     const consumed = consumeQuickSettingsSubpage();
     if (consumed) setPage(consumed);
   });
+
+  createEffect(
+    () => Boolean(power.data()?.profiles.available && power.data()?.profiles.profiles.length),
+    available => {
+      if (!available && profileMenuOpen()) setProfileMenuOpen(false);
+    },
+  );
+
+  const togglePowerMenu = () => {
+    setPowerMenuOpen(open => {
+      const next = !open;
+      if (next) setProfileMenuOpen(false);
+      return next;
+    });
+  };
+
+  const toggleProfileMenu = () => {
+    setProfileMenuOpen(open => {
+      const next = !open;
+      if (next) setPowerMenuOpen(false);
+      return next;
+    });
+  };
 
   const animatedHeight = createM3Spring(() => targetHeight() ?? 0, "defaultSpatial", {
     scheme,
@@ -578,8 +732,10 @@ export function QuickSettingsPanel(): NativeChild {
             navigate={transitionTo}
             fromSubpage={returnedFromSubpage()}
             powerMenuOpen={powerMenuOpen()}
-            togglePowerMenu={() => setPowerMenuOpen(open => !open)}
+            togglePowerMenu={togglePowerMenu}
             closePowerMenu={() => setPowerMenuOpen(false)}
+            profileMenuOpen={profileMenuOpen()}
+            toggleProfileMenu={toggleProfileMenu}
           />
         }>
           {current => <QuickSettingsSubpage page={current()} onBack={() => transitionTo("main")} />}
@@ -590,6 +746,7 @@ export function QuickSettingsPanel(): NativeChild {
           <OutgoingQuickSettingsLayer
             entry={entry}
             powerMenuOpen={powerMenuOpen()}
+            profileMenuOpen={profileMenuOpen()}
             onDone={() => {
               if (outgoing()?.id === entry.id) setOutgoing(null);
             }}

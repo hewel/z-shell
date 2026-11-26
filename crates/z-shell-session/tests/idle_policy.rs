@@ -362,3 +362,52 @@ fn invalid_rules_are_rejected_without_partial_reconfiguration() {
     );
     assert_eq!(policy.snapshot().rules, original);
 }
+
+#[test]
+fn is_sleep_blocked_is_restricted_to_caffeine_and_explicit_sleep_plugin_leases() {
+    let mut policy = IdlePolicy::default();
+    assert!(!policy.is_sleep_blocked());
+
+    // Media playback and Idle-scoped plugin inhibitors must NOT trigger OS sleep:block.
+    policy.set_media_playing(MediaPlayback::Playing);
+    assert!(!policy.is_sleep_blocked());
+
+    policy.sync_plugin_inhibitors(&[InhibitorEntry {
+        cookie: 1,
+        scope: InhibitorScope::Idle,
+        reason: "presentation".into(),
+        owner: TopicOwner::Core,
+    }]);
+    assert!(!policy.is_sleep_blocked());
+
+    policy.sync_plugin_inhibitors(&[InhibitorEntry {
+        cookie: 2,
+        scope: InhibitorScope::Lock,
+        reason: "meeting".into(),
+        owner: TopicOwner::Core,
+    }]);
+    assert!(!policy.is_sleep_blocked());
+
+    // Explicit Sleep-scoped plugin lease triggers sleep block.
+    policy.sync_plugin_inhibitors(&[InhibitorEntry {
+        cookie: 3,
+        scope: InhibitorScope::Sleep,
+        reason: "compile".into(),
+        owner: TopicOwner::Core,
+    }]);
+    assert!(policy.is_sleep_blocked());
+    assert_eq!(policy.sleep_block_reason().as_deref(), Some("compile"));
+
+    policy.sync_plugin_inhibitors(&[]);
+    assert!(!policy.is_sleep_blocked());
+
+    // Keep awake triggers sleep block independently of plugin leases.
+    policy.set_caffeine(Caffeine::Enabled);
+    assert!(policy.is_sleep_blocked());
+    assert_eq!(
+        policy.sleep_block_reason().as_deref(),
+        Some("Keep awake is active")
+    );
+    policy.set_caffeine(Caffeine::Disabled);
+    assert!(!policy.is_sleep_blocked());
+}

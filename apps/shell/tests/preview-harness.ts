@@ -103,6 +103,7 @@ export interface DeviceBounds {
 
 export interface PreviewScrollMetrics {
   readonly overflowY?: boolean;
+  readonly offsetY?: number;
   readonly contentHeight?: number;
   readonly viewportHeight?: number;
 }

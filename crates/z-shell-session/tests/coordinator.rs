@@ -302,3 +302,70 @@ fn approvals_do_not_survive_a_new_daemon_instance() {
         Err(CoordinatorError::InvalidUnlockApproval)
     );
 }
+
+#[test]
+fn idle_suspend_produces_idle_suspend_action_separate_from_explicit_suspend() {
+    let (mut coordinator, inhibitor) = coordinator(None);
+    coordinator.register_host(3);
+    let actions = coordinator.request_idle_suspend();
+    assert!(coordinator.snapshot().sleep_hold);
+    let lock_id = coordinator.snapshot().lock_id.expect("lock ID");
+    assert!(actions.iter().any(|action| matches!(
+        action,
+        CoordinatorAction::RequestHostLock { lock_id: id, ui_session_generation: 3 } if *id == lock_id
+    )));
+
+    let ack_actions = coordinator
+        .on_host_lock_acknowledged(lock_id, 3)
+        .expect("valid ACK");
+    assert_eq!(coordinator.snapshot().phase, LockPhaseName::Locked);
+    assert!(!inhibitor.is_held());
+    assert!(ack_actions.contains(&CoordinatorAction::ReleaseSleepDelayInhibitor));
+    assert!(ack_actions.contains(&CoordinatorAction::IdleSuspend));
+    assert!(!ack_actions.contains(&CoordinatorAction::Suspend));
+}
+
+#[tokio::test]
+async fn on_suspend_failed_is_generation_guarded_against_newer_prepare_for_sleep() {
+    let (mut coordinator, inhibitor) = coordinator(None);
+    coordinator
+        .arm_sleep_delay()
+        .await
+        .expect("initial delay lock");
+    locked(&mut coordinator);
+
+    // Explicit suspend engages hold generation 1 and releases delay FD.
+    let actions = coordinator.request_suspend();
+    assert!(actions.contains(&CoordinatorAction::Suspend));
+    assert!(coordinator.snapshot().sleep_hold);
+    assert!(!inhibitor.is_held());
+    let first_gen = coordinator.sleep_hold_generation();
+
+    // Newer external PrepareForSleep advances hold generation.
+    coordinator
+        .on_sleep_signal(SleepSignal::PrepareForSleep)
+        .await;
+    let second_gen = coordinator.sleep_hold_generation();
+    assert!(second_gen > first_gen);
+    assert!(coordinator.snapshot().sleep_hold);
+
+    // Stale failure from generation 1 must NOT clear sleep_hold or re-arm delay.
+    let stale_recovery = coordinator
+        .on_suspend_failed(first_gen, "stale suspend error")
+        .await;
+    assert!(stale_recovery.is_empty());
+    assert!(coordinator.snapshot().sleep_hold);
+    assert!(!inhibitor.is_held());
+
+    // Matching generation failure clears sleep_hold and re-arms delay while staying locked.
+    let active_recovery = coordinator
+        .on_suspend_failed(second_gen, "current suspend failed")
+        .await;
+    assert_eq!(
+        active_recovery,
+        vec![CoordinatorAction::AcquireSleepDelayInhibitor]
+    );
+    assert!(!coordinator.snapshot().sleep_hold);
+    assert_eq!(coordinator.snapshot().phase, LockPhaseName::Locked);
+    assert!(inhibitor.is_held());
+}

@@ -387,6 +387,7 @@ function AudioDeviceRow(props: { device: Accessor<AudioDevice>; kind: "sink" | "
       <M3CardAction>
         <PrecisionSliderRow
           label={`${name()} volume`}
+          sliderTestId={`qs-audio-${props.kind}-slider-${props.device().index}`}
           icon={props.device().muted ? "volumeMute" : props.kind === "sink" ? "volumeHigh" : "mic"}
           iconLabel={props.device().muted ? "Unmute device" : "Mute device"}
           value={props.device().volume * 100}

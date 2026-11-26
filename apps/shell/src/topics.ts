@@ -1066,11 +1066,17 @@ export type IdleServiceStatus =
   | { readonly status: "unavailable"; readonly reason: string }
   | { readonly status: "stopped" };
 
+export type SleepBlockStatus =
+  | { readonly status: "inactive" }
+  | { readonly status: "held" }
+  | { readonly status: "unavailable"; readonly reason: string };
+
 export interface IdleSnapshot {
   readonly caffeine: boolean;
   readonly caffeine_scope?: "idle" | "sleep" | "lock";
   readonly caffeine_duration_seconds?: number | null;
   readonly caffeine_expires_at_ms?: number | null;
+  readonly sleep_block_status?: SleepBlockStatus;
   readonly media_playing: boolean;
   readonly active_inhibitors: readonly IdleInhibitor[];
   readonly warning: WarningFade | null;
@@ -1084,6 +1090,10 @@ export function supportsTimedKeepAwake(idle: IdleSnapshot | undefined): boolean 
     || idle.caffeine_duration_seconds !== undefined
     || idle.caffeine_expires_at_ms !== undefined
   );
+}
+
+export function supportsOsSleepBlock(idle: IdleSnapshot | undefined): boolean {
+  return idle?.sleep_block_status !== undefined;
 }
 
 export function formatKeepAwakeRemaining(

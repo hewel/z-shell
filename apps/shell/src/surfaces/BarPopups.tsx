@@ -1,10 +1,10 @@
-import { Button, For, Image, PopupSurface, Show, createEffect, createMemo, createSignal, type NativeChild, type NativeNode } from "@hewel/zgui";
+import { Button, For, Image, PopupSurface, Show, createEffect, createMemo, createSignal, untrack, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { MenuItemPrimitive, MenuListPrimitive, MenuRootPrimitive } from "@hewel/zgui/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
 import { createRetainedPresence, panelMotionStyle, popoverContentMotionStyle, useMotionScheme, type M3Spring } from "../motion.ts";
 import { POPOVER_BLEED_STYLE, POPOVER_SHADOW_INSETS, resolvePopoverGeometry } from "../panels/ShellPanels.tsx";
-import { useShellStore, type TrayOverflowTarget } from "../store.ts";
+import { useShellStore, type ImeMenuTarget, type TrayMenuTarget, type TrayOverflowTarget } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import { isImeTrayItem, partitionTrayItems, type BarPosition, type BarStyle, type TrayItem, type TrayMenuNode } from "../topics.ts";
 
@@ -200,14 +200,16 @@ function MenuButton(props: {
 function TrayOverflowTile(props: {
   readonly item: TrayItem;
   readonly overflowTarget: TrayOverflowTarget;
+  readonly onExternalContextMenu: (itemId: string) => void;
 }): NativeChild {
-  const { hostClient, invokePublic, openTrayMenu, closeTrayOverflow } = useShellStore();
+  const { hostClient, invokePublic, openTrayMenu } = useShellStore();
   const { src } = useDaemonMedia(hostClient, () => props.item.icon, { fetchCommand: "tray.fetch-blob" });
   const label = () => props.item.title?.trim() || props.item.app_id?.trim() || props.item.icon_name?.trim() || props.item.id;
   const fallbackLetter = () => {
     const first = Array.from(label())[0];
     return first && /^[\p{L}\p{N}]$/u.test(first) ? first.toUpperCase() : null;
   };
+  let lastSecondaryMs = -1;
   const openMenuOnBar = () => {
     const { item } = props;
     const target = props.overflowTarget;
@@ -220,9 +222,24 @@ function TrayOverflowTile(props: {
         anchorRect: target.anchorRect,
       });
     } else {
-      closeTrayOverflow();
-      void invokePublic("tray.context-menu", { id: item.id });
+      props.onExternalContextMenu(item.id);
     }
+  };
+  const handleSecondary = (
+    event: { preventDefault(): void; stopPropagation(): void },
+    source: "pointer" | "context",
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const now = Date.now();
+    if (source === "context" && lastSecondaryMs >= 0 && now - lastSecondaryMs < 150) {
+      lastSecondaryMs = -1;
+      return;
+    }
+    if (source === "pointer") {
+      lastSecondaryMs = now;
+    }
+    openMenuOnBar();
   };
   return (
     <Button
@@ -237,12 +254,10 @@ function TrayOverflowTile(props: {
       }}
       onPointerDown={event => {
         if (event.button !== "secondary") return;
-        event.preventDefault();
-        openMenuOnBar();
+        handleSecondary(event, "pointer");
       }}
       onContextMenu={event => {
-        event.preventDefault();
-        openMenuOnBar();
+        handleSecondary(event, "context");
       }}
       style={{
         display: "flex",
@@ -301,6 +316,7 @@ function TrayOverflowCard(props: {
   readonly opacity: M3Spring;
   readonly cardRef: (node: NativeNode) => void;
   readonly onConfigure: () => void;
+  readonly onExternalContextMenu: (itemId: string) => void;
 }): NativeChild {
   const { theme } = useShellStore();
   useShellTheme(theme.data);
@@ -382,7 +398,13 @@ function TrayOverflowCard(props: {
                 {row => (
                   <row style={{ gap: "12px", alignItems: "center" }}>
                     <For each={row()} keyed={item => item.id}>
-                      {item => <TrayOverflowTile item={item()} overflowTarget={props.overflowTarget} />}
+                      {item => (
+                        <TrayOverflowTile
+                          item={item()}
+                          overflowTarget={props.overflowTarget}
+                          onExternalContextMenu={props.onExternalContextMenu}
+                        />
+                      )}
                     </For>
                   </row>
                 )}
@@ -394,6 +416,25 @@ function TrayOverflowCard(props: {
     </box>
   );
 }
+
+type ActiveBarPopup =
+  | {
+      readonly kind: "tray-menu";
+      readonly key: string;
+      readonly target: TrayMenuTarget;
+      readonly label: string;
+      readonly menu: NonNullable<TrayItem["menu"]>;
+    }
+  | {
+      readonly kind: "ime-menu";
+      readonly key: string;
+      readonly target: ImeMenuTarget;
+    }
+  | {
+      readonly kind: "tray-overflow";
+      readonly key: string;
+      readonly target: TrayOverflowTarget;
+    };
 
 export function BarPopups(): NativeChild {
   const {
@@ -410,6 +451,7 @@ export function BarPopups(): NativeChild {
     invokePublic,
   } = useShellStore();
   const scheme = useMotionScheme();
+  const [instantExitNext, setInstantExitNext] = createSignal(false);
   const position = (): BarPosition => settings.data()?.bar.position ?? "top";
   const barStyle = (): BarStyle => settings.data()?.bar.style ?? "floating";
   const geometry = createMemo(() => resolvePopoverGeometry(position(), barStyle(), false));
@@ -424,16 +466,6 @@ export function BarPopups(): NativeChild {
       if (shouldClose) closeTrayOverflow();
     },
   );
-  const overflowTarget = createMemo(() => {
-    const target = activeTrayOverflow();
-    return target && collapsedTrayItems().length > 0 ? target : null;
-  });
-  const overflowPresence = createRetainedPresence(overflowTarget, {
-    scheme,
-    enterRole: "defaultSpatial",
-    enterOpacityRole: "fastEffects",
-    exitRole: "fastEffects",
-  });
   const overflowRows = createMemo(() => {
     const items = collapsedTrayItems();
     const rows: (readonly TrayItem[])[] = [];
@@ -442,31 +474,60 @@ export function BarPopups(): NativeChild {
     }
     return rows;
   });
-  const trayTarget = createMemo(() => {
-    const target = activeTrayMenu();
-    if (!target) return null;
-    const item = tray.data()?.items.find(candidate => candidate.id === target.itemId);
-    return item?.menu ? { target, label: item.title || item.id, menu: item.menu } : null;
+  const activePopup = createMemo((): ActiveBarPopup | null => {
+    const trayMenuTarget = activeTrayMenu();
+    if (trayMenuTarget) {
+      const item = tray.data()?.items.find(candidate => candidate.id === trayMenuTarget.itemId);
+      if (item?.menu) {
+        return {
+          kind: "tray-menu",
+          key: `tray-menu:${trayMenuTarget.itemId}:${trayMenuTarget.parentSurface}`,
+          target: trayMenuTarget,
+          label: item.title || item.id,
+          menu: item.menu,
+        };
+      }
+      return null;
+    }
+    const imeTarget = activeImeMenu();
+    if (imeTarget) {
+      return {
+        kind: "ime-menu",
+        key: `ime-menu:${imeTarget.parentSurface}`,
+        target: imeTarget,
+      };
+    }
+    const overflowTarget = activeTrayOverflow();
+    if (overflowTarget && collapsedTrayItems().length > 0) {
+      return {
+        kind: "tray-overflow",
+        key: `tray-overflow:${overflowTarget.parentSurface}`,
+        target: overflowTarget,
+      };
+    }
+    return null;
   });
-  const trayPresence = createRetainedPresence(trayTarget, {
+  createEffect(
+    () => activePopup() !== null,
+    isOpen => {
+      if (isOpen && instantExitNext()) setInstantExitNext(false);
+    },
+  );
+  const presence = createRetainedPresence(activePopup, {
     scheme,
     enterRole: "defaultSpatial",
     enterOpacityRole: "fastEffects",
     exitRole: "fastEffects",
+    instantExit: instantExitNext,
   });
+  const mountedKey = createMemo(() => presence.value()?.key ?? null);
   const trayRows = createMemo(() => {
-    const target = trayPresence.value();
-    return target ? visibleTrayRows(target.menu.root.children) : [];
+    const current = presence.value();
+    return current?.kind === "tray-menu" ? visibleTrayRows(current.menu.root.children) : [];
   });
   const trayWidth = createMemo(() =>
     resolveMenuWidth(trayRows().map(row => ({ label: row.node.label ?? "", depth: row.depth, submenu: row.submenu }))),
   );
-  const imePresence = createRetainedPresence(activeImeMenu, {
-    scheme,
-    enterRole: "defaultSpatial",
-    enterOpacityRole: "fastEffects",
-    exitRole: "fastEffects",
-  });
   const imeWidth = createMemo(() => {
     const snapshot = ime.data();
     const labels = [
@@ -475,20 +536,31 @@ export function BarPopups(): NativeChild {
     ];
     return resolveMenuWidth(labels);
   });
+  const handleExternalContextMenu = (itemId: string) => {
+    setInstantExitNext(true);
+    closeTrayOverflow();
+    void invokePublic("tray.context-menu", { id: itemId });
+  };
 
   return (
-    <>
-      <Show when={trayPresence.value()}>
-        {item => {
-          const [cardNode, setCardNode] = createSignal<NativeNode | null>(null);
+    <Show when={mountedKey()} keyed>
+      {_key => {
+        const entry = untrack(() => presence.value()!);
+        const [cardNode, setCardNode] = createSignal<NativeNode | null>(null);
+
+        if (entry.kind === "tray-menu") {
+          const currentLabel = () => {
+            const current = presence.value();
+            return current?.kind === "tray-menu" ? current.label : entry.label;
+          };
           return (
-            <PopupSurface name="tray-menu" parent={item().target.parentSurface} anchorRect={item().target.anchorRect}
+            <PopupSurface name="tray-menu" parent={entry.target.parentSurface} anchorRect={entry.target.anchorRect}
               width={trayWidth()} height="auto" minHeight={48} maxHeight={MENU_MAX_HEIGHT}
               geometryInsets={POPOVER_SHADOW_INSETS}
               inputRegion={cardNode() ? [cardNode()!] : []}
               placement={geometry().placement} offset={geometry().offset} grab blurRegion={cardNode() ? [cardNode()!] : "none"}
-              onDismiss={() => { trayPresence.dismissInstant(); closeTrayMenu(); }}>
-              <PopupContent padding="8px" label={item().label} header={item().label} cardTestId="tray-menu-card" position={position()} inert={!trayPresence.present()} spatial={trayPresence.progress} opacity={trayPresence.opacity}
+              onDismiss={() => { presence.dismissInstant(); closeTrayMenu(); }}>
+              <PopupContent padding="8px" label={currentLabel()} header={currentLabel()} cardTestId="tray-menu-card" position={position()} inert={!presence.present()} spatial={presence.progress} opacity={presence.opacity}
                 cardRef={setCardNode} onDismiss={closeTrayMenu}>
                 <For each={trayRows()} keyed={row => row.node.id}>
                   {row => (
@@ -496,7 +568,7 @@ export function BarPopups(): NativeChild {
                       <MenuButton testId={`tray-menu-item-${row().node.id}`} label={row().node.label ?? ""} depth={row().depth}
                         disabled={!row().enabled} toggle={row().node.toggle_type} checked={row().node.toggle_state === 1} submenu={row().submenu}
                         activate={() => {
-                          void invokePublic("tray.menu-item", { id: item().target.itemId, menu_id: row().node.id });
+                          void invokePublic("tray.menu-item", { id: entry.target.itemId, menu_id: row().node.id });
                           closeTrayMenu();
                         }} />
                     </Show>
@@ -505,19 +577,17 @@ export function BarPopups(): NativeChild {
               </PopupContent>
             </PopupSurface>
           );
-        }}
-      </Show>
-      <Show when={imePresence.value()}>
-        {target => {
-          const [cardNode, setCardNode] = createSignal<NativeNode | null>(null);
+        }
+
+        if (entry.kind === "ime-menu") {
           return (
-            <PopupSurface name="ime-menu" parent={target().parentSurface} anchorRect={target().anchorRect}
+            <PopupSurface name="ime-menu" parent={entry.target.parentSurface} anchorRect={entry.target.anchorRect}
               width={imeWidth()} height="auto" minHeight={48} maxHeight={MENU_MAX_HEIGHT}
               geometryInsets={POPOVER_SHADOW_INSETS}
               inputRegion={cardNode() ? [cardNode()!] : []}
               placement={geometry().placement} offset={geometry().offset} grab blurRegion={cardNode() ? [cardNode()!] : "none"}
-              onDismiss={() => { imePresence.dismissInstant(); closeImeMenu(); }}>
-              <PopupContent padding="8px" label="Input method" header="Input method" cardTestId="ime-menu-card" position={position()} inert={!imePresence.present()} spatial={imePresence.progress} opacity={imePresence.opacity}
+              onDismiss={() => { presence.dismissInstant(); closeImeMenu(); }}>
+              <PopupContent padding="8px" label="Input method" header="Input method" cardTestId="ime-menu-card" position={position()} inert={!presence.present()} spatial={presence.progress} opacity={presence.opacity}
                 cardRef={setCardNode} onDismiss={closeImeMenu}>
                 <For each={ime.data()?.group_ims} keyed={im => im.unique_name}>
                   {im => {
@@ -547,36 +617,33 @@ export function BarPopups(): NativeChild {
               </PopupContent>
             </PopupSurface>
           );
-        }}
-      </Show>
-      <Show when={overflowPresence.value()}>
-        {target => {
-          const [cardNode, setCardNode] = createSignal<NativeNode | null>(null);
-          return (
-            <PopupSurface name="tray-overflow" parent={target().parentSurface} anchorRect={target().anchorRect}
-              width={TRAY_OVERFLOW_WIDTH} height="auto" minHeight={88} maxHeight={TRAY_OVERFLOW_MAX_HEIGHT}
-              geometryInsets={POPOVER_SHADOW_INSETS}
-              inputRegion={cardNode() ? [cardNode()!] : []}
-              placement={geometry().placement} offset={geometry().offset} grab blurRegion={cardNode() ? [cardNode()!] : "none"}
-              onDismiss={() => { overflowPresence.dismissInstant(); closeTrayOverflow(); }}>
-              <TrayOverflowCard
-                overflowTarget={target()}
-                rows={overflowRows()}
-                count={collapsedTrayItems().length}
-                position={position()}
-                inert={!overflowPresence.present()}
-                spatial={overflowPresence.progress}
-                opacity={overflowPresence.opacity}
-                cardRef={setCardNode}
-                onConfigure={() => {
-                  closeTrayOverflow();
-                  openSettingsWindow("bar", "tray-rules");
-                }}
-              />
-            </PopupSurface>
-          );
-        }}
-      </Show>
-    </>
+        }
+
+        return (
+          <PopupSurface name="tray-overflow" parent={entry.target.parentSurface} anchorRect={entry.target.anchorRect}
+            width={TRAY_OVERFLOW_WIDTH} height="auto" minHeight={88} maxHeight={TRAY_OVERFLOW_MAX_HEIGHT}
+            geometryInsets={POPOVER_SHADOW_INSETS}
+            inputRegion={cardNode() ? [cardNode()!] : []}
+            placement={geometry().placement} offset={geometry().offset} grab blurRegion={cardNode() ? [cardNode()!] : "none"}
+            onDismiss={() => { presence.dismissInstant(); closeTrayOverflow(); }}>
+            <TrayOverflowCard
+              overflowTarget={entry.target}
+              rows={overflowRows()}
+              count={collapsedTrayItems().length}
+              position={position()}
+              inert={!presence.present()}
+              spatial={presence.progress}
+              opacity={presence.opacity}
+              cardRef={setCardNode}
+              onExternalContextMenu={handleExternalContextMenu}
+              onConfigure={() => {
+                closeTrayOverflow();
+                openSettingsWindow("bar", "tray-rules");
+              }}
+            />
+          </PopupSurface>
+        );
+      }}
+    </Show>
   );
 }

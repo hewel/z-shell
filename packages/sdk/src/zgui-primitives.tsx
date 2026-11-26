@@ -215,6 +215,7 @@ export interface M3SliderProps {
 export function M3Slider(props: M3SliderProps): NativeChild {
   const scheme = useGlobalMotionScheme();
   const [dragging, setDragging] = createSignal(false);
+  const [focused, setFocused] = createSignal(false);
   const value = () => clampPercent(props.value);
   const animatedValue = createM3Spring(value, "fastSpatial", { scheme, epsilon: SPRING_EPSILON.px });
   const step = () => props.step ?? 5;
@@ -247,6 +248,10 @@ export function M3Slider(props: M3SliderProps): NativeChild {
   const showStopDot = () => displayValue() < 95;
   const interactive = () => !props.readOnly && !props.disabled;
 
+  createEffect(interactive, canInteract => {
+    if (!canInteract) setFocused(false);
+  });
+
   return (
     <box
       testId={props.testId ?? null}
@@ -261,6 +266,10 @@ export function M3Slider(props: M3SliderProps): NativeChild {
       ariaValueNow={Math.round(value())}
       ariaValueStep={props.readOnly ? null : step()}
       class={styles.sliderLane}
+      onFocus={() => {
+        if (interactive()) setFocused(true);
+      }}
+      onBlur={() => setFocused(false)}
       onPointerDown={event => {
         if (!interactive() || !event.primary || !(event.button === "primary" || (event.button === null && event.pointerKind !== "mouse"))) return;
         const rect = getWindowRect(event.currentTarget);
@@ -278,7 +287,7 @@ export function M3Slider(props: M3SliderProps): NativeChild {
       onPointerUp={() => setDrag(false)}
       onPointerCancel={() => setDrag(false)}
       onWheel={event => {
-        if (!interactive()) return;
+        if (!interactive() || !focused()) return;
         const delta = event.delta.y || event.delta.x;
         if (!delta) return;
         event.preventDefault();
@@ -337,6 +346,7 @@ export interface M3SliderRowProps {
   readonly disabled?: boolean;
   readonly compact?: boolean;
   readonly step?: number;
+  readonly sliderTestId?: string;
   readonly iconLabel?: string;
   readonly onIconClick?: () => void;
   readonly leadingIcon: (state: { readonly dragging: boolean; readonly disabled: boolean }) => NativeChild;
@@ -381,6 +391,7 @@ export function M3SliderRow(props: M3SliderRowProps): NativeChild {
         disabled={disabled()}
         compact={props.compact ?? false}
         {...(props.step !== undefined ? { step: props.step } : {})}
+        {...(props.sliderTestId !== undefined ? { testId: props.sliderTestId } : {})}
         onDraggingChange={setDragging}
         onChange={props.onChange}
       />

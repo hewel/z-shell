@@ -4,6 +4,7 @@ import { createOpacityEnter, useMotionScheme } from "../../motion.ts";
 import { useShellStore } from "../../store.ts";
 import {
   formatKeepAwakeRemaining,
+  supportsOsSleepBlock,
   supportsTimedKeepAwake,
   type IdleAction,
 } from "../../topics.ts";
@@ -263,6 +264,20 @@ export function IdlePane(): NativeChild {
     return formatKeepAwakeRemaining(snap?.caffeine_expires_at_ms, nowMs());
   };
   const selectedPreset = () => presetIdForDuration(idle.data()?.caffeine_duration_seconds);
+  const sleepBlockStatus = () => idle.data()?.sleep_block_status;
+  const osSleepBlockSupported = () => supportsOsSleepBlock(idle.data());
+  const unavailableSleepBlockReason = () => {
+    const status = sleepBlockStatus();
+    return status?.status === "unavailable" ? status.reason : null;
+  };
+  const keepAwakeSubtitle = () => {
+    if (!caffeine()) return "Manual sleep inhibit · Allow screen-off";
+    const status = sleepBlockStatus();
+    if (status?.status === "held") return "OS sleep block active · Screen-off & lock allowed";
+    if (status?.status === "unavailable") return "Local idle sleep only · OS sleep block unavailable";
+    if (!osSleepBlockSupported()) return "Local idle sleep inhibit · Update z-shelld for OS sleep block";
+    return "Manual sleep inhibit · Allow screen-off";
+  };
   const serviceStatus = () => idle.data()?.service_status?.status ?? "stopped";
   const [draftRules, setDraftRules] = createSignal<EditableIdleRule[]>([]);
   const [selectedName, setSelectedName] = createSignal<string | null>(null);
@@ -349,7 +364,7 @@ export function IdlePane(): NativeChild {
                 <text>{serviceStatus() === "running" ? "Watching" : serviceStatus()}</text>
               </row>
             </row>
-            <text style={{ fontSize: "11px", color: muted }}>Manual sleep inhibit · Allow screen-off</text>
+            <text testId="settings-keep-awake-subtitle" style={{ fontSize: "11px", color: muted }}>{keepAwakeSubtitle()}</text>
           </column>
           <row style={{ alignItems: "center", gap: "8px", flexShrink: 0 }}>
             <text testId="settings-keep-awake-status" data-tabular="true" style={{
@@ -366,6 +381,18 @@ export function IdlePane(): NativeChild {
             />
           </row>
         </row>
+        <Show when={unavailableSleepBlockReason()}>
+          {reason => (
+            <row testId="settings-keep-awake-os-block-warning" style={{
+              alignItems: "center", gap: "8px", padding: "6px 10px", borderRadius: "10px",
+              backgroundColor: "var(--color-error-container)", color: "var(--color-on-error-container)",
+            }}>
+              <text style={{ ...clipped, fontSize: "11px", lineHeight: "15px", fontWeight: 500 }}>
+                {`OS sleep block unavailable: ${reason()}`}
+              </text>
+            </row>
+          )}
+        </Show>
         <row style={{ alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
           <text style={{ fontSize: "11px", color: muted, whiteSpace: "nowrap", flexShrink: 0 }}>
             {timedSupported() ? "Auto-expire timer" : "Timed presets require updated z-shelld"}

@@ -46,7 +46,7 @@ impl SleepInhibitorError {
 pub type InhibitorFuture<'a> =
     Pin<Box<dyn Future<Output = Result<(), SleepInhibitorError>> + Send + 'a>>;
 
-/// Mockable logind sleep-delay and suspend boundary.
+/// Mockable logind sleep-delay, sleep-block, and suspend boundary.
 pub trait SleepInhibitor: fmt::Debug + Send + Sync {
     /// Acquires or retains the delay inhibitor before sleep can be announced.
     fn acquire(&self) -> InhibitorFuture<'_>;
@@ -56,6 +56,23 @@ pub trait SleepInhibitor: fmt::Debug + Send + Sync {
 
     /// Reports whether a delay inhibitor is currently held.
     fn is_held(&self) -> bool;
+
+    /// Acquires or retains an independent `sleep:block` inhibitor FD separate from the delay FD.
+    fn acquire_sleep_block(&self, _reason: &str) -> InhibitorFuture<'_> {
+        Box::pin(async {
+            Err(SleepInhibitorError::new(
+                "sleep block inhibitor is unavailable through this inhibitor",
+            ))
+        })
+    }
+
+    /// Releases the independent `sleep:block` inhibitor, closing its underlying file descriptor.
+    fn release_sleep_block(&self) {}
+
+    /// Reports whether an independent `sleep:block` inhibitor FD is currently held.
+    fn is_sleep_block_held(&self) -> bool {
+        false
+    }
 
     /// Requests system suspend after a verified lock acknowledgement.
     fn suspend(&self) -> InhibitorFuture<'_> {
@@ -67,11 +84,13 @@ pub trait SleepInhibitor: fmt::Debug + Send + Sync {
     }
 }
 
-/// Real logind delay-inhibitor owner backed by one system-bus connection.
+/// Real logind delay- and block-inhibitor owner backed by one system-bus connection.
 pub struct LogindSleepInhibitor {
     connection: zbus::Connection,
     held: Mutex<Option<OwnedFd>>,
     acquisition: tokio::sync::Mutex<()>,
+    held_block: Mutex<Option<OwnedFd>>,
+    block_acquisition: tokio::sync::Mutex<()>,
 }
 
 impl fmt::Debug for LogindSleepInhibitor {
@@ -79,6 +98,7 @@ impl fmt::Debug for LogindSleepInhibitor {
         formatter
             .debug_struct("LogindSleepInhibitor")
             .field("held", &self.is_held())
+            .field("held_block", &self.is_sleep_block_held())
             .finish_non_exhaustive()
     }
 }
@@ -105,6 +125,8 @@ impl LogindSleepInhibitor {
             connection,
             held: Mutex::new(None),
             acquisition: tokio::sync::Mutex::new(()),
+            held_block: Mutex::new(None),
+            block_acquisition: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -293,6 +315,41 @@ impl SleepInhibitor for LogindSleepInhibitor {
             .is_some()
     }
 
+    fn acquire_sleep_block(&self, reason: &str) -> InhibitorFuture<'_> {
+        let reason = reason.to_owned();
+        Box::pin(async move {
+            let _acquisition = self.block_acquisition.lock().await;
+            if self.is_sleep_block_held() {
+                return Ok(());
+            }
+            let fd = self
+                .proxy()
+                .await?
+                .call("Inhibit", &("sleep", "z-shell", reason.as_str(), "block"))
+                .await
+                .map_err(|error| SleepInhibitorError::new(error.to_string()))?;
+            *self
+                .held_block
+                .lock()
+                .expect("logind block inhibitor lock poisoned") = Some(fd);
+            Ok(())
+        })
+    }
+
+    fn release_sleep_block(&self) {
+        self.held_block
+            .lock()
+            .expect("logind block inhibitor lock poisoned")
+            .take();
+    }
+
+    fn is_sleep_block_held(&self) -> bool {
+        self.held_block
+            .lock()
+            .expect("logind block inhibitor lock poisoned")
+            .is_some()
+    }
+
     fn suspend(&self) -> InhibitorFuture<'_> {
         Box::pin(async move {
             self.proxy()
@@ -426,8 +483,10 @@ pub enum CoordinatorAction {
     AcquireSleepDelayInhibitor,
     /// Spawn the explicitly configured fallback argv without claiming ACK.
     SpawnFallback(Vec<String>),
-    /// Execute logind suspend after a verified lock.
+    /// Execute logind suspend after a verified lock for an explicit `host.suspend` request.
     Suspend,
+    /// Execute logind suspend after a verified lock for an idle `LockAndSuspend` rule.
+    IdleSuspend,
     /// Cancel a shell-initiated suspend because lock verification failed.
     AbortSuspend {
         /// Failure explaining why suspend was not attempted.
@@ -490,6 +549,7 @@ pub enum SleepSignal {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SuspendOrigin {
     Shell,
+    Idle,
     External,
 }
 
@@ -508,6 +568,7 @@ pub struct Coordinator {
     host_connected: bool,
     active_ui_session_generation: Option<u64>,
     sleep_hold: bool,
+    sleep_hold_generation: u64,
     pending_suspend: Option<SuspendOrigin>,
     active_authentication: Option<AuthenticationAttempt>,
     next_lock_id: u64,
@@ -531,6 +592,7 @@ impl Coordinator {
             host_connected: false,
             active_ui_session_generation: None,
             sleep_hold: false,
+            sleep_hold_generation: 0,
             pending_suspend: None,
             active_authentication: None,
             next_lock_id: 1,
@@ -539,6 +601,12 @@ impl Coordinator {
             sleep_inhibitor,
             last_error: None,
         }
+    }
+
+    /// Returns the monotonic generation of the latest engaged sleep hold.
+    #[must_use]
+    pub fn sleep_hold_generation(&self) -> u64 {
+        self.sleep_hold_generation
     }
 
     /// Updates the optional fallback locker argv used only when no privileged host is connected.
@@ -635,31 +703,52 @@ impl Coordinator {
         self.begin_lock(None)
     }
 
-    /// Requests lock-then-suspend; only a verified ACK can produce [`CoordinatorAction::Suspend`].
+    /// Requests explicit lock-then-suspend (`host.suspend`); only a verified ACK can produce
+    /// [`CoordinatorAction::Suspend`].
     pub fn request_suspend(&mut self) -> Vec<CoordinatorAction> {
+        self.request_suspend_with_origin(SuspendOrigin::Shell)
+    }
+
+    /// Requests idle-triggered lock-then-suspend (`IdleAction::LockAndSuspend`); only a verified
+    /// ACK can produce [`CoordinatorAction::IdleSuspend`].
+    pub fn request_idle_suspend(&mut self) -> Vec<CoordinatorAction> {
+        self.request_suspend_with_origin(SuspendOrigin::Idle)
+    }
+
+    fn request_suspend_with_origin(&mut self, origin: SuspendOrigin) -> Vec<CoordinatorAction> {
         self.invalidate_authentication();
-        self.sleep_hold = true;
-        self.set_phase_sleep_hold();
+        self.engage_sleep_hold();
         match self.phase {
             LockPhase::Locked { .. } => {
                 self.pending_suspend = None;
                 self.sleep_inhibitor.release();
                 vec![
                     CoordinatorAction::ReleaseSleepDelayInhibitor,
-                    CoordinatorAction::Suspend,
+                    match origin {
+                        SuspendOrigin::Shell => CoordinatorAction::Suspend,
+                        SuspendOrigin::Idle => CoordinatorAction::IdleSuspend,
+                        SuspendOrigin::External => CoordinatorAction::Suspend,
+                    },
                 ]
             }
             LockPhase::Engaging { .. } => {
-                self.pending_suspend = Some(SuspendOrigin::Shell);
+                match (self.pending_suspend, origin) {
+                    (Some(SuspendOrigin::Shell | SuspendOrigin::External), SuspendOrigin::Idle) => {
+                    }
+                    _ => {
+                        self.pending_suspend = Some(origin);
+                    }
+                }
                 Vec::new()
             }
             LockPhase::FallbackSpawned { .. } => {
                 self.pending_suspend = None;
+                self.sleep_hold = false;
                 vec![CoordinatorAction::AbortSuspend {
                     reason: "fallback locker is not a verified compositor lock".into(),
                 }]
             }
-            LockPhase::Unlocked => self.begin_lock(Some(SuspendOrigin::Shell)),
+            LockPhase::Unlocked => self.begin_lock(Some(origin)),
         }
     }
 
@@ -677,7 +766,10 @@ impl Coordinator {
                 let reason = "fallback locker cannot acknowledge compositor lock".to_owned();
                 self.last_error = Some(reason.clone());
                 actions.push(match origin {
-                    SuspendOrigin::Shell => CoordinatorAction::AbortSuspend { reason },
+                    SuspendOrigin::Shell | SuspendOrigin::Idle => {
+                        self.sleep_hold = false;
+                        CoordinatorAction::AbortSuspend { reason }
+                    }
                     SuspendOrigin::External => CoordinatorAction::UnacknowledgedSuspend { reason },
                 });
             }
@@ -701,7 +793,11 @@ impl Coordinator {
             if let Some(origin) = suspend {
                 self.pending_suspend = None;
                 vec![match origin {
-                    SuspendOrigin::Shell => CoordinatorAction::AbortSuspend { reason },
+                    SuspendOrigin::Shell | SuspendOrigin::Idle => {
+                        self.sleep_hold = false;
+                        self.set_phase_sleep_hold();
+                        CoordinatorAction::AbortSuspend { reason }
+                    }
                     SuspendOrigin::External => CoordinatorAction::UnacknowledgedSuspend { reason },
                 }]
             } else {
@@ -749,8 +845,10 @@ impl Coordinator {
             self.sleep_inhibitor.release();
             actions.push(CoordinatorAction::ReleaseSleepDelayInhibitor);
         }
-        if origin == Some(SuspendOrigin::Shell) {
-            actions.push(CoordinatorAction::Suspend);
+        match origin {
+            Some(SuspendOrigin::Shell) => actions.push(CoordinatorAction::Suspend),
+            Some(SuspendOrigin::Idle) => actions.push(CoordinatorAction::IdleSuspend),
+            Some(SuspendOrigin::External) | None => {}
         }
         Ok(actions)
     }
@@ -782,7 +880,9 @@ impl Coordinator {
 
     fn failed_suspend_actions(&mut self, reason: String) -> Vec<CoordinatorAction> {
         match self.pending_suspend.take() {
-            Some(SuspendOrigin::Shell) => vec![CoordinatorAction::AbortSuspend { reason }],
+            Some(SuspendOrigin::Shell | SuspendOrigin::Idle) => {
+                vec![CoordinatorAction::AbortSuspend { reason }]
+            }
             Some(SuspendOrigin::External) => {
                 vec![CoordinatorAction::UnacknowledgedSuspend { reason }]
             }
@@ -790,13 +890,34 @@ impl Coordinator {
         }
     }
 
+    /// Clears `sleep_hold` and re-arms the logind `delay` inhibitor after a failed or cancelled
+    /// suspend, strictly guarded by `hold_generation` so stale errors never clear a newer external
+    /// `PrepareForSleep` hold.
+    pub async fn on_suspend_failed(
+        &mut self,
+        hold_generation: u64,
+        reason: impl Into<String>,
+    ) -> Vec<CoordinatorAction> {
+        if !self.sleep_hold || self.sleep_hold_generation != hold_generation {
+            return Vec::new();
+        }
+        self.sleep_hold = false;
+        self.set_phase_sleep_hold();
+        self.pending_suspend = None;
+        self.last_error = Some(reason.into());
+        let actions = vec![CoordinatorAction::AcquireSleepDelayInhibitor];
+        if let Err(error) = self.sleep_inhibitor.acquire().await {
+            self.last_error = Some(error.to_string());
+        }
+        actions
+    }
+
     /// Handles logind sleep transitions and invalidates all pre-transition authentication.
     pub async fn on_sleep_signal(&mut self, signal: SleepSignal) -> Vec<CoordinatorAction> {
         self.invalidate_authentication();
         match signal {
             SleepSignal::PrepareForSleep => {
-                self.sleep_hold = true;
-                self.set_phase_sleep_hold();
+                self.engage_sleep_hold();
                 match self.phase {
                     LockPhase::Locked { .. } => {
                         self.pending_suspend = None;
@@ -973,6 +1094,16 @@ impl Coordinator {
         if let LockPhase::Locked { pending_unlock, .. } = &mut self.phase {
             *pending_unlock = None;
         }
+    }
+
+    fn engage_sleep_hold(&mut self) -> u64 {
+        self.sleep_hold = true;
+        self.sleep_hold_generation = self
+            .sleep_hold_generation
+            .checked_add(1)
+            .expect("sleep hold generation space exhausted");
+        self.set_phase_sleep_hold();
+        self.sleep_hold_generation
     }
 
     fn set_phase_sleep_hold(&mut self) {

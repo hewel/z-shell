@@ -325,6 +325,22 @@ pub enum IdleServiceStatus {
     Stopped,
 }
 
+/// Status of the OS-level `systemd-logind` `sleep:block` inhibitor.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum SleepBlockStatus {
+    /// No OS-level sleep block inhibitor is requested or held.
+    #[default]
+    Inactive,
+    /// A `systemd-logind` `sleep` `block` inhibitor FD is currently held.
+    Held,
+    /// OS-level sleep block was requested but could not be acquired.
+    Unavailable {
+        /// Non-secret diagnostic.
+        reason: String,
+    },
+}
+
 /// Non-secret idle topic snapshot.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct IdleSnapshot {
@@ -336,6 +352,8 @@ pub struct IdleSnapshot {
     pub caffeine_duration_seconds: Option<u32>,
     /// Unix epoch timestamp in milliseconds when timed Keep awake expires (`None` if disabled/indefinite).
     pub caffeine_expires_at_ms: Option<u64>,
+    /// Status of the OS-level `systemd-logind` `sleep:block` inhibitor.
+    pub sleep_block_status: SleepBlockStatus,
     /// Whether MPRIS currently inhibits idle.
     pub media_playing: bool,
     /// All active Caffeine, media, ScreenSaver, and plugin inhibitors.
@@ -455,6 +473,7 @@ pub struct IdlePolicy {
     screensaver_inhibitors: Vec<IdleInhibitor>,
     plugin_inhibitors: Vec<IdleInhibitor>,
     service_status: IdleServiceStatus,
+    sleep_block_status: SleepBlockStatus,
 }
 
 impl Default for IdlePolicy {
@@ -484,6 +503,7 @@ impl Default for IdlePolicy {
             screensaver_inhibitors: Vec::new(),
             plugin_inhibitors: Vec::new(),
             service_status: IdleServiceStatus::Running,
+            sleep_block_status: SleepBlockStatus::Inactive,
         }
     }
 }
@@ -677,6 +697,66 @@ impl IdlePolicy {
         self.service_status = status;
     }
 
+    /// Returns whether OS-level `systemd-logind` `sleep:block` inhibition should be held.
+    ///
+    /// Restricted strictly to active Keep awake (`Caffeine::Enabled`) and explicit
+    /// `InhibitorScope::Sleep` bus plugin leases so `InhibitorScope::Idle` retains its
+    /// local idle-only contract.
+    #[must_use]
+    pub fn is_sleep_blocked(&self) -> bool {
+        self.caffeine == Caffeine::Enabled
+            || self
+                .plugin_inhibitors
+                .iter()
+                .any(|inhibitor| inhibitor.scope == InhibitorScope::Sleep)
+    }
+
+    /// Returns the human-readable reason for holding the OS-level `sleep:block` inhibitor,
+    /// or `None` when no sleep-blocking source is active.
+    #[must_use]
+    pub fn sleep_block_reason(&self) -> Option<String> {
+        if self.caffeine == Caffeine::Enabled {
+            return Some("Keep awake is active".into());
+        }
+        self.plugin_inhibitors
+            .iter()
+            .find(|inhibitor| inhibitor.scope == InhibitorScope::Sleep)
+            .map(|inhibitor| {
+                let trimmed = inhibitor.reason.trim();
+                if trimmed.is_empty() {
+                    "Sleep inhibition is active".into()
+                } else {
+                    trimmed.to_owned()
+                }
+            })
+    }
+
+    /// Returns whether idle-triggered sleep actions are currently inhibited by any active source.
+    #[must_use]
+    pub fn is_idle_sleep_inhibited(&self) -> bool {
+        if self.is_sleep_blocked() || self.media == MediaPlayback::Playing {
+            return true;
+        }
+        self.screensaver_inhibitors
+            .iter()
+            .chain(&self.plugin_inhibitors)
+            .any(|inhibitor| {
+                matches!(
+                    inhibitor.scope,
+                    InhibitorScope::Idle | InhibitorScope::Sleep
+                )
+            })
+    }
+
+    /// Records the latest OS-level `sleep:block` inhibitor status, returning `true` if it changed.
+    pub fn set_sleep_block_status(&mut self, status: SleepBlockStatus) -> bool {
+        if self.sleep_block_status == status {
+            return false;
+        }
+        self.sleep_block_status = status;
+        true
+    }
+
     /// Handles an `idled` event only if its watch token is still current.
     pub fn idle(&mut self, rule_index: usize, token: u64) -> Vec<IdleEffect> {
         let Some(state) = self.states.get(rule_index) else {
@@ -797,6 +877,7 @@ impl IdlePolicy {
             caffeine_scope: InhibitorScope::Sleep,
             caffeine_duration_seconds: self.caffeine_duration_seconds,
             caffeine_expires_at_ms: self.caffeine_expires_at_ms,
+            sleep_block_status: self.sleep_block_status.clone(),
             media_playing: self.media == MediaPlayback::Playing,
             active_inhibitors,
             warning: self.fade.map(|token| WarningFade {

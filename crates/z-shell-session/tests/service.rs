@@ -14,16 +14,26 @@ use z_shell_protocol::{
 use z_shell_session::coordinator::{
     CoordinatorAction, LockPhaseName, SleepInhibitor, SleepInhibitorError, SleepSignal,
 };
-use z_shell_session::idle::{Caffeine, IdleSnapshot, MediaPlayback};
+use z_shell_session::idle::{
+    Caffeine, IdleAction, IdleConfig, IdleRule, IdleSnapshot, MediaPlayback, SleepBlockStatus,
+};
 use z_shell_session::pam::{
     AuthFuture, AuthOutcome, Authenticator, Credentials, MockAuthenticator,
 };
 use z_shell_session::service::{LOCK_TOPIC, SessionService};
+use z_shell_session::wayland_idle::WaylandIdleEvent;
 
 #[derive(Debug, Default)]
 struct MockSleep {
     held: Mutex<bool>,
+    block_held: Mutex<bool>,
+    block_acquisitions: Mutex<u32>,
+    block_releases: Mutex<u32>,
+    block_fail: Mutex<Option<String>>,
+    block_gate: Mutex<Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>,
     suspends: Mutex<u32>,
+    suspend_fail: Mutex<Option<String>>,
+    suspend_gate: Mutex<Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>,
 }
 
 impl SleepInhibitor for MockSleep {
@@ -44,10 +54,51 @@ impl SleepInhibitor for MockSleep {
         *self.held.lock().expect("held")
     }
 
+    fn acquire_sleep_block(
+        &self,
+        _reason: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), SleepInhibitorError>> + Send + '_>> {
+        let gate = self.block_gate.lock().expect("block gate").clone();
+        let fail = self.block_fail.lock().expect("block fail").clone();
+        Box::pin(async move {
+            if let Some((entered, release)) = gate {
+                entered.notify_waiters();
+                release.notified().await;
+            }
+            if let Some(reason) = fail {
+                return Err(SleepInhibitorError::new(reason));
+            }
+            *self.block_held.lock().expect("block held") = true;
+            *self.block_acquisitions.lock().expect("block acq") += 1;
+            Ok(())
+        })
+    }
+
+    fn release_sleep_block(&self) {
+        let mut held = self.block_held.lock().expect("block held");
+        if *held {
+            *held = false;
+            *self.block_releases.lock().expect("block rel") += 1;
+        }
+    }
+
+    fn is_sleep_block_held(&self) -> bool {
+        *self.block_held.lock().expect("block held")
+    }
+
     fn suspend(
         &self,
     ) -> Pin<Box<dyn Future<Output = Result<(), SleepInhibitorError>> + Send + '_>> {
+        let gate = self.suspend_gate.lock().expect("suspend gate").clone();
+        let fail = self.suspend_fail.lock().expect("suspend fail").clone();
         Box::pin(async move {
+            if let Some((entered, release)) = gate {
+                entered.notify_waiters();
+                release.notified().await;
+            }
+            if let Some(reason) = fail {
+                return Err(SleepInhibitorError::new(reason));
+            }
             *self.suspends.lock().expect("suspends") += 1;
             Ok(())
         })
@@ -529,4 +580,389 @@ async fn idle_caffeine_preset_validation_null_indefinite_and_timer_expiry() {
     .expect("timed Keep awake must auto-expire");
     assert_eq!(service.idle_snapshot().caffeine_expires_at_ms, None);
     assert_eq!(service.idle_snapshot().caffeine_duration_seconds, Some(1));
+}
+
+#[tokio::test]
+async fn sleep_block_inhibitor_tracks_caffeine_legacy_payload_and_timer_expiry() {
+    let (service, inhibitor, hub) = service(Arc::new(MockAuthenticator::new([])));
+    assert!(!inhibitor.is_sleep_block_held());
+    assert_eq!(
+        service.idle_snapshot().sleep_block_status,
+        SleepBlockStatus::Inactive
+    );
+
+    // Legacy `{enabled: true}` payload acquires block FD before returning.
+    let on = invoke(
+        &hub,
+        ClientRole::Public,
+        "idle.caffeine",
+        json!({ "enabled": true }),
+    )
+    .await
+    .unwrap();
+    assert!(inhibitor.is_sleep_block_held());
+    assert_eq!(on["sleep_block_status"]["status"], json!("held"));
+    assert_eq!(
+        service.idle_snapshot().sleep_block_status,
+        SleepBlockStatus::Held
+    );
+
+    // Turning off releases block FD.
+    let off = invoke(
+        &hub,
+        ClientRole::Public,
+        "idle.caffeine",
+        json!({ "enabled": false }),
+    )
+    .await
+    .unwrap();
+    assert!(!inhibitor.is_sleep_block_held());
+    assert_eq!(off["sleep_block_status"]["status"], json!("inactive"));
+
+    // Timed Keep awake acquires and releases on auto-expiry.
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "idle.caffeine",
+        json!({ "enabled": true, "duration_seconds": 1 }),
+    )
+    .await
+    .unwrap();
+    assert!(inhibitor.is_sleep_block_held());
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if !service.idle_snapshot().caffeine && !inhibitor.is_sleep_block_held() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(40)).await;
+        }
+    })
+    .await
+    .expect("timed Keep awake must release sleep:block FD on expiry");
+    assert_eq!(
+        service.idle_snapshot().sleep_block_status,
+        SleepBlockStatus::Inactive
+    );
+}
+
+#[tokio::test]
+async fn sleep_block_failure_is_observable_while_local_caffeine_remains_active() {
+    let (service, inhibitor, hub) = service(Arc::new(MockAuthenticator::new([])));
+    *inhibitor.block_fail.lock().expect("block fail") = Some("logind denied inhibit".into());
+
+    let reply = invoke(
+        &hub,
+        ClientRole::Public,
+        "idle.caffeine",
+        json!({ "enabled": true }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(reply["caffeine"], json!(true));
+    assert_eq!(reply["sleep_block_status"]["status"], json!("unavailable"));
+    assert_eq!(
+        reply["sleep_block_status"]["reason"],
+        json!("logind denied inhibit")
+    );
+    assert!(!inhibitor.is_sleep_block_held());
+    assert_eq!(
+        service.idle_snapshot().sleep_block_status,
+        SleepBlockStatus::Unavailable {
+            reason: "logind denied inhibit".into(),
+        }
+    );
+
+    // Turning off resets status to Inactive.
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "idle.caffeine",
+        json!({ "enabled": false }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        service.idle_snapshot().sleep_block_status,
+        SleepBlockStatus::Inactive
+    );
+}
+
+#[tokio::test]
+async fn pending_sleep_block_acquisition_completing_after_shutdown_does_not_reinstall_fd() {
+    let (service, inhibitor, hub) = service(Arc::new(MockAuthenticator::new([])));
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    *inhibitor.block_gate.lock().expect("block gate") = Some((entered.clone(), release.clone()));
+
+    let entered_wait = entered.notified();
+    let call_hub = hub.clone();
+    let task = tokio::spawn(async move {
+        invoke(
+            &call_hub,
+            ClientRole::Public,
+            "idle.caffeine",
+            json!({ "enabled": true }),
+        )
+        .await
+    });
+    entered_wait.await;
+
+    // Shut down while acquire_sleep_block() is still in flight.
+    service.shutdown();
+    release.notify_waiters();
+    task.await.expect("task join").expect("caffeine call");
+
+    assert!(
+        !inhibitor.is_sleep_block_held(),
+        "sleep:block FD must not remain installed after shutdown()"
+    );
+    assert_eq!(
+        service.idle_snapshot().sleep_block_status,
+        SleepBlockStatus::Inactive
+    );
+}
+
+#[tokio::test]
+async fn explicit_host_suspend_bypasses_block_fd_and_ignores_concurrent_caffeine_toggle() {
+    let (service, inhibitor, hub) = service(Arc::new(MockAuthenticator::new([])));
+    service.arm_sleep_delay().await.expect("arm delay");
+    invoke(
+        &hub,
+        ClientRole::PrivilegedHost,
+        "host.session-register",
+        json!({ "ui_session_generation": 1 }),
+    )
+    .await
+    .expect("register");
+    invoke(&hub, ClientRole::Public, "lock.request", json!({}))
+        .await
+        .expect("lock");
+    let lock_id = service.lock_snapshot().lock_id.expect("lock ID");
+    invoke(
+        &hub,
+        ClientRole::PrivilegedHost,
+        "host.lock-ack",
+        json!({ "lock_id": lock_id, "ui_session_generation": 1 }),
+    )
+    .await
+    .expect("ack");
+
+    // Enable Keep awake so our own sleep:block FD is held.
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "idle.caffeine",
+        json!({ "enabled": true }),
+    )
+    .await
+    .expect("caffeine on");
+    assert!(inhibitor.is_sleep_block_held());
+
+    // Gate suspend() so we can toggle Keep awake while explicit suspend is in flight.
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    *inhibitor.suspend_gate.lock().expect("suspend gate") =
+        Some((entered.clone(), release.clone()));
+
+    let entered_wait = entered.notified();
+    let suspend_hub = hub.clone();
+    let suspend_task = tokio::spawn(async move {
+        invoke(
+            &suspend_hub,
+            ClientRole::PrivilegedHost,
+            "host.suspend",
+            json!({}),
+        )
+        .await
+    });
+    entered_wait.await;
+
+    // Our own block FD must already be released before suspend() executes.
+    assert!(!inhibitor.is_sleep_block_held());
+
+    // Toggling Keep awake off and back on while explicit suspend is in flight must NOT reinstall FD.
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "idle.caffeine",
+        json!({ "enabled": false }),
+    )
+    .await
+    .expect("caffeine off mid-suspend");
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "idle.caffeine",
+        json!({ "enabled": true }),
+    )
+    .await
+    .expect("caffeine on mid-suspend");
+    assert!(
+        !inhibitor.is_sleep_block_held(),
+        "concurrent Keep awake toggle must not reinstall block FD during explicit suspend"
+    );
+
+    release.notify_waiters();
+    suspend_task
+        .await
+        .expect("suspend join")
+        .expect("suspend succeeded");
+    assert_eq!(*inhibitor.suspends.lock().expect("suspends"), 1);
+    assert!(!inhibitor.is_sleep_block_held());
+
+    // After Wake, Keep awake is still active so block FD is re-acquired.
+    service.handle_sleep_signal(SleepSignal::Wake).await;
+    assert!(inhibitor.is_sleep_block_held());
+    assert_eq!(
+        service.idle_snapshot().sleep_block_status,
+        SleepBlockStatus::Held
+    );
+}
+
+#[tokio::test]
+async fn idle_lock_and_suspend_cancelled_if_caffeine_enabled_while_lock_ack_pending() {
+    let (service, inhibitor, hub) = service(Arc::new(MockAuthenticator::new([])));
+    service.arm_sleep_delay().await.expect("arm delay");
+    invoke(
+        &hub,
+        ClientRole::PrivilegedHost,
+        "host.session-register",
+        json!({ "ui_session_generation": 9 }),
+    )
+    .await
+    .expect("register");
+
+    let config = IdleConfig {
+        rules: vec![IdleRule {
+            name: "sleep".into(),
+            enabled: true,
+            timeout_seconds: 60,
+            locked_timeout_seconds: None,
+            action: IdleAction::LockAndSuspend,
+            resume_command: None,
+            pre_action_fade_seconds: 0,
+        }],
+    };
+    invoke(
+        &hub,
+        ClientRole::PrivilegedHost,
+        "idle.configure",
+        serde_json::to_value(config).expect("config JSON"),
+    )
+    .await
+    .expect("configure");
+
+    let (rule_index, token, _) = service
+        .active_idle_watches()
+        .into_iter()
+        .next()
+        .expect("active watch");
+    service
+        .handle_wayland_idle(WaylandIdleEvent::Idled { rule_index, token })
+        .await;
+    assert_eq!(service.lock_snapshot().phase, LockPhaseName::Engaging);
+    assert!(service.lock_snapshot().sleep_hold);
+    let lock_id = service.lock_snapshot().lock_id.expect("lock ID");
+
+    // Enable Keep awake while lock ACK is still pending.
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "idle.caffeine",
+        json!({ "enabled": true }),
+    )
+    .await
+    .expect("caffeine on");
+    assert!(inhibitor.is_sleep_block_held());
+
+    // Host acknowledges lock; IdleSuspend must abort cleanly while staying locked!
+    invoke(
+        &hub,
+        ClientRole::PrivilegedHost,
+        "host.lock-ack",
+        json!({ "lock_id": lock_id, "ui_session_generation": 9 }),
+    )
+    .await
+    .expect("ACK succeeds cleanly even when idle suspend is cancelled");
+
+    assert_eq!(*inhibitor.suspends.lock().expect("suspends"), 0);
+    assert_eq!(service.lock_snapshot().phase, LockPhaseName::Locked);
+    assert!(!service.lock_snapshot().sleep_hold);
+    assert!(inhibitor.is_held(), "delay inhibitor must be re-armed");
+    assert!(
+        inhibitor.is_sleep_block_held(),
+        "sleep:block inhibitor must stay held"
+    );
+}
+
+#[tokio::test]
+async fn stale_suspend_failure_does_not_clear_newer_external_prepare_for_sleep_hold() {
+    let (service, inhibitor, hub) = service(Arc::new(MockAuthenticator::new([])));
+    service.arm_sleep_delay().await.expect("arm delay");
+    invoke(
+        &hub,
+        ClientRole::PrivilegedHost,
+        "host.session-register",
+        json!({ "ui_session_generation": 3 }),
+    )
+    .await
+    .expect("register");
+    invoke(&hub, ClientRole::Public, "lock.request", json!({}))
+        .await
+        .expect("lock");
+    let lock_id = service.lock_snapshot().lock_id.expect("lock ID");
+    invoke(
+        &hub,
+        ClientRole::PrivilegedHost,
+        "host.lock-ack",
+        json!({ "lock_id": lock_id, "ui_session_generation": 3 }),
+    )
+    .await
+    .expect("ack");
+
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    *inhibitor.suspend_gate.lock().expect("suspend gate") =
+        Some((entered.clone(), release.clone()));
+    *inhibitor.suspend_fail.lock().expect("suspend fail") =
+        Some("polkit denied Suspend(false)".into());
+
+    let entered_wait = entered.notified();
+    let suspend_hub = hub.clone();
+    let suspend_task = tokio::spawn(async move {
+        invoke(
+            &suspend_hub,
+            ClientRole::PrivilegedHost,
+            "host.suspend",
+            json!({}),
+        )
+        .await
+    });
+    entered_wait.await;
+
+    // A newer external PrepareForSleep arrives before the earlier Suspend(false) fails.
+    service
+        .handle_sleep_signal(SleepSignal::PrepareForSleep)
+        .await;
+    assert!(service.lock_snapshot().sleep_hold);
+    assert!(!inhibitor.is_held());
+
+    // Now the stale Suspend(false) fails.
+    release.notify_waiters();
+    let err = suspend_task
+        .await
+        .expect("suspend join")
+        .expect_err("suspend failed");
+    assert_eq!(err.code, ErrorCode::Internal);
+
+    // The newer external PrepareForSleep hold MUST remain intact!
+    assert!(
+        service.lock_snapshot().sleep_hold,
+        "stale suspend failure must not clear newer external PrepareForSleep hold"
+    );
+    assert!(
+        !inhibitor.is_held(),
+        "stale suspend failure must not re-arm delay FD during newer PrepareForSleep"
+    );
 }

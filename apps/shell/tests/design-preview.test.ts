@@ -5152,4 +5152,433 @@ describe("apps/shell design geometry & pixel lint", () => {
       cleanup();
     }
   }, 30_000);
+
+  previewTest("L4 Interactive Regressions: Focus-Gated Slider Wheel, Batteryless QS Power Profile Drawer & Hidden-Tray Right-Click Handoff", () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-design-interactions-");
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const monitor = { id: "DP-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900, scale: 1 };
+
+      const trayDropbox = {
+        id: "dropbox-99",
+        app_id: "dropbox",
+        title: "Dropbox",
+        icon_name: "dropbox",
+        icon: null,
+        category: "ApplicationStatus",
+        status: "Active",
+        tooltip: null,
+        item_is_menu: false,
+        menu: {
+          revision: 1,
+          root: {
+            id: 0,
+            label: null,
+            enabled: true,
+            visible: true,
+            separator: false,
+            toggle_type: null,
+            toggle_state: null,
+            icon_name: null,
+            children: [
+              {
+                id: 1,
+                label: "Pause syncing",
+                enabled: true,
+                visible: true,
+                separator: false,
+                toggle_type: null,
+                toggle_state: null,
+                icon_name: null,
+                children: [],
+              },
+            ],
+          },
+        },
+      };
+      const traySteam = {
+        id: "steam-42",
+        app_id: "steam",
+        title: "Steam",
+        icon_name: "steam",
+        icon: null,
+        category: "ApplicationStatus",
+        status: "Active",
+        tooltip: null,
+        item_is_menu: false,
+        menu: null,
+      };
+
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+
+      // Part (b): Batteryless desktop Quick Settings -> expand Power Profile drawer inline, select, live update, cycle, and auto-collapse to Unavailable.
+      timeline.step({ id: "open-qs", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-audio" }, button: "primary" });
+      timeline.advance("qs-open-settle", 450);
+      timeline.step({ id: "capture-qs-desktop-collapsed", op: "capture", surface: "panel-quick-settings", captureId: "qs-desktop-collapsed" });
+
+      timeline.step({ id: "expand-profile-drawer", op: "pointer.click", target: { surface: "panel-quick-settings", testId: "qs-open-profile" }, button: "primary" });
+      timeline.advance("profile-drawer-open-settle", 450);
+      timeline.step({ id: "capture-qs-profile-expanded", op: "capture", surface: "panel-quick-settings", captureId: "qs-profile-expanded" });
+
+      const setPerfAtMs = timeline.after(15);
+      const powerPerfUpdateAtMs = timeline.after(30);
+      timeline.step({ id: "select-profile-performance", op: "pointer.click", target: { surface: "panel-quick-settings", testId: "qs-profile-option-performance" }, button: "primary" });
+      timeline.advance("profile-perf-settle", 200);
+      timeline.step({ id: "capture-qs-profile-perf", op: "capture", surface: "panel-quick-settings", captureId: "qs-profile-perf" });
+
+      const cycleBalancedAtMs = timeline.after(15);
+      const powerBalancedUpdateAtMs = timeline.after(30);
+      timeline.step({ id: "cycle-profile-left-click", op: "pointer.click", target: { surface: "panel-quick-settings", testId: "qs-tile-profile" }, button: "primary" });
+      timeline.advance("profile-cycle-settle", 200);
+      timeline.step({ id: "capture-qs-profile-cycled", op: "capture", surface: "panel-quick-settings", captureId: "qs-profile-cycled" });
+
+      const powerUnavailableUpdateAtMs = timeline.after(15);
+      timeline.advance("profile-unavailable-settle", 450);
+      timeline.step({ id: "capture-qs-profile-unavailable", op: "capture", surface: "panel-quick-settings", captureId: "qs-profile-unavailable" });
+
+      // Part (a): Overflowing Sound subpage -> unfocused wheel scrolls (0 commands), pointer click focuses -> wheel adjusts volume (no scroll), Tab blur resumes scroll, Tab focus adjusts second slider, blur resumes scroll.
+      timeline.step({ id: "open-sound-subpage", op: "pointer.click", target: { surface: "panel-quick-settings", testId: "qs-open-sound" }, button: "primary" });
+      timeline.advance("sound-open-settle", 450);
+      timeline.step({ id: "capture-sound-initial", op: "capture", surface: "panel-quick-settings", captureId: "sound-initial" });
+
+      timeline.step({
+        id: "sound-wheel-unfocused-down",
+        op: "wheel",
+        target: { surface: "panel-quick-settings", testId: "qs-audio-sink-slider-1" },
+        delta: { x: 0, y: 120, unit: "pixels" },
+      });
+      timeline.advance("sound-wheel-unfocused-settle", 450);
+      timeline.step({ id: "capture-sound-unfocused-scrolled", op: "capture", surface: "panel-quick-settings", captureId: "sound-unfocused-scrolled" });
+
+      timeline.step({
+        id: "sound-wheel-unfocused-up",
+        op: "wheel",
+        target: { surface: "panel-quick-settings", testId: "qs-audio-sink-slider-2" },
+        delta: { x: 0, y: -120, unit: "pixels" },
+      });
+      timeline.advance("sound-wheel-back-settle", 450);
+      timeline.step({ id: "capture-sound-scrolled-back", op: "capture", surface: "panel-quick-settings", captureId: "sound-scrolled-back" });
+
+      // Pointer click on 50% slider center focuses it cleanly without emitting a spurious volume change.
+      timeline.step({ id: "focus-slider-1-click", op: "pointer.click", target: { surface: "panel-quick-settings", testId: "qs-audio-sink-slider-1" }, button: "primary" });
+      timeline.advance("focus-slider-1-settle", 40);
+      const slider1WheelAtMs = timeline.after(15);
+      timeline.step({
+        id: "sound-wheel-focused-1",
+        op: "wheel",
+        target: { surface: "panel-quick-settings", testId: "qs-audio-sink-slider-1" },
+        delta: { x: 0, y: 120, unit: "pixels" },
+      });
+      timeline.advance("sound-wheel-focused-1-settle", 350);
+      timeline.step({ id: "capture-sound-focused-1", op: "capture", surface: "panel-quick-settings", captureId: "sound-focused-1" });
+
+      // Blur slider 1 via Tab -> next focusable control (sink 2 card), then wheel over slider 1 resumes scrolling with 0 volume commands.
+      timeline.step({ id: "blur-slider-1-tab", op: "key.press", surface: "panel-quick-settings", key: "Tab" });
+      timeline.advance("blur-slider-1-settle", 40);
+      timeline.step({
+        id: "sound-wheel-after-blur-down",
+        op: "wheel",
+        target: { surface: "panel-quick-settings", testId: "qs-audio-sink-slider-1" },
+        delta: { x: 0, y: 120, unit: "pixels" },
+      });
+      timeline.advance("sound-wheel-after-blur-settle", 450);
+      timeline.step({ id: "capture-sound-blurred-scrolled", op: "capture", surface: "panel-quick-settings", captureId: "sound-blurred-scrolled" });
+
+      // Scroll back to top and Tab onto slider 2 (Tab -> sink 2 mute button -> sink 2 slider).
+      timeline.step({
+        id: "sound-wheel-after-blur-up",
+        op: "wheel",
+        target: { surface: "panel-quick-settings", testId: "qs-audio-sink-slider-2" },
+        delta: { x: 0, y: -120, unit: "pixels" },
+      });
+      timeline.advance("sound-wheel-reset-2", 450);
+      timeline.step({ id: "tab-to-sink2-mute", op: "key.press", surface: "panel-quick-settings", key: "Tab" });
+      timeline.step({ id: "tab-to-sink2-slider", op: "key.press", surface: "panel-quick-settings", key: "Tab" });
+      timeline.advance("tab-to-sink2-slider-settle", 40);
+      const slider2WheelAtMs = timeline.after(15);
+      timeline.step({
+        id: "sound-wheel-focused-2",
+        op: "wheel",
+        target: { surface: "panel-quick-settings", testId: "qs-audio-sink-slider-2" },
+        delta: { x: 0, y: 120, unit: "pixels" },
+      });
+      timeline.advance("sound-wheel-focused-2-settle", 350);
+      timeline.step({ id: "capture-sound-focused-2", op: "capture", surface: "panel-quick-settings", captureId: "sound-focused-2" });
+
+      timeline.step({ id: "dismiss-qs-after-sound", op: "key.press", surface: "panel-quick-settings", key: "Escape" });
+      timeline.advance("qs-dismiss-settle", 260);
+
+      // Part (c): Hidden-tray secondary-click handoff -> tray-menu stays open + single tray.menu-item; menu-less secondary click closes overflow + single tray.context-menu.
+      timeline.step({ id: "open-tray-overflow-1", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-tray-overflow-toggle" }, button: "primary" });
+      timeline.advance("tray-overflow-1-settle", 400);
+      timeline.step({ id: "capture-tray-overflow-1", op: "capture", surface: "tray-overflow", captureId: "tray-overflow-1" });
+
+      timeline.step({ id: "right-click-overflow-dropbox", op: "pointer.click", target: { surface: "tray-overflow", testId: "tray-overflow-item-dropbox-99" }, button: "secondary" });
+      timeline.advance("tray-menu-right-click-settle", 400);
+      timeline.step({ id: "after-right-click-dropbox", op: "monitors.set", monitors: [monitor] });
+      timeline.step({ id: "capture-tray-menu-right-click", op: "capture", surface: "tray-menu", captureId: "tray-menu-right-click" });
+
+      const menuItemClickAtMs = timeline.after(15);
+      timeline.step({ id: "click-tray-menu-item", op: "pointer.click", target: { surface: "tray-menu", testId: "tray-menu-item-1" }, button: "primary" });
+      timeline.advance("tray-menu-item-settle", 260);
+
+      timeline.step({ id: "open-tray-overflow-2", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-tray-overflow-toggle" }, button: "primary" });
+      timeline.advance("tray-overflow-2-settle", 400);
+      const contextMenuAtMs = timeline.after(15);
+      timeline.step({ id: "right-click-overflow-steam", op: "pointer.click", target: { surface: "tray-overflow", testId: "tray-overflow-item-steam-42" }, button: "secondary" });
+      timeline.advance("tray-menuless-settle", 120);
+      timeline.step({ id: "after-menuless-right-click", op: "monitors.set", monitors: [monitor] });
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-design-interactions",
+        initialTopics: {
+          "wayland.outputs": {
+            capability: "connected",
+            outputs: [{
+              output_instance_id: 1, name: "DP-1", description: "Desktop Monitor", make: "Test", model: "1440x900",
+              x: 0, y: 0, width: 1440, height: 900, mode_width: 1440, mode_height: 900, refresh_mhz: 60000, scale: 1,
+              physical_width_mm: null, physical_height_mm: null,
+            }],
+          },
+          settings: {
+            general: { offline_mode: false, log_level: "info" },
+            bar: {
+              position: "top",
+              style: "floating",
+              gaps: 14,
+              edge_overrides: { top: null, right: null, bottom: null, left: null },
+              launcher_enabled: true,
+              dock_enabled: false,
+              clock_24h: true,
+              clock_seconds: false,
+              tray: {
+                default_action: "show",
+                rules: {
+                  dropbox: "collapse",
+                  steam: "collapse",
+                },
+              },
+            },
+            theme: { mode: "dark", variant: "tonal", seed_color: null, backend: "builtin", gtk_linking: false },
+            ime: { mode: "indicator_only", candidate_layout: "auto", switch_osd: true },
+            polkit: { enabled: true },
+            wallpaper: { directories: [], fit: "cover", sync_theme: true, slideshow_seconds: 300 },
+            pre_action_fade_seconds: 0,
+            configured_plugins: [],
+          },
+          "desktop.tray": {
+            available: true,
+            items: [trayDropbox, traySteam],
+          },
+          "system.power": {
+            available: true,
+            on_ac: true,
+            battery: null,
+            profiles: {
+              available: true,
+              active_profile: "balanced",
+              profiles: ["performance", "balanced", "power-saver"],
+            },
+          },
+          "system.audio": {
+            availability: "available",
+            default_sink: "sink-1",
+            default_source: "source-1",
+            sinks: [
+              { index: 1, name: "sink-1", description: "Studio Speakers", volume: 0.5, muted: false, channels: 2 },
+              { index: 2, name: "sink-2", description: "Desk Headphones", volume: 0.5, muted: false, channels: 2 },
+              { index: 3, name: "sink-3", description: "HDMI Monitor Audio", volume: 0.6, muted: false, channels: 2 },
+              { index: 4, name: "sink-4", description: "USB DAC", volume: 0.7, muted: false, channels: 2 },
+              { index: 5, name: "sink-5", description: "Bluetooth Receiver", volume: 0.4, muted: false, channels: 2 },
+            ],
+            sources: [
+              { index: 10, name: "source-1", description: "Desk Mic", volume: 0.8, muted: false, channels: 1 },
+              { index: 11, name: "source-2", description: "Webcam Mic", volume: 0.5, muted: false, channels: 1 },
+            ],
+            sink_inputs: [
+              { index: 20, name: "Playback", application: "Firefox", device_index: 1, channels: 2, volume: 0.75, muted: false, corked: false, volume_writable: true },
+              { index: 21, name: "Playback", application: "Spotify", device_index: 1, channels: 2, volume: 0.65, muted: false, corked: false, volume_writable: true },
+              { index: 22, name: "Playback", application: "mpv", device_index: 1, channels: 2, volume: 0.85, muted: false, corked: false, volume_writable: true },
+            ],
+            source_outputs: [],
+          },
+        },
+        topicUpdates: [
+          {
+            atMs: powerPerfUpdateAtMs,
+            topic: "system.power",
+            revision: 2,
+            data: {
+              available: true,
+              on_ac: true,
+              battery: null,
+              profiles: {
+                available: true,
+                active_profile: "performance",
+                profiles: ["performance", "balanced", "power-saver"],
+              },
+            },
+          },
+          {
+            atMs: powerBalancedUpdateAtMs,
+            topic: "system.power",
+            revision: 3,
+            data: {
+              available: true,
+              on_ac: true,
+              battery: null,
+              profiles: {
+                available: true,
+                active_profile: "balanced",
+                profiles: ["performance", "balanced", "power-saver"],
+              },
+            },
+          },
+          {
+            atMs: powerUnavailableUpdateAtMs,
+            topic: "system.power",
+            revision: 4,
+            data: {
+              available: true,
+              on_ac: true,
+              battery: null,
+              profiles: {
+                available: false,
+                active_profile: null,
+                profiles: [],
+              },
+            },
+          },
+        ],
+        commands: [
+          {
+            id: 26,
+            name: "power.set-profile",
+            payload: { profile: "performance" },
+            atMs: setPerfAtMs,
+          },
+          {
+            id: 27,
+            name: "power.set-profile",
+            payload: { profile: "balanced" },
+            atMs: cycleBalancedAtMs,
+          },
+          {
+            id: 28,
+            name: "audio.set-volume",
+            payload: { kind: "sink", index: 1, volume: 0.45 },
+            atMs: slider1WheelAtMs,
+          },
+          {
+            id: 29,
+            name: "audio.set-volume",
+            payload: { kind: "sink", index: 2, volume: 0.45 },
+            atMs: slider2WheelAtMs,
+          },
+          {
+            id: 30,
+            name: "tray.menu-item",
+            payload: { id: "dropbox-99", menu_id: 1 },
+            atMs: menuItemClickAtMs,
+          },
+          {
+            id: 31,
+            name: "tray.context-menu",
+            payload: { id: "steam-42" },
+            atMs: contextMenuAtMs,
+          },
+        ],
+      }), null, 2));
+
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-design-interactions",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time", "input.wheel"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(published.dist, fixture, scenario, out);
+      expectCleanPreview(result, 13, 0);
+
+      // Verify Part (b): Batteryless desktop Quick Settings Power Profile drawer
+      const qsCollapsed = readCapture(out, "panel-quick-settings", "qs-desktop-collapsed");
+      expect(qsCollapsed.tree.nodes.some(n => n.testId === "qs-battery-row")).toBe(false);
+      expect(qsCollapsed.tree.nodes.some(n => n.testId === "qs-profile-menu")).toBe(false);
+      expect(qsCollapsed.tree.nodes.some(n => n.text === "Balanced")).toBe(true);
+
+      const qsExpanded = readCapture(out, "panel-quick-settings", "qs-profile-expanded");
+      expect(treeNode(qsExpanded.tree, "qs-profile-menu").boundsLogical).toBeDefined();
+      expect(treeNode(qsExpanded.tree, "qs-profile-option-performance").boundsLogical).toBeDefined();
+      expect(treeNode(qsExpanded.tree, "qs-profile-option-balanced").boundsLogical).toBeDefined();
+      expect(treeNode(qsExpanded.tree, "qs-profile-option-power-saver").boundsLogical).toBeDefined();
+      for (const node of qsExpanded.tree.nodes) {
+        if (node.scrollMetrics) {
+          expect(node.scrollMetrics.overflowY, "expanded Power Profile drawer stays zero-scroll").toBe(false);
+        }
+      }
+
+      const qsPerf = readCapture(out, "panel-quick-settings", "qs-profile-perf");
+      expect(qsPerf.tree.nodes.some(n => n.text === "Performance")).toBe(true);
+
+      const qsCycled = readCapture(out, "panel-quick-settings", "qs-profile-cycled");
+      expect(qsCycled.tree.nodes.some(n => n.text === "Balanced")).toBe(true);
+
+      const qsUnavailable = readCapture(out, "panel-quick-settings", "qs-profile-unavailable");
+      expect(qsUnavailable.tree.nodes.some(n => n.testId === "qs-profile-menu")).toBe(false);
+      expect(qsUnavailable.tree.nodes.some(n => n.text === "Unavailable")).toBe(true);
+      expect(qsUnavailable.tree.nodes.some(n => n.text === "balanced")).toBe(false);
+
+      // Verify Part (a): Focus-gated M3Slider wheel on overflowing Sound subpage
+      const soundInitial = readCapture(out, "panel-quick-settings", "sound-initial");
+      const soundScroll = treeNode(soundInitial.tree, "qs-page-sound");
+      expect(soundScroll.scrollMetrics?.overflowY, "Sound subpage overflows vertically").toBe(true);
+      expect(soundScroll.scrollMetrics?.offsetY ?? 0).toBe(0);
+      const yInitial = treeNode(soundInitial.tree, "qs-audio-sink-1").boundsLogical!.y;
+
+      const soundUnfocused = readCapture(out, "panel-quick-settings", "sound-unfocused-scrolled");
+      const unfocusedOffset = treeNode(soundUnfocused.tree, "qs-page-sound").scrollMetrics?.offsetY ?? 0;
+      expect(unfocusedOffset, "wheel over unfocused slider scrolls outer scroll container").toBeGreaterThan(80);
+      expect(treeNode(soundUnfocused.tree, "qs-audio-sink-1").boundsLogical!.y).toBeLessThan(yInitial - 80);
+
+      const soundBack = readCapture(out, "panel-quick-settings", "sound-scrolled-back");
+      const backOffset = treeNode(soundBack.tree, "qs-page-sound").scrollMetrics?.offsetY ?? 0;
+      expect(backOffset, "wheel up restores scroll offset near top").toBeLessThanOrEqual(2);
+
+      // Notice: focused wheel uses delta.y = +120 (downward scroll direction) while offsetY stays pinned at 0!
+      const soundFocused1 = readCapture(out, "panel-quick-settings", "sound-focused-1");
+      const focused1Offset = treeNode(soundFocused1.tree, "qs-page-sound").scrollMetrics?.offsetY ?? 0;
+      expect(Math.abs(focused1Offset - backOffset), "wheel on pointer-focused slider adjusts volume without scrolling").toBeLessThanOrEqual(1);
+
+      const soundBlurred = readCapture(out, "panel-quick-settings", "sound-blurred-scrolled");
+      const blurredOffset = treeNode(soundBlurred.tree, "qs-page-sound").scrollMetrics?.offsetY ?? 0;
+      expect(blurredOffset, "wheel over slider resumes scrolling after blur").toBeGreaterThan(80);
+
+      const soundFocused2 = readCapture(out, "panel-quick-settings", "sound-focused-2");
+      const focused2Offset = treeNode(soundFocused2.tree, "qs-page-sound").scrollMetrics?.offsetY ?? 0;
+      expect(focused2Offset, "wheel on Tab-focused slider adjusts volume without scrolling").toBeLessThanOrEqual(2);
+
+      // Verify Part (c): Hidden-tray secondary-click handoff & menu-less single context-menu dispatch
+      const overflowCap = readCapture(out, "tray-overflow", "tray-overflow-1");
+      expect(treeNode(overflowCap.tree, "tray-overflow-item-dropbox-99").boundsLogical).toBeDefined();
+      expect(treeNode(overflowCap.tree, "tray-overflow-item-steam-42").boundsLogical).toBeDefined();
+
+      const surfacesAfterRightClick = previewSurfaces(out, "after-right-click-dropbox");
+      expect(surfacesAfterRightClick).toContain("tray-menu");
+      expect(surfacesAfterRightClick).not.toContain("tray-overflow");
+
+      const trayMenuCap = readCapture(out, "tray-menu", "tray-menu-right-click");
+      expect(treeNode(trayMenuCap.tree, "tray-menu-card").boundsLogical).toBeDefined();
+      expect(treeNode(trayMenuCap.tree, "tray-menu-item-1").boundsLogical).toBeDefined();
+
+      const surfacesAfterMenuless = previewSurfaces(out, "after-menuless-right-click");
+      expect(surfacesAfterMenuless).not.toContain("tray-overflow");
+      expect(surfacesAfterMenuless).not.toContain("tray-menu");
+    } finally {
+      cleanup();
+    }
+  }, 30_000);
 });
