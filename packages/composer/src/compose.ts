@@ -23,6 +23,7 @@ export interface ComposeEntryInstance {
   readonly pluginId: string;
   readonly entryId: string;
   readonly instanceId: string;
+  readonly instanceSlug?: string;
   readonly outputId?: string;
   readonly settings?: Readonly<Record<string, unknown>>;
 }
@@ -396,6 +397,7 @@ function generateModule(
       instanceId: instance.instanceId,
       importKey: instance.entryId,
     };
+    if (instance.instanceSlug !== undefined) result.instanceSlug = instance.instanceSlug;
     if (instance.outputId !== undefined) result.outputId = instance.outputId;
     return result;
   });
@@ -437,6 +439,7 @@ function generateModule(
     "  readonly settings: Readonly<Record<string, unknown>>;",
     "  readonly pluginSettings: Readonly<Record<string, unknown>>;",
     "  readonly instanceId: string;",
+    "  readonly instanceSlug?: string;",
     "  readonly outputId?: string;",
     "  readonly importKey: string;",
     "}",

@@ -28,6 +28,7 @@ export interface ComposedEntryInstanceDescriptor {
   readonly settings: Readonly<Record<string, unknown>>;
   readonly pluginSettings: Readonly<Record<string, unknown>>;
   readonly instanceId: string;
+  readonly instanceSlug?: string;
   readonly outputId?: string;
   readonly importKey: string;
 }

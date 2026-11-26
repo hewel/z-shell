@@ -379,6 +379,12 @@ describe("First-party reference plugins end-to-end", () => {
           { id: "daemon-events", op: "clock.advance", byMs: 30 },
           { id: "ready", op: "settle" },
           {
+            id: "ai-slot-mounted",
+            op: "assert",
+            target: { surface: "bar-dp-1", testId: "bar-plugin-slot-ai-quota-bar" },
+            check: { property: "exists", equals: true },
+          },
+          {
             id: "ai-widget-mounted",
             op: "assert",
             target: { surface: "bar-dp-1", testId: "plugin-ai-usage-widget" },
@@ -426,7 +432,7 @@ describe("First-party reference plugins end-to-end", () => {
 
       expect(zguiHost && Bun.which(zguiHost)).not.toBeNull();
       const result = runPreview(published.dist, fixture, scenario, previewOut);
-      expectCleanPreview(result, 0, 5);
+      expectCleanPreview(result, 0, 6);
     } finally {
       removeTempTree(tempDir);
     }

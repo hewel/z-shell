@@ -47,7 +47,46 @@ function pluginSourceDir(plugin: RegistryPluginEntry): string | undefined {
   return undefined;
 }
 
-function inspectEnabledPlugins(registryPath: string): {
+interface ExplicitBarPluginSlot {
+  readonly entry: string;
+  readonly instance: string;
+  readonly output?: string;
+  readonly settings?: Readonly<Record<string, unknown>>;
+}
+
+function readExplicitBarPluginSlots(settingsPath: string | undefined): ExplicitBarPluginSlot[] {
+  if (!settingsPath || !existsSync(settingsPath)) return [];
+  try {
+    const parsed = Bun.TOML.parse(readFileSync(settingsPath, "utf8")) as {
+      bar?: { plugins?: Record<string, unknown> };
+    };
+    const zones = parsed.bar?.plugins;
+    if (!zones || typeof zones !== "object") return [];
+    const collected: ExplicitBarPluginSlot[] = [];
+    for (const zone of ["left", "center", "right", "hidden"]) {
+      const items = zones[zone];
+      if (!Array.isArray(items)) continue;
+      for (const item of items) {
+        if (!item || typeof item !== "object") continue;
+        const slot = item as Record<string, unknown>;
+        if (typeof slot.entry !== "string" || typeof slot.instance !== "string") continue;
+        collected.push({
+          entry: slot.entry,
+          instance: slot.instance,
+          ...(typeof slot.output === "string" ? { output: slot.output } : {}),
+          ...(slot.settings && typeof slot.settings === "object"
+            ? { settings: slot.settings as Readonly<Record<string, unknown>> }
+            : {}),
+        });
+      }
+    }
+    return collected;
+  } catch {
+    return [];
+  }
+}
+
+function inspectEnabledPlugins(registryPath: string, settingsPath?: string): {
   instances: ComposeEntryInstance[];
   missingIds: Set<string>;
   hasAnyEnabled: boolean;
@@ -56,6 +95,7 @@ function inspectEnabledPlugins(registryPath: string): {
   const entries = Object.values(raw.plugins ?? {}).filter(
     plugin => plugin.enabled === true && plugin.revoked !== true,
   );
+  const explicitSlots = readExplicitBarPluginSlots(settingsPath);
   const instances: ComposeEntryInstance[] = [];
   const missingIds = new Set<string>();
   let hasAnyEnabled = false;
@@ -73,11 +113,35 @@ function inspectEnabledPlugins(registryPath: string): {
     const slug = manifest.id.replace(/[^a-zA-Z0-9_-]+/g, "-");
     for (const entry of manifest.entries) {
       if (entry.kind === "service") continue;
-      instances.push({
-        pluginId: manifest.id,
-        entryId: entry.entryId,
-        instanceId: `${slug}-${entry.id}`,
-      });
+      const matchingSlots = entry.kind === "widget"
+        ? explicitSlots.filter(slot => slot.entry === entry.entryId)
+        : [];
+      const hasDefaultSlot = matchingSlots.some(slot => slot.instance === "default");
+      if (!hasDefaultSlot) {
+        instances.push({
+          pluginId: manifest.id,
+          entryId: entry.entryId,
+          instanceId: `${slug}-${entry.id}`,
+          ...(entry.kind === "widget" ? { instanceSlug: "default" } : {}),
+        });
+      }
+      const seenInstanceIds = new Set<string>();
+      for (const slot of matchingSlots) {
+        const outputSuffix = slot.output ? `-${slot.output.replace(/[^a-zA-Z0-9_-]+/g, "-")}` : "";
+        const instanceId = slot.instance === "default" && !slot.output
+          ? `${slug}-${entry.id}`
+          : `${slug}-${entry.id}-${slot.instance}${outputSuffix}`;
+        if (seenInstanceIds.has(instanceId)) continue;
+        seenInstanceIds.add(instanceId);
+        instances.push({
+          pluginId: manifest.id,
+          entryId: entry.entryId,
+          instanceId,
+          instanceSlug: slot.instance,
+          ...(slot.output !== undefined ? { outputId: slot.output } : {}),
+          ...(slot.settings !== undefined ? { settings: slot.settings } : {}),
+        });
+      }
     }
   }
   return { instances, missingIds, hasAnyEnabled };
@@ -136,7 +200,7 @@ const t0 = performance.now();
 const registryPath = resolveXdgPath("XDG_STATE_HOME", ".local/state", "z-shell", "plugins", "registry.json");
 const settingsPath = resolveXdgPath("XDG_CONFIG_HOME", ".config", "z-shell", "settings.toml");
 const inspected = !standalone && existsSync(registryPath)
-  ? inspectEnabledPlugins(registryPath)
+  ? inspectEnabledPlugins(registryPath, settingsPath)
   : { instances: [], missingIds: new Set<string>(), hasAnyEnabled: false };
 
 if (!inspected.hasAnyEnabled) {
