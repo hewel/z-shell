@@ -17,7 +17,7 @@ use toml_edit::{
 };
 use z_shell_protocol::PluginId;
 
-const ALLOWED_PATCH_SECTIONS: [&str; 7] = [
+const ALLOWED_PATCH_SECTIONS: [&str; 8] = [
     "general",
     "bar",
     "theme",
@@ -25,6 +25,7 @@ const ALLOWED_PATCH_SECTIONS: [&str; 7] = [
     "polkit",
     "wallpaper",
     "idle",
+    "plugins",
 ];
 
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(1);

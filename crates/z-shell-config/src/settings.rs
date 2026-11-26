@@ -26,6 +26,9 @@ pub const MAX_IDLE_TIMEOUT_SECONDS: u32 = 86_400;
 /// Maximum pre-action fade duration in seconds.
 pub const MAX_PRE_ACTION_FADE_SECONDS: u32 = 60;
 
+/// Maximum number of per-application system tray rules allowed in `[bar.tray]`.
+pub const MAX_BAR_TRAY_RULES: usize = 256;
+
 /// Log verbosity for the shell daemon.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -235,6 +238,52 @@ impl BarPluginsSettings {
     }
 }
 
+/// Default visibility applied to newly appearing system tray items without an explicit rule.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TrayDefaultAction {
+    /// Display new tray items directly in the bar.
+    #[default]
+    Show,
+    /// Collapse new tray items into the bar overflow popover (`09E`).
+    Collapse,
+}
+
+/// Per-application visibility rule in `[bar.tray.rules]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TrayItemRule {
+    /// Display the item directly in the bar.
+    Show,
+    /// Collapse the item into the bar overflow popover (`09E`).
+    Collapse,
+    /// Hide the item from both the bar and the overflow popover.
+    Hide,
+}
+
+/// Declarative system tray visibility and overflow preferences (`[bar.tray]`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BarTraySettings {
+    /// Default action applied to tray items without an explicit entry in `rules`.
+    pub default_action: TrayDefaultAction,
+    /// Per-application rules keyed by stable non-transient identifier (SNI `app_id`, etc.).
+    pub rules: BTreeMap<String, TrayItemRule>,
+}
+
+impl BarTraySettings {
+    /// Returns true when both `default_action` and `rules` match the default configuration.
+    ///
+    /// Used with `#[serde(skip_serializing_if)]` so untouched configs remain rollback-compatible
+    /// with older daemons that use `deny_unknown_fields` on `BarSettings`.
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        self.default_action == TrayDefaultAction::Show && self.rules.is_empty()
+    }
+}
+
 /// Bar, dock, launcher, and clock preferences.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -257,6 +306,9 @@ pub struct BarSettings {
     pub clock_seconds: bool,
     /// Declarative left/center/right/hidden plugin widget placement (`[bar.plugins]`).
     pub plugins: BarPluginsSettings,
+    /// Declarative system tray visibility and overflow rules (`[bar.tray]`).
+    #[serde(default, skip_serializing_if = "BarTraySettings::is_default")]
+    pub tray: BarTraySettings,
 }
 
 impl BarSettings {
@@ -271,6 +323,7 @@ impl BarSettings {
             clock_24h: self.clock_24h,
             clock_seconds: self.clock_seconds,
             plugins: self.plugins.redacted_for_public(),
+            tray: self.tray.clone(),
         }
     }
 }
@@ -287,6 +340,7 @@ impl Default for BarSettings {
             clock_24h: true,
             clock_seconds: false,
             plugins: BarPluginsSettings::default(),
+            tray: BarTraySettings::default(),
         }
     }
 }
@@ -748,6 +802,7 @@ impl UserSettings {
             }
         }
         validate_bar_plugins(&self.bar.plugins)?;
+        validate_bar_tray(&self.bar.tray)?;
         validate_plugin_sources(&self.plugins.sources)?;
         Ok(())
     }
@@ -803,6 +858,28 @@ fn validate_bar_plugins(plugins: &BarPluginsSettings) -> Result<(), String> {
                     "duplicate bar plugin instance ({entry}, {instance:?}, {output:?})"
                 ));
             }
+        }
+    }
+    Ok(())
+}
+
+fn validate_bar_tray(tray: &BarTraySettings) -> Result<(), String> {
+    if tray.rules.len() > MAX_BAR_TRAY_RULES {
+        return Err(format!(
+            "bar.tray.rules supports at most {MAX_BAR_TRAY_RULES} entries, got {}",
+            tray.rules.len()
+        ));
+    }
+    for key in tray.rules.keys() {
+        let trimmed = key.trim();
+        if trimmed.is_empty()
+            || trimmed != key
+            || key.len() > 256
+            || key.chars().any(char::is_control)
+        {
+            return Err(format!(
+                "bar.tray.rules contains invalid key {key:?} (1..=256 bytes, no control chars or outer whitespace)"
+            ));
         }
     }
     Ok(())

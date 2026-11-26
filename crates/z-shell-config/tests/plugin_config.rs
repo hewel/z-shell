@@ -1,8 +1,10 @@
+use serde_json::{Map as JsonMap, Value as JsonValue, json};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use tempfile::tempdir;
 use z_shell_config::{
-    BarPluginInstance, BarPluginSlot, PluginSourceKind, ShellPaths, UserSettings,
+    BarPluginInstance, BarPluginSlot, ConfigError, ConfigStore, PluginSourceKind, ShellPaths,
+    TrayDefaultAction, TrayItemRule, UserSettings,
 };
 
 #[test]
@@ -81,7 +83,7 @@ priority = 250
 left = ["z-shell/niri-overview:status"]
 center = []
 right = [
-  "z-shell/nosleep:bar-indicator",
+  "z-shell/sample-keep:bar-indicator",
   { entry = "z-shell/ai-usage:bar-quota", instance = "primary", output = "DP-1", settings = { compact = true, api_token = "super-secret" } },
   { entry = "z-shell/ai-usage:bar-quota", instance = "secondary", output = "HDMI-A-1", settings = { compact = false } }
 ]
@@ -189,4 +191,100 @@ unknown_field = true
         )
         .is_err()
     );
+}
+
+#[test]
+fn bar_tray_omits_defaults_for_rollback_and_patches_with_plugins_sources() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    let paths = ShellPaths::from_roots(
+        root.join("config"),
+        root.join("state"),
+        root.join("runtime"),
+        root.join("runtime/bus.sock"),
+    );
+    let store = ConfigStore::new(paths);
+
+    // Default UserSettings must omit [bar.tray] in TOML and PublicSettingsSummary JSON.
+    let defaults = UserSettings::default();
+    let toml_text = toml::to_string_pretty(&defaults).unwrap();
+    assert!(
+        !toml_text.contains("tray"),
+        "unexpected tray in default TOML:\n{toml_text}"
+    );
+    let summary_json = serde_json::to_value(defaults.public_summary()).unwrap();
+    assert!(summary_json["bar"].get("tray").is_none());
+
+    // Patch [bar.tray] and [plugins.sources] losslessly.
+    let patch: JsonMap<String, JsonValue> = serde_json::from_value(json!({
+        "bar": {
+            "tray": {
+                "default_action": "collapse",
+                "rules": {
+                    "discord": "hide",
+                    "nm-applet": "show"
+                }
+            }
+        },
+        "plugins": {
+            "sources": [
+                {
+                    "id": "official",
+                    "name": "Official",
+                    "kind": "https_json",
+                    "url": "https://plugins.z-shell.org/catalog-v1.json",
+                    "enabled": true,
+                    "priority": 100
+                }
+            ]
+        }
+    }))
+    .unwrap();
+    let patched = store.patch_settings(&patch).unwrap();
+    assert_eq!(patched.bar.tray.default_action, TrayDefaultAction::Collapse);
+    assert_eq!(
+        patched.bar.tray.rules.get("discord"),
+        Some(&TrayItemRule::Hide)
+    );
+    assert_eq!(
+        patched.bar.tray.rules.get("nm-applet"),
+        Some(&TrayItemRule::Show)
+    );
+    assert_eq!(patched.plugins.sources.len(), 1);
+    assert_eq!(patched.plugins.sources[0].id, "official");
+
+    // Reset one rule + reset default_action back to show.
+    let reset_patch: JsonMap<String, JsonValue> = serde_json::from_value(json!({
+        "bar": {
+            "tray": {
+                "default_action": "show",
+                "rules": { "discord": null, "nm-applet": null }
+            }
+        },
+        "plugins": { "sources": [] }
+    }))
+    .unwrap();
+    let reset = store.patch_settings(&reset_patch).unwrap();
+    assert!(reset.bar.tray.is_default());
+    assert!(reset.plugins.sources.is_empty());
+
+    // Invalid tray rule key must fail validation without mutating settings.toml.
+    let bad_tray: JsonMap<String, JsonValue> = serde_json::from_value(json!({
+        "bar": { "tray": { "rules": { " ": "hide" } } }
+    }))
+    .unwrap();
+    assert!(matches!(
+        store.patch_settings(&bad_tray),
+        Err(ConfigError::Validation(_))
+    ));
+
+    // Secret plugin_settings remains forbidden in patch_settings.
+    let bad_secret: JsonMap<String, JsonValue> = serde_json::from_value(json!({
+        "plugin_settings": { "z-shell/ai-usage": { "token": "secret" } }
+    }))
+    .unwrap();
+    assert!(matches!(
+        store.patch_settings(&bad_secret),
+        Err(ConfigError::Validation(_))
+    ));
 }
