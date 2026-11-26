@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -23,6 +23,15 @@ const oxlintBin = join(repoRoot, "node_modules/.bin/oxlint");
 const pluginPath = join(repoRoot, "tools/oxlint-design-plugin.mjs");
 
 function lintSnippet(filename: string, code: string, rule: string): { status: number | null; output: string } {
+  return lintSnippetWithCss(filename, code, null, rule);
+}
+
+function lintSnippetWithCss(
+  filename: string,
+  code: string,
+  css: { filename?: string; content: string } | string | null,
+  rule: string,
+): { status: number | null; output: string } {
   const dir = mkdtempSync(join(tmpdir(), "z-shell-design-lint-"));
   try {
     const configPath = join(dir, ".oxlintrc.json");
@@ -34,6 +43,14 @@ function lintSnippet(filename: string, code: string, rule: string): { status: nu
       rules: { [rule]: "error" },
     }));
     writeFileSync(targetPath, code);
+    if (css !== null) {
+      const cssSpec = typeof css === "string"
+        ? { filename: filename.replace(/\.tsx?$/, ".module.css"), content: css }
+        : { filename: css.filename ?? filename.replace(/\.tsx?$/, ".module.css"), content: css.content };
+      const cssPath = join(dirname(targetPath), cssSpec.filename);
+      mkdirSync(dirname(cssPath), { recursive: true });
+      writeFileSync(cssPath, cssSpec.content);
+    }
     const result = spawnSync(oxlintBin, ["--config", configPath, "--deny-warnings", targetPath], {
       cwd: repoRoot,
       encoding: "utf8",
@@ -801,6 +818,386 @@ describe("zshell oxlint design plugin", () => {
     );
     expect(goodPositiveMargin.status, goodPositiveMargin.output).toBe(0);
   });
+
+  test("CSS Module L1 rules inspect imported *.module.css and class={styles.*} without losing coverage or false-positiving", () => {
+    // no-raw-colors
+    expect(
+      lintSnippetWithCss(
+        "Card.tsx",
+        `import styles from "./Card.module.css"; export const X = () => <box class={styles.card} />;`,
+        `.card { background-color: #254777; }`,
+        "zshell/no-raw-colors",
+      ).status,
+    ).not.toBe(0);
+    const goodColors = lintSnippetWithCss(
+      "Card.tsx",
+      `import styles from "./Card.module.css"; export const X = () => <box class={styles.card} />;`,
+      `.card { background-color: var(--color-surface-container); border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent); box-shadow: 0 14px 36px rgba(0, 0, 0, 0.50); }`,
+      "zshell/no-raw-colors",
+    );
+    expect(goodColors.status, goodColors.output).toBe(0);
+
+    // valid-color-roles (CSS rule pairing + ShellIcon ancestor class + conditional data-active / color-mix)
+    expect(
+      lintSnippetWithCss(
+        "Alert.tsx",
+        `import styles from "./Alert.module.css"; export const X = () => <box class={styles.alert} />;`,
+        `.alert { &[data-active="true"] { background-color: var(--color-error-container); color: var(--color-error); } }`,
+        "zshell/valid-color-roles",
+      ).status,
+    ).not.toBe(0);
+    expect(
+      lintSnippetWithCss(
+        "Tile.tsx",
+        `import styles from "./Tile.module.css"; export const X = () => <row class={styles.tile}><ShellIcon name="wifi" color="var(--color-primary)" /></row>;`,
+        `.tile { background-color: var(--color-primary-container); }`,
+        "zshell/valid-color-roles",
+      ).status,
+    ).not.toBe(0);
+    const goodIconWell = lintSnippetWithCss(
+      "Tile.tsx",
+      `import styles from "./Tile.module.css"; export const X = (p: { active: boolean }) => (
+        <row class={styles.well} data-active={p.active ? "true" : null}>
+          <ShellIcon name="wifi" color={p.active ? "var(--color-primary)" : "var(--color-on-surface-variant)"} />
+        </row>
+      );`,
+      `.well { background-color: var(--color-surface-container-highest); &[data-active="true"] { background-color: color-mix(in srgb, var(--color-primary) 18%, transparent); } }`,
+      "zshell/valid-color-roles",
+    );
+    expect(goodIconWell.status, goodIconWell.output).toBe(0);
+    const goodMenuItem = lintSnippetWithCss(
+      "BarPopups.tsx",
+      `import styles from "./BarPopups.module.css"; export const X = (p: { active: boolean }) => (
+        <Button class={styles.item} data-active={p.active ? "true" : null}>
+          <ShellIcon name="check" color={p.active ? "var(--color-on-primary-container)" : "var(--color-on-surface-variant)"} />
+        </Button>
+      );`,
+      `.item { &[data-active="true"] { background-color: var(--color-primary-container); } }`,
+      "zshell/valid-color-roles",
+    );
+    expect(goodMenuItem.status, goodMenuItem.output).toBe(0);
+
+    // calm-active-surface
+    expect(
+      lintSnippetWithCss(
+        "Card.tsx",
+        `import styles from "./Card.module.css"; export const X = () => <row class={styles.card} />;`,
+        `.card { flex-grow: 1; height: 52px; &[data-active="true"] { background-color: var(--color-primary); } }`,
+        "zshell/calm-active-surface",
+      ).status,
+    ).not.toBe(0);
+    const goodCalm = lintSnippetWithCss(
+      "Card.tsx",
+      `import styles from "./Card.module.css"; export const X = () => <Button class={styles.fab} />;`,
+      `.fab { width: 52px; height: 52px; border-radius: 999px; background-color: var(--color-primary); }`,
+      "zshell/calm-active-surface",
+    );
+    expect(goodCalm.status, goodCalm.output).toBe(0);
+
+    // no-system-ui-font & valid-radius-scale & no-outline-none
+    expect(
+      lintSnippetWithCss(
+        "Font.tsx",
+        `import styles from "./Font.module.css"; export const X = () => <text class={styles.t}>A</text>;`,
+        `.t { font-family: system-ui; }`,
+        "zshell/no-system-ui-font",
+      ).status,
+    ).not.toBe(0);
+    expect(
+      lintSnippetWithCss(
+        "Radius.tsx",
+        `import styles from "./Radius.module.css"; export const X = () => <box class={styles.r} />;`,
+        `.r { border-radius: 0 0 18px 18px; }`,
+        "zshell/valid-radius-scale",
+      ).status,
+    ).not.toBe(0);
+    const goodMultiRadius = lintSnippetWithCss(
+      "Radius.tsx",
+      `import styles from "./Radius.module.css"; export const X = () => <box class={styles.r} />;`,
+      `.r { border-radius: 0 0 16px 16px; }`,
+      "zshell/valid-radius-scale",
+    );
+    expect(goodMultiRadius.status, goodMultiRadius.output).toBe(0);
+    expect(
+      lintSnippetWithCss(
+        "Focus.tsx",
+        `import styles from "./Focus.module.css"; export const X = () => <Button class={styles.b} />;`,
+        `.b { outline: none; }`,
+        "zshell/no-outline-none",
+      ).status,
+    ).not.toBe(0);
+
+    // tabular-readout
+    expect(
+      lintSnippetWithCss(
+        "Readout.tsx",
+        `import styles from "./Readout.module.css"; export const X = () => <text data-tabular="true" class={styles.num}>68%</text>;`,
+        `.num { font-family: var(--font-mono); }`,
+        "zshell/tabular-readout",
+      ).status,
+    ).not.toBe(0);
+    const goodReadoutCss = lintSnippetWithCss(
+      "Readout.tsx",
+      `import styles from "./Readout.module.css"; export const X = () => <text data-tabular="true" class={styles.num}>68%</text>;`,
+      `.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }`,
+      "zshell/tabular-readout",
+    );
+    expect(goodReadoutCss.status, goodReadoutCss.output).toBe(0);
+
+    // composite-input-focus with cx() and template literal
+    const goodCompositeCx = lintSnippetWithCss(
+      "LauncherOverlay.tsx",
+      `import styles from "./LauncherOverlay.module.css"; export const X = () => <row data-composite-input="true"><ShellIcon name="search" /><TextField class={cx(styles.field, "shell-composite-field")} onFocus={() => {}} onBlur={() => {}} value="" /></row>;`,
+      `.field { flex-grow: 1; }`,
+      "zshell/composite-input-focus",
+    );
+    expect(goodCompositeCx.status, goodCompositeCx.output).toBe(0);
+    const goodCompositeTpl = lintSnippetWithCss(
+      "LauncherOverlay.tsx",
+      `import styles from "./LauncherOverlay.module.css"; export const X = () => <row data-composite-input="true"><ShellIcon name="search" /><TextField class={\`\${styles.field} shell-composite-field\`} onFocus={() => {}} onBlur={() => {}} value="" /></row>;`,
+      `.field { flex-grow: 1; }`,
+      "zshell/composite-input-focus",
+    );
+    expect(goodCompositeTpl.status, goodCompositeTpl.output).toBe(0);
+
+    // no-hover-hit-target-shift (nested &:hover transform, [data-dock-visual] pointer-events, enabled Button cursor)
+    expect(
+      lintSnippetWithCss(
+        "DockSurface.tsx",
+        `import styles from "./DockSurface.module.css"; export const X = () => <Button class={styles.tile} />;`,
+        `.tile { &:hover { transform: translateY(-4px); } }`,
+        "zshell/no-hover-hit-target-shift",
+      ).status,
+    ).not.toBe(0);
+    expect(
+      lintSnippetWithCss(
+        "DockSurface.tsx",
+        `import styles from "./DockSurface.module.css"; export const X = () => <box data-dock-visual="true" class={styles.vis} />;`,
+        `.vis { width: 38px; }`,
+        "zshell/no-hover-hit-target-shift",
+      ).status,
+    ).not.toBe(0);
+    expect(
+      lintSnippetWithCss(
+        "StatusBar.tsx",
+        `import styles from "./StatusBar.module.css"; export const X = () => <Button class={styles.btn}>Go</Button>;`,
+        `.btn { cursor: default; }`,
+        "zshell/no-hover-hit-target-shift",
+      ).status,
+    ).not.toBe(0);
+    const goodHoverCss = lintSnippetWithCss(
+      "DockSurface.tsx",
+      `import styles from "./DockSurface.module.css"; export const X = () => <Button class={styles.tile}><box data-dock-visual="true" class={styles.vis} /></Button>;`,
+      `.tile { cursor: pointer; &:disabled { cursor: default; } &:not(:disabled):active > .vis { transform: scale(0.96); } } .vis { pointer-events: none; }`,
+      "zshell/no-hover-hit-target-shift",
+    );
+    expect(goodHoverCss.status, goodHoverCss.output).toBe(0);
+
+    // no-flush-surface-shadow & semantic-elevation-tokens & m3-motion-tokens & no-unblurred-translucent-surface
+    expect(
+      lintSnippetWithCss(
+        "SettingsWindow.tsx",
+        `import styles from "./SettingsWindow.module.css"; export const X = () => <WindowSurface class={styles.win} />;`,
+        `.win { box-shadow: var(--shadow-level-3); }`,
+        "zshell/no-flush-surface-shadow",
+      ).status,
+    ).not.toBe(0);
+    expect(
+      lintSnippetWithCss(
+        "ShellPanels.tsx",
+        `import styles from "./ShellPanels.module.css"; export const X = () => <PopupSurface><box class={styles.frame} /></PopupSurface>;`,
+        `.frame { box-shadow: var(--shadow-level-2); }`,
+        "zshell/no-flush-surface-shadow",
+      ).status,
+    ).not.toBe(0);
+    const goodInsetCss = lintSnippetWithCss(
+      "BarPopups.tsx",
+      `import styles from "./BarPopups.module.css"; export const X = () => <PopupSurface geometryInsets={{ top: 20, right: 28, bottom: 38, left: 28 }}><box class={styles.frame} /></PopupSurface>;`,
+      `.frame { box-shadow: var(--shadow-level-2); }`,
+      "zshell/no-flush-surface-shadow",
+    );
+    expect(goodInsetCss.status, goodInsetCss.output).toBe(0);
+    expect(
+      lintSnippetWithCss(
+        "Card.tsx",
+        `import styles from "./Card.module.css"; export const X = () => <box class={styles.c} />;`,
+        `.c { box-shadow: 0 20px 56px rgba(0, 0, 0, 0.6); }`,
+        "zshell/semantic-elevation-tokens",
+      ).status,
+    ).not.toBe(0);
+    expect(
+      lintSnippetWithCss(
+        "Anim.tsx",
+        `import styles from "./Anim.module.css"; export const X = () => <box class={styles.c} />;`,
+        `.c { transition-timing-function: ease-out; }`,
+        "zshell/m3-motion-tokens",
+      ).status,
+    ).not.toBe(0);
+    expect(
+      lintSnippetWithCss(
+        "SettingsWindow.tsx",
+        `import styles from "./SettingsWindow.module.css"; export const X = () => <box class={styles.c} />;`,
+        `.c { backdrop-filter: blur(20px); }`,
+        "zshell/no-unblurred-translucent-surface",
+      ).status,
+    ).not.toBe(0);
+    expect(
+      lintSnippetWithCss(
+        "DockSurface.tsx",
+        `import styles from "./DockSurface.module.css"; export const X = () => <box class={styles.c} />;`,
+        `.c { background-color: color-mix(in srgb, var(--color-surface-container) 42%, transparent); }`,
+        "zshell/no-unblurred-translucent-surface",
+      ).status,
+    ).not.toBe(0);
+
+    // min-hit-target-size & no-pill-action-button & interactive-hover-radius & no-partial-card-hover
+    expect(
+      lintSnippetWithCss(
+        "Settings.tsx",
+        `import styles from "./Settings.module.css"; export const X = () => <Button class={styles.tiny} />;`,
+        `.tiny { width: 32px; height: 22px; }`,
+        "zshell/min-hit-target-size",
+      ).status,
+    ).not.toBe(0);
+    expect(
+      lintSnippetWithCss(
+        "PowerDialog.tsx",
+        `import styles from "./PowerDialog.module.css"; export const X = () => <Button class={styles.pill}>Cancel</Button>;`,
+        `.pill { height: 34px; padding: 0 16px; border-radius: 999px; }`,
+        "zshell/no-pill-action-button",
+      ).status,
+    ).not.toBe(0);
+    const goodCircleCss = lintSnippetWithCss(
+      "PowerDialog.tsx",
+      `import styles from "./PowerDialog.module.css"; export const X = () => <Button class={styles.circle}><text>X</text></Button>;`,
+      `.circle { width: 36px; height: 36px; border-radius: 999px; }`,
+      "zshell/no-pill-action-button",
+    );
+    expect(goodCircleCss.status, goodCircleCss.output).toBe(0);
+    expect(
+      lintSnippetWithCss(
+        "IdlePane.tsx",
+        `import styles from "./IdlePane.module.css"; export const X = () => <Button class={styles.sharp}>Rule</Button>;`,
+        `.sharp { min-height: 32px; }`,
+        "zshell/interactive-hover-radius",
+      ).status,
+    ).not.toBe(0);
+    const goodHoverRadiusCss = lintSnippetWithCss(
+      "IdlePane.tsx",
+      `import styles from "./IdlePane.module.css"; export const X = () => <Button class={styles.rounded} data-size="md">Rule</Button>;`,
+      `.rounded { &[data-size="md"] { border-radius: var(--radius-md); } }`,
+      "zshell/interactive-hover-radius",
+    );
+    expect(goodHoverRadiusCss.status, goodHoverRadiusCss.output).toBe(0);
+    expect(
+      lintSnippetWithCss(
+        "ClipboardPanel.tsx",
+        `import styles from "./ClipboardPanel.module.css"; export const X = () => <Button class={styles.neg}>Row</Button>;`,
+        `.neg { border-radius: 10px; margin: -4px -6px; }`,
+        "zshell/no-partial-card-hover",
+      ).status,
+    ).not.toBe(0);
+
+    // centered-text-badge
+    expect(
+      lintSnippetWithCss(
+        "ClipboardPanel.tsx",
+        `import styles from "./ClipboardPanel.module.css"; export const X = () => <box class={styles.badge}><text class={styles.lbl}>Esc</text></box>;`,
+        `.badge { border-radius: 6px; background-color: var(--color-surface-container-highest); } .lbl { font-size: 10px; }`,
+        "zshell/centered-text-badge",
+      ).status,
+    ).not.toBe(0);
+    const goodBadgeCss = lintSnippetWithCss(
+      "ClipboardPanel.tsx",
+      `import styles from "./ClipboardPanel.module.css"; export const X = () => <box class={styles.badge}><text class={styles.lbl}>Esc</text></box>;`,
+      `.badge { display: flex; align-items: center; justify-content: center; border-radius: 6px; background-color: var(--color-surface-container-highest); } .lbl { font-size: 10px; line-height: 12px; }`,
+      "zshell/centered-text-badge",
+    );
+    expect(goodBadgeCss.status, goodBadgeCss.output).toBe(0);
+
+    // concentric-geometry
+    expect(
+      lintSnippetWithCss(
+        "DockSurface.tsx",
+        `import styles from "./DockSurface.module.css"; export const X = () => <row class={styles.capsule}><Button testId="dock-launcher" class={styles.tile} /></row>;`,
+        `.capsule { border-radius: 999px; } .tile { border-radius: 14px; }`,
+        "zshell/concentric-geometry",
+      ).status,
+    ).not.toBe(0);
+    expect(
+      lintSnippetWithCss(
+        "QuickSettingsPanel.tsx",
+        `import styles from "./QuickSettingsPanel.module.css"; export const X = () => <box data-qs-tile-icon="true" class={styles.well} />;`,
+        `.well { border-radius: 10px; }`,
+        "zshell/concentric-geometry",
+      ).status,
+    ).not.toBe(0);
+    const goodStatusBadgeCss = lintSnippetWithCss(
+      "StatusBar.tsx",
+      `import styles from "./StatusBar.module.css"; export const X = (p: { vertical: boolean; activeContainer: boolean }) => (
+        <box testId="bar-notifications-badge" data-vertical={p.vertical ? "true" : null} data-active-container={p.activeContainer ? "true" : null} class={styles.badge} />
+      );`,
+      `.badge { height: 24px; background-color: var(--color-primary-container); &[data-vertical="true"] { max-width: 28px; } &[data-active-container="true"] { background-color: color-mix(in srgb, var(--color-on-primary-container) 14%, transparent); } }`,
+      "zshell/concentric-geometry",
+    );
+    expect(goodStatusBadgeCss.status, goodStatusBadgeCss.output).toBe(0);
+
+    // consistent-active-hover-shape & no-child-control-overflow
+    expect(
+      lintSnippetWithCss(
+        "PluginHost.tsx",
+        `import styles from "./PluginHost.module.css"; declare function registerPluginBarWidget(s: unknown): void;
+         export function mount() { registerPluginBarWidget({ render: () => <box class={styles.wrap}><Widget /></box> }); }`,
+        `.wrap { padding: 4px; border-radius: 8px; }`,
+        "zshell/consistent-active-hover-shape",
+      ).status,
+    ).not.toBe(0);
+    const goodPluginWrapCss = lintSnippetWithCss(
+      "PluginHost.tsx",
+      `import styles from "./PluginHost.module.css"; declare function registerPluginBarWidget(s: unknown): void;
+       export function mount() { registerPluginBarWidget({ render: () => <box class={styles.wrap}><Widget /></box> }); }`,
+      `.wrap { padding: 0px; border-radius: inherit; }`,
+      "zshell/consistent-active-hover-shape",
+    );
+    expect(goodPluginWrapCss.status, goodPluginWrapCss.output).toBe(0);
+    expect(
+      lintSnippetWithCss(
+        "plugins/ai-usage/src/widget.tsx",
+        `import styles from "./widget.module.css"; export default function Widget() { return <Button class={styles.root} />; }`,
+        `.root { border-radius: 999px; }`,
+        "zshell/consistent-active-hover-shape",
+      ).status,
+    ).not.toBe(0);
+    const goodIndicatorCss = lintSnippetWithCss(
+      "StatusBar.tsx",
+      `import styles from "./StatusBar.module.css";
+       function WsBtn(p: { docked: boolean }) { return <Button data-docked={p.docked ? "true" : null} class={styles.wsBtn} />; }
+       export function Track(p: { docked: boolean }) { return <box><box data-active-indicator="true" data-docked={p.docked ? "true" : null} class={styles.ind} /><WsBtn docked={p.docked} /></box>; }`,
+      `.ind { left: 0px; top: 0px; border-radius: 999px; &[data-docked="true"] { border-radius: 6px; } }
+       .wsBtn { border-radius: 999px; &[data-docked="true"] { border-radius: 6px; } }`,
+      "zshell/consistent-active-hover-shape",
+    );
+    expect(goodIndicatorCss.status, goodIndicatorCss.output).toBe(0);
+    expect(
+      lintSnippetWithCss(
+        "StatusBar.tsx",
+        `import styles from "./StatusBar.module.css"; export const X = (p: { vertical: boolean }) => (
+          <box data-vertical={p.vertical ? "true" : null} class={styles.capsule}><Button class={styles.btn}>O</Button></box>
+        );`,
+        `.capsule { height: 32px; &[data-vertical="true"] { width: 30px; height: auto; } } .btn { width: 32px; height: 24px; }`,
+        "zshell/no-child-control-overflow",
+      ).status,
+    ).not.toBe(0);
+    const goodOverflowCss = lintSnippetWithCss(
+      "StatusBar.tsx",
+      `import styles from "./StatusBar.module.css"; export const X = (p: { vertical: boolean }) => (
+        <box data-vertical={p.vertical ? "true" : null} class={styles.capsule}><Button class={styles.btn}>O</Button></box>
+      );`,
+      `.capsule { height: 32px; &[data-vertical="true"] { width: 32px; height: auto; } } .btn { width: 24px; height: 24px; }`,
+      "zshell/no-child-control-overflow",
+    );
+    expect(goodOverflowCss.status, goodOverflowCss.output).toBe(0);
+  });
 });
 
 function parseCubicPoints(d: string): { x: number; y: number }[] {
@@ -876,6 +1273,399 @@ describe("Exact-Geometry Shape & Material-First Icon contracts", () => {
   });
 });
 
+const VALID_COLOR_ROLES = new Set([
+  "surface", "surface-dim", "surface-bright",
+  "surface-container-lowest", "surface-container-low", "surface-container",
+  "surface-container-high", "surface-container-highest",
+  "on-surface", "on-surface-variant", "inverse-surface", "inverse-on-surface",
+  "outline", "outline-variant", "scrim",
+  "primary", "on-primary", "primary-container", "on-primary-container",
+  "secondary", "on-secondary", "secondary-container", "on-secondary-container",
+  "tertiary", "on-tertiary", "tertiary-container", "on-tertiary-container",
+  "error", "on-error", "error-container", "on-error-container",
+]);
+
+const SURFACE_FOREGROUND_ROLES = new Set([
+  "on-surface",
+  "on-surface-variant",
+  "primary",
+  "secondary",
+  "tertiary",
+  "error",
+  "outline",
+]);
+
+const ROLE_PAIRS = new Map<string, ReadonlySet<string>>([
+  ["primary", new Set(["on-primary"])],
+  ["primary-container", new Set(["on-primary-container"])],
+  ["secondary", new Set(["on-secondary"])],
+  ["secondary-container", new Set(["on-secondary-container"])],
+  ["tertiary", new Set(["on-tertiary"])],
+  ["tertiary-container", new Set(["on-tertiary-container"])],
+  ["error", new Set(["on-error"])],
+  ["error-container", new Set(["on-error-container"])],
+  ["inverse-surface", new Set(["inverse-on-surface"])],
+  ["surface", SURFACE_FOREGROUND_ROLES],
+  ["surface-dim", SURFACE_FOREGROUND_ROLES],
+  ["surface-bright", SURFACE_FOREGROUND_ROLES],
+  ["surface-container-lowest", SURFACE_FOREGROUND_ROLES],
+  ["surface-container-low", SURFACE_FOREGROUND_ROLES],
+  ["surface-container", SURFACE_FOREGROUND_ROLES],
+  ["surface-container-high", SURFACE_FOREGROUND_ROLES],
+  ["surface-container-highest", SURFACE_FOREGROUND_ROLES],
+]);
+
+const ALLOWED_RADIUS_PX = new Set([0, 1, 2, 3, 4, 6, 8, 10, 12, 14, 16, 22, 999]);
+const ALLOWED_CUBIC_BEZIERS = new Set<string>(Object.values(M3_EASINGS));
+const SKIPPED_SCAN_DIRS = new Set(["node_modules", "dist", ".zgui-generations", ".git"]);
+
+function walkCssModules(dir: string, out: string[]): void {
+  if (!existsSync(dir)) return;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (SKIPPED_SCAN_DIRS.has(entry.name)) continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkCssModules(full, out);
+    } else if (entry.isFile() && entry.name.endsWith(".module.css")) {
+      out.push(full);
+    }
+  }
+}
+
+function discoverCssModuleFiles(): string[] {
+  const found: string[] = [];
+  walkCssModules(join(repoRoot, "packages/sdk/src"), found);
+  walkCssModules(join(shellDir, "src"), found);
+  const pluginsDir = join(repoRoot, "plugins");
+  if (existsSync(pluginsDir)) {
+    for (const entry of readdirSync(pluginsDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        walkCssModules(join(pluginsDir, entry.name, "src"), found);
+      }
+    }
+  }
+  return [...new Set(found)].sort();
+}
+
+interface ComponentSources {
+  readonly tsx: string;
+  readonly css: string;
+}
+
+function readComponentSources(relTsxPath: string): ComponentSources {
+  const fullTsxPath = join(repoRoot, relTsxPath);
+  const tsx = readFileSync(fullTsxPath, "utf8");
+  const cssPaths = new Set<string>();
+  for (const match of tsx.matchAll(/from\s+["'](\.[^"']+\.module\.css)["']/g)) {
+    cssPaths.add(resolve(dirname(fullTsxPath), match[1]!));
+  }
+  const siblingModule = fullTsxPath.replace(/\.tsx?$/, ".module.css");
+  if (existsSync(siblingModule)) {
+    cssPaths.add(siblingModule);
+  }
+  const css = [...cssPaths]
+    .filter(p => existsSync(p))
+    .sort()
+    .map(p => readFileSync(p, "utf8"))
+    .join("\n");
+  return { tsx, css };
+}
+
+function hasWidthPx(unit: ComponentSources, px: number): boolean {
+  return unit.tsx.includes(`width: "${px}px"`) || new RegExp(`\\bwidth\\s*:\\s*${px}px\\b`).test(unit.css);
+}
+
+function hasRoundCornerBlock(unit: ComponentSources): boolean {
+  return (
+    unit.tsx.includes(`"--zgui-corner-shape": "none"`) ||
+    unit.tsx.includes(`data-corner-shape="round"`) ||
+    /--zgui-corner-shape\s*:\s*none\b/.test(unit.css)
+  );
+}
+
+interface CssDeclaration {
+  readonly prop: string;
+  readonly value: string;
+}
+
+interface CssRuleBlock {
+  readonly selectors: string[];
+  readonly declarations: CssDeclaration[];
+}
+
+function splitTopLevel(input: string, isDelimiter: (ch: string) => boolean): string[] {
+  const parts: string[] = [];
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let quote: string | null = null;
+  let start = 0;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i]!;
+    if (quote) {
+      if (ch === "\\" && i + 1 < input.length) {
+        i++;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === `"` || ch === `'`) {
+      quote = ch;
+    } else if (ch === "(") {
+      parenDepth++;
+    } else if (ch === ")") {
+      if (parenDepth > 0) parenDepth--;
+    } else if (ch === "[") {
+      bracketDepth++;
+    } else if (ch === "]") {
+      if (bracketDepth > 0) bracketDepth--;
+    } else if (parenDepth === 0 && bracketDepth === 0 && isDelimiter(ch)) {
+      const slice = input.slice(start, i).trim();
+      if (slice.length > 0) parts.push(slice);
+      start = i + 1;
+    }
+  }
+  const tail = input.slice(start).trim();
+  if (tail.length > 0) parts.push(tail);
+  return parts;
+}
+
+function extractDeclarations(text: string): CssDeclaration[] {
+  const decls: CssDeclaration[] = [];
+  for (const stmt of splitTopLevel(text, ch => ch === ";")) {
+    const colon = stmt.indexOf(":");
+    if (colon <= 0) continue;
+    const prop = stmt.slice(0, colon).trim().toLowerCase();
+    const value = stmt.slice(colon + 1).trim();
+    if (prop.length > 0) decls.push({ prop, value });
+  }
+  return decls;
+}
+
+function resolveNestedSelectors(parents: string[], rawSelector: string): string[] {
+  const children = splitTopLevel(rawSelector, ch => ch === ",");
+  if (parents.length === 0) return children;
+  const resolved: string[] = [];
+  for (const parent of parents) {
+    for (const child of children) {
+      resolved.push(child.includes("&") ? child.replaceAll("&", parent) : `${parent} ${child}`);
+    }
+  }
+  return resolved;
+}
+
+function rightmostCompoundSelector(selector: string): string {
+  const parts = splitTopLevel(selector, ch => ch === ">" || ch === "+" || ch === "~" || /\s/.test(ch));
+  return parts.at(-1) ?? "";
+}
+
+function parseCssRuleBlocks(body: string, parentSelectors: string[] = []): CssRuleBlock[] {
+  const blocks: CssRuleBlock[] = [];
+  let inlineText = "";
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let quote: string | null = null;
+  let i = 0;
+
+  while (i < body.length) {
+    const ch = body[i]!;
+    if (quote) {
+      inlineText += ch;
+      if (ch === "\\" && i + 1 < body.length) {
+        inlineText += body[i + 1]!;
+        i += 2;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      i++;
+      continue;
+    }
+    if (ch === `"` || ch === `'`) {
+      quote = ch;
+      inlineText += ch;
+      i++;
+      continue;
+    }
+    if (ch === "(") parenDepth++;
+    else if (ch === ")" && parenDepth > 0) parenDepth--;
+    else if (ch === "[") bracketDepth++;
+    else if (ch === "]" && bracketDepth > 0) bracketDepth--;
+
+    if (parenDepth === 0 && bracketDepth === 0 && ch === "{") {
+      const semiIdx = inlineText.lastIndexOf(";");
+      const prelude = (semiIdx >= 0 ? inlineText.slice(semiIdx + 1) : inlineText).trim();
+      const beforePrelude = semiIdx >= 0 ? inlineText.slice(0, semiIdx + 1) : "";
+      if (parentSelectors.length > 0 && beforePrelude.trim().length > 0) {
+        const existing = blocks.find(b => b.selectors === parentSelectors);
+        const decls = extractDeclarations(beforePrelude);
+        if (existing) existing.declarations.push(...decls);
+        else blocks.push({ selectors: parentSelectors, declarations: decls });
+      }
+      inlineText = "";
+
+      let depth = 1;
+      let j = i + 1;
+      let innerQuote: string | null = null;
+      while (j < body.length && depth > 0) {
+        const c = body[j]!;
+        if (innerQuote) {
+          if (c === "\\" && j + 1 < body.length) {
+            j += 2;
+            continue;
+          }
+          if (c === innerQuote) innerQuote = null;
+          j++;
+          continue;
+        }
+        if (c === `"` || c === `'`) innerQuote = c;
+        else if (c === "{") depth++;
+        else if (c === "}") depth--;
+        j++;
+      }
+      const innerBody = body.slice(i + 1, j - 1);
+      i = j;
+
+      if (prelude.startsWith("@")) {
+        if (!/^@(?:-[a-z]+-)?keyframes\b/i.test(prelude)) {
+          blocks.push(...parseCssRuleBlocks(innerBody, parentSelectors));
+        }
+      } else if (prelude.length > 0) {
+        const selectors = resolveNestedSelectors(parentSelectors, prelude);
+        const ruleBlock: CssRuleBlock = { selectors, declarations: [] };
+        blocks.push(ruleBlock);
+        blocks.push(...parseCssRuleBlocks(innerBody, selectors));
+      }
+      continue;
+    }
+
+    inlineText += ch;
+    i++;
+  }
+
+  if (parentSelectors.length > 0 && inlineText.trim().length > 0) {
+    const decls = extractDeclarations(inlineText);
+    const existing = blocks.find(b => b.selectors === parentSelectors);
+    if (existing) existing.declarations.push(...decls);
+    else if (decls.length > 0) blocks.push({ selectors: parentSelectors, declarations: decls });
+  }
+  return blocks;
+}
+
+function isAllowedRadiusValue(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed === "inherit") return true;
+  const parts = trimmed.split(/\s+/);
+  for (const part of parts) {
+    if (part === "0" || part === "50%" || /^var\(--radius-[a-z0-9-]+\)$/.test(part)) continue;
+    const match = /^(\d+(?:\.\d+)?)px$/i.exec(part);
+    if (!match) return false;
+    if (!ALLOWED_RADIUS_PX.has(Number(match[1]))) return false;
+  }
+  return parts.length > 0;
+}
+
+function validateDesignStylesheet(css: string, filePath: string): string[] {
+  const violations: string[] = [];
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const normPath = filePath.replaceAll("\\", "/");
+  const isModuleCss = normPath.endsWith(".module.css");
+  const isSolidToplevel =
+    /(?:^|\/)(?:SettingsWindow|SystemMonitorWindow)\.module\.css$/.test(normPath) ||
+    /\/surfaces\/settings\/[^/]+\.module\.css$/.test(normPath);
+  const isFlushToplevel = /(?:^|\/)(?:SettingsWindow|SystemMonitorWindow)\.module\.css$/.test(normPath);
+
+  if (/\boutline\s*:\s*(?:none|0(?:px)?)\s*;/i.test(stripped)) {
+    violations.push(`${filePath}: outline: none is forbidden`);
+  }
+  if (/\btransition(?:-property)?\s*:[^;{}]*\boutline-width\b/i.test(stripped)) {
+    violations.push(`${filePath}: outline-width transition is forbidden`);
+  }
+  if (/\bfont-family\s*:[^;{}]*\bsystem-ui\b/i.test(stripped)) {
+    violations.push(`${filePath}: system-ui font is forbidden`);
+  }
+  for (const match of stripped.matchAll(/var\(\s*--color-([a-z0-9-]+)/g)) {
+    if (!VALID_COLOR_ROLES.has(match[1]!)) {
+      violations.push(`${filePath}: unknown color role --color-${match[1]}`);
+    }
+  }
+  if (isModuleCss) {
+    if (/#(?:[0-9a-fA-F]{3,8})\b|\b(?:rgba?|hsla?)\s*\(/i.test(stripped)) {
+      violations.push(`${filePath}: raw color literal is forbidden in *.module.css`);
+    }
+    if (
+      /background(?:-color)?\s*:\s*color-mix\(\s*in\s+srgb\s*,\s*var\(--color-surface[^)]*\)\s+\d+(?:\.\d+)?%\s*,\s*transparent\s*\)/i.test(
+        stripped,
+      )
+    ) {
+      violations.push(`${filePath}: unblurred translucent surface is forbidden in *.module.css`);
+    }
+  }
+  if (isSolidToplevel && /\bbackdrop-filter\s*:/i.test(stripped)) {
+    violations.push(`${filePath}: backdrop-filter is forbidden on solid Settings/SystemMonitor toplevel sheets`);
+  }
+
+  for (const block of parseCssRuleBlocks(stripped)) {
+    const isRootRule = block.selectors.every(sel => sel.trim() === ":root");
+    let bgRole: string | null = null;
+    let fgRole: string | null = null;
+
+    for (const { prop, value } of block.declarations) {
+      if (prop === "transform" && /\b(?:translate|scale|rotate|skew|matrix)/i.test(value)) {
+        for (const sel of block.selectors) {
+          const subject = rightmostCompoundSelector(sel);
+          if (/:(?:hover|active)(?::[a-z-]+)*$/i.test(subject)) {
+            violations.push(`${filePath}: hover/active hit-target shift on "${sel}"`);
+          }
+        }
+      }
+      if (
+        !prop.startsWith("--") &&
+        (prop === "border-radius" || /^border-(?:top|bottom)-(?:left|right)-radius$/.test(prop)) &&
+        !isAllowedRadiusValue(value)
+      ) {
+        violations.push(`${filePath}: off-scale ${prop}: ${value}`);
+      }
+      if (prop === "background-color" || prop === "background") {
+        const m = /^var\(\s*--color-([a-z0-9-]+)\s*\)$/.exec(value);
+        if (m) bgRole = m[1]!;
+      }
+      if (prop === "color") {
+        const m = /^var\(\s*--color-([a-z0-9-]+)\s*\)$/.exec(value);
+        if (m) fgRole = m[1]!;
+      }
+      if (!isRootRule && prop === "transition-timing-function") {
+        for (const item of splitTopLevel(value, ch => ch === ",")) {
+          if (
+            item !== "linear" &&
+            !/^var\(--motion-easing-[a-z0-9-]+\)$/.test(item) &&
+            !ALLOWED_CUBIC_BEZIERS.has(item)
+          ) {
+            violations.push(`${filePath}: non-M3 transition-timing-function "${item}"`);
+          }
+        }
+      }
+      if (!isRootRule && prop === "font-family" && !/^(?:var\(--font-(?:sans|mono)\)|inherit)$/.test(value.trim())) {
+        violations.push(`${filePath}: non-semantic font-family "${value}"`);
+      }
+      if (isFlushToplevel && prop === "box-shadow") {
+        const trimmed = value.trim().toLowerCase();
+        if (trimmed !== "none" && !/^inset\b/.test(trimmed)) {
+          violations.push(`${filePath}: flush prefer-no-csd toplevel window forbids outer box-shadow "${value}"`);
+        }
+      }
+    }
+
+    if (bgRole && fgRole) {
+      const allowed = ROLE_PAIRS.get(bgRole);
+      if (allowed && !allowed.has(fgRole)) {
+        violations.push(`${filePath}: invalid color role pair --color-${fgRole} on --color-${bgRole}`);
+      }
+    }
+  }
+
+  return violations;
+}
+
 describe("DESIGN.md token and surface contract sync", () => {
   test("DESIGN.md frontmatter colors match SHELL_DEFAULT_SCHEME and app.css :root", () => {
     const frontmatter = parseDesignFrontmatter();
@@ -928,16 +1718,16 @@ describe("DESIGN.md token and surface contract sync", () => {
 
     const shellPanels = readFileSync(join(shellDir, "src/panels/ShellPanels.tsx"), "utf8");
     const pluginHost = readFileSync(join(shellDir, "src/plugins/PluginHost.tsx"), "utf8");
-    const settingsWin = readFileSync(join(shellDir, "src/surfaces/SettingsWindow.tsx"), "utf8");
-    const sysmonWin = readFileSync(join(shellDir, "src/surfaces/SystemMonitorWindow.tsx"), "utf8");
+    const settingsWin = readComponentSources("apps/shell/src/surfaces/SettingsWindow.tsx");
+    const sysmonWin = readComponentSources("apps/shell/src/surfaces/SystemMonitorWindow.tsx");
     expect(shellPanels).toContain(`height="auto"`);
     expect(pluginHost).toContain(`height="auto"`);
-    expect(settingsWin).toContain("width={820}");
-    expect(settingsWin).toContain("height={600}");
-    expect(settingsWin).toContain(`width: "216px"`);
-    expect(sysmonWin).toContain("width={820}");
-    expect(sysmonWin).toContain("height={600}");
-    expect(sysmonWin).toContain(`width: "216px"`);
+    expect(settingsWin.tsx).toContain("width={820}");
+    expect(settingsWin.tsx).toContain("height={600}");
+    expect(hasWidthPx(settingsWin, 216), "SettingsWindow 216px sidebar").toBe(true);
+    expect(sysmonWin.tsx).toContain("width={820}");
+    expect(sysmonWin.tsx).toContain("height={600}");
+    expect(hasWidthPx(sysmonWin, 216), "SystemMonitorWindow 216px sidebar").toBe(true);
 
     // QuickSettings Wi-Fi tile decouples visual active fill (wifiConnected) from toggle a11y checked (wifi.enabled).
     const qsPanel = readFileSync(join(shellDir, "src/panels/QuickSettingsPanel.tsx"), "utf8");
@@ -946,13 +1736,13 @@ describe("DESIGN.md token and surface contract sync", () => {
 
   test("surface width tiers match DESIGN.md (Compact 360, Standard 396, Clipboard 560, Launcher 652, Overview 684)", () => {
     const shellPanels = readFileSync(join(shellDir, "src/panels/ShellPanels.tsx"), "utf8");
-    const clipboardOverlay = readFileSync(join(shellDir, "src/surfaces/ClipboardOverlay.tsx"), "utf8");
+    const clipboardOverlay = readComponentSources("apps/shell/src/surfaces/ClipboardOverlay.tsx");
     const powerDialog = readFileSync(join(shellDir, "src/surfaces/PowerDialog.tsx"), "utf8");
     const polkitDialog = readFileSync(join(shellDir, "src/surfaces/PolkitDialog.tsx"), "utf8");
     const primitivesCss = readFileSync(join(repoRoot, "packages/sdk/src/zgui-primitives.module.css"), "utf8");
-    const launcher = readFileSync(join(shellDir, "src/surfaces/LauncherOverlay.tsx"), "utf8");
-    const overview = readFileSync(join(repoRoot, "plugins/niri-overview/src/layer.tsx"), "utf8");
-    const builtinOverview = readFileSync(join(shellDir, "src/surfaces/OverviewOverlay.tsx"), "utf8");
+    const launcher = readComponentSources("apps/shell/src/surfaces/LauncherOverlay.tsx");
+    const overview = readComponentSources("plugins/niri-overview/src/layer.tsx");
+    const builtinOverview = readComponentSources("apps/shell/src/surfaces/OverviewOverlay.tsx");
 
     expect(shellPanels).toMatch(/"quick-settings":\s*\{\s*width:\s*396\b/);
     expect(shellPanels).toMatch(/calendar:\s*\{\s*width:\s*396\b/);
@@ -960,14 +1750,14 @@ describe("DESIGN.md token and surface contract sync", () => {
     expect(shellPanels).toMatch(/battery:\s*\{\s*width:\s*396\b/);
     expect(shellPanels).toMatch(/"system-monitor":\s*\{\s*width:\s*396\b/);
     expect(shellPanels).not.toMatch(/\bclipboard:/);
-    expect(clipboardOverlay).toContain(`width: "560px"`);
-    expect(clipboardOverlay).toContain(`keyboard="exclusive"`);
+    expect(hasWidthPx(clipboardOverlay, 560), "ClipboardOverlay 560px width tier").toBe(true);
+    expect(clipboardOverlay.tsx).toContain(`keyboard="exclusive"`);
     expect(powerDialog).toContain("<M3DialogShell");
     expect(polkitDialog).toContain("<M3DialogShell");
     expect(primitivesCss).toMatch(/\.dialogCard\s*\{[^}]*width:\s*360px;/s);
-    expect(launcher).toContain(`width: "652px"`);
-    expect(overview).toContain(`width: "684px"`);
-    expect(builtinOverview).toContain(`width: "684px"`);
+    expect(hasWidthPx(launcher, 652), "LauncherOverlay 652px width tier").toBe(true);
+    expect(hasWidthPx(overview, 684), "niri-overview 684px width tier").toBe(true);
+    expect(hasWidthPx(builtinOverview, 684), "OverviewOverlay 684px width tier").toBe(true);
   });
 
   test(".impeccable/design.json motion tokens match packages/sdk/src/motion.ts and app.css", () => {
@@ -1052,53 +1842,54 @@ describe("DESIGN.md token and surface contract sync", () => {
     expect(lightSolid).toContain("--shadow-level-3: 0 18px 48px rgba(25, 28, 32, 0.16);");
   });
 
-  test("CSS Modules and stylesheets enforce DESIGN.md color, outline, font, and hover-stability invariants", () => {
-    const validColorRoles = new Set([
-      "surface", "surface-dim", "surface-bright",
-      "surface-container-lowest", "surface-container-low", "surface-container",
-      "surface-container-high", "surface-container-highest",
-      "on-surface", "on-surface-variant", "inverse-surface", "inverse-on-surface",
-      "outline", "outline-variant", "scrim",
-      "primary", "on-primary", "primary-container", "on-primary-container",
-      "secondary", "on-secondary", "secondary-container", "on-secondary-container",
-      "tertiary", "on-tertiary", "tertiary-container", "on-tertiary-container",
-      "error", "on-error", "error-container", "on-error-container",
-    ]);
-
-    const cssFiles = [
-      join(repoRoot, "packages/sdk/src/zgui-primitives.module.css"),
-      join(shellDir, "src/app.css"),
-    ];
+  test("CSS Modules and stylesheets enforce DESIGN.md color, outline, font, radius, motion, and hover-stability invariants", () => {
+    const moduleCssFiles = discoverCssModuleFiles();
+    expect(moduleCssFiles.length).toBeGreaterThanOrEqual(1);
+    const cssFiles = [join(shellDir, "src/app.css"), ...moduleCssFiles];
 
     for (const filePath of cssFiles) {
       const css = readFileSync(filePath, "utf8");
-      const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
-
-      expect(stripped, `${filePath} outline: none`).not.toMatch(/\boutline\s*:\s*(?:none|0(?:px)?)\s*;/i);
-      expect(stripped, `${filePath} outline-width transition`).not.toMatch(/\btransition[^;]*\boutline-width\b/i);
-      expect(stripped, `${filePath} system-ui font`).not.toMatch(/\bfamily\s*:\s*[^;]*system-ui/i);
-
-      for (const match of stripped.matchAll(/var\(\s*--color-([a-z0-9-]+)/g)) {
-        expect(validColorRoles.has(match[1]!), `${filePath} unknown color role --color-${match[1]}`).toBe(true);
-      }
-
-      for (const rule of stripped.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-        const selectors = rule[1] ?? "";
-        const body = rule[2] ?? "";
-        if (!/\btransform\s*:\s*[^;]*(?:translate|scale|rotate|skew|matrix)/i.test(body)) continue;
-        for (const rawSel of selectors.split(",")) {
-          const subject = rawSel.trim().split(/[\s>+~]+/).pop() ?? "";
-          expect(subject, `${filePath} hover hit-target shift on "${rawSel.trim()}"`).not.toMatch(/:(?:hover|active)(?::[a-z-]+)*$/i);
-        }
-      }
-
-      if (filePath.endsWith(".module.css")) {
-        expect(stripped, `${filePath} raw color literal`).not.toMatch(/#(?:[0-9a-fA-F]{3,8})\b|\b(?:rgba?|hsla?)\s*\(/i);
-        expect(stripped, `${filePath} unblurred translucent surface`).not.toMatch(
-          /background(?:-color)?\s*:\s*color-mix\(\s*in\s+srgb\s*,\s*var\(--color-surface[^)]*\)\s+\d+(?:\.\d+)?%\s*,\s*transparent\s*\)/i,
-        );
-      }
+      expect(validateDesignStylesheet(css, filePath), filePath).toEqual([]);
     }
+
+    expect(
+      validateDesignStylesheet(`.card { border-radius: 24px; }`, "Card.module.css").length,
+      "off-scale border-radius in CSS Module",
+    ).toBeGreaterThan(0);
+    expect(
+      validateDesignStylesheet(
+        `.alert { background-color: var(--color-error-container); color: var(--color-error); }`,
+        "Alert.module.css",
+      ).length,
+      "mismatched color-role pair in CSS Module",
+    ).toBeGreaterThan(0);
+    expect(
+      validateDesignStylesheet(`.tile { &:hover { transform: scale(1.02); } }`, "Tile.module.css").length,
+      "nested hover hit-target shift",
+    ).toBeGreaterThan(0);
+    expect(
+      validateDesignStylesheet(
+        `.tile { &:not(:disabled):active > .pressInner { transform: scale(0.955); } }`,
+        "Tile.module.css",
+      ),
+      "nested inner press visual transform is allowed",
+    ).toEqual([]);
+    expect(
+      validateDesignStylesheet(`.tile { transition-timing-function: ease-in-out; }`, "Tile.module.css").length,
+      "non-M3 timing curve in CSS Module",
+    ).toBeGreaterThan(0);
+    expect(
+      validateDesignStylesheet(`.win { backdrop-filter: blur(20px); }`, "apps/shell/src/surfaces/SettingsWindow.module.css")
+        .length,
+      "backdrop-filter forbidden on solid SettingsWindow sheet",
+    ).toBeGreaterThan(0);
+    expect(
+      validateDesignStylesheet(
+        `.win { box-shadow: var(--shadow-level-3); }`,
+        "apps/shell/src/surfaces/SettingsWindow.module.css",
+      ).length,
+      "outer box-shadow forbidden on prefer-no-csd SettingsWindow sheet",
+    ).toBeGreaterThan(0);
   });
 
   test("Universal Pointer Affordance & Tactile Activation contracts hold in app.css, zgui-primitives.module.css, and L1", () => {
@@ -1306,8 +2097,11 @@ export function mount() {
       ["apps/shell/src/surfaces/SystemMonitorWindow.tsx", "SystemMonitor window status dot & progress bars"],
       ["apps/shell/src/surfaces/settings/AppearancePane.tsx", "Settings circular color seed swatches"],
     ] as const) {
-      const source = readFileSync(join(repoRoot, relPath), "utf8");
-      expect(source, `${label} declares "--zgui-corner-shape": "none"`).toContain(`"--zgui-corner-shape": "none"`);
+      const unit = readComponentSources(relPath);
+      expect(
+        hasRoundCornerBlock(unit),
+        `${label} blocks superellipse inheritance (--zgui-corner-shape: none or data-corner-shape="round")`,
+      ).toBe(true);
     }
   });
 });

@@ -5,6 +5,7 @@
 **/dist
 **/.zgui-generations
 **/.zgui-native-status.json
+*.module.css.d.ts
 .DS_Store
 *.swp
 .scratch/

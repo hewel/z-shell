@@ -19,7 +19,7 @@
     "icons:sync": "bun tools/sync-tabler-icons.ts",
     "dev:local": "bash tools/dev-local.sh",
     "lint": "bun --bun run oxlint --deny-warnings",
-    "typecheck": "bun --bun run tsrs --project tsconfig.quickjs.json && bun --bun run tsrs --project packages/composer/tsconfig.json && bun --bun run tsrs --project apps/shell/tsconfig.json",
+    "typecheck": "bun -e \"import { syncCssModuleTypes } from '@hewel/zgui-build'; await syncCssModuleTypes({ project: 'apps/shell/tsconfig.json', include: ['plugins/*/src'] });\" && bun --bun run tsrs --project tsconfig.quickjs.json && bun --bun run tsrs --project packages/composer/tsconfig.json && bun --bun run tsrs --project apps/shell/tsconfig.json",
     "test:rust": "cargo test --workspace && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo doc --workspace --no-deps",
     "test:ui": "bun run lint && bun run typecheck && bun test --timeout=30000 packages/sdk/tests/motion.test.ts packages/sdk/tests/zgui.test.ts apps/shell/tests/ plugins/",
     "test:ts": "cargo build --bins && bun test --timeout=30000 packages/ plugins/ apps/",

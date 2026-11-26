@@ -17,6 +17,7 @@ export interface BuildShellOptions {
   readonly root?: string;
   readonly capabilitiesFile?: string;
   readonly extraCapabilities?: HostCapabilities;
+  readonly cssModuleInclude?: readonly string[];
   readonly development?: boolean;
 }
 
@@ -33,6 +34,7 @@ export async function buildShellApplication(options: BuildShellOptions): Promise
       // Normalization returns fresh arrays; expose the mutable view required by zgui-build.
       extraCapabilities: normalizeHostCapabilities(extra) as Capabilities,
     }),
+    ...(options.cssModuleInclude === undefined ? {} : { cssModuleInclude: options.cssModuleInclude }),
     ...(options.development === undefined ? {} : { development: options.development }),
   };
   return buildApplication(options.app ?? "shell", buildOptions);
@@ -43,6 +45,7 @@ export interface ComposeAndBuildOptions extends ComposePluginsOptions {
   readonly appDirectory: string;
   readonly root?: string;
   readonly development?: boolean;
+  readonly cssModuleInclude?: readonly string[];
 }
 
 export interface ComposeAndBuildResult {
@@ -57,6 +60,7 @@ export async function composeAndBuildShell(options: ComposeAndBuildOptions): Pro
     appDirectory: options.appDirectory,
     ...(options.root === undefined ? {} : { root: options.root }),
     capabilitiesFile: join(options.outDir, "manifest-capabilities.json"),
+    ...(options.cssModuleInclude === undefined ? {} : { cssModuleInclude: options.cssModuleInclude }),
     ...(options.development === undefined ? {} : { development: options.development }),
   });
   return { compose, published };

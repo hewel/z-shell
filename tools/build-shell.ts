@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, relative, resolve } from "node:path";
+import { syncCssModuleTypes } from "@hewel/zgui-build";
 import {
   buildShellApplication,
   composePlugins,
@@ -225,6 +226,11 @@ if (!inspected.hasAnyEnabled) {
       entryInstances: inspected.instances,
     });
 
+    await syncCssModuleTypes({
+      project: join(appDirectory, "tsconfig.json"),
+      include: [join(repoRoot, "plugins/*/src")],
+    });
+
     mkdirSync(stagedShellDir, { recursive: true });
     for (const entry of ["package.json", "tsconfig.json", "assets", "src", "preview"]) {
       const source = join(appDirectory, entry);
@@ -244,6 +250,7 @@ if (!inspected.hasAnyEnabled) {
       app: "shell",
       appDirectory: stagedShellDir,
       capabilitiesFile: join(composeOutDir, "manifest-capabilities.json"),
+      cssModuleInclude: [join(repoRoot, "packages/sdk/src"), join(repoRoot, "plugins/*/src")],
     });
 
     const targetDist = publishComposedDist(appDirectory, published.dist);
