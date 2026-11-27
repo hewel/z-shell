@@ -54,7 +54,7 @@ function PluginPanelFrame(props: {
   cardRef?: (node: NativeNode) => void;
   children: NativeChild;
 }): NativeChild {
-  useShellTheme(props.theme.data);
+  useShellTheme(() => props.theme.data());
   const scheme = useMotionScheme();
   return (
     <box inert={props.inert} class={shellPanelsStyles.popoverBleed}>
@@ -98,10 +98,7 @@ function formatPluginTitle(pluginId: string, entryId: string): string {
     .join(" ");
 }
 
-export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): NativeChild {
-  const bundle = props?.bundle ?? composedPlugins;
-  if (bundle.entryInstances.length === 0 && bundle.services.length === 0) return null;
-
+function ActivePluginHost(props: { readonly bundle: ComposedPluginBundle }): NativeChild {
   const {
     publicClient, invokeHostResult, registerPluginBarWidget, registerPluginSettingsPage, pluginSettingsPages, openSettingsWindow,
     monitors, outputs, settings, theme,
@@ -109,7 +106,7 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
   } = useShellStore();
   const [pluginPanelData, setPluginPanelData] = createSignal<ActivePluginPanel | null>(null);
   let serviceController: ComposedServiceController | undefined;
-  const panels = bundle.entryInstances.filter(instance => instance.kind === "panel");
+  const panels = () => props.bundle.entryInstances.filter(instance => instance.kind === "panel");
   const scheme = useMotionScheme();
   const activePluginPanel = createMemo(() => {
     const activeId = activePluginPanelId();
@@ -137,20 +134,21 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
     setPluginPanelData(null);
   };
 
-  if (bundle.services.length > 0) {
-    createEffect(publicClient, client => {
+  createEffect(
+    () => (props.bundle.services.length > 0 ? publicClient() : undefined),
+    client => {
       if (!client) {
         serviceController = undefined;
         return;
       }
-      const controller = createComposedServiceController(bundle, client);
+      const controller = createComposedServiceController(props.bundle, client);
       serviceController = controller;
       return () => {
         if (serviceController === controller) serviceController = undefined;
         controller.dispose();
       };
-    });
-  }
+    },
+  );
 
   function openPanel(widget: ComposedEntryInstanceDescriptor, outputId: string, entryId?: string, anchor?: NativeNode): void {
     const monitor = monitors().find(candidate => candidate.id === outputId);
@@ -158,7 +156,7 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
     recordActiveMonitor(outputId);
     const targetEntryId = entryId !== undefined && !entryId.includes(":") ? `${widget.pluginId}:${entryId}` : entryId;
     let panel: ComposedEntryInstanceDescriptor | undefined;
-    for (const candidate of panels) {
+    for (const candidate of panels()) {
       if (targetEntryId === undefined ? candidate.pluginId !== widget.pluginId : candidate.entryId !== targetEntryId) continue;
       if (candidate.outputId === outputId) {
         panel = candidate;
@@ -182,7 +180,7 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
       }),
       position: layout.position,
       style: layout.style,
-      Component: entryComponent<PanelProps>(bundle, panel),
+      Component: entryComponent<PanelProps>(props.bundle, panel),
     });
     if (!togglePluginPanel(panel.instanceId, outputId, panel.pluginId)) {
       setPluginPanelData(null);
@@ -191,14 +189,14 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
 
   return (
     <>
-      <For each={bundle.entryInstances}>
+      <For each={props.bundle.entryInstances}>
         {instance => {
           if (instance.kind === "layer") {
-            const LayerComponent = entryComponent<ClientProps>(bundle, instance);
+            const LayerComponent = entryComponent<ClientProps>(props.bundle, instance);
             return <LayerComponent client={publicClient} />;
           }
           if (instance.kind === "settings_page") {
-            const SettingsComponent = entryComponent<PluginSettingsPageProps>(bundle, instance);
+            const SettingsComponent = entryComponent<PluginSettingsPageProps>(props.bundle, instance);
             const readSettings = async (): Promise<Readonly<Record<string, unknown>>> => {
               const res = await invokeHostResult("settings.get-plugin", { plugin_id: instance.pluginId });
               const data = res.ok ? (res.result.data as { settings?: Record<string, unknown> } | undefined) : undefined;
@@ -236,7 +234,7 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
             return null;
           }
           if (instance.kind !== "widget") return null;
-          const WidgetComponent = entryComponent<WidgetProps>(bundle, instance);
+          const WidgetComponent = entryComponent<WidgetProps>(props.bundle, instance);
           const register = (outputId: string) => {
             let slotNode: NativeNode | undefined;
             const onOpenPanel: OpenPanel = (entryId, anchor) => openPanel(instance, outputId, entryId, anchor ?? slotNode);
@@ -248,13 +246,13 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
                 entryId: instance.entryId,
                 ...(instance.instanceSlug !== undefined ? { instanceSlug: instance.instanceSlug } : {}),
                 outputId,
-                render: ({ vertical }) => (
+                render: slotProps => (
                   <box
                     ref={node => { slotNode = node; }}
                     class={styles.widgetSlot}
-                    data-vertical={vertical ? "true" : null}
+                    data-vertical={slotProps.vertical ? "true" : null}
                   >
-                    <WidgetComponent client={publicClient} vertical={vertical} onOpenPanel={onOpenPanel} />
+                    <WidgetComponent client={publicClient} vertical={slotProps.vertical} onOpenPanel={onOpenPanel} />
                   </box>
                 ),
               });
@@ -264,7 +262,7 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
           };
           if (instance.outputId !== undefined) return register(instance.outputId);
           // Slots only receive orientation. Bind one slot per output so a popup uses the bar that opened it.
-          return <For each={monitors()} keyed={monitor => monitor.id}>{monitor => register(monitor().id)}</For>;
+          return <For each={monitors()} keyed={monitor => monitor.id}>{monitor => register(untrack(() => monitor().id))}</For>;
         }}
       </For>
       <Show when={mountedPanelKey()} keyed>
@@ -295,5 +293,17 @@ export function PluginHost(props?: { readonly bundle?: ComposedPluginBundle }): 
         }}
       </Show>
     </>
+  );
+}
+
+export function PluginHost(props: { readonly bundle?: ComposedPluginBundle } = {}): NativeChild {
+  const activeBundle = () => {
+    const candidate = props.bundle ?? composedPlugins;
+    return candidate.entryInstances.length > 0 || candidate.services.length > 0 ? candidate : null;
+  };
+  return (
+    <Show when={activeBundle()} keyed>
+      {bundle => <ActivePluginHost bundle={bundle} />}
+    </Show>
   );
 }

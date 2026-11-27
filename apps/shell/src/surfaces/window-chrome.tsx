@@ -5,6 +5,7 @@ import {
   createSignal,
   flush,
   onCleanup,
+  untrack,
   type Accessor,
   type NativeChild,
 } from "@hewel/zgui";
@@ -105,12 +106,12 @@ export function SingleInstanceWindowSurface(props: {
 }): NativeChild {
   const width = () => props.width ?? 820;
   const height = () => props.height ?? 600;
-  const [surfaceMounted, setSurfaceMounted] = createSignal(props.open());
+  const [surfaceMounted, setSurfaceMounted] = createSignal(untrack(() => props.open()));
   let disposed = false;
   onCleanup(() => {
     disposed = true;
   });
-  createEffect(props.open, open => {
+  createEffect(() => props.open(), open => {
     if (open) {
       setSurfaceMounted(true);
       return;

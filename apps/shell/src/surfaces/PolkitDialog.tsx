@@ -22,18 +22,17 @@ function PolkitContent(props: {
 }): NativeChild {
   const { invokeHostResult, theme } = useShellStore();
   const dark = () => theme.data()?.dark ?? true;
-  const { active } = props;
   const scheme = useMotionScheme();
   const [response, setResponse] = createSignal("");
   const [localError, setLocalError] = createSignal<string>();
   const [inputFocused, setInputFocused] = createSignal(false);
   const [revealSecret, setRevealSecret] = createSignal(false);
-  const detailEntries = createMemo(() => Object.entries(active().details));
-  const prompt = createMemo(() => active().prompt ?? "Password");
-  const errorText = () => localError() || active().error_message || null;
+  const detailEntries = createMemo(() => Object.entries(props.active().details));
+  const prompt = createMemo(() => props.active().prompt ?? "Password");
+  const errorText = () => localError() || props.active().error_message || null;
   const selectedIdentity = createMemo(() => {
-    const list = active().identities;
-    return list.find(id => id.uid === active().selected_uid) ?? list[0] ?? null;
+    const list = props.active().identities;
+    return list.find(id => id.uid === props.active().selected_uid) ?? list[0] ?? null;
   });
 
   const shakeX = createM3Spring(() => 0, "fastSpatial", {
@@ -46,7 +45,7 @@ function PolkitContent(props: {
   let cancelButton: NativeNode | undefined;
   let commandRevision = 0;
 
-  createEffect(() => `${active().request_id}:${active().selected_uid}`, () => {
+  createEffect(() => `${props.active().request_id}:${props.active().selected_uid}`, () => {
     commandRevision++;
     setResponse("");
     setLocalError(undefined);
@@ -55,7 +54,7 @@ function PolkitContent(props: {
   createEffect(errorText, err => {
     if (err) shakeX.impulse(280);
   });
-  createEffect(() => active().authenticating, authenticating => {
+  createEffect(() => props.active().authenticating, authenticating => {
     const target = authenticating ? cancelButton : input;
     if (target) focus(target);
   });
@@ -73,14 +72,14 @@ function PolkitContent(props: {
 
   function cancel(): void {
     setResponse("");
-    void invoke("host.polkit-cancel", { request_id: active().request_id });
+    void invoke("host.polkit-cancel", { request_id: props.active().request_id });
   }
 
   function submit(): void {
-    if (active().authenticating) return;
+    if (props.active().authenticating) return;
     const value = response();
     setResponse("");
-    void invoke("host.polkit-respond", { request_id: active().request_id, response: value });
+    void invoke("host.polkit-respond", { request_id: props.active().request_id, response: value });
   }
 
   function handleKeyDown(event: NativeKeyEvent): void {
@@ -90,7 +89,7 @@ function PolkitContent(props: {
   }
 
   function selectIdentity(uid: number): void {
-    void invokeHostResult("host.polkit-select-identity", { request_id: active().request_id, uid });
+    void invokeHostResult("host.polkit-select-identity", { request_id: props.active().request_id, uid });
   }
 
   const cardMotion = () => {
@@ -143,8 +142,8 @@ function PolkitContent(props: {
         </row>
 
         <column class={styles.sectionCard}>
-          <text testId="polkit-message" class={styles.messageText}>{active().message}</text>
-          <text testId="polkit-action-id" class={styles.actionId}>{active().action_id}</text>
+          <text testId="polkit-message" class={styles.messageText}>{props.active().message}</text>
+          <text testId="polkit-action-id" class={styles.actionId}>{props.active().action_id}</text>
           <Show when={detailEntries().length > 0} fallback={<box class={styles.hiddenSection} />}>
             <column class={styles.detailsList}>
               <For each={detailEntries()} keyed={entry => entry[0]}>
@@ -160,7 +159,7 @@ function PolkitContent(props: {
         </column>
 
         <column class={styles.authCard}>
-          <Show when={active().identities.length > 1} fallback={
+          <Show when={props.active().identities.length > 1} fallback={
             <Show when={selectedIdentity()} fallback={<box class={styles.hiddenSection} />}>
               {identity => (
                 <row testId={`polkit-identity-${identity().uid}`} class={styles.identityRow}>
@@ -174,7 +173,7 @@ function PolkitContent(props: {
             </Show>
           }>
             <row class={styles.identityList}>
-              <For each={active().identities} keyed={item => item.uid}>
+              <For each={props.active().identities} keyed={item => item.uid}>
                 {identity => {
                   const selected = () => identity().uid === selectedIdentity()?.uid;
                   return (
@@ -182,7 +181,7 @@ function PolkitContent(props: {
                       testId={`polkit-identity-${identity().uid}`}
                       selected={selected()}
                       data-selected={selected() ? "true" : "false"}
-                      disabled={active().authenticating}
+                      disabled={props.active().authenticating}
                       onClick={() => selectIdentity(identity().uid)}
                       class={styles.identityButton}
                     >
@@ -210,8 +209,8 @@ function PolkitContent(props: {
               class={cx(styles.textField, "shell-composite-field")}
               ariaLabel={prompt()}
               placeholder={prompt()}
-              secure={!active().echo_on && !revealSecret()}
-              disabled={active().authenticating}
+              secure={!props.active().echo_on && !revealSecret()}
+              disabled={props.active().authenticating}
               value={response()}
               onInput={event => setResponse(event.value)}
               onFocus={() => setInputFocused(true)}
@@ -221,7 +220,7 @@ function PolkitContent(props: {
             />
             <Button
               ariaLabel={revealSecret() ? "Hide password" : "Show password"}
-              disabled={active().echo_on}
+              disabled={props.active().echo_on}
               onClick={() => setRevealSecret(v => !v)}
               class={styles.revealButton}
             >
@@ -234,7 +233,7 @@ function PolkitContent(props: {
           </row>
         </column>
 
-        <Show when={active().info_message} fallback={<box class={styles.hiddenSection} />}>
+        <Show when={props.active().info_message} fallback={<box class={styles.hiddenSection} />}>
           {message => <text role="status" class={styles.infoText}>{message()}</text>}
         </Show>
         <Show when={errorText()} fallback={<box class={styles.hiddenSection} />}>
@@ -245,7 +244,7 @@ function PolkitContent(props: {
           <M3Button testId="polkit-cancel" variant="outlined" neutral onClick={cancel} ref={node => { cancelButton = node; }}>
             Cancel
           </M3Button>
-          <M3Button testId="polkit-submit" variant="filled" disabled={active().authenticating} onClick={submit}>
+          <M3Button testId="polkit-submit" variant="filled" disabled={props.active().authenticating} onClick={submit}>
             Authenticate
           </M3Button>
         </row>

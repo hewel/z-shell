@@ -8,7 +8,7 @@ const ZOOM_PRESETS = [0.25, 0.35, 0.5, 0.72, 0.85, 1.0] as const;
 const QUEUE_PRESETS = [16, 32, 64, 128] as const;
 
 export default function NiriOverviewSettingsPage(props: PluginSettingsProps): NativeChild {
-  const { data: snapshot } = useTopic<NiriOverviewSnapshot>(props.client, "plugin.z-shell.niri-overview.state");
+  const { data: snapshot } = useTopic<NiriOverviewSnapshot>(() => props.client(), "plugin.z-shell.niri-overview.state");
   const [zoomScale, setZoomScale] = createSignal(0.5);
   const [queueDepth, setQueueDepth] = createSignal(64);
   const [savedNotice, setSavedNotice] = createSignal<string | null>(null);

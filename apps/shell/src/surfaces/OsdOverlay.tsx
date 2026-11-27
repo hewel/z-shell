@@ -1,4 +1,4 @@
-import { For, LayerSurface, Show, createEffect, createMemo, createSignal, onCleanup, type Accessor, type Monitor, type NativeChild, type NativeNode } from "@hewel/zgui";
+import { For, LayerSurface, Show, createDelay, createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor, type Monitor, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { M3Slider } from "@z-shell/sdk/primitives";
 import { ShellIcon } from "../icons.tsx";
 import {
@@ -11,40 +11,40 @@ import { usePinnedOutput, useShellStore } from "../store.ts";
 import { formatSurfaceName, resolveMonitorLogicalSize, type OsdPayload, type WarningFade } from "../topics.ts";
 import styles from "./OsdOverlay.module.css";
 
-function OsdPill({ osd, spatial, opacity, pillRef }: {
+function OsdPill(props: {
   osd: Accessor<OsdPayload>;
   spatial: M3Spring;
   opacity: M3Spring;
   pillRef?: (node: NativeNode | null) => void;
 }): NativeChild {
   const scheme = useMotionScheme();
-  const value = () => Math.max(0, Math.min(100, osd().value ?? 0));
+  const value = () => Math.max(0, Math.min(100, props.osd().value ?? 0));
   const icon = () => {
-    const { kind, muted } = osd();
+    const { kind, muted } = props.osd();
     return kind === "brightness" ? "brightness" : kind === "ime" ? "terminal" : muted ? "volumeMute" : "volumeHigh";
   };
-  onCleanup(() => pillRef?.(null));
+  onCleanup(() => props.pillRef?.(null));
 
   return (
     <row
-      ref={node => pillRef?.(node)}
+      ref={node => props.pillRef?.(node)}
       testId="osd-pill"
       role="status"
-      ariaLabel={osd().label}
+      ariaLabel={props.osd().label}
       class={styles.osdPill}
       style={{
-        opacity: Math.max(0, Math.min(1, opacity())),
+        opacity: Math.max(0, Math.min(1, props.opacity())),
         transform: scheme() === "reduced"
           ? "none"
-          : `translateY(${((1 - spatial()) * 12).toFixed(2)}px) scale(${(0.94 + spatial() * 0.06).toFixed(4)})`,
+          : `translateY(${((1 - props.spatial()) * 12).toFixed(2)}px) scale(${(0.94 + props.spatial() * 0.06).toFixed(4)})`,
       }}
     >
       <box class={styles.iconWell}>
         <ShellIcon name={icon()} size={18} color="var(--color-on-primary-container)" />
       </box>
-      <Show when={osd().kind === "ime"} fallback={
+      <Show when={props.osd().kind === "ime"} fallback={
         <>
-          <M3Slider label={osd().label} value={value()} readOnly compact />
+          <M3Slider label={props.osd().label} value={value()} readOnly compact />
           <row class={styles.valueRow}>
             <text testId="osd-value" data-tabular="true" class={styles.valueText}>
               {value()}%
@@ -52,60 +52,62 @@ function OsdPill({ osd, spatial, opacity, pillRef }: {
           </row>
         </>
       }>
-        <text testId="osd-label" class={styles.imeLabel}>{osd().label}</text>
+        <text testId="osd-label" class={styles.imeLabel}>{props.osd().label}</text>
         <text class={styles.imeSubtitle}>Input Method</text>
       </Show>
     </row>
   );
 }
 
-function IdleScrim({ monitorId, warning, seconds }: {
+function IdleScrim(props: {
   monitorId: string;
   warning: Accessor<WarningFade>;
   seconds: Accessor<number>;
 }): NativeChild {
   const scheme = useMotionScheme();
-  const ramp = createLinearProgress(() => warning().fade_seconds * 1000, scheme);
+  const ramp = createLinearProgress(() => props.warning().fade_seconds * 1000, scheme);
   const opacity = () => Math.max(0.25, Math.min(1, ramp()));
   return (
     <box class={styles.idleScrim} style={{ opacity: opacity() }}>
-      <row testId={`idle-warning-${monitorId}`} class={styles.idleWarning}>
-        <text class={styles.idleRules}>{warning().rules.join(", ")}</text>
+      <row testId={`idle-warning-${props.monitorId}`} class={styles.idleWarning}>
+        <text class={styles.idleRules}>{props.warning().rules.join(", ")}</text>
         <text data-tabular="true" class={styles.idleSeconds}>
-          {seconds()}s
+          {props.seconds()}s
         </text>
       </row>
     </box>
   );
 }
 
-function IdleWarning({ warning, monitors }: { warning: Accessor<WarningFade>; monitors: Accessor<readonly Monitor[]> }): NativeChild {
+function IdleWarning(props: { warning: Accessor<WarningFade>; monitors: Accessor<readonly Monitor[]> }): NativeChild {
   const { outputs } = useShellStore();
-  const [seconds, setSeconds] = createSignal(warning().fade_seconds);
+  const [seconds, setSeconds] = createSignal(untrack(() => props.warning().fade_seconds));
   // Unrelated idle snapshots can repeat a token; don't restart its countdown.
-  const token = createMemo(() => warning().token);
+  const token = createMemo(() => props.warning().token);
+  const countdownDelay = createDelay();
   createEffect(token, () => {
-    const deadline = Date.now() + warning().fade_seconds * 1000;
-    let timer: number | undefined;
+    const deadline = Date.now() + props.warning().fade_seconds * 1000;
     function tick() {
       const remaining = Math.max(0, deadline - Date.now());
       const secondsLeft = Math.ceil(remaining / 1000);
       setSeconds(secondsLeft);
-      if (secondsLeft > 0) timer = setTimeout(tick, remaining - (secondsLeft - 1) * 1000);
+      if (secondsLeft > 0) {
+        countdownDelay.schedule(Math.max(0, remaining - (secondsLeft - 1) * 1000), tick);
+      }
     }
     tick();
-    return () => { if (timer !== undefined) clearTimeout(timer); };
+    return () => countdownDelay.cancel();
   });
 
   return (
-    <For each={monitors()} keyed={monitor => monitor.id}>
+    <For each={props.monitors()} keyed={monitor => monitor.id}>
       {monitor => {
         const size = createMemo(() => resolveMonitorLogicalSize(monitor(), outputs.data()));
         return (
           <LayerSurface name={formatSurfaceName("idle-fade", monitor().id)} output={monitor().id} layer="overlay"
             anchor={["top", "bottom", "left", "right"]} width={size().width} height={size().height}
             exclusiveZone={-1} keyboard="none" inputRegion="empty">
-            <IdleScrim monitorId={monitor().id} warning={warning} seconds={seconds} />
+            <IdleScrim monitorId={monitor().id} warning={props.warning} seconds={seconds} />
           </LayerSurface>
         );
       }}

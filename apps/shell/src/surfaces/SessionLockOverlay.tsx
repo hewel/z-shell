@@ -1,9 +1,8 @@
 import {
-  Button, For, Image, SessionLockSurface, Show, createEffect, createMemo, createSignal, cx, flush,
+  Button, For, Image, SessionLockSurface, Show, TextField, createDelay, createEffect, createMemo, createSignal, cx, flush,
   focus, getSessionGeneration, onCleanup, requestSessionLock,
   type Accessor, type Monitor, type NativeChild, type NativeNode, type SessionLockRequest,
 } from "@hewel/zgui";
-import { Input as TextField } from "@hewel/zgui/components";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
 import {
@@ -46,7 +45,7 @@ const MAX_VISIBLE_DOTS = 14;
 
 function MorphPasswordDot(props: { readonly d: string; readonly viewBox: string; readonly visible: Accessor<boolean>; readonly error?: Accessor<boolean> }): NativeChild {
   const scheme = useMotionScheme();
-  const presence = createPresence(props.visible, {
+  const presence = createPresence(() => props.visible(), {
     scheme,
     enterRole: "fastSpatial",
     enterOpacityRole: "fastEffects",
@@ -82,7 +81,6 @@ function LockScreen(props: {
   readonly controls: LockControls;
 }): NativeChild {
   const { hostClient, wallpaper, power, ime, media } = useShellStore();
-  const { monitor, controls } = props;
   const scheme = useMotionScheme();
   const entryFade = createOpacityEnter("slowEffects", scheme);
   const shakeX = createM3Spring(() => 0, "fastSpatial", {
@@ -90,10 +88,10 @@ function LockScreen(props: {
     overrideScheme: "expressive",
     epsilon: SPRING_EPSILON.px,
   });
-  createEffect(controls.error, err => {
+  createEffect(() => props.controls.error(), err => {
     if (err) shakeX.impulse(650);
   });
-  const activeWallpaper = createMemo(() => resolveMonitorWallpaper(wallpaper.data(), monitor().name));
+  const activeWallpaper = createMemo(() => resolveMonitorWallpaper(wallpaper.data(), props.monitor().name));
   const backdrop = useDaemonMedia(hostClient, () => activeWallpaper()?.media, { fetchCommand: "wallpaper.fetch-blob" });
   const playing = () => {
     const player = selectActiveMediaPlayer(media.data());
@@ -101,14 +99,14 @@ function LockScreen(props: {
   };
   const [field, setField] = createSignal<NativeNode>();
   const [passwordFocused, setPasswordFocused] = createSignal(false);
-  createEffect(() => props.primary() && !controls.disabled() ? field() : undefined, node => {
+  createEffect(() => props.primary() && !props.controls.disabled() ? field() : undefined, node => {
     if (node) focus(node);
   });
   const dotSlots = Array.from({ length: MAX_VISIBLE_DOTS }, (_, index) => ({
     index,
     shape: MORPH_SEQUENCE[index % MORPH_SEQUENCE.length]!,
   }));
-  const dotCount = () => Math.min(controls.password().length, MAX_VISIBLE_DOTS);
+  const dotCount = () => Math.min(props.controls.password().length, MAX_VISIBLE_DOTS);
 
   return (
     <box class={styles.lockRoot} style={{ opacity: Math.max(0, Math.min(1, entryFade())) }}>
@@ -127,7 +125,7 @@ function LockScreen(props: {
           return percentage == null ? "—" : `${Math.round(percentage)}%`;
         });
         return (
-          <row testId={`lock-battery-${monitor().id}`} class={styles.batteryPill}>
+          <row testId={`lock-battery-${props.monitor().id}`} class={styles.batteryPill}>
             <ShellIcon name={battery().state === "charging" ? "batteryCharging" : "battery"} size={18} color="var(--color-on-surface)" />
             <text data-tabular="true" class={styles.batteryLabel}>
               {label()}
@@ -136,7 +134,7 @@ function LockScreen(props: {
         );
       }}</Show>
       <box class={styles.clockSection}>
-        <text testId={`lock-clock-${monitor().id}`} class={styles.clockTime}>
+        <text testId={`lock-clock-${props.monitor().id}`} class={styles.clockTime}>
           {props.clock().time}
         </text>
         <text class={styles.clockDate}>{props.clock().date}</text>
@@ -148,14 +146,14 @@ function LockScreen(props: {
             <ShellIcon name="person" size={46} color="var(--color-on-primary-container)" />
           }>{src => <Image ariaHidden src={src()} class={styles.avatarImage} style={{ clipPath: SHELL_ROSETTE_CLIP_104 }} />}</Show>
         </box>
-        <text testId={`lock-user-${monitor().id}`} class={styles.username}>
-          {controls.username()}
+        <text testId={`lock-user-${props.monitor().id}`} class={styles.username}>
+          {props.controls.username()}
         </text>
         <row
           testId="lock-password-capsule"
           data-composite-input="true"
           data-focused={passwordFocused() ? "true" : "false"}
-          data-error={controls.error() ? "true" : null}
+          data-error={props.controls.error() ? "true" : null}
           class={styles.passwordCapsule}
           style={{
             transform: scheme() === "reduced" || Math.abs(shakeX()) < SPRING_EPSILON.px
@@ -174,7 +172,7 @@ function LockScreen(props: {
                     d={slot().shape.d}
                     viewBox={slot().shape.viewBox}
                     visible={() => slot().index < dotCount()}
-                    error={() => controls.error() !== null}
+                    error={() => props.controls.error() !== null}
                   />
                 )}
               </For>
@@ -186,16 +184,16 @@ function LockScreen(props: {
             secure
             placeholder="Password"
             ariaLabel="Password"
-            disabled={controls.disabled()}
-            value={controls.password()}
-            onValueChange={value => controls.setPassword(value)}
+            disabled={props.controls.disabled()}
+            value={props.controls.password()}
+            onInput={e => props.controls.setPassword(e.value)}
             onFocus={() => setPasswordFocused(true)}
             onBlur={() => setPasswordFocused(false)}
             ref={node => { setField(node); }}
             onKeyDown={e => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                void controls.submit();
+                void props.controls.submit();
               }
             }}
           />
@@ -208,24 +206,24 @@ function LockScreen(props: {
             <Button
               testId="lock-submit"
               ariaLabel="Unlock"
-              disabled={controls.disabled()}
-              onClick={() => void controls.submit()}
+              disabled={props.controls.disabled()}
+              onClick={() => void props.controls.submit()}
               class={styles.submitButton}
             >
               <ShellIcon name="chevronRight" color="var(--color-on-primary)" size={18} />
             </Button>
           </row>
         </row>
-        <Show when={controls.sleepHold()}><text testId="lock-sleep-hold">Preparing for sleep…</text></Show>
-        <Show when={controls.authenticating()}>
+        <Show when={props.controls.sleepHold()}><text testId="lock-sleep-hold">Preparing for sleep…</text></Show>
+        <Show when={props.controls.authenticating()}>
           <row testId="lock-verifying" role="status" class={styles.verifyingPill}>
             <box ariaHidden class={styles.verifyingDot} />
             <text class={styles.verifyingText}>Verifying PAM credentials...</text>
           </row>
         </Show>
-        <Show when={controls.error()}>
+        <Show when={props.controls.error()}>
           <text testId="lock-error" role="alert" class={styles.errorText}>
-            {controls.error()}
+            {props.controls.error()}
           </text>
         </Show>
         <Show when={playing()}>{player => (
@@ -247,19 +245,20 @@ function LockSurfaces(props: { readonly controls: LockControls }): NativeChild {
   const avatar = useDaemonMedia(hostClient, () => user.data()?.avatar, { fetchCommand: "user.fetch-blob" });
   // Monitor has no primary flag; focus the active output, falling back to the first output.
   const primaryId = () => activeMonitor()?.id ?? monitors()[0]?.id;
-  const [now, setNow] = createSignal(Date.now());
+  const initialNow = Date.now();
+  const [now, setNow] = createSignal(initialNow);
   const clock = createMemo(() => {
     const time = now();
     const { hours, minutes } = formatBarClock(time, clockFormat);
     return { time: `${hours}:${minutes}`, date: formatFullDate(time) };
   });
+  const clockDelay = createDelay();
   function tick() {
     const time = Date.now();
     setNow(time);
-    timer = setTimeout(tick, 60_000 - time % 60_000);
+    clockDelay.schedule(60_000 - time % 60_000, tick);
   }
-  let timer = setTimeout(tick, 60_000 - now() % 60_000);
-  onCleanup(() => clearTimeout(timer));
+  clockDelay.schedule(60_000 - initialNow % 60_000, tick);
 
   return <For each={monitors()} keyed={monitor => monitor.id}>{monitor => (
     <SessionLockSurface name={formatSurfaceName("lock", monitor().id)} output={monitor().id}>
@@ -362,14 +361,14 @@ export function SessionLockOverlay(): NativeChild {
   });
 
   async function submit(): Promise<void> {
-    const active = activeLock();
+    const initialActive = activeLock();
     const host = hostClient();
     const bus = publicClient();
-    if (!active || !host || !bus || host.helloInfo?.daemon_instance_id !== active.daemonId || disabled() ||
-        active.request.state() !== "locked" || sessionLock.data()?.lock_id !== active.lockId) return;
+    if (!initialActive || !host || !bus || host.helloInfo?.daemon_instance_id !== initialActive.daemonId || disabled() ||
+        initialActive.request.state() !== "locked" || sessionLock.data()?.lock_id !== initialActive.lockId) return;
     const submittedPassword = password();
     if (submittedPassword.length === 0) return;
-    const { lockId, request } = active;
+    const { lockId, request } = initialActive;
     const seq = ++authSeq;
     flush(() => {
       setPassword("");
@@ -379,7 +378,7 @@ export function SessionLockOverlay(): NativeChild {
 
     function isCurrent(consumed = false): boolean {
       const snapshot = sessionLock.data();
-      return !disposed && seq === authSeq && hostClient() === host && publicClient() === bus && activeLock() === active &&
+      return !disposed && seq === authSeq && hostClient() === host && publicClient() === bus && activeLock() === initialActive &&
         request.state() === "locked" && snapshot !== undefined && !snapshot.sleep_hold &&
         // Consume publishes the unlocked snapshot before returning its reply.
         (snapshot.lock_id === lockId || (consumed && snapshot.phase === "unlocked"));

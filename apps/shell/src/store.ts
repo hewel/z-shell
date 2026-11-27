@@ -1,4 +1,4 @@
-import { createContext, createEffect, createMemo, createSignal, flush, getSessionGeneration, onCleanup, runWithOwner, untrack, useContext, useMonitors, type Accessor, type Monitor, type NativeChild, type NativeWindowRect } from "@hewel/zgui";
+import { createContext, createDelay, createEffect, createMemo, createSignal, flush, getSessionGeneration, onCleanup, runWithOwner, untrack, useContext, useMonitors, type Accessor, type Monitor, type NativeChild, type NativeWindowRect } from "@hewel/zgui";
 import { mountOwned } from "@hewel/zgui/renderer";
 import { getResolvedCapabilities, onControlMessage, type JsonValue } from "@hewel/zgui-services";
 import { ZShellClient, type BusHelloResult, type BusTransport, type CommandInvokeResult } from "@z-shell/sdk";
@@ -517,15 +517,13 @@ export function createShellStore(): ShellStore {
 
   const [activeOsd, setActiveOsd] = createSignal<OsdPayload | null>(null);
   let osdSeq = 0;
-  let osdTimer: number | undefined;
+  const osdDelay = createDelay();
   function showOsd(osd: Omit<OsdPayload, "seq">): void {
     if (disposed) return;
-    if (osdTimer !== undefined) clearTimeout(osdTimer);
     setActiveOsd({ ...osd, seq: ++osdSeq });
-    osdTimer = setTimeout(() => {
-      osdTimer = undefined;
+    osdDelay.schedule(1500, () => {
       setActiveOsd(null);
-    }, 1500);
+    });
   }
 
   const [pluginBarWidgets, setPluginBarWidgets] = createSignal<readonly PluginBarWidgetSlot[]>([]);
@@ -644,7 +642,7 @@ export function createShellStore(): ShellStore {
   let disposeTopics: (() => void) | undefined;
   onCleanup(() => {
     disposed = true;
-    if (osdTimer !== undefined) clearTimeout(osdTimer);
+    osdDelay.cancel();
     closePublic?.();
     closeHost?.();
     disposeTopics?.();

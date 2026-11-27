@@ -145,19 +145,18 @@ interface PaneChartProps {
 }
 
 function OverviewPane(props: PaneChartProps): NativeChild {
-  const snap = props.snap;
-  const mem = createMemo(() => computeMemoryBreakdown(snap()?.memory));
-  const gpu = createMemo(() => selectPrimaryGpu(snap()?.gpus));
-  const netDisplay = createMemo(() => selectNetworkDisplay(snap()?.network, props.history()));
-  const headlineTemp = createMemo(() => selectHeadlineTempCelsius(snap()));
-  const cpuCores = () => snap()?.cpu?.per_core_usage_percent ?? [];
-  const coreCount = () => snap()?.cpu?.core_count ?? cpuCores().length;
+  const mem = createMemo(() => computeMemoryBreakdown(props.snap()?.memory));
+  const gpu = createMemo(() => selectPrimaryGpu(props.snap()?.gpus));
+  const netDisplay = createMemo(() => selectNetworkDisplay(props.snap()?.network, props.history()));
+  const headlineTemp = createMemo(() => selectHeadlineTempCelsius(props.snap()));
+  const cpuCores = () => props.snap()?.cpu?.per_core_usage_percent ?? [];
+  const coreCount = () => props.snap()?.cpu?.core_count ?? cpuCores().length;
 
   const cpuHeaderMeta = createMemo(() => {
     const parts: string[] = [];
-    const freq = formatFrequencyMhz(snap()?.cpu?.frequency_mhz, 2);
+    const freq = formatFrequencyMhz(props.snap()?.cpu?.frequency_mhz, 2);
     if (freq) parts.push(freq);
-    const load1 = snap()?.cpu?.load_average?.[0];
+    const load1 = props.snap()?.cpu?.load_average?.[0];
     if (load1 !== undefined && load1 !== null && Number.isFinite(load1)) {
       parts.push(`Load ${load1.toFixed(2)}`);
     }
@@ -167,7 +166,7 @@ function OverviewPane(props: PaneChartProps): NativeChild {
   });
 
   const thermalStrip = createMemo(() => {
-    const sensors = snap()?.sensors ?? [];
+    const sensors = props.snap()?.sensors ?? [];
     if (sensors.length > 0) {
       return sensors.slice(0, 4).map(s => ({
         label: s.label,
@@ -175,14 +174,14 @@ function OverviewPane(props: PaneChartProps): NativeChild {
         highlight: s.category === "cpu",
       }));
     }
-    return (snap()?.temperatures ?? []).slice(0, 4).map((z, idx) => ({
+    return (props.snap()?.temperatures ?? []).slice(0, 4).map((z, idx) => ({
       label: z.kind,
       temp: `${Math.round(z.temperature_millicelsius / 1000)}°C`,
       highlight: idx === 0,
     }));
   });
 
-  const mounts = () => (snap()?.storage?.mounts ?? []).slice(0, 2);
+  const mounts = () => (props.snap()?.storage?.mounts ?? []).slice(0, 2);
 
   return (
     <column testId="sysmon-overview-pane" class={styles.paneStack}>
@@ -198,7 +197,7 @@ function OverviewPane(props: PaneChartProps): NativeChild {
             </Show>
           </row>
           <text testId="sysmon-win-cpu-pct" data-tabular="true" class={styles.cpuHeroPct}>
-            {percentText(snap()?.cpu_usage_percent)}
+            {percentText(props.snap()?.cpu_usage_percent)}
           </text>
         </row>
         <row class={styles.cardRow}>
@@ -232,7 +231,7 @@ function OverviewPane(props: PaneChartProps): NativeChild {
       <row class={styles.cardRow}>
         <Show when={mem()}>
           {breakdown => {
-            const swap = () => snap()?.swap;
+            const swap = () => props.snap()?.swap;
             return (
               <column class={cx(styles.card, styles.grow, styles.spaceBetween)}>
                 <row class={styles.cardHeader}>
@@ -311,7 +310,7 @@ function OverviewPane(props: PaneChartProps): NativeChild {
       </row>
 
       {/* Row 3: Network | Disk I/O & Storage */}
-      <Show when={Boolean(netDisplay() || snap()?.storage)}>
+      <Show when={Boolean(netDisplay() || props.snap()?.storage)}>
         <row class={styles.cardRow}>
           <Show when={netDisplay()}>
             {net => (
@@ -327,7 +326,7 @@ function OverviewPane(props: PaneChartProps): NativeChild {
                 <DualLineChart
                   testId="sysmon-win-net-chart"
                   compact
-                  wide={!snap()?.storage}
+                  wide={!props.snap()?.storage}
                   primarySeries={net().rxHistory}
                   secondarySeries={net().txHistory}
                   bucketSeconds={props.history()?.bucket_seconds}
@@ -349,7 +348,7 @@ function OverviewPane(props: PaneChartProps): NativeChild {
             )}
           </Show>
 
-          <Show when={snap()?.storage}>
+          <Show when={props.snap()?.storage}>
             {storage => (
               <column class={cx(styles.card, styles.grow, styles.spaceBetween)}>
                 <row class={styles.cardHeaderTight}>
@@ -362,7 +361,7 @@ function OverviewPane(props: PaneChartProps): NativeChild {
                   <DualLineChart
                     testId="sysmon-win-disk-chart"
                     compact
-                    wide={!snap()?.network}
+                    wide={!props.snap()?.network}
                     primarySeries={props.history()?.disk_read_bytes_per_sec}
                     secondarySeries={props.history()?.disk_write_bytes_per_sec}
                     bucketSeconds={props.history()?.bucket_seconds}
@@ -412,11 +411,10 @@ function OverviewPane(props: PaneChartProps): NativeChild {
 }
 
 function CpuThermalPane(props: PaneChartProps): NativeChild {
-  const snap = props.snap;
-  const cpu = () => snap()?.cpu;
+  const cpu = () => props.snap()?.cpu;
   const cores = () => (cpu()?.per_core_usage_percent ?? []).map((val, idx) => ({ idx, val }));
-  const sensors = () => snap()?.sensors ?? [];
-  const zones = () => snap()?.temperatures ?? [];
+  const sensors = () => props.snap()?.sensors ?? [];
+  const zones = () => props.snap()?.temperatures ?? [];
 
   return (
     <column testId="sysmon-cpu-pane" class={styles.paneStack}>
@@ -435,7 +433,7 @@ function CpuThermalPane(props: PaneChartProps): NativeChild {
             </text>
           </column>
           <text data-tabular="true" class={styles.detailHeroPct}>
-            {percentText(snap()?.cpu_usage_percent)}
+            {percentText(props.snap()?.cpu_usage_percent)}
           </text>
         </row>
         <AreaLineChart

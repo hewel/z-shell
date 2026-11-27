@@ -27,10 +27,9 @@ function ClipboardRow(props: {
   onRowRef?: (node: NativeNode) => void;
 }) {
   const { hostClient, invokePublic, closePanels } = useShellStore();
-  const { entry } = props;
-  const { src } = useDaemonMedia(hostClient, () => entry().kind === "image" ? entry().media : undefined, { fetchCommand: "clipboard.fetch-blob" });
+  const { src } = useDaemonMedia(hostClient, () => props.entry().kind === "image" ? props.entry().media : undefined, { fetchCommand: "clipboard.fetch-blob" });
   const title = createMemo(() => {
-    const current = entry();
+    const current = props.entry();
     if (current.kind === "text") return current.preview;
     const dimensions = current.dimensions;
     return `${current.mime.replace("image/", "").toUpperCase()} · ${dimensions ? `${dimensions.width} × ${dimensions.height}` : ""}`;
@@ -39,47 +38,47 @@ function ClipboardRow(props: {
   return (
     <M3InteractiveCard
       layout="row"
-      testId={`clip-entry-${entry().id}`}
-      actionTestId={`clip-copy-${entry().id}`}
+      testId={`clip-entry-${props.entry().id}`}
+      actionTestId={`clip-copy-${props.entry().id}`}
       ariaLabel={title()}
       {...(props.onRowRef ? { ref: props.onRowRef } : {})}
       onClick={() => {
-        void invokePublic("clipboard.copy", { id: entry().id });
+        void invokePublic("clipboard.copy", { id: props.entry().id });
         closePanels();
       }}
-      class={cx(styles.rowCard, entry().pinned && styles.rowCardPinned)}
+      class={cx(styles.rowCard, props.entry().pinned && styles.rowCardPinned)}
     >
       <Show when={src()} fallback={
         <box class={cx(styles.thumbnail, styles.thumbnailFallback)}>
-          <ShellIcon name={entry().kind === "image" ? "image" : entry().preview.startsWith("http") ? "link" : "fileText"} size={18} color={primary} />
+          <ShellIcon name={props.entry().kind === "image" ? "image" : props.entry().preview.startsWith("http") ? "link" : "fileText"} size={18} color={primary} />
         </box>
       }>
-        <Image testId={`clip-image-${entry().id}`} src={src()} class={cx(styles.thumbnail, styles.thumbnailImage)} />
+        <Image testId={`clip-image-${props.entry().id}`} src={src()} class={cx(styles.thumbnail, styles.thumbnailImage)} />
       </Show>
       <column class={styles.rowTextCol}>
         <text class={cx(styles.truncate, styles.rowTitle)}>{title()}</text>
-        <text data-tabular="true" class={cx(styles.truncate, styles.rowMeta)} data-pinned={entry().pinned ? "true" : "false"}>
-          {`${entry().pinned ? "Pinned · " : ""}${entry().kind} · ${entry().byte_len} B`}
+        <text data-tabular="true" class={cx(styles.truncate, styles.rowMeta)} data-pinned={props.entry().pinned ? "true" : "false"}>
+          {`${props.entry().pinned ? "Pinned · " : ""}${props.entry().kind} · ${props.entry().byte_len} B`}
         </text>
       </column>
       <M3CardAction class={styles.rowActionWrap}>
         <Button
-          testId={`clip-pin-${entry().id}`}
-          ariaLabel={entry().pinned ? "Unpin entry" : "Pin entry"}
-          checked={entry().pinned}
+          testId={`clip-pin-${props.entry().id}`}
+          ariaLabel={props.entry().pinned ? "Unpin entry" : "Pin entry"}
+          checked={props.entry().pinned}
           class={cx(styles.iconButton, styles.pinButton)}
-          data-pinned={entry().pinned ? "true" : "false"}
-          onClick={() => { void invokePublic(entry().pinned ? "clipboard.unpin" : "clipboard.pin", { id: entry().id }); }}
+          data-pinned={props.entry().pinned ? "true" : "false"}
+          onClick={() => { void invokePublic(props.entry().pinned ? "clipboard.unpin" : "clipboard.pin", { id: props.entry().id }); }}
         >
-          <ShellIcon name="pin" size={14} color={entry().pinned ? onPrimaryContainer : muted} />
+          <ShellIcon name="pin" size={14} color={props.entry().pinned ? onPrimaryContainer : muted} />
         </Button>
       </M3CardAction>
       <M3CardAction class={styles.rowActionWrap}>
         <Button
-          testId={`clip-forget-${entry().id}`}
+          testId={`clip-forget-${props.entry().id}`}
           ariaLabel="Forget entry"
           class={styles.iconButton}
-          onClick={() => { void invokePublic("clipboard.forget", { id: entry().id }); }}
+          onClick={() => { void invokePublic("clipboard.forget", { id: props.entry().id }); }}
         >
           <ShellIcon name="trash" size={14} color="var(--color-error)" />
         </Button>

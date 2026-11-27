@@ -68,7 +68,7 @@ function BridgeTargetCard(props: {
 }
 
 export default function ThemeBridgesSettingsPage(props: PluginSettingsProps): NativeChild {
-  const { data: status } = useTopic<ThemeBridgesStatus>(props.client, "plugin.z-shell.theme-bridges.status");
+  const { data: status } = useTopic<ThemeBridgesStatus>(() => props.client(), "plugin.z-shell.theme-bridges.status");
   const [commandError, setCommandError] = createSignal<string>();
   const [enableShoji, setEnableShoji] = createSignal(false);
   const [enableZen, setEnableZen] = createSignal(false);

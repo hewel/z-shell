@@ -46,7 +46,7 @@ interface PluginCardRow {
 
 function PluginCardIcon(props: { readonly media: Accessor<MediaRef | null> }): NativeChild {
   const { hostClient } = useShellStore();
-  const { src } = useDaemonMedia(hostClient, props.media, { fetchCommand: "plugins.catalog.fetch-blob" });
+  const { src } = useDaemonMedia(hostClient, () => props.media(), { fetchCommand: "plugins.catalog.fetch-blob" });
   return (
     <box class={styles.cardIcon}>
       <Show when={src()} fallback={<ShellIcon name="extension" size={18} color="var(--color-primary)" />}>

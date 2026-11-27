@@ -252,7 +252,7 @@ function formatOverviewSurfaceName(id: string): string {
 }
 
 export default function NiriOverviewLayer(props: { readonly client: Accessor<ZShellClient | undefined> }): NativeChild {
-  const { data: snapshot } = useTopic<NiriOverviewSnapshot>(props.client, "plugin.z-shell.niri-overview.state");
+  const { data: snapshot } = useTopic<NiriOverviewSnapshot>(() => props.client(), "plugin.z-shell.niri-overview.state");
   const monitors = useMonitors();
   const scheme = useGlobalMotionScheme();
   const open = () => snapshot()?.open === true;

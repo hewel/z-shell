@@ -18,7 +18,7 @@ const notificationMedia = { fetchCommand: "notifications.fetch-blob" } as const;
 
 type TrackNode = (node: NativeNode) => () => void;
 
-function trackedRef(track: TrackNode): (node: NativeNode) => void {
+function useTrackedRef(track: TrackNode): (node: NativeNode) => void {
   let detach: (() => void) | undefined;
   onCleanup(() => {
     detach?.();
@@ -30,19 +30,7 @@ function trackedRef(track: TrackNode): (node: NativeNode) => void {
   };
 }
 
-function ToastCard({
-  toast,
-  track,
-  trackBlur,
-  stackSpatial,
-  stackOpacity,
-  promoted,
-  staggerIndex = 0,
-  groupCount = 1,
-  groupExpanded = false,
-  onToggleGroup,
-  onDismissGroup,
-}: {
+function ToastCard(props: {
   toast: Accessor<NotificationItem>;
   track: TrackNode;
   trackBlur: TrackNode;
@@ -56,25 +44,25 @@ function ToastCard({
   onDismissGroup?: () => void;
 }): NativeChild {
   const { hostClient, invokePublic } = useShellStore();
-  const countValue = () => (typeof groupCount === "function" ? groupCount() : groupCount);
-  const expandedValue = () => (typeof groupExpanded === "function" ? groupExpanded() : groupExpanded);
-  const mediaLayout = createMemo(() => resolveNotificationMediaLayout(toast()));
+  const countValue = () => (typeof props.groupCount === "function" ? props.groupCount() : (props.groupCount ?? 1));
+  const expandedValue = () => (typeof props.groupExpanded === "function" ? props.groupExpanded() : (props.groupExpanded ?? false));
+  const mediaLayout = createMemo(() => resolveNotificationMediaLayout(props.toast()));
   const leading = useDaemonMedia(hostClient, () => mediaLayout().leadingMedia, notificationMedia);
   const badge = useDaemonMedia(hostClient, () => mediaLayout().appBadge, notificationMedia);
   const preview = useDaemonMedia(hostClient, () => mediaLayout().previewBanner, notificationMedia);
   const scheme = useMotionScheme();
   const cardReflow = createEnterProgress("defaultSpatial", { scheme });
   const cardFade = createOpacityEnter("fastEffects", scheme);
-  const combinedOpacity = () => Math.max(0, Math.min(1, cardFade() * stackOpacity()));
-  const flipDeltaY = propsOr(promoted, 44, 14 + Math.min(staggerIndex, 4) * 10);
-  const actions = createMemo(() => splitNotificationActions(toast().actions));
-  const formattedBody = createMemo(() => formatNotificationBody(toast().body));
+  const combinedOpacity = () => Math.max(0, Math.min(1, cardFade() * props.stackOpacity()));
+  const flipDeltaY = () => propsOr(props.promoted, 44, 14 + Math.min(props.staggerIndex ?? 0, 4) * 10);
+  const actions = createMemo(() => splitNotificationActions(props.toast().actions));
+  const formattedBody = createMemo(() => formatNotificationBody(props.toast().body));
 
   const bodyContent = () => (
     <row class={styles.bodyRow}>
       <box class={styles.iconWrapper}>
         <Show when={leading.src()} fallback={
-          <box testId={`toast-fallback-${toast().id}`} data-kind={mediaLayout().fallbackKind} class={styles.iconFallback}>
+          <box testId={`toast-fallback-${props.toast().id}`} data-kind={mediaLayout().fallbackKind} class={styles.iconFallback}>
             <ShellIcon
               name={mediaLayout().fallbackKind === "image" ? "image" : "bell"}
               size={18}
@@ -82,42 +70,42 @@ function ToastCard({
             />
           </box>
         }>
-          <box testId={`toast-icon-${toast().id}`} class={styles.iconBox}>
+          <box testId={`toast-icon-${props.toast().id}`} class={styles.iconBox}>
             <Image src={leading.src()} class={styles.leadingImage} />
           </box>
         </Show>
         <Show when={badge.src()}>
-          <box testId={`toast-badge-${toast().id}`} class={styles.badgeBox}>
+          <box testId={`toast-badge-${props.toast().id}`} class={styles.badgeBox}>
             <Image src={badge.src()} class={styles.badgeImage} />
           </box>
         </Show>
       </box>
       <column class={styles.textColumn}>
-        <text class={styles.appName}>{toast().app_name}</text>
-        <text class={styles.summary}>{toast().summary}</text>
+        <text class={styles.appName}>{props.toast().app_name}</text>
+        <text class={styles.summary}>{props.toast().summary}</text>
         <Show when={formattedBody()}>
           {body => (
-            <text testId={`toast-body-${toast().id}`} class={cx(styles.bodyText, "notification-body")}>{body()}</text>
+            <text testId={`toast-body-${props.toast().id}`} class={cx(styles.bodyText, "notification-body")}>{body()}</text>
           )}
         </Show>
       </column>
     </row>
   );
 
-  const inputRef = trackedRef(track);
-  const blurRef = trackedRef(trackBlur);
+  const inputRef = useTrackedRef(node => props.track(node));
+  const blurRef = useTrackedRef(node => props.trackBlur(node));
 
   return (
     <M3InteractiveCard
       layout="column"
       ref={node => { inputRef(node); blurRef(node); }}
-      testId={`toast-card-${toast().id}`}
-      actionTestId={`toast-default-${toast().id}`}
-      ariaLabel={actions().defaultAction ? (actions().defaultAction!.label.trim() || `Open ${toast().summary || toast().app_name}`) : null}
+      testId={`toast-card-${props.toast().id}`}
+      actionTestId={`toast-default-${props.toast().id}`}
+      ariaLabel={actions().defaultAction ? (actions().defaultAction!.label.trim() || `Open ${props.toast().summary || props.toast().app_name}`) : null}
       onClick={actions().defaultAction
         ? () => {
             const def = actions().defaultAction;
-            if (def) void invokePublic("notifications.invoke-action", { id: toast().id, action_key: def.key });
+            if (def) void invokePublic("notifications.invoke-action", { id: props.toast().id, action_key: def.key });
           }
         : undefined}
       class={styles.toastCard}
@@ -125,21 +113,21 @@ function ToastCard({
         opacity: combinedOpacity(),
         transform: scheme() === "reduced"
           ? "none"
-          : `translateX(${((1 - stackSpatial()) * 24).toFixed(2)}px) translateY(${((1 - cardReflow()) * flipDeltaY).toFixed(2)}px) scale(${(0.96 + stackSpatial() * 0.04).toFixed(4)})`,
+          : `translateX(${((1 - props.stackSpatial()) * 24).toFixed(2)}px) translateY(${((1 - cardReflow()) * flipDeltaY()).toFixed(2)}px) scale(${(0.96 + props.stackSpatial() * 0.04).toFixed(4)})`,
       }}
     >
       <row class={styles.topRow}>
         {bodyContent()}
-        <Show when={countValue() > 1 && onToggleGroup !== undefined}>
+        <Show when={countValue() > 1 && props.onToggleGroup !== undefined}>
           <M3CardAction class={styles.cardActionShrink}>
             <Button
-              testId={`toast-group-toggle-${toast().id}`}
+              testId={`toast-group-toggle-${props.toast().id}`}
               ariaLabel={expandedValue()
-                ? `Collapse notifications from ${toast().app_name || "app"}`
-                : `Expand ${countValue() - 1} more notifications from ${toast().app_name || "app"}`}
+                ? `Collapse notifications from ${props.toast().app_name || "app"}`
+                : `Expand ${countValue() - 1} more notifications from ${props.toast().app_name || "app"}`}
               expanded={expandedValue()}
               class={styles.groupToggle}
-              onClick={() => onToggleGroup?.()}
+              onClick={() => props.onToggleGroup?.()}
             >
               <text data-tabular="true" class={styles.groupToggleText}>
                 {expandedValue() ? `${countValue()}` : `+${countValue() - 1}`}
@@ -150,14 +138,14 @@ function ToastCard({
         </Show>
         <M3CardAction class={styles.cardActionShrink}>
           <Button
-            ariaLabel={!expandedValue() && countValue() > 1 ? `Dismiss all notifications from ${toast().app_name || "app"}` : "Dismiss notification"}
-            testId={`toast-dismiss-${toast().id}`}
+            ariaLabel={!expandedValue() && countValue() > 1 ? `Dismiss all notifications from ${props.toast().app_name || "app"}` : "Dismiss notification"}
+            testId={`toast-dismiss-${props.toast().id}`}
             class={styles.dismissButton}
             onClick={() => {
-              if (!expandedValue() && countValue() > 1 && onDismissGroup) {
-                onDismissGroup();
+              if (!expandedValue() && countValue() > 1 && props.onDismissGroup) {
+                props.onDismissGroup();
               } else {
-                void invokePublic("notifications.dismiss", { id: toast().id });
+                void invokePublic("notifications.dismiss", { id: props.toast().id });
               }
             }}
           >
@@ -166,7 +154,7 @@ function ToastCard({
         </M3CardAction>
       </row>
       <Show when={preview.src()}>
-        <box testId={`toast-attachment-${toast().id}`} data-fit={mediaLayout().previewFit} class={styles.previewFrame}>
+        <box testId={`toast-attachment-${props.toast().id}`} data-fit={mediaLayout().previewFit} class={styles.previewFrame}>
           <Image src={preview.src()} data-fit={mediaLayout().previewFit} class={styles.previewImage} />
         </box>
       </Show>
@@ -176,9 +164,9 @@ function ToastCard({
             {action => (
               <M3CardAction class={styles.actionSlot}>
                 <Button
-                  testId={`toast-action-${toast().id}-${action().key}`}
+                  testId={`toast-action-${props.toast().id}-${action().key}`}
                   class={styles.actionButton}
-                  onClick={() => { void invokePublic("notifications.invoke-action", { id: toast().id, action_key: action().key }); }}
+                  onClick={() => { void invokePublic("notifications.invoke-action", { id: props.toast().id, action_key: action().key }); }}
                 >
                   <text class={styles.clipped}>{action().label}</text>
                 </Button>
@@ -195,29 +183,29 @@ function propsOr(cond: boolean, a: number, b: number): number {
   return cond ? a : b;
 }
 
-function ToastDeckPeek({ headId, count, track, onExpand }: {
+function ToastDeckPeek(props: {
   headId: number;
   count: number;
   track: TrackNode;
   onExpand: () => void;
 }): NativeChild {
-  const inputRef = trackedRef(track);
+  const inputRef = useTrackedRef(node => props.track(node));
   return (
     <column
       ref={inputRef}
-      testId={`toast-deck-peek-${headId}`}
-      onClick={onExpand}
+      testId={`toast-deck-peek-${props.headId}`}
+      onClick={() => props.onExpand()}
       class={styles.deckPeek}
     >
-      <box ariaHidden testId={`toast-deck-layer-1-${headId}`} class="toast-deck-layer-1" />
-      <Show when={count >= 3}>
-        <box ariaHidden testId={`toast-deck-layer-2-${headId}`} class="toast-deck-layer-2" />
+      <box ariaHidden testId={`toast-deck-layer-1-${props.headId}`} class="toast-deck-layer-1" />
+      <Show when={props.count >= 3}>
+        <box ariaHidden testId={`toast-deck-layer-2-${props.headId}`} class="toast-deck-layer-2" />
       </Show>
     </column>
   );
 }
 
-function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity }: {
+function ToastSurface(props: {
   output: string;
   monitorHeight: Accessor<number>;
   popups: Accessor<readonly NotificationItem[]>;
@@ -231,10 +219,10 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
   const [promoted, setPromoted] = createSignal(false);
   const [expandedKeys, setExpandedKeys] = createSignal<readonly string[]>([]);
   const [hovered, setHovered] = createSignal(false);
-  const grouped = createMemo(() => groupNotificationPopups(popups(), 3));
+  const grouped = createMemo(() => groupNotificationPopups(props.popups(), 3));
 
   let lastHeadId: number | undefined;
-  createEffect(() => popups()[0]?.id, headId => {
+  createEffect(() => props.popups()[0]?.id, headId => {
     if (lastHeadId !== undefined && headId !== undefined && headId !== lastHeadId) {
       setPromoted(true);
     }
@@ -250,7 +238,7 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
 
   // Pause daemon 5s auto-expiry whenever the user is hovering or viewing any expanded app group.
   let lastPaused = false;
-  createEffect(() => visible() && (expandedKeys().length > 0 || hovered()), paused => {
+  createEffect(() => props.visible() && (expandedKeys().length > 0 || hovered()), paused => {
     if (paused === lastPaused) return;
     lastPaused = paused;
     void invokePublic("notifications.set-paused", { paused });
@@ -318,17 +306,17 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
   const anyExpanded = () => expandedKeys().length > 0;
   const surfaceHeight = createMemo(() =>
     anyExpanded() || grouped().groups.length > 1
-      ? Math.min(760, Math.max(456, Math.round(monitorHeight() - topMargin() - 20)))
+      ? Math.min(760, Math.max(456, Math.round(props.monitorHeight() - topMargin() - 20)))
       : 456,
   );
   const scrollMaxHeight = createMemo(() => Math.max(240, surfaceHeight() - 12));
 
   return (
-    <LayerSurface name="notification-toasts" output={output} layer="overlay" anchor={["top", "right"]}
+    <LayerSurface name="notification-toasts" output={props.output} layer="overlay" anchor={["top", "right"]}
       margin={{ top: Math.max(0, topMargin() - 12), right: 0 }} width={396} height={surfaceHeight()} keyboard="none"
       inputRegion={trackedNodes()} blurRegion={blurNodes().length > 0 ? blurNodes() : "none"}>
       <column
-        inert={!visible()}
+        inert={!props.visible()}
         onPointerEnter={() => setHovered(true)}
         onPointerLeave={() => setHovered(false)}
         class={styles.toastSurfaceRoot}
@@ -353,8 +341,8 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
                       toast={head}
                       track={track}
                       trackBlur={trackBlur}
-                      stackSpatial={spatial}
-                      stackOpacity={opacity}
+                      stackSpatial={props.spatial}
+                      stackOpacity={props.opacity}
                       promoted={groupIndex() === 0 && promoted()}
                       groupCount={() => group().items.length}
                       groupExpanded={isExpanded}
@@ -377,8 +365,8 @@ function ToastSurface({ output, monitorHeight, popups, visible, spatial, opacity
                               toast={item}
                               track={track}
                               trackBlur={trackBlur}
-                              stackSpatial={spatial}
-                              stackOpacity={opacity}
+                              stackSpatial={props.spatial}
+                              stackOpacity={props.opacity}
                               promoted={false}
                               staggerIndex={itemIndex() + 1}
                             />

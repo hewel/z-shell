@@ -120,18 +120,17 @@ function WavyProgressTrack(props: {
 
 function TrackControls(props: { player: Accessor<MediaPlayer> }) {
   const { media, hostClient, invokePublic } = useShellStore();
-  const { player } = props;
   const { src } = useDaemonMedia(hostClient, () => media.data()?.cover, { fetchCommand: "media.fetch-blob" });
-  const playing = () => player().playback_status === "playing";
-  const length = () => player().metadata.length_us;
-  const position = () => player().position_us;
-  const canSeek = () => player().capabilities.can_seek;
+  const playing = () => props.player().playback_status === "playing";
+  const length = () => props.player().metadata.length_us;
+  const position = () => props.player().position_us;
+  const canSeek = () => props.player().capabilities.can_seek;
   const canScrub = () => canSeek() && (length() ?? 0) > 0 && position() != null;
   const fraction = () => Math.max(0, Math.min(1, (position() ?? 0) / (length() || 1)));
-  const canPlayPause = () => playing() ? player().capabilities.can_pause : player().capabilities.can_play;
+  const canPlayPause = () => playing() ? props.player().capabilities.can_pause : props.player().capabilities.can_play;
 
   function seek(offsetUs: number) {
-    const current = player();
+    const current = props.player();
     if (current.capabilities.can_seek) void invokePublic("media.seek", { player_id: current.id, offset_us: offsetUs });
   }
 
@@ -147,16 +146,16 @@ function TrackControls(props: { player: Accessor<MediaPlayer> }) {
         </Show>
         <column class={styles.trackMetaCol}>
           <text testId="media-title" class={cx(styles.truncate, styles.trackTitle)}>
-            {player().metadata.title ?? "Unknown track"}
+            {props.player().metadata.title ?? "Unknown track"}
           </text>
-          <Show when={player().metadata.artists.length > 0}>
+          <Show when={props.player().metadata.artists.length > 0}>
             <text class={cx(styles.truncate, styles.trackArtists)}>
-              {player().metadata.artists.join(" · ")}
+              {props.player().metadata.artists.join(" · ")}
             </text>
           </Show>
-          <Show when={player().metadata.album}>
+          <Show when={props.player().metadata.album}>
             <text class={cx(styles.truncate, styles.trackAlbum)}>
-              {player().metadata.album}
+              {props.player().metadata.album}
             </text>
           </Show>
         </column>
@@ -188,9 +187,9 @@ function TrackControls(props: { player: Accessor<MediaPlayer> }) {
         <Button
           testId="media-prev"
           ariaLabel="Previous track"
-          disabled={!player().capabilities.can_go_previous}
+          disabled={!props.player().capabilities.can_go_previous}
           class={styles.skipBtn}
-          onClick={() => { void invokePublic("media.previous", { player_id: player().id }); }}
+          onClick={() => { void invokePublic("media.previous", { player_id: props.player().id }); }}
         >
           <ShellIcon name="skipPrev" size={20} color={onSurface} />
         </Button>
@@ -199,16 +198,16 @@ function TrackControls(props: { player: Accessor<MediaPlayer> }) {
           ariaLabel={playing() ? "Pause" : "Play"}
           disabled={!canPlayPause()}
           class={styles.playPauseBtn}
-          onClick={() => { void invokePublic("media.play-pause", { player_id: player().id }); }}
+          onClick={() => { void invokePublic("media.play-pause", { player_id: props.player().id }); }}
         >
           <ShellIcon name={playing() ? "pause" : "play"} size={22} color={onPrimary} />
         </Button>
         <Button
           testId="media-next"
           ariaLabel="Next track"
-          disabled={!player().capabilities.can_go_next}
+          disabled={!props.player().capabilities.can_go_next}
           class={styles.skipBtn}
-          onClick={() => { void invokePublic("media.next", { player_id: player().id }); }}
+          onClick={() => { void invokePublic("media.next", { player_id: props.player().id }); }}
         >
           <ShellIcon name="skipNext" size={20} color={onSurface} />
         </Button>

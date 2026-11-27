@@ -1,4 +1,4 @@
-import { Button, For, Show, TextField, createEffect, createMemo, createSignal, cx, onCleanup, type Accessor, type NativeChild } from "@hewel/zgui";
+import { Button, For, Show, TextField, createDelay, createEffect, createMemo, createSignal, cx, type Accessor, type NativeChild } from "@hewel/zgui";
 import { M3Button, M3CardAction, M3InteractiveCard, M3SegmentedControl, M3Switch } from "@z-shell/sdk/primitives";
 import { createOpacityEnter, useMotionScheme } from "../../motion.ts";
 import { useShellStore } from "../../store.ts";
@@ -212,18 +212,16 @@ export function IdlePane(): NativeChild {
   const timedSupported = () => supportsTimedKeepAwake(idle.data());
   const keepAwakeTimed = () => Boolean(caffeine() && idle.data()?.caffeine_expires_at_ms != null);
   const [nowMs, setNowMs] = createSignal(Date.now());
+  const keepAwakeDelay = createDelay();
   createEffect(keepAwakeTimed, active => {
     if (!active) return;
-    let timer: number | undefined;
     const tick = () => {
       const now = Date.now();
       setNowMs(now);
-      timer = setTimeout(tick, 1_000 - (now % 1_000));
+      keepAwakeDelay.schedule(1_000 - (now % 1_000), tick);
     };
     tick();
-    onCleanup(() => {
-      if (timer !== undefined) clearTimeout(timer);
-    });
+    return () => keepAwakeDelay.cancel();
   });
   const keepAwakeStatus = () => {
     const snap = idle.data();

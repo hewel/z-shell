@@ -7,7 +7,7 @@ const REFRESH_PRESETS = [60, 180, 300, 600, 900] as const;
 const TIMEOUT_PRESETS = [2000, 5000, 10000, 15000] as const;
 
 export default function AiUsageSettingsPage(props: PluginSettingsProps): NativeChild {
-  const { data: snapshot } = useTopic<AiUsageSnapshot>(props.client, "plugin.z-shell.ai-usage.quotas");
+  const { data: snapshot } = useTopic<AiUsageSnapshot>(() => props.client(), "plugin.z-shell.ai-usage.quotas");
   const [refreshSeconds, setRefreshSeconds] = createSignal(300);
   const [timeoutMs, setTimeoutMs] = createSignal(5000);
   const [codexUrl, setCodexUrl] = createSignal("");

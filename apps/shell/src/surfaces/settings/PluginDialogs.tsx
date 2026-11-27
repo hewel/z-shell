@@ -158,7 +158,7 @@ export function ApprovalReviewDialog(props: {
   };
 
   return (
-    <box class={styles.backdrop} onClick={props.onClose}>
+    <box class={styles.backdrop} onClick={() => props.onClose()}>
       <M3DialogShell
         testId="plugin-approval-dialog"
         ariaLabel={meta().title}
@@ -290,7 +290,7 @@ export function InstallCustomDialog(props: {
   };
 
   return (
-    <box class={styles.backdrop} onClick={props.onClose}>
+    <box class={styles.backdrop} onClick={() => props.onClose()}>
       <M3DialogShell testId="plugin-install-custom-dialog" ariaLabel="Install custom plugin" style={{ width: "460px" }}>
         <text role="heading" class={styles.dialogTitle}>Install local or custom plugin</text>
         <M3SegmentedControl ariaLabel="Install source kind" options={CUSTOM_KINDS} value={kind()} onChange={setKind} />
@@ -425,7 +425,7 @@ export function SourcesDialog(props: {
   };
 
   return (
-    <box class={styles.backdrop} onClick={props.onClose}>
+    <box class={styles.backdrop} onClick={() => props.onClose()}>
       <M3DialogShell testId="plugin-sources-dialog" ariaLabel="Catalog sources" style={{ width: "520px" }}>
         <row class={styles.sourcesHeader}>
           <text role="heading" class={styles.dialogTitle}>Catalog sources</text>

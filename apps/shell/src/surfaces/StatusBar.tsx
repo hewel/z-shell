@@ -1,5 +1,5 @@
 import {
-  Button, For, Image, LayerSurface, Show, createEffect, createMemo, createSignal, cx, getWindowRect, onCleanup,
+  Button, For, Image, LayerSurface, Show, createDelay, createEffect, createMemo, createSignal, cx, getWindowRect, onCleanup,
   type Accessor, type ButtonProps, type Monitor, type NativeNode, type NativeStyle, type NativeWheelEvent, type NativeWindowRect,
 } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
@@ -256,7 +256,7 @@ function ActiveWindowPill(props: { window: Accessor<WaylandWindow>; vertical: bo
   const { apps, hostClient } = useShellStore();
   const app = createMemo(() => resolveDesktopApp(apps.data()?.apps, props.window().app_id));
   const { src } = useDaemonMedia(hostClient, () => app()?.icon, { fetchCommand: "launcher.fetch-blob" });
-  const blurRef = useBlurRef(props.trackBlur);
+  const blurRef = useBlurRef(node => props.trackBlur(node));
   return (
     <box
       ref={blurRef}
@@ -393,7 +393,7 @@ function ClockPill(props: {
   const count = () => notifications.data()?.history.length ?? 0;
   const dnd = () => notifications.data()?.dnd ?? false;
   const hasBadge = () => count() > 0 || dnd();
-  const blurRef = useBlurRef(props.trackBlur);
+  const blurRef = useBlurRef(node => props.trackBlur(node));
   return (
     <Button
       ref={blurRef}
@@ -443,7 +443,7 @@ function SystemMonitorTrigger(props: {
   trackBlur: TrackBlurNode;
 }) {
   const { telemetry, togglePanel } = useShellStore();
-  const blurRef = useBlurRef(props.trackBlur);
+  const blurRef = useBlurRef(node => props.trackBlur(node));
   const cpuPct = () => telemetry.data()?.cpu_usage_percent ?? null;
   const ramPct = () => computeMemoryBreakdown(telemetry.data()?.memory)?.usedPercent ?? null;
   const cpuLabel = () => (cpuPct() === null ? "—" : `${Math.round(cpuPct()!)}%`);
@@ -532,7 +532,7 @@ function SystemPill(props: {
     togglePanel, toggleQuickSettingsPage, invokePublic, openImeMenu, openSettingsWindow,
   } = useShellStore();
   let systemNode: NativeNode | undefined;
-  const blurRef = useBlurRef(props.trackBlur);
+  const blurRef = useBlurRef(node => props.trackBlur(node));
   const anchorFor = (targetNode: NativeNode): NativeWindowRect =>
     resolveBarPopupAnchor(props.layout, { align: "end", targetRect: getWindowRect(props.vertical ? (systemNode ?? targetNode) : targetNode) });
   const qsOpenHere = () => activePanel() === "quick-settings"
@@ -790,7 +790,7 @@ function PluginSlotIsland(props: {
   trackBlur: TrackBlurNode;
 }) {
   const { activePluginPanelTarget } = useShellStore();
-  const blurRef = useBlurRef(props.trackBlur);
+  const blurRef = useBlurRef(node => props.trackBlur(node));
   const active = () => {
     const target = activePluginPanelTarget();
     return Boolean(
@@ -827,7 +827,7 @@ function BarContent(props: {
   const store = useShellStore();
   const { activePanel, togglePanel, dismissOverlay, invokePublic } = store;
   useShellTheme(store.theme.data);
-  const workspacesRef = useBlurRef(props.trackBlur);
+  const workspacesRef = useBlurRef(node => props.trackBlur(node));
   const vertical = createMemo(() => props.layout.isVertical);
   const docked = createMemo(() => props.layout.style === "docked");
   const surfaceName = () => formatSurfaceName("bar", props.monitor.id);
@@ -1080,19 +1080,16 @@ export function StatusBar() {
   const barSettings = () => settings.data()?.bar ?? DEFAULT_BAR_SETTINGS;
   const [now, setNow] = createSignal(Date.now());
   const clockSeconds = () => barSettings().clock_seconds;
-  let timer: number | undefined;
-  onCleanup(() => {
-    if (timer !== undefined) clearTimeout(timer);
-  });
+  const clockDelay = createDelay();
   createEffect(clockSeconds, seconds => {
     const period = seconds ? 1_000 : 60_000;
     const tick = () => {
       const time = Date.now();
       setNow(time);
-      timer = setTimeout(tick, period - (time % period));
+      clockDelay.schedule(period - (time % period), tick);
     };
-    if (timer !== undefined) clearTimeout(timer);
     tick();
+    return () => clockDelay.cancel();
   });
   const clock = createMemo(() => formatBarClock(now(), { clock24h: barSettings().clock_24h, clockSeconds: clockSeconds() }));
 

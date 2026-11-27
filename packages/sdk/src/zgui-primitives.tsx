@@ -1,7 +1,9 @@
 import {
   Button,
   For,
+  Match,
   Show,
+  Switch,
   createEffect,
   createMemo,
   createSignal,
@@ -9,6 +11,7 @@ import {
   focus,
   getWindowRect,
   observeGeometry,
+  untrack,
   type NativeChild,
   type NativeEvent,
   type NativeKeyEvent,
@@ -545,7 +548,7 @@ export function M3Collapsible(props: M3CollapsibleProps): NativeChild {
     exitRole: "fastEffects",
   });
   const [innerNode, setInnerNode] = createSignal<NativeNode | null>(null);
-  const [measuredHeight, setMeasuredHeight] = createSignal(props.estimatedHeight ?? 64);
+  const [measuredHeight, setMeasuredHeight] = createSignal(untrack(() => props.estimatedHeight ?? 64));
 
   createEffect(() => [presence.mounted(), innerNode()] as const, ([mounted, node]) => {
     if (!mounted || !node) return;
@@ -722,8 +725,23 @@ export function M3InteractiveCard(props: M3InteractiveCardProps): NativeChild {
     </Show>
   );
 
-  if (props.layout === "row") {
-    return (
+  return (
+    <Show
+      when={props.layout === "row"}
+      fallback={(
+        <column
+          testId={props.testId ?? null}
+          data-interactive={interactive()}
+          {...(props.inert !== undefined ? { inert: props.inert } : {})}
+          {...(props.ref ? { ref: props.ref } : {})}
+          class={className()}
+          {...(props.style !== undefined ? { style: props.style } : {})}
+        >
+          {renderHitLayer()}
+          {props.children}
+        </column>
+      )}
+    >
       <row
         testId={props.testId ?? null}
         data-interactive={interactive()}
@@ -735,21 +753,7 @@ export function M3InteractiveCard(props: M3InteractiveCardProps): NativeChild {
         {renderHitLayer()}
         {props.children}
       </row>
-    );
-  }
-
-  return (
-    <column
-      testId={props.testId ?? null}
-      data-interactive={interactive()}
-      {...(props.inert !== undefined ? { inert: props.inert } : {})}
-      {...(props.ref ? { ref: props.ref } : {})}
-      class={className()}
-      {...(props.style !== undefined ? { style: props.style } : {})}
-    >
-      {renderHitLayer()}
-      {props.children}
-    </column>
+    </Show>
   );
 }
 
@@ -763,23 +767,24 @@ export interface M3CardActionProps {
 /** Elevates a secondary interactive control above `M3InteractiveCard`'s hit layer. */
 export function M3CardAction(props: M3CardActionProps): NativeChild {
   const className = () => cx(styles.interactiveCardAction, props.class);
-  if (props.layout === "row") {
-    return (
-      <row class={className()} {...(props.style !== undefined ? { style: props.style } : {})}>
-        {props.children}
-      </row>
-    );
-  }
-  if (props.layout === "column") {
-    return (
-      <column class={className()} {...(props.style !== undefined ? { style: props.style } : {})}>
-        {props.children}
-      </column>
-    );
-  }
   return (
-    <box class={className()} {...(props.style !== undefined ? { style: props.style } : {})}>
-      {props.children}
-    </box>
+    <Switch
+      fallback={(
+        <box class={className()} {...(props.style !== undefined ? { style: props.style } : {})}>
+          {props.children}
+        </box>
+      )}
+    >
+      <Match when={props.layout === "row"}>
+        <row class={className()} {...(props.style !== undefined ? { style: props.style } : {})}>
+          {props.children}
+        </row>
+      </Match>
+      <Match when={props.layout === "column"}>
+        <column class={className()} {...(props.style !== undefined ? { style: props.style } : {})}>
+          {props.children}
+        </column>
+      </Match>
+    </Switch>
   );
 }

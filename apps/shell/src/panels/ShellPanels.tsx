@@ -71,7 +71,7 @@ function PanelContent(props: {
   cardRef?: (node: NativeNode) => void;
   children: NativeChild;
 }) {
-  useShellTheme(props.theme.data);
+  useShellTheme(() => props.theme.data());
   const scheme = useMotionScheme();
   return (
     <box inert={props.inert} class={cx(styles.popoverBleed)}>

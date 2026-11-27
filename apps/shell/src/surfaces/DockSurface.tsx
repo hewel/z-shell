@@ -1,5 +1,5 @@
 import {
-  Button, For, Image, LayerSurface, Show, createEffect, createMemo, createSignal, cx, onCleanup,
+  Button, For, Image, LayerSurface, Show, createDelay, createEffect, createMemo, createSignal, cx,
   type Accessor, type Monitor, type NativeChild, type NativeNode, type NativeWindowRect,
 } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
@@ -23,31 +23,30 @@ const tints = ["primary", "secondary", "tertiary"] as const;
 
 function DockApp(props: { entry: Accessor<DockEntry> }) {
   const { hostClient, invokePublic, invokeHost } = useShellStore();
-  const entry = props.entry;
-  const { src } = useDaemonMedia(hostClient, () => entry().icon, { fetchCommand: "launcher.fetch-blob" });
+  const { src } = useDaemonMedia(hostClient, () => props.entry().icon, { fetchCommand: "launcher.fetch-blob" });
   const tint = createMemo(() => {
     let hash = 0;
-    for (const char of entry().appId) hash = (Math.imul(31, hash) + char.codePointAt(0)!) >>> 0;
+    for (const char of props.entry().appId) hash = (Math.imul(31, hash) + char.codePointAt(0)!) >>> 0;
     return tints[hash % tints.length];
   });
   const initial = createMemo(() => {
-    const label = entry().title.trim();
-    const id = (label || entry().appId).replace(/\.desktop$/i, "");
+    const label = props.entry().title.trim();
+    const id = (label || props.entry().appId).replace(/\.desktop$/i, "");
     return String.fromCodePoint(id.codePointAt(id.lastIndexOf(".") + 1) ?? 0x3f).toUpperCase();
   });
   function activate() {
-    const { appId, windows } = entry();
+    const { appId, windows } = props.entry();
     const window = windows[0];
     if (window) void invokePublic("wayland.window.activate", { window_id: window.window_id });
     else void invokePublic("launcher.activate", { provider_id: "desktop", item_id: appId });
   }
   function togglePin() {
-    const { appId, pinned } = entry();
+    const { appId, pinned } = props.entry();
     void invokeHost("apps.pin", { id: appId, pinned: !pinned });
   }
   return (
     <column class={styles.tileStack}>
-      <Button testId={`dock-${entry().pinned ? "app" : "running"}-${entry().appId}`} ariaLabel={entry().title}
+      <Button testId={`dock-${props.entry().pinned ? "app" : "running"}-${props.entry().appId}`} ariaLabel={props.entry().title}
         data-dock-item="true"
         onClick={activate}
         onPointerDown={event => {
@@ -77,9 +76,9 @@ function DockApp(props: { entry: Accessor<DockEntry> }) {
         </box>
       </Button>
       <row ariaHidden class={styles.dotsRow}>
-        <Show when={!entry().focused}>
-          <Show when={entry().pinned} fallback={<box class={cx(styles.dot, styles.dotUnpinned)} />}>
-            <For each={entry().windows} keyed={window => window.window_id}>{() => <box class={styles.dot} />}</For>
+        <Show when={!props.entry().focused}>
+          <Show when={props.entry().pinned} fallback={<box class={cx(styles.dot, styles.dotUnpinned)} />}>
+            <For each={props.entry().windows} keyed={window => window.window_id}>{() => <box class={styles.dot} />}</For>
           </Show>
         </Show>
       </row>
@@ -168,9 +167,11 @@ function DockCapsule(props: {
             }}
           />
           <For each={slots()} keyed={slot => slot.key}>
-            {slot => slot().kind === "divider"
-              ? <box ariaHidden class={styles.divider} />
-              : <DockApp entry={() => (slot() as Extract<DockSlot, { readonly kind: "app" }>).entry} />}
+            {slot => (
+              <Show when={slot().kind === "app"} fallback={<box ariaHidden class={styles.divider} />}>
+                <DockApp entry={() => (slot() as Extract<DockSlot, { readonly kind: "app" }>).entry} />
+              </Show>
+            )}
           </For>
         </row>
       </scroll>
@@ -187,25 +188,17 @@ function MonitorDock(props: {
   const { outputs } = useShellStore();
   const [hovered, setHovered] = createSignal(false);
   const [revealed, setRevealed] = createSignal(true);
-  let hideTimer: number | undefined;
-  const clearHideTimer = () => {
-    if (hideTimer !== undefined) {
-      clearTimeout(hideTimer);
-      hideTimer = undefined;
-    }
-  };
-  onCleanup(clearHideTimer);
+  const hideDelay = createDelay();
 
   createEffect(hovered, isHovered => {
-    clearHideTimer();
+    hideDelay.cancel();
     if (isHovered) {
       setRevealed(true);
       return;
     }
-    hideTimer = setTimeout(() => {
-      hideTimer = undefined;
+    hideDelay.schedule(autoHideDelayMs, () => {
       setRevealed(false);
-    }, autoHideDelayMs);
+    });
   });
 
   const size = createMemo(() => resolveMonitorLogicalSize(props.monitor(), outputs.data()));

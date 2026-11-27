@@ -34,6 +34,7 @@
     "@z-shell/composer": "workspace:*",
     "@z-shell/plugin-api": "workspace:*",
     "@z-shell/sdk": "workspace:*",
+    "eslint-plugin-solid": "0.20.1",
     "oxlint": "1.94.0",
     "solid-js": "2.0.1",
     "tsrs": "7.1.0-beta.tsrs2"

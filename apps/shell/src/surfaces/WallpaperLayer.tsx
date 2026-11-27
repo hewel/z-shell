@@ -87,14 +87,13 @@ function WallpaperContent(props: { readonly monitor: Accessor<Monitor>; readonly
 
 function MonitorWallpaper(props: { readonly monitor: Accessor<Monitor> }): NativeChild {
   const { outputs, wallpaper } = useShellStore();
-  const { monitor } = props;
-  const active = () => resolveMonitorWallpaper(wallpaper.data(), monitor().name);
-  const size = createMemo(() => resolveMonitorLogicalSize(monitor(), outputs.data()));
+  const active = () => resolveMonitorWallpaper(wallpaper.data(), props.monitor().name);
+  const size = createMemo(() => resolveMonitorLogicalSize(props.monitor(), outputs.data()));
   return (
     <Show when={active()}>
       <LayerSurface
-        name={formatSurfaceName("wallpaper", monitor().id)}
-        output={monitor().id}
+        name={formatSurfaceName("wallpaper", props.monitor().id)}
+        output={props.monitor().id}
         layer="background"
         anchor={["top", "bottom", "left", "right"]}
         width={size().width}
@@ -103,7 +102,7 @@ function MonitorWallpaper(props: { readonly monitor: Accessor<Monitor> }): Nativ
         keyboard="none"
         inputRegion="empty"
       >
-        <WallpaperContent monitor={monitor} active={active} />
+        <WallpaperContent monitor={props.monitor} active={active} />
       </LayerSurface>
     </Show>
   );

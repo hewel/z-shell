@@ -50,11 +50,10 @@ function CandidateCard(props: {
 }) {
   const { theme, invokePublic } = useShellStore();
   useShellTheme(theme.data);
-  const panel = props.panel;
-  const table = () => panel().lookup_table;
+  const table = () => props.panel().lookup_table;
   const preedit = createMemo(() => {
     // Kimpanel reports a Unicode code-point offset, not a UTF-16 string index.
-    const { preedit: text, caret } = panel();
+    const { preedit: text, caret } = props.panel();
     let offset = 0;
     let remaining = caret;
     for (const char of text) {
@@ -65,7 +64,7 @@ function CandidateCard(props: {
   });
   const page = (down: boolean) => void invokePublic(down ? "ime.page-down" : "ime.page-up", {});
   const hasPager = () => table().has_prev || table().has_next;
-  const inlineHorizontalPager = () => !props.vertical() && hasPager() && panel().preedit.length > 0;
+  const inlineHorizontalPager = () => !props.vertical() && hasPager() && props.panel().preedit.length > 0;
   const cursorLabel = () => {
     const count = table().texts.length;
     if (count === 0) return "";
@@ -83,9 +82,9 @@ function CandidateCard(props: {
         if (event.delta.y !== 0) page(event.delta.y > 0);
       }}
     >
-      <Show when={panel().preedit.length > 0 || panel().aux.length > 0}>
+      <Show when={props.panel().preedit.length > 0 || props.panel().aux.length > 0}>
         <column class={cx(styles.header, props.vertical() && table().texts.length > 0 && styles.headerVerticalWithCandidates)}>
-          <Show when={panel().preedit.length > 0}>
+          <Show when={props.panel().preedit.length > 0}>
             <row class={styles.preeditRow} data-inline-pager={inlineHorizontalPager() ? "true" : "false"}>
               <row testId="kimpanel-preedit" class={styles.preedit}>
                 <text class={styles.preeditText}>{preedit().before}</text>
@@ -121,8 +120,8 @@ function CandidateCard(props: {
               </Show>
             </row>
           </Show>
-          <Show when={panel().aux.length > 0}>
-            <text testId="kimpanel-aux" class={styles.auxText}>{panel().aux}</text>
+          <Show when={props.panel().aux.length > 0}>
+            <text testId="kimpanel-aux" class={styles.auxText}>{props.panel().aux}</text>
           </Show>
         </column>
       </Show>

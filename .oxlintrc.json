@@ -1,7 +1,8 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "extends": ["./node_modules/@hewel/zgui/oxlint/recommended.json"],
   "plugins": ["eslint", "typescript", "oxc"],
-  "jsPlugins": ["./tools/oxlint-design-plugin.mjs", "./node_modules/@hewel/zgui/dist/oxlint/plugin.js"],
+  "jsPlugins": ["./tools/oxlint-design-plugin.mjs"],
   "ignorePatterns": [
     "**/node_modules/**",
     "**/dist/**",
@@ -11,8 +12,6 @@
     "apps/shell/src/plugins/composed.ts"
   ],
   "rules": {
-    "no-debugger": "error",
-    "no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
     "zshell/no-lint-suppression": "error"
   },
   "overrides": [
@@ -57,12 +56,6 @@
         "zshell/no-partial-card-hover": "error",
         "zshell/consistent-active-hover-shape": "error",
         "zshell/no-child-control-overflow": "error",
-        "zgui/no-direct-bridge": "error",
-        "zgui/no-cleanup-in-ref": "error",
-        "zgui/no-top-level-service-call": "error",
-        "zgui/no-solid-web-imports": "error",
-        "zgui/no-getter-object-spread": "error",
-        "zgui/no-static-component-stylesheet": "error",
         "zgui/prefer-stylesheet": "error"
       }
     },
@@ -87,7 +80,42 @@
     {
       "files": ["**/tests/**", "tools/**"],
       "rules": {
-        "zshell/no-lint-suppression": "off"
+        "zshell/no-lint-suppression": "off",
+        "zgui/no-lint-suppression": "off"
+      }
+    },
+    {
+      "files": [
+        "packages/composer/**",
+        "packages/plugin-api/**",
+        "packages/sdk/src/client.ts",
+        "packages/sdk/src/motion.ts",
+        "packages/sdk/src/zgui-transport.ts",
+        "plugins/*/src/*.ts",
+        "tools/**",
+        "scripts/**",
+        "**/tests/**"
+      ],
+      "rules": {
+        "no-restricted-globals": "off"
+      }
+    },
+    {
+      "files": ["packages/sdk/src/motion.ts"],
+      "rules": {
+        "zgui/no-direct-bridge": "off"
+      }
+    },
+    {
+      "files": ["packages/sdk/src/zgui-motion.ts"],
+      "rules": {
+        "solid/reactivity": "off"
+      }
+    },
+    {
+      "files": ["packages/sdk/tests/zgui.test.ts"],
+      "rules": {
+        "zgui/no-solid-web-imports": "off"
       }
     }
   ]

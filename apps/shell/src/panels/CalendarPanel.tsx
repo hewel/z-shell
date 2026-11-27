@@ -1,4 +1,4 @@
-import { Button, For, Image, Show, createMemo, createSignal, cx, onCleanup, type Accessor } from "@hewel/zgui";
+import { Button, For, Image, Show, createDelay, createMemo, createSignal, cx, type Accessor } from "@hewel/zgui";
 import { M3Button, M3CardAction, M3InteractiveCard } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
@@ -15,20 +15,19 @@ const rowStarts = [0, 7, 14, 21, 28, 35] as const;
 
 function NotificationRow(props: { item: Accessor<NotificationItem> }) {
   const { hostClient, invokePublic } = useShellStore();
-  const { item } = props;
-  const mediaLayout = createMemo(() => resolveNotificationMediaLayout(item()));
+  const mediaLayout = createMemo(() => resolveNotificationMediaLayout(props.item()));
   const leading = useDaemonMedia(hostClient, () => mediaLayout().leadingMedia, { fetchCommand: "notifications.fetch-blob" });
   const badge = useDaemonMedia(hostClient, () => mediaLayout().appBadge, { fetchCommand: "notifications.fetch-blob" });
   const preview = useDaemonMedia(hostClient, () => mediaLayout().previewBanner, { fetchCommand: "notifications.fetch-blob" });
-  const actions = createMemo(() => splitNotificationActions(item().actions));
-  const formattedBody = createMemo(() => formatNotificationBody(item().body));
+  const actions = createMemo(() => splitNotificationActions(props.item().actions));
+  const formattedBody = createMemo(() => formatNotificationBody(props.item().body));
 
   const bodyContent = () => (
     <row class={styles.notifBodyMain}>
-      <box testId={`cal-notif-leading-${item().id}`} class={styles.notifLeadingWrap}>
+      <box testId={`cal-notif-leading-${props.item().id}`} class={styles.notifLeadingWrap}>
         <Show when={leading.src()} fallback={
           <box
-            testId={`cal-notif-fallback-${item().id}`}
+            testId={`cal-notif-fallback-${props.item().id}`}
             class={cx(styles.imageTile, styles.notifFallback)}
             data-kind={mediaLayout().fallbackKind}
           >
@@ -41,24 +40,24 @@ function NotificationRow(props: { item: Accessor<NotificationItem> }) {
         }>
           <box class={cx(styles.imageTile, styles.notifAvatarWrap)}>
             <Image
-              testId={`cal-notif-avatar-${item().id}`}
+              testId={`cal-notif-avatar-${props.item().id}`}
               src={leading.src()}
               class={styles.notifAvatarImg}
             />
           </box>
         </Show>
         <Show when={badge.src()}>
-          <box testId={`cal-notif-badge-${item().id}`} class={styles.notifAppBadge}>
+          <box testId={`cal-notif-badge-${props.item().id}`} class={styles.notifAppBadge}>
             <Image src={badge.src()} class={styles.notifAppBadgeImg} />
           </box>
         </Show>
       </box>
       <column class={styles.notifTextCol}>
-        <text class={styles.notifAppName}>{item().app_name}</text>
-        <text class={styles.notifSummary}>{item().summary}</text>
+        <text class={styles.notifAppName}>{props.item().app_name}</text>
+        <text class={styles.notifSummary}>{props.item().summary}</text>
         <Show when={formattedBody()}>
           {body => (
-            <text testId={`cal-notif-body-${item().id}`} class={cx(styles.notifBody, "notification-body")}>{body()}</text>
+            <text testId={`cal-notif-body-${props.item().id}`} class={cx(styles.notifBody, "notification-body")}>{body()}</text>
           )}
         </Show>
       </column>
@@ -68,13 +67,13 @@ function NotificationRow(props: { item: Accessor<NotificationItem> }) {
   return (
     <M3InteractiveCard
       layout="column"
-      testId={`cal-notif-${item().id}`}
-      actionTestId={`cal-notif-default-${item().id}`}
-      ariaLabel={actions().defaultAction ? (actions().defaultAction!.label.trim() || `Open ${item().summary || item().app_name}`) : null}
+      testId={`cal-notif-${props.item().id}`}
+      actionTestId={`cal-notif-default-${props.item().id}`}
+      ariaLabel={actions().defaultAction ? (actions().defaultAction!.label.trim() || `Open ${props.item().summary || props.item().app_name}`) : null}
       onClick={actions().defaultAction
         ? () => {
             const def = actions().defaultAction;
-            if (def) void invokePublic("notifications.invoke-action", { id: item().id, action_key: def.key });
+            if (def) void invokePublic("notifications.invoke-action", { id: props.item().id, action_key: def.key });
           }
         : undefined}
       class={styles.notifCard}
@@ -83,17 +82,17 @@ function NotificationRow(props: { item: Accessor<NotificationItem> }) {
         {bodyContent()}
         <M3CardAction class={styles.notifActionWrap}>
           <Button
-            testId={`cal-notif-dismiss-${item().id}`}
+            testId={`cal-notif-dismiss-${props.item().id}`}
             ariaLabel="Dismiss notification"
             class={cx(styles.pill, styles.iconBtn)}
-            onClick={() => { void invokePublic("notifications.dismiss", { id: item().id }); }}
+            onClick={() => { void invokePublic("notifications.dismiss", { id: props.item().id }); }}
           >
             <ShellIcon name="close" size={14} color={muted} />
           </Button>
         </M3CardAction>
       </row>
       <Show when={preview.src()}>
-        <box testId={`cal-notif-preview-${item().id}`} class={styles.notifPreviewFrame} data-fit={mediaLayout().previewFit}>
+        <box testId={`cal-notif-preview-${props.item().id}`} class={styles.notifPreviewFrame} data-fit={mediaLayout().previewFit}>
           <Image src={preview.src()} class={styles.notifPreviewImg} data-fit={mediaLayout().previewFit} />
         </box>
       </Show>
@@ -103,9 +102,9 @@ function NotificationRow(props: { item: Accessor<NotificationItem> }) {
             {action => (
               <M3CardAction>
                 <Button
-                  testId={`cal-notif-action-${item().id}-${action().key}`}
+                  testId={`cal-notif-action-${props.item().id}-${action().key}`}
                   class={cx(styles.pill, styles.notifActionBtn)}
-                  onClick={() => { void invokePublic("notifications.invoke-action", { id: item().id, action_key: action().key }); }}
+                  onClick={() => { void invokePublic("notifications.invoke-action", { id: props.item().id, action_key: action().key }); }}
                 >
                   <text>{action().label}</text>
                 </Button>
@@ -120,8 +119,9 @@ function NotificationRow(props: { item: Accessor<NotificationItem> }) {
 
 export function CalendarPanel() {
   const { notifications, invokePublic } = useShellStore();
-  const [nowMs, setNowMs] = createSignal(Date.now());
-  const initialDate = new Date(nowMs());
+  const initialNow = Date.now();
+  const [nowMs, setNowMs] = createSignal(initialNow);
+  const initialDate = new Date(initialNow);
   const [viewYear, setViewYear] = createSignal(initialDate.getFullYear());
   const [viewMonth, setViewMonth] = createSignal(initialDate.getMonth());
   const clock = createMemo(() => formatBarClock(nowMs(), { clock24h: true, clockSeconds: true }));
@@ -133,13 +133,13 @@ export function CalendarPanel() {
   const dnd = () => notifications.data()?.dnd ?? false;
   const history = () => notifications.data()?.history ?? [];
 
+  const clockDelay = createDelay();
   const tick = () => {
     const now = Date.now();
     setNowMs(now);
-    timer = setTimeout(tick, 1_000 - (now % 1_000));
+    clockDelay.schedule(1_000 - (now % 1_000), tick);
   };
-  let timer = setTimeout(tick, 1_000 - (initialDate.getTime() % 1_000));
-  onCleanup(() => clearTimeout(timer));
+  clockDelay.schedule(1_000 - (initialNow % 1_000), tick);
 
   function moveMonth(offset: number) {
     const date = new Date(viewYear(), viewMonth() + offset, 1);

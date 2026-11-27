@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, cx, type Accessor, type NativeChild } from "@hewel/zgui";
+import { For, Show, createMemo, createSignal, cx, untrack, type Accessor, type NativeChild } from "@hewel/zgui";
 import type { ZShellClient } from "@z-shell/sdk";
 import { M3Collapsible, M3IconButton, M3InteractiveCard, M3LinearProgress } from "@z-shell/sdk/primitives";
 import { SPRING_EPSILON, createM3Spring, useGlobalMotionScheme, useTopic, type MotionScheme } from "@z-shell/sdk/zgui";
@@ -27,9 +27,9 @@ function ProviderQuotaCard(props: {
   readonly defaultExpanded: boolean;
   readonly scheme: Accessor<MotionScheme>;
 }): NativeChild {
-  const [expanded, setExpanded] = createSignal(props.defaultExpanded);
+  const [expanded, setExpanded] = createSignal(untrack(() => props.defaultExpanded));
   const chevronDeg = createM3Spring(() => expanded() ? 180 : 0, "fastSpatial", {
-    scheme: props.scheme,
+    scheme: () => props.scheme(),
     epsilon: SPRING_EPSILON.deg,
   });
   const primaryEntry = () => props.entries[0];
@@ -98,7 +98,7 @@ export default function Panel(props: {
   readonly onClose?: () => void;
   readonly onOpenSettings?: () => void;
 }): NativeChild {
-  const { data: snapshot } = useTopic<AiUsageSnapshot>(props.client, "plugin.z-shell.ai-usage.quotas");
+  const { data: snapshot } = useTopic<AiUsageSnapshot>(() => props.client(), "plugin.z-shell.ai-usage.quotas");
   const scheme = useGlobalMotionScheme();
   const groups = createMemo(() => {
     const byProvider = new Map<string, QuotaEntry[]>();

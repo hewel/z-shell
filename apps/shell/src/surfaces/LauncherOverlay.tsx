@@ -17,9 +17,8 @@ function LauncherTile(props: {
   activate: (item: LauncherItem) => void;
 }): NativeChild {
   const { hostClient } = useShellStore();
-  const { item } = props;
-  const { src } = useDaemonMedia(hostClient, () => item().icon, { fetchCommand: "launcher.fetch-blob" });
-  const letter = () => item().title.trim().codePointAt(0);
+  const { src } = useDaemonMedia(hostClient, () => props.item().icon, { fetchCommand: "launcher.fetch-blob" });
+  const letter = () => props.item().title.trim().codePointAt(0);
   const initial = () => {
     const code = letter();
     return code === undefined ? "?" : String.fromCodePoint(code).toUpperCase();
@@ -29,11 +28,11 @@ function LauncherTile(props: {
   return (
     <Button
       ref={props.registerNode}
-      testId={`launcher-item-${item().provider_id}-${item().item_id}`}
+      testId={`launcher-item-${props.item().provider_id}-${props.item().item_id}`}
       tabIndex={-1}
       selected={props.selected}
       data-selected={props.selected ? "true" : null}
-      onClick={() => props.activate(item())}
+      onClick={() => props.activate(props.item())}
       class={styles.tile}
     >
       <column data-press-visual="card" class={styles.tileInner}>
@@ -48,9 +47,9 @@ function LauncherTile(props: {
         }>
           {image => <Image src={image()} class={styles.iconImage} />}
         </Show>
-        <text data-selected={props.selected ? "true" : "false"} class={styles.tileTitle}>{item().title}</text>
-        <Show when={item().provider_id !== "desktop"}>
-          <text class={styles.tileProvider}>{item().provider_id}</text>
+        <text data-selected={props.selected ? "true" : "false"} class={styles.tileTitle}>{props.item().title}</text>
+        <Show when={props.item().provider_id !== "desktop"}>
+          <text class={styles.tileProvider}>{props.item().provider_id}</text>
         </Show>
       </column>
     </Button>

@@ -21,7 +21,7 @@ function PreviewBlobImage(props: {
   readonly testId?: string;
 }): NativeChild {
   const { hostClient } = useShellStore();
-  const { src } = useDaemonMedia(hostClient, props.media, { fetchCommand: "plugins.catalog.fetch-blob" });
+  const { src } = useDaemonMedia(hostClient, () => props.media(), { fetchCommand: "plugins.catalog.fetch-blob" });
   return (
     <box testId={props.testId ?? null} class={styles.blobBox} data-variant={props.variant}>
       <Show when={src()} fallback={<ShellIcon name="extension" size={20} color="var(--color-on-surface-variant)" />}>

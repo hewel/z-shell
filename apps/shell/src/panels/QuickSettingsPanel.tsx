@@ -1,5 +1,5 @@
 import {
-  Button, For, Image, Show, createEffect, createSignal, cx, getWindowRect, onCleanup, untrack,
+  Button, For, Image, Show, createDelay, createEffect, createSignal, cx, getWindowRect, untrack,
   type NativeChild, type NativeNode,
 } from "@hewel/zgui";
 import { M3Collapsible, M3SliderRow } from "@z-shell/sdk/primitives";
@@ -406,18 +406,16 @@ function MainPage(props: {
   const caffeine = () => idle.data()?.caffeine ?? false;
   const keepAwakeTimed = () => Boolean(caffeine() && idle.data()?.caffeine_expires_at_ms != null);
   const [nowMs, setNowMs] = createSignal(Date.now());
+  const keepAwakeDelay = createDelay();
   createEffect(keepAwakeTimed, active => {
     if (!active) return;
-    let timer: number | undefined;
     const tick = () => {
       const now = Date.now();
       setNowMs(now);
-      timer = setTimeout(tick, 1_000 - (now % 1_000));
+      keepAwakeDelay.schedule(1_000 - (now % 1_000), tick);
     };
     tick();
-    onCleanup(() => {
-      if (timer !== undefined) clearTimeout(timer);
-    });
+    return () => keepAwakeDelay.cancel();
   });
   const keepAwakeDetail = () => {
     const snap = idle.data();

@@ -40,7 +40,7 @@ export default function Widget(props: {
   readonly vertical: boolean;
   readonly onOpenPanel?: (entryId?: string, anchor?: NativeNode) => void;
 }): NativeChild {
-  const { data: snapshot } = useTopic<AiUsageSnapshot>(props.client, "plugin.z-shell.ai-usage.quotas");
+  const { data: snapshot } = useTopic<AiUsageSnapshot>(() => props.client(), "plugin.z-shell.ai-usage.quotas");
   const summary = createMemo(() => {
     const quota = snapshot()?.quotas[0];
     const remaining = quota?.remainingPercent ?? null;

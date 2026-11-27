@@ -389,34 +389,33 @@ function WifiPage(props: { onBack: () => void; outgoing?: boolean | undefined })
 
 function BluetoothDeviceRow(props: { dev: Accessor<BluetoothDevice> }): NativeChild {
   const { bluetooth, invokePublic } = useShellStore();
-  const { dev } = props;
-  const powered = () => bluetooth.data()?.adapters.some(candidate => candidate.path === dev().adapter && candidate.powered);
-  const deviceAction = (action: string) => { void invokePublic(`bluetooth.${action}`, { device: dev().path }); };
+  const powered = () => bluetooth.data()?.adapters.some(candidate => candidate.path === props.dev().adapter && candidate.powered);
+  const deviceAction = (action: string) => { void invokePublic(`bluetooth.${action}`, { device: props.dev().path }); };
   return (
-    <column testId={`bt-dev-${dev().address}`} class={styles.btCard} data-connected={dev().connected ? "true" : "false"}>
+    <column testId={`bt-dev-${props.dev().address}`} class={styles.btCard} data-connected={props.dev().connected ? "true" : "false"}>
       <row class={styles.row}>
-        <ShellIcon name="bluetooth" size={18} color={dev().connected ? selectedInk : muted} />
+        <ShellIcon name="bluetooth" size={18} color={props.dev().connected ? selectedInk : muted} />
         <column class={cx(styles.grow, styles.itemTextCol)}>
-          <text class={cx(styles.clipped, styles.connectedTitle)}>{dev().name || dev().address}</text>
-          <text class={cx(styles.clipped, styles.btSub)} data-connected={dev().connected ? "true" : "false"}>
-            {dev().connected ? "Connected" : dev().paired ? "Click to connect" : "Click to pair"}
+          <text class={cx(styles.clipped, styles.connectedTitle)}>{props.dev().name || props.dev().address}</text>
+          <text class={cx(styles.clipped, styles.btSub)} data-connected={props.dev().connected ? "true" : "false"}>
+            {props.dev().connected ? "Connected" : props.dev().paired ? "Click to connect" : "Click to pair"}
           </text>
         </column>
-        <Show when={dev().battery != null}>
+        <Show when={props.dev().battery != null}>
           <text data-tabular="true" class={styles.monoPercent}>
-            {dev().battery}%
+            {props.dev().battery}%
           </text>
         </Show>
-        <Show when={dev().connected}>
+        <Show when={props.dev().connected}>
           <QuickSettingsIconButton label="Disconnect" icon="linkOff" size={30}
             tone="accent-subtle" color={selectedInk}
             disabled={!powered()} onClick={() => deviceAction("disconnect")} />
         </Show>
       </row>
-      <Show when={!dev().connected}>
+      <Show when={!props.dev().connected}>
         <row class={styles.btActions}>
           <Action label="Connect" disabled={!powered()} onClick={() => deviceAction("connect")} />
-          <Show when={!dev().paired}><Action label="Pair" disabled={!powered()} onClick={() => deviceAction("pair")} /></Show>
+          <Show when={!props.dev().paired}><Action label="Pair" disabled={!powered()} onClick={() => deviceAction("pair")} /></Show>
           <Action label="Remove" onClick={() => deviceAction("remove")} />
         </row>
       </Show>
