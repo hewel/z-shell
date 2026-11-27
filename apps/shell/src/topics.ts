@@ -1771,6 +1771,30 @@ export function selectActiveMediaPlayer(media: DesktopMediaSnapshot | undefined)
     ?? null;
 }
 
+/**
+ * Returns `true` only when `system.audio` reports an active default output sink that is
+ * explicitly muted or at zero volume. Missing or unavailable audio telemetry returns `false`
+ * so absent backend state never suppresses playback indicators.
+ */
+export function isDefaultSinkSilent(audio: SystemAudioSnapshot | undefined): boolean {
+  if (!audio || audio.availability === "unavailable" || !audio.default_sink) {
+    return false;
+  }
+  const sink = audio.sinks.find(device => device.name === audio.default_sink);
+  if (!sink) {
+    return false;
+  }
+  return sink.muted || sink.volume <= 0;
+}
+
+/** Returns `true` when `player` is actively playing and the default sink is not muted/zero-volume. */
+export function isMediaPlayerAudible(
+  player: MediaPlayer | null | undefined,
+  audio: SystemAudioSnapshot | undefined,
+): boolean {
+  return player?.playback_status === "playing" && !isDefaultSinkSilent(audio);
+}
+
 export interface BarAnchorBox {
   readonly x: number;
   readonly y: number;

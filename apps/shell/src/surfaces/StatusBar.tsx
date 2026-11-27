@@ -4,13 +4,13 @@ import {
 } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { MiniSparkline, SplitDualArcGauge } from "../charts/TelemetryCharts.tsx";
-import { ShellIcon } from "../icons.tsx";
+import { MediaEqIcon, ShellIcon } from "../icons.tsx";
 import { SPRING_EPSILON, createEnterProgress, createM3Spring, useMotionScheme } from "../motion.ts";
 import { useShellStore, type PluginBarWidgetSlot } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import {
   DEFAULT_BAR_SETTINGS, computeMemoryBreakdown, filterWorkspacesForMonitor, findActiveWindowForMonitor,
-  formatBarClock, formatSurfaceName, isImeTrayItem, partitionPluginBarWidgets, partitionTrayItems, resolveBarLayout, resolveBarPopupAnchor, resolveDesktopApp, resolveWorkspaceLabel, selectActiveMediaPlayer,
+  formatBarClock, formatSurfaceName, isImeTrayItem, isMediaPlayerAudible, partitionPluginBarWidgets, partitionTrayItems, resolveBarLayout, resolveBarPopupAnchor, resolveDesktopApp, resolveWorkspaceLabel, selectActiveMediaPlayer,
   type ResolvedBarLayout, type TrayItem, type WaylandWindow, type WaylandWorkspace,
 } from "../topics.ts";
 import styles from "./StatusBar.module.css";
@@ -967,6 +967,12 @@ function BarContent(props: {
         <Show when={player()}>
           {active => {
             const mediaRef = useBlurRef(props.trackBlur);
+            const mediaAudible = () => isMediaPlayerAudible(active(), store.audio.data());
+            const mediaIconColor = () => (docked() && activePanel() === "media")
+              ? "var(--color-on-primary-container)"
+              : mediaAudible()
+                ? "var(--color-primary)"
+                : "var(--color-on-surface-variant)";
             return (
               <Button
                 ref={mediaRef}
@@ -996,7 +1002,7 @@ function BarContent(props: {
                 }}
               >
                 <row data-press-visual="compact" data-docked={docked() ? "true" : "false"} class={styles.mediaInner}>
-                  <ShellIcon name="mediaEq" size={16} color="var(--color-primary)" />
+                  <MediaEqIcon active={mediaAudible()} mode="state" size={16} color={mediaIconColor()} testId="bar-media-eq" />
                   <Show when={!vertical()}><text testId="bar-media-text" class={styles.mediaText}>{mediaLabel()}</text></Show>
                 </row>
               </Button>

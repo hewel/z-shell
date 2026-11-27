@@ -1,10 +1,10 @@
 import { Button, For, Image, Show, createMemo, createSignal, cx, getWindowRect, type Accessor } from "@hewel/zgui";
 import { M3Collapsible } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
-import { ShellIcon } from "../icons.tsx";
+import { MediaEqIcon, ShellIcon } from "../icons.tsx";
 import { SPRING_EPSILON, createM3Spring, createPhaseLoop, useMotionScheme } from "../motion.ts";
 import { useShellStore } from "../store.ts";
-import { formatTrackTimeUs, selectActiveMediaPlayer, type MediaPlayer } from "../topics.ts";
+import { formatTrackTimeUs, isMediaPlayerAudible, selectActiveMediaPlayer, type MediaPlayer } from "../topics.ts";
 import styles from "./MediaPanel.module.css";
 
 const primary = "var(--color-primary)";
@@ -119,9 +119,10 @@ function WavyProgressTrack(props: {
 }
 
 function TrackControls(props: { player: Accessor<MediaPlayer> }) {
-  const { media, hostClient, invokePublic } = useShellStore();
+  const { media, audio, hostClient, invokePublic } = useShellStore();
   const { src } = useDaemonMedia(hostClient, () => media.data()?.cover, { fetchCommand: "media.fetch-blob" });
   const playing = () => props.player().playback_status === "playing";
+  const audible = () => isMediaPlayerAudible(props.player(), audio.data());
   const length = () => props.player().metadata.length_us;
   const position = () => props.player().position_us;
   const canSeek = () => props.player().capabilities.can_seek;
@@ -139,7 +140,7 @@ function TrackControls(props: { player: Accessor<MediaPlayer> }) {
       <row class={styles.trackHeader}>
         <Show when={src()} fallback={
           <box class={cx(styles.coverTile, styles.coverFallback)}>
-            <ShellIcon name="mediaEq" size={28} color={primary} />
+            <MediaEqIcon active={audible()} mode="continuous" size={28} color={primary} testId="media-cover-eq" />
           </box>
         }>
           <Image testId="media-cover" src={src()} class={cx(styles.coverTile, styles.coverImage)} />
@@ -273,7 +274,13 @@ export function MediaPanel() {
                       onClick={() => { void invokePublic("media.select-player", { player_id: player().id }); }}
                       class={cx(styles.pill, styles.playerPill)}
                     >
-                      <ShellIcon name="musicNote" size={12} color={active() ? onPrimaryContainer : muted} />
+                      <MediaEqIcon
+                        active={isMediaPlayerAudible(player(), audio.data())}
+                        mode="continuous"
+                        size={12}
+                        color={active() ? onPrimaryContainer : muted}
+                        testId={`media-player-eq-${player().id}`}
+                      />
                       <text class={styles.truncate}>{player().identity}</text>
                     </Button>
                   );

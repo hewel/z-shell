@@ -6,7 +6,14 @@ import { dirname, join, resolve } from "node:path";
 
 import { M3_EASINGS, M3_SPRINGS } from "@z-shell/sdk/zgui";
 import { buildTablerIconsModule } from "../../../tools/sync-tabler-icons.ts";
-import { LOCK_MORPH_SHAPES, SHELL_ROSETTE_PATH, resolveIconStrokeWidthPx } from "../src/shapes.ts";
+import {
+  LOCK_MORPH_SHAPES,
+  MEDIA_EQ_REST_PATH,
+  SHELL_ROSETTE_PATH,
+  buildMediaEqStatePath,
+  buildMediaEqWavePath,
+  resolveIconStrokeWidthPx,
+} from "../src/shapes.ts";
 import { TABLER_ICON_PATHS } from "../src/tabler-icons.generated.ts";
 import { SHELL_DEFAULT_SCHEME, buildThemeStylesheet } from "../src/theme.ts";
 import {
@@ -1279,6 +1286,37 @@ describe("Exact-Geometry Shape & Material-First Icon contracts", () => {
     expect(TABLER_ICON_PATHS.wifiLock.d).toContain("M17 19a1 1 0 0 1 1 -1h3a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-3a1 1 0 0 1 -1 -1v-2");
     const generated = readFileSync(join(shellDir, "src/tabler-icons.generated.ts"), "utf8");
     expect(generated).toBe(buildTablerIconsModule(repoRoot));
+  });
+
+  test("analytical mediaEq wave and state paths match resting Tabler geometry and preserve vertical symmetry", () => {
+    expect(MEDIA_EQ_REST_PATH).toBe(TABLER_ICON_PATHS.mediaEq.d);
+    expect(buildMediaEqWavePath(0, 1.25)).toBe(MEDIA_EQ_REST_PATH);
+    expect(buildMediaEqStatePath(1)).toBe(MEDIA_EQ_REST_PATH);
+    expect(buildMediaEqStatePath(0)).toBe(
+      "M4 10.75v2.5\nM8 10.25v3.5\nM12 10.75v2.5\nM16 10.25v3.5\nM20 10.75v2.5",
+    );
+
+    const frameA = buildMediaEqWavePath(1, 0);
+    const frameB = buildMediaEqWavePath(1, 0.18);
+    expect(frameA).not.toBe(frameB);
+
+    const expectedXs = [4, 8, 12, 16, 20];
+    for (let step = 0; step <= 20; step++) {
+      const path = buildMediaEqWavePath(1, step * 0.1);
+      const lines = path.split("\n");
+      expect(lines.length).toBe(5);
+      lines.forEach((line, index) => {
+        const match = /^M(\d+(?:\.\d+)?) (\d+(?:\.\d+)?)v(\d+(?:\.\d+)?)$/.exec(line);
+        expect(match, `segment ${index} format: ${line}`).not.toBeNull();
+        const x = Number(match![1]);
+        const y0 = Number(match![2]);
+        const h = Number(match![3]);
+        expect(x).toBe(expectedXs[index]);
+        expect(Math.abs((y0 + h / 2) - 12)).toBeLessThan(1e-2);
+        expect(h).toBeGreaterThanOrEqual(2);
+        expect(h).toBeLessThanOrEqual(17.5);
+      });
+    }
   });
 });
 

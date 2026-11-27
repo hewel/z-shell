@@ -592,6 +592,8 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.step({ id: "open-media", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-media" }, button: "primary" });
       timeline.advance("media-reduced-settle", 120);
       timeline.step({ id: "capture-media-reduced", op: "capture", surface: "panel-media", captureId: "media-reduced" });
+      timeline.advance("media-reduced-hold", 180);
+      timeline.step({ id: "capture-media-reduced-t180", op: "capture", surface: "panel-media", captureId: "media-reduced-t180" });
 
       const polkitAtMs = timeline.after(15);
       timeline.advance("polkit-prompt", 30);
@@ -719,9 +721,10 @@ describe("apps/shell design geometry & pixel lint", () => {
       }, null, 2));
 
       const result = runPreview(published.dist, fixture, scenario, out);
-      expectCleanPreview(result, 3, 0);
+      expectCleanPreview(result, 4, 0);
       const barDocked = readCapture(out, "bar-dp-1", "bar-docked");
       const mediaReduced = readCapture(out, "panel-media", "media-reduced");
+      const mediaReducedT180 = readCapture(out, "panel-media", "media-reduced-t180");
       const polkit = readCapture(out, "polkit-dialog", "polkit-23");
 
       // Docked top bar is flush 38px without floating shadow bleed and always solid (blurRegion="none").
@@ -750,6 +753,14 @@ describe("apps/shell design geometry & pixel lint", () => {
           expect(pixel(mediaReduced.image, sx, centerY - 6), `reduced media flat above at ${frac}`).toEqual(bgSample);
           expect(pixel(mediaReduced.image, sx, centerY + 6), `reduced media flat below at ${frac}`).toEqual(bgSample);
         }
+        expect(
+          diffRegionPixels(mediaReduced.image, mediaReducedT180.image, treeNode(mediaReduced.tree, "media-cover-eq").boundsDevice!),
+          "reduced media cover eq remains static over 180ms",
+        ).toBe(0);
+        expect(
+          diffRegionPixels(mediaReduced.image, mediaReducedT180.image, treeNode(mediaReduced.tree, "media-player-eq-spotify").boundsDevice!),
+          "reduced media player pill eq remains static over 180ms",
+        ).toBe(0);
       }
 
       // Polkit 23 card width (360px), 34px M3Button actions, and >= 24px interactive hit targets.
@@ -5768,6 +5779,163 @@ describe("apps/shell design geometry & pixel lint", () => {
       const surfacesAfterMenuless = previewSurfaces(out, "after-menuless-right-click");
       expect(surfacesAfterMenuless).not.toContain("tray-overflow");
       expect(surfacesAfterMenuless).not.toContain("tray-menu");
+    } finally {
+      cleanup();
+    }
+  }, 30_000);
+
+  previewTest("MediaPanel & StatusBar animated waveform icon: continuous playback breathing, mute/pause suppression, and 0% steady-state bar CPU", () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-media-eq-");
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const monitor = { id: "DP-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900, scale: 1 };
+
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+
+      // StatusBar bar-media-eq stays stationary in steady state while playing (0% bar CPU).
+      timeline.step({ id: "capture-bar-audible-0", op: "capture", surface: "bar-dp-1", captureId: "bar-audible-0" });
+      timeline.advance("bar-audible-hold", 180);
+      timeline.step({ id: "capture-bar-audible-1", op: "capture", surface: "bar-dp-1", captureId: "bar-audible-1" });
+
+      // MediaPanel cover fallback (28px) and playing pill (12px) breathe while paused pill stays still.
+      timeline.step({ id: "open-media", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-media" }, button: "primary" });
+      timeline.advance("media-open-settle", 400);
+      timeline.step({ id: "capture-media-audible-0", op: "capture", surface: "panel-media", captureId: "media-audible-0" });
+      timeline.advance("media-audible-step", 180);
+      timeline.step({ id: "capture-media-audible-1", op: "capture", surface: "panel-media", captureId: "media-audible-1" });
+
+      // Muting default sink compresses StatusBar icon and converges MediaPanel waveforms to rest.
+      const muteAtMs = timeline.after(10);
+      timeline.advance("mute-deliver", 10);
+      timeline.advance("mute-spring-settle", 380);
+      timeline.step({ id: "capture-bar-muted-0", op: "capture", surface: "bar-dp-1", captureId: "bar-muted-0" });
+      timeline.step({ id: "capture-media-muted-0", op: "capture", surface: "panel-media", captureId: "media-muted-0" });
+      timeline.advance("muted-hold", 180);
+      timeline.step({ id: "capture-bar-muted-1", op: "capture", surface: "bar-dp-1", captureId: "bar-muted-1" });
+      timeline.step({ id: "capture-media-muted-1", op: "capture", surface: "panel-media", captureId: "media-muted-1" });
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-media-eq",
+        initialTopics: {
+          "wayland.outputs": {
+            capability: "connected",
+            outputs: [{
+              output_instance_id: 1, name: "DP-1", description: "Primary", make: "Test", model: "1440x900",
+              x: 0, y: 0, width: 1440, height: 900, mode_width: 1440, mode_height: 900, refresh_mhz: 60000, scale: 1,
+              physical_width_mm: null, physical_height_mm: null,
+            }],
+          },
+          "desktop.media": {
+            available: true,
+            selected_player_id: "spotify",
+            any_playing: true,
+            cover: null,
+            players: [
+              {
+                id: "spotify",
+                identity: "Spotify",
+                playback_status: "playing",
+                position_us: 45_000_000,
+                capabilities: { can_control: true, can_play: true, can_pause: true, can_go_next: true, can_go_previous: true, can_seek: true },
+                metadata: { title: "Glass Harbor", artists: ["Kiasmos"], album: "Loop", length_us: 180_000_000 },
+              },
+              {
+                id: "firefox",
+                identity: "Firefox",
+                playback_status: "paused",
+                position_us: 12_000_000,
+                capabilities: { can_control: true, can_play: true, can_pause: true, can_go_next: true, can_go_previous: true, can_seek: true },
+                metadata: { title: "Paused Talk", artists: ["Podcast"], album: null, length_us: 300_000_000 },
+              },
+            ],
+          },
+          "system.audio": {
+            availability: "available",
+            default_sink: "speakers",
+            default_source: null,
+            sinks: [
+              { index: 1, name: "speakers", description: "Studio Speakers", volume: 0.65, muted: false, channels: 2 },
+            ],
+            sources: [],
+            sink_inputs: [],
+            source_outputs: [],
+          },
+        },
+        topicUpdates: [
+          {
+            atMs: muteAtMs,
+            topic: "system.audio",
+            revision: 2,
+            data: {
+              availability: "available",
+              default_sink: "speakers",
+              default_source: null,
+              sinks: [
+                { index: 1, name: "speakers", description: "Studio Speakers", volume: 0.65, muted: true, channels: 2 },
+              ],
+              sources: [],
+              sink_inputs: [],
+              source_outputs: [],
+            },
+          },
+        ],
+      }), null, 2));
+
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-media-eq",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(published.dist, fixture, scenario, out);
+      expectCleanPreview(result, 8, 0);
+
+      const barAudible0 = readCapture(out, "bar-dp-1", "bar-audible-0");
+      const barAudible1 = readCapture(out, "bar-dp-1", "bar-audible-1");
+      const mediaAudible0 = readCapture(out, "panel-media", "media-audible-0");
+      const mediaAudible1 = readCapture(out, "panel-media", "media-audible-1");
+      const barMuted0 = readCapture(out, "bar-dp-1", "bar-muted-0");
+      const barMuted1 = readCapture(out, "bar-dp-1", "bar-muted-1");
+      const mediaMuted0 = readCapture(out, "panel-media", "media-muted-0");
+      const mediaMuted1 = readCapture(out, "panel-media", "media-muted-1");
+
+      const barEqBounds = treeNode(barAudible0.tree, "bar-media-eq").boundsDevice!;
+      expect(diffRegionPixels(barAudible0.image, barAudible1.image, barEqBounds), "StatusBar bar-media-eq does not loop continuously while playing").toBe(0);
+
+      expect(
+        diffRegionPixels(mediaAudible0.image, mediaAudible1.image, treeNode(mediaAudible0.tree, "media-cover-eq").boundsDevice!),
+        "MediaPanel 28px cover fallback waveform animates while audible",
+      ).toBeGreaterThan(0);
+      expect(
+        diffRegionPixels(mediaAudible0.image, mediaAudible1.image, treeNode(mediaAudible0.tree, "media-player-eq-spotify").boundsDevice!),
+        "MediaPanel 12px playing pill waveform animates while audible",
+      ).toBeGreaterThan(0);
+      expect(
+        diffRegionPixels(mediaAudible0.image, mediaAudible1.image, treeNode(mediaAudible0.tree, "media-player-eq-firefox").boundsDevice!),
+        "MediaPanel 12px paused pill waveform remains stationary",
+      ).toBe(0);
+
+      expect(
+        diffRegionPixels(barAudible0.image, barMuted0.image, barEqBounds),
+        "StatusBar bar-media-eq transitions visually when default sink is muted",
+      ).toBeGreaterThan(0);
+      expect(
+        diffRegionPixels(barMuted0.image, barMuted1.image, barEqBounds),
+        "StatusBar bar-media-eq settles to 0 diff after mute transition",
+      ).toBe(0);
+      expect(
+        diffRegionPixels(mediaMuted0.image, mediaMuted1.image, treeNode(mediaMuted0.tree, "media-cover-eq").boundsDevice!),
+        "MediaPanel 28px cover fallback settles to 0 diff when muted",
+      ).toBe(0);
+      expect(
+        diffRegionPixels(mediaMuted0.image, mediaMuted1.image, treeNode(mediaMuted0.tree, "media-player-eq-spotify").boundsDevice!),
+        "MediaPanel 12px pill settles to 0 diff when muted",
+      ).toBe(0);
     } finally {
       cleanup();
     }

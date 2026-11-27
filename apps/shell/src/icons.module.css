@@ -3,3 +3,7 @@
   --zgui-stroke-linejoin: round;
   flex-shrink: 0;
 }
+
+.outline {
+  --zgui-fill: transparent;
+}

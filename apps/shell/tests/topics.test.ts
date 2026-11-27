@@ -42,6 +42,7 @@ import {
   groupNotificationPopups,
   hasWindowsOnMonitor,
   isImeTrayItem,
+  isMediaPlayerAudible,
   maxThermalCelsius,
   notificationGroupKey,
   partitionPluginBarWidgets,
@@ -74,6 +75,7 @@ import {
   type DesktopMediaSnapshot,
   type EdgeOverrides,
   type MediaPlayer,
+  type SystemAudioSnapshot,
   type SystemTelemetrySnapshot,
   type TelemetryHistoryWindow,
   type TelemetryNetwork,
@@ -455,6 +457,61 @@ describe("selectActiveMediaPlayer", () => {
     expect(selectActiveMediaPlayer(makeMedia([first, second]))).toBe(first);
     expect(selectActiveMediaPlayer(makeMedia([]))).toBeNull();
     expect(selectActiveMediaPlayer(undefined)).toBeNull();
+  });
+});
+
+describe("isMediaPlayerAudible", () => {
+  function makeAudio(
+    overrides: Partial<SystemAudioSnapshot> = {},
+  ): SystemAudioSnapshot {
+    return {
+      availability: "available",
+      default_sink: "speakers",
+      default_source: null,
+      sinks: [
+        { index: 1, name: "speakers", description: "Speakers", channels: 2, volume: 0.65, muted: false },
+        { index: 2, name: "headphones", description: "Headphones", channels: 2, volume: 0, muted: true },
+      ],
+      sources: [],
+      sink_inputs: [],
+      source_outputs: [],
+      ...overrides,
+    };
+  }
+
+  test("returns true when playing and the default sink is unmuted with positive volume", () => {
+    const playing = makePlayer("spotify", "playing");
+    expect(isMediaPlayerAudible(playing, makeAudio())).toBe(true);
+  });
+
+  test("returns false for non-playing or missing players", () => {
+    const audio = makeAudio();
+    expect(isMediaPlayerAudible(makePlayer("spotify", "paused"), audio)).toBe(false);
+    expect(isMediaPlayerAudible(makePlayer("spotify", "stopped"), audio)).toBe(false);
+    expect(isMediaPlayerAudible(makePlayer("spotify", "unknown"), audio)).toBe(false);
+    expect(isMediaPlayerAudible(null, audio)).toBe(false);
+    expect(isMediaPlayerAudible(undefined, audio)).toBe(false);
+  });
+
+  test("returns false when the default sink is muted or at zero volume", () => {
+    const playing = makePlayer("spotify", "playing");
+    expect(isMediaPlayerAudible(playing, makeAudio({
+      sinks: [{ index: 1, name: "speakers", description: "Speakers", channels: 2, volume: 0.5, muted: true }],
+    }))).toBe(false);
+    expect(isMediaPlayerAudible(playing, makeAudio({
+      sinks: [{ index: 1, name: "speakers", description: "Speakers", channels: 2, volume: 0, muted: false }],
+    }))).toBe(false);
+  });
+
+  test("does not suppress playback motion when audio telemetry is missing or unavailable", () => {
+    const playing = makePlayer("spotify", "playing");
+    expect(isMediaPlayerAudible(playing, undefined)).toBe(true);
+    expect(isMediaPlayerAudible(playing, makeAudio({
+      availability: "unavailable",
+      sinks: [{ index: 1, name: "speakers", description: "Speakers", channels: 2, volume: 0, muted: true }],
+    }))).toBe(true);
+    expect(isMediaPlayerAudible(playing, makeAudio({ default_sink: null }))).toBe(true);
+    expect(isMediaPlayerAudible(playing, makeAudio({ default_sink: "missing" }))).toBe(true);
   });
 });
 

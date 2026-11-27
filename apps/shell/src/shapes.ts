@@ -123,3 +123,60 @@ export const LOCK_MORPH_SHAPES = Object.freeze({
 export function resolveIconStrokeWidthPx(size: number, strokeWidth = 2, viewBoxSize = 24): string {
   return `${Number(((strokeWidth * size) / viewBoxSize).toFixed(3))}px`;
 }
+
+/** Canonical resting 5-bar Tabler `waveform` (`mediaEq`) silhouette on `0 0 24 24`. */
+export const MEDIA_EQ_REST_PATH = "M4 10.5v3\nM8 7v10\nM12 8v8\nM16 4v16\nM20 10v4";
+
+const MEDIA_EQ_XS = [4, 8, 12, 16, 20] as const;
+const MEDIA_EQ_REST_HEIGHTS = [3, 10, 8, 16, 4] as const;
+const MEDIA_EQ_QUIET_HEIGHTS = [2.5, 3.5, 2.5, 3.5, 2.5] as const;
+const MEDIA_EQ_WAVE_SPECS = [
+  { min: 3.0, max: 9.5, freqHz: 1.21, phase: 0.3 },
+  { min: 4.5, max: 14.5, freqHz: 1.54, phase: 1.7 },
+  { min: 5.0, max: 16.0, freqHz: 1.33, phase: 3.1 },
+  { min: 5.5, max: 16.0, freqHz: 1.68, phase: 4.4 },
+  { min: 3.0, max: 10.0, freqHz: 1.15, phase: 2.3 },
+] as const;
+
+function formatMediaEqBars(heights: readonly number[]): string {
+  return MEDIA_EQ_XS.map((x, index) => {
+    const height = heights[index]!;
+    const y0 = 12 - height / 2;
+    return `M${x} ${fmt(y0)}v${fmt(height)}`;
+  }).join("\n");
+}
+
+/**
+ * Generates an analytically symmetric 5-bar waveform SVG path on `0 0 24 24` centered at `y = 12`.
+ * When `amplitudeScale <= 0.005`, returns the exact resting `mediaEq` Tabler path.
+ */
+export function buildMediaEqWavePath(amplitudeScale: number, phaseSec: number): string {
+  const amp = Math.max(0, Math.min(1, amplitudeScale));
+  if (amp <= 0.005) {
+    return MEDIA_EQ_REST_PATH;
+  }
+  const heights = MEDIA_EQ_WAVE_SPECS.map((spec, index) => {
+    const rest = MEDIA_EQ_REST_HEIGHTS[index]!;
+    const mid = (spec.min + spec.max) / 2;
+    const span = (spec.max - spec.min) / 2;
+    const wave = mid + span * Math.sin(phaseSec * Math.PI * 2 * spec.freqHz + spec.phase);
+    return Math.max(2.5, Math.min(16.5, rest + amp * (wave - rest)));
+  });
+  return formatMediaEqBars(heights);
+}
+
+/**
+ * Generates a one-shot 5-bar state transition SVG path on `0 0 24 24` between quiet stubs
+ * (`activeScale = 0`) and the canonical resting `mediaEq` silhouette (`activeScale = 1`).
+ */
+export function buildMediaEqStatePath(activeScale: number): string {
+  if (Math.abs(activeScale - 1) <= 0.005) {
+    return MEDIA_EQ_REST_PATH;
+  }
+  const scale = Math.max(0, Math.min(1.08, activeScale));
+  const heights = MEDIA_EQ_REST_HEIGHTS.map((rest, index) => {
+    const quiet = MEDIA_EQ_QUIET_HEIGHTS[index]!;
+    return Math.max(2, Math.min(17.5, quiet + scale * (rest - quiet)));
+  });
+  return formatMediaEqBars(heights);
+}
