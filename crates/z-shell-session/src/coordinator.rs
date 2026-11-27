@@ -13,6 +13,11 @@ const LOGIND_NAME: &str = "org.freedesktop.login1";
 const LOGIND_PATH: &str = "/org/freedesktop/login1";
 const LOGIND_INTERFACE: &str = "org.freedesktop.login1.Manager";
 const LOGIND_SESSION_INTERFACE: &str = "org.freedesktop.login1.Session";
+const DBUS_NAME: &str = "org.freedesktop.DBus";
+const DBUS_PATH: &str = "/org/freedesktop/DBus";
+const LOGIND_RETRY_INITIAL: std::time::Duration = std::time::Duration::from_millis(250);
+const LOGIND_RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(10);
+const LOGIND_HEALTHY_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Asynchronous lifecycle signal received from `systemd-logind`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,9 +89,9 @@ pub trait SleepInhibitor: fmt::Debug + Send + Sync {
     }
 }
 
-/// Real logind delay- and block-inhibitor owner backed by one system-bus connection.
+/// Real logind delay- and block-inhibitor owner backed by a reconnectable D-Bus connection.
 pub struct LogindSleepInhibitor {
-    connection: zbus::Connection,
+    connection: Mutex<zbus::Connection>,
     held: Mutex<Option<OwnedFd>>,
     acquisition: tokio::sync::Mutex<()>,
     held_block: Mutex<Option<OwnedFd>>,
@@ -97,6 +102,7 @@ impl fmt::Debug for LogindSleepInhibitor {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("LogindSleepInhibitor")
+            .field("connected", &self.is_connected())
             .field("held", &self.is_held())
             .field("held_block", &self.is_sleep_block_held())
             .finish_non_exhaustive()
@@ -110,19 +116,25 @@ impl LogindSleepInhibitor {
     ///
     /// Returns a diagnostic when the system bus cannot be reached.
     pub async fn connect_system() -> Result<Self, SleepInhibitorError> {
-        let connection = zbus::connection::Builder::system()
-            .map_err(|error| SleepInhibitorError::new(error.to_string()))?
-            .build()
-            .await
-            .map_err(|error| SleepInhibitorError::new(error.to_string()))?;
+        let connection = Self::open_system_connection().await?;
         Ok(Self::from_connection(connection))
     }
 
-    /// Wraps an existing system-bus connection.
+    /// Connects to an explicit D-Bus address without yet acquiring an inhibitor.
+    ///
+    /// # Errors
+    ///
+    /// Returns a diagnostic when the D-Bus endpoint cannot be reached.
+    pub async fn connect_address(address: &str) -> Result<Self, SleepInhibitorError> {
+        let connection = Self::open_address_connection(address).await?;
+        Ok(Self::from_connection(connection))
+    }
+
+    /// Wraps an existing D-Bus connection.
     #[must_use]
     pub fn from_connection(connection: zbus::Connection) -> Self {
         Self {
-            connection,
+            connection: Mutex::new(connection),
             held: Mutex::new(None),
             acquisition: tokio::sync::Mutex::new(()),
             held_block: Mutex::new(None),
@@ -130,8 +142,77 @@ impl LogindSleepInhibitor {
         }
     }
 
-    async fn proxy(&self) -> Result<zbus::Proxy<'_>, SleepInhibitorError> {
-        zbus::Proxy::new(&self.connection, LOGIND_NAME, LOGIND_PATH, LOGIND_INTERFACE)
+    /// Reports whether the underlying D-Bus connection remains open.
+    #[must_use]
+    pub fn is_connected(&self) -> bool {
+        !self.connection().is_closed()
+    }
+
+    /// Replaces the underlying D-Bus connection and clears any stale inhibitor file descriptors.
+    pub fn replace_connection(&self, connection: zbus::Connection) {
+        *self
+            .connection
+            .lock()
+            .expect("logind connection lock poisoned") = connection;
+        self.clear_held_fds();
+    }
+
+    /// Opens a fresh system-bus connection and replaces the active connection in place.
+    ///
+    /// # Errors
+    ///
+    /// Returns a diagnostic when the system bus cannot be reached.
+    pub async fn reconnect_system(&self) -> Result<(), SleepInhibitorError> {
+        let connection = Self::open_system_connection().await?;
+        self.replace_connection(connection);
+        Ok(())
+    }
+
+    /// Opens a fresh connection to `address` and replaces the active connection in place.
+    ///
+    /// # Errors
+    ///
+    /// Returns a diagnostic when `address` cannot be reached.
+    pub async fn reconnect_address(&self, address: &str) -> Result<(), SleepInhibitorError> {
+        let connection = Self::open_address_connection(address).await?;
+        self.replace_connection(connection);
+        Ok(())
+    }
+
+    async fn open_system_connection() -> Result<zbus::Connection, SleepInhibitorError> {
+        zbus::connection::Builder::system()
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))?
+            .build()
+            .await
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))
+    }
+
+    async fn open_address_connection(
+        address: &str,
+    ) -> Result<zbus::Connection, SleepInhibitorError> {
+        zbus::connection::Builder::address(address)
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))?
+            .build()
+            .await
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))
+    }
+
+    fn connection(&self) -> zbus::Connection {
+        self.connection
+            .lock()
+            .expect("logind connection lock poisoned")
+            .clone()
+    }
+
+    fn clear_held_fds(&self) {
+        self.release();
+        self.release_sleep_block();
+    }
+
+    async fn proxy_for(
+        connection: &zbus::Connection,
+    ) -> Result<zbus::Proxy<'_>, SleepInhibitorError> {
+        zbus::Proxy::new(connection, LOGIND_NAME, LOGIND_PATH, LOGIND_INTERFACE)
             .await
             .map_err(|error| SleepInhibitorError::new(error.to_string()))
     }
@@ -144,8 +225,8 @@ impl LogindSleepInhibitor {
     pub async fn next_sleep_signal(&self) -> Result<SleepSignal, SleepInhibitorError> {
         use zbus::export::futures_core::Stream;
 
-        let stream = self
-            .proxy()
+        let connection = self.connection();
+        let stream = Self::proxy_for(&connection)
             .await?
             .receive_signal("PrepareForSleep")
             .await
@@ -166,8 +247,10 @@ impl LogindSleepInhibitor {
     }
 
     /// Resolves the current logind session object path via PID or `XDG_SESSION_ID`.
-    async fn resolve_session_path(&self) -> Option<zbus::zvariant::OwnedObjectPath> {
-        let proxy = self.proxy().await.ok()?;
+    async fn resolve_session_path_for(
+        connection: &zbus::Connection,
+    ) -> Option<zbus::zvariant::OwnedObjectPath> {
+        let proxy = Self::proxy_for(connection).await.ok()?;
         if let Ok(path) = proxy
             .call::<_, _, zbus::zvariant::OwnedObjectPath>(
                 "GetSessionByPID",
@@ -188,17 +271,96 @@ impl LogindSleepInhibitor {
         None
     }
 
-    /// Monitors `org.freedesktop.login1.Manager.PrepareForSleep` and (when a session path resolves)
+    async fn open_session_lock_stream(
+        connection: &zbus::Connection,
+    ) -> Result<Option<zbus::MessageStream>, SleepInhibitorError> {
+        let Some(session_path) = Self::resolve_session_path_for(connection).await else {
+            return Ok(None);
+        };
+        let lock_rule = zbus::MatchRule::builder()
+            .msg_type(zbus::message::Type::Signal)
+            .interface(LOGIND_SESSION_INTERFACE)
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))?
+            .path(session_path.as_str())
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))?
+            .member("Lock")
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))?
+            .build();
+        let stream = zbus::MessageStream::for_match_rule(lock_rule, connection, None)
+            .await
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))?;
+        Ok(Some(stream))
+    }
+
+    async fn resolve_logind_owner(
+        connection: &zbus::Connection,
+    ) -> Result<zbus::names::OwnedUniqueName, SleepInhibitorError> {
+        let dbus = zbus::fdo::DBusProxy::new(connection)
+            .await
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))?;
+        let name: zbus::names::BusName<'_> = LOGIND_NAME
+            .try_into()
+            .map_err(|error: zbus::names::Error| SleepInhibitorError::new(error.to_string()))?;
+        match dbus.get_name_owner(name.clone()).await {
+            Ok(owner) => Ok(owner),
+            Err(zbus::fdo::Error::NameHasNoOwner(_)) => {
+                let well_known: zbus::names::WellKnownName<'_> =
+                    LOGIND_NAME
+                        .try_into()
+                        .map_err(|error: zbus::names::Error| {
+                            SleepInhibitorError::new(error.to_string())
+                        })?;
+                let _ = dbus.start_service_by_name(well_known, 0).await;
+                dbus.get_name_owner(name)
+                    .await
+                    .map_err(|error| SleepInhibitorError::new(error.to_string()))
+            }
+            Err(error) => Err(SleepInhibitorError::new(error.to_string())),
+        }
+    }
+
+    /// Monitors `org.freedesktop.login1.Manager.PrepareForSleep` and
     /// `org.freedesktop.login1.Session.Lock`, delivering every [`LogindEvent`] into `sender`.
+    ///
+    /// Self-heals transient or delayed `Session.Lock` stream setup with bounded exponential
+    /// backoff, and returns an error (clearing stale held inhibitor FDs) if `systemd-logind`
+    /// loses its bus name or the D-Bus connection drops so a supervisor can reconnect and re-arm
+    /// inhibitors.
     ///
     /// # Errors
     ///
-    /// Returns an error if match-rule registration or D-Bus signal reception fails.
+    /// Returns an error if match-rule registration fails, `systemd-logind` disappears or restarts,
+    /// or D-Bus signal reception fails.
     pub async fn monitor_events(
         &self,
         sender: tokio::sync::mpsc::Sender<LogindEvent>,
     ) -> Result<(), SleepInhibitorError> {
         use zbus::export::futures_core::Stream;
+
+        let connection = self.connection();
+        if connection.is_closed() {
+            self.clear_held_fds();
+            return Err(SleepInhibitorError::new(
+                "logind D-Bus connection is closed",
+            ));
+        }
+
+        let owner_rule = zbus::MatchRule::builder()
+            .msg_type(zbus::message::Type::Signal)
+            .sender(DBUS_NAME)
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))?
+            .path(DBUS_PATH)
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))?
+            .interface(DBUS_NAME)
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))?
+            .member("NameOwnerChanged")
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))?
+            .add_arg(LOGIND_NAME)
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))?
+            .build();
+        let mut owner_changes = zbus::MessageStream::for_match_rule(owner_rule, &connection, None)
+            .await
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))?;
 
         let sleep_rule = zbus::MatchRule::builder()
             .msg_type(zbus::message::Type::Signal)
@@ -209,39 +371,68 @@ impl LogindSleepInhibitor {
             .member("PrepareForSleep")
             .map_err(|error| SleepInhibitorError::new(error.to_string()))?
             .build();
-        let sleep_stream = zbus::MessageStream::for_match_rule(sleep_rule, &self.connection, None)
+        let sleep_stream = zbus::MessageStream::for_match_rule(sleep_rule, &connection, None)
             .await
             .map_err(|error| SleepInhibitorError::new(error.to_string()))?;
         let mut sleep_stream = std::pin::pin!(sleep_stream);
 
-        let lock_stream = if let Some(session_path) = self.resolve_session_path().await {
-            let lock_rule = zbus::MatchRule::builder()
-                .msg_type(zbus::message::Type::Signal)
-                .interface(LOGIND_SESSION_INTERFACE)
-                .map_err(|error| SleepInhibitorError::new(error.to_string()))?
-                .path(session_path.as_str())
-                .map_err(|error| SleepInhibitorError::new(error.to_string()))?
-                .member("Lock")
-                .map_err(|error| SleepInhibitorError::new(error.to_string()))?
-                .build();
-            zbus::MessageStream::for_match_rule(lock_rule, &self.connection, None)
-                .await
-                .ok()
-        } else {
-            None
+        let owner = match Self::resolve_logind_owner(&connection).await {
+            Ok(owner) => owner,
+            Err(error) => {
+                self.clear_held_fds();
+                return Err(error);
+            }
         };
-        let mut lock_stream = lock_stream.map(Box::pin);
+
+        let (mut lock_stream, mut lock_stream_opened_at, mut lock_retry_delay, mut lock_backoff) =
+            match Self::open_session_lock_stream(&connection).await {
+                Ok(Some(stream)) => (
+                    Some(Box::pin(stream)),
+                    Some(tokio::time::Instant::now()),
+                    None,
+                    LOGIND_RETRY_INITIAL,
+                ),
+                Ok(None) => (
+                    None,
+                    None,
+                    Some(LOGIND_RETRY_INITIAL),
+                    LOGIND_RETRY_INITIAL.saturating_mul(2).min(LOGIND_RETRY_MAX),
+                ),
+                Err(error) => {
+                    self.clear_held_fds();
+                    return Err(error);
+                }
+            };
 
         loop {
             let event = tokio::select! {
+                () = connection.closed() => {
+                    self.clear_held_fds();
+                    return Err(SleepInhibitorError::new("logind D-Bus connection closed"));
+                }
+                owner_err = wait_for_logind_owner_loss(&mut owner_changes, &owner) => {
+                    self.clear_held_fds();
+                    return Err(owner_err);
+                }
                 sleep_msg = std::future::poll_fn(|cx| sleep_stream.as_mut().poll_next(cx)) => {
-                    let message = sleep_msg
-                        .ok_or_else(|| SleepInhibitorError::new("logind PrepareForSleep stream ended"))?
-                        .map_err(|error| SleepInhibitorError::new(error.to_string()))?;
+                    let message = match sleep_msg {
+                        Some(Ok(message)) => message,
+                        Some(Err(error)) => {
+                            self.clear_held_fds();
+                            return Err(SleepInhibitorError::new(error.to_string()));
+                        }
+                        None => {
+                            self.clear_held_fds();
+                            return Err(SleepInhibitorError::new("logind PrepareForSleep stream ended"));
+                        }
+                    };
                     let (sleeping,) = message
                         .body()
                         .deserialize::<(bool,)>()
-                        .map_err(|error| SleepInhibitorError::new(error.to_string()))?;
+                        .map_err(|error| {
+                            self.clear_held_fds();
+                            SleepInhibitorError::new(error.to_string())
+                        })?;
                     if sleeping {
                         LogindEvent::PrepareForSleep
                     } else {
@@ -255,17 +446,71 @@ impl LogindSleepInhibitor {
                     }
                 } => {
                     match lock_msg {
-                        Some(Ok(_)) => LogindEvent::SessionLock,
+                        Some(Ok(_)) => {
+                            if lock_stream_opened_at
+                                .is_some_and(|opened| opened.elapsed() >= LOGIND_HEALTHY_WINDOW)
+                            {
+                                lock_backoff = LOGIND_RETRY_INITIAL;
+                            }
+                            LogindEvent::SessionLock
+                        }
                         Some(Err(error)) => {
-                            tracing::debug!(%error, "logind Session.Lock stream failed; disabling session lock monitor");
+                            if connection.is_closed() {
+                                self.clear_held_fds();
+                                return Err(SleepInhibitorError::new(error.to_string()));
+                            }
+                            tracing::debug!(%error, "logind Session.Lock stream failed; scheduling session stream rebuild");
+                            if lock_stream_opened_at
+                                .take()
+                                .is_some_and(|opened| opened.elapsed() >= LOGIND_HEALTHY_WINDOW)
+                            {
+                                lock_backoff = LOGIND_RETRY_INITIAL;
+                            }
                             lock_stream = None;
+                            lock_retry_delay = Some(lock_backoff);
+                            lock_backoff = lock_backoff.saturating_mul(2).min(LOGIND_RETRY_MAX);
                             continue;
                         }
                         None => {
+                            if connection.is_closed() {
+                                self.clear_held_fds();
+                                return Err(SleepInhibitorError::new("logind Session.Lock stream ended"));
+                            }
+                            if lock_stream_opened_at
+                                .take()
+                                .is_some_and(|opened| opened.elapsed() >= LOGIND_HEALTHY_WINDOW)
+                            {
+                                lock_backoff = LOGIND_RETRY_INITIAL;
+                            }
                             lock_stream = None;
+                            lock_retry_delay = Some(lock_backoff);
+                            lock_backoff = lock_backoff.saturating_mul(2).min(LOGIND_RETRY_MAX);
                             continue;
                         }
                     }
+                }
+                () = async {
+                    match lock_retry_delay {
+                        Some(delay) => tokio::time::sleep(delay).await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    match Self::open_session_lock_stream(&connection).await {
+                        Ok(Some(stream)) => {
+                            lock_stream = Some(Box::pin(stream));
+                            lock_stream_opened_at = Some(tokio::time::Instant::now());
+                            lock_retry_delay = None;
+                        }
+                        Ok(None) => {
+                            lock_retry_delay = Some(lock_backoff);
+                            lock_backoff = lock_backoff.saturating_mul(2).min(LOGIND_RETRY_MAX);
+                        }
+                        Err(error) => {
+                            self.clear_held_fds();
+                            return Err(error);
+                        }
+                    }
+                    continue;
                 }
             };
             if sender.send(event).await.is_err() {
@@ -275,15 +520,44 @@ impl LogindSleepInhibitor {
     }
 }
 
+async fn wait_for_logind_owner_loss(
+    changes: &mut zbus::MessageStream,
+    owner: &zbus::names::OwnedUniqueName,
+) -> SleepInhibitorError {
+    use zbus::export::futures_core::Stream;
+
+    loop {
+        let message = match std::future::poll_fn(|cx| Pin::new(&mut *changes).poll_next(cx)).await {
+            Some(Ok(message)) => message,
+            Some(Err(error)) => return SleepInhibitorError::new(error.to_string()),
+            None => return SleepInhibitorError::new("logind owner watch stream ended"),
+        };
+        let body = message.body();
+        let (_, old, new) = match body.deserialize::<(&str, &str, &str)>() {
+            Ok(owners) => owners,
+            Err(error) => return SleepInhibitorError::new(error.to_string()),
+        };
+        if old == owner.as_str() && new != old {
+            return SleepInhibitorError::new("systemd-logind owner changed or disappeared");
+        }
+    }
+}
+
 impl SleepInhibitor for LogindSleepInhibitor {
     fn acquire(&self) -> InhibitorFuture<'_> {
         Box::pin(async move {
             let _acquisition = self.acquisition.lock().await;
+            let connection = self.connection();
+            if connection.is_closed() {
+                self.release();
+                return Err(SleepInhibitorError::new(
+                    "logind D-Bus connection is closed",
+                ));
+            }
             if self.is_held() {
                 return Ok(());
             }
-            let fd = self
-                .proxy()
+            let fd = Self::proxy_for(&connection)
                 .await?
                 .call(
                     "Inhibit",
@@ -309,21 +583,29 @@ impl SleepInhibitor for LogindSleepInhibitor {
     }
 
     fn is_held(&self) -> bool {
-        self.held
-            .lock()
-            .expect("logind inhibitor lock poisoned")
-            .is_some()
+        !self.connection().is_closed()
+            && self
+                .held
+                .lock()
+                .expect("logind inhibitor lock poisoned")
+                .is_some()
     }
 
     fn acquire_sleep_block(&self, reason: &str) -> InhibitorFuture<'_> {
         let reason = reason.to_owned();
         Box::pin(async move {
             let _acquisition = self.block_acquisition.lock().await;
+            let connection = self.connection();
+            if connection.is_closed() {
+                self.release_sleep_block();
+                return Err(SleepInhibitorError::new(
+                    "logind D-Bus connection is closed",
+                ));
+            }
             if self.is_sleep_block_held() {
                 return Ok(());
             }
-            let fd = self
-                .proxy()
+            let fd = Self::proxy_for(&connection)
                 .await?
                 .call("Inhibit", &("sleep", "z-shell", reason.as_str(), "block"))
                 .await
@@ -344,15 +626,18 @@ impl SleepInhibitor for LogindSleepInhibitor {
     }
 
     fn is_sleep_block_held(&self) -> bool {
-        self.held_block
-            .lock()
-            .expect("logind block inhibitor lock poisoned")
-            .is_some()
+        !self.connection().is_closed()
+            && self
+                .held_block
+                .lock()
+                .expect("logind block inhibitor lock poisoned")
+                .is_some()
     }
 
     fn suspend(&self) -> InhibitorFuture<'_> {
         Box::pin(async move {
-            self.proxy()
+            let connection = self.connection();
+            Self::proxy_for(&connection)
                 .await?
                 .call("Suspend", &false)
                 .await

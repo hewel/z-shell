@@ -222,6 +222,7 @@ export interface LauncherQueryResponse {
 
 export interface DockEntry {
   readonly appId: string;
+  readonly desktopId?: string;
   readonly title: string;
   readonly icon?: MediaRef;
   readonly pinned: boolean;
@@ -787,6 +788,15 @@ export interface LockSnapshot {
   readonly host_connected: boolean;
   readonly ui_session_generation: number | null;
   readonly last_error: string | null;
+}
+
+/**
+ * Reports whether the session is locking, locked, or holding for sleep so transient
+ * popovers and notification toasts exit immediately and stay suppressed.
+ */
+export function isSessionLockActive(lock: LockSnapshot | null | undefined): boolean {
+  if (!lock) return false;
+  return lock.phase !== "unlocked" || lock.sleep_hold === true;
 }
 
 export interface UnlockApproval {
@@ -1983,6 +1993,7 @@ export function buildDockItems(
     const appWindows = groups.get(canonicalKey(appId))?.windows ?? [];
     return {
       appId,
+      ...(resolved?.id && resolved.id !== appId ? { desktopId: resolved.id } : {}),
       title: resolved?.title ?? appId,
       ...(resolved?.icon ? { icon: resolved.icon } : {}),
       pinned: true,

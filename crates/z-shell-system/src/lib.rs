@@ -34,8 +34,8 @@
 //!   `bluetooth.trust` takes `{device, trusted}`. Targets are BlueZ object paths
 //!   from `system.bluetooth`.
 //! - `power.set-profile`: `{profile}` from `system.power`. `power.reboot`,
-//!   `power.poweroff`, `power.suspend`, and `power.logout` require the privileged
-//!   host control channel and take no payload.
+//!   `power.poweroff`, and `power.logout` require the privileged host control
+//!   channel and take no payload (`power.suspend` is coordinated by `z-shell-session`).
 //! - `brightness.set`: `{device, value}` from `system.brightness`; the raw
 //!   integer value is clamped to the selected backlight's supported range.
 

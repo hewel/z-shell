@@ -442,7 +442,7 @@ describe("apps/shell preview", () => {
               body: "Phase 2 preview",
               icon: null,
               attachment: null,
-              actions: [],
+              actions: id === 1 ? [{ key: "default", label: "" }, { key: "open", label: "Open" }] : [],
               urgency: 1,
             })),
           },
@@ -655,6 +655,12 @@ describe("apps/shell preview", () => {
       expect(treeNode(calendar.tree, "cal-today-cell").text).toBe("14");
       expect(treeNode(calendar.tree, "cal-notif-count").text).toBe("2");
       expect(calendar.tree.nodes.some(node => node.text === "Notification 1")).toBe(true);
+      expect(treeNode(calendar.tree, "cal-notif-default-1").boundsDevice).toBeDefined();
+      expect(treeNode(calendar.tree, "cal-notif-action-1-open").boundsDevice).toBeDefined();
+      expect(calendar.tree.nodes.some(node => node.testId === "cal-notif-default-2")).toBe(false);
+      expect(calendar.tree.nodes.some(node => node.testId?.startsWith("cal-notif-action-2-"))).toBe(false);
+      expect(treeNode(calendar.tree, "cal-notif-dismiss-2").boundsDevice).toBeDefined();
+      expect(treeNode(calendar.tree, "cal-clear-all").boundsDevice).toBeDefined();
       // Single-owner IA (DESIGN.md): system telemetry lives in Settings > Power, not Calendar.
       expect(calendar.tree.nodes.some(node => node.text === "46°C")).toBe(false);
       expect(treeNode(media.tree, "media-title").text).toBe("Feather");
@@ -958,27 +964,29 @@ describe("apps/shell preview", () => {
           },
         },
         commands: [
-          { id: 26, name: "wayland.window.activate", payload: { window_id: 41 }, atMs: 40 },
+          { id: 26, name: "apps.launch", payload: { id: "zen.desktop" }, atMs: 35 },
+          { id: 27, name: "wayland.window.activate", payload: { window_id: 41 }, atMs: 40 },
           {
-            id: 27,
+            id: 28,
             name: "launcher.query",
             payload: { query: "", query_id: 1, limit: 18 },
             atMs: 40,
             result: { data: { query_id: 1, items: [zen, alacritty] } },
           },
           {
-            id: 28,
+            id: 29,
             name: "launcher.query",
             payload: { query: "ala", query_id: 2, limit: 18 },
             atMs: 50,
             result: { data: { query_id: 2, items: [alacritty] } },
           },
           {
-            id: 29,
+            id: 30,
             name: "launcher.activate",
             payload: { query_id: 2, provider_id: "desktop", item_id: "alacritty.desktop" },
             atMs: 60,
           },
+          { id: 31, name: "apps.launch", payload: { id: "zen.desktop" }, atMs: 300 },
         ],
       }), null, 2));
       writeFileSync(scenario, JSON.stringify({
@@ -997,6 +1005,12 @@ describe("apps/shell preview", () => {
           { id: "daemon-events", op: "clock.advance", byMs: 30 },
           { id: "ready", op: "settle" },
           { id: "capture-dock", op: "capture", surface: "dock-dp-1", captureId: "dock-dp-1" },
+          {
+            id: "launch-cold-boot-pinned-app",
+            op: "pointer.click",
+            target: { surface: "dock-dp-1", testId: "dock-app-zen.desktop" },
+            button: "primary",
+          },
           {
             id: "activate-running-pinned-app",
             op: "pointer.click",
@@ -1023,6 +1037,13 @@ describe("apps/shell preview", () => {
           { id: "activation-reply", op: "clock.advance", byMs: 10 },
           { id: "launcher-exit-motion", op: "clock.advance", byMs: 220 },
           { id: "launcher-closed-settled", op: "settle" },
+          {
+            id: "launch-pinned-app-after-filtered-query",
+            op: "pointer.click",
+            target: { surface: "dock-dp-1", testId: "dock-app-zen.desktop" },
+            button: "primary",
+          },
+          { id: "post-filter-launch-reply", op: "clock.advance", byMs: 15 },
           {
             id: "launcher-closed-surfaces",
             op: "monitors.set",
@@ -1239,6 +1260,117 @@ describe("apps/shell preview", () => {
       expectCleanPreview(refusedResult, 0, 0);
       expect(sessionLockTrace(refusedOut).unlockCount).toBe(0);
       expect(previewSurfaces(refusedOut, "refused")).not.toContain("lock-dp-1");
+
+      // Unsettled username with display_name containing spaces must omit `username` on the wire
+      // (never sending `display_name` or `"user"` fallback) while still displaying `display_name`.
+      const unsettledOut = join(workspace, "unsettled-out");
+      const unsettledFixture = join(workspace, "unsettled-fixture.json");
+      const unsettledScenario = join(workspace, "unsettled-scenario.json");
+      const unsettledTimeline = createVirtualTimeline();
+      unsettledTimeline.step({ id: "outputs", op: "monitors.set", monitors: [monitors[0]] });
+      unsettledTimeline.advance("daemon-events", 30);
+      unsettledTimeline.step({ id: "ready", op: "settle" });
+      const unsettledEngageAtMs = unsettledTimeline.after(10);
+      const unsettledLockedAtMs = unsettledTimeline.after(15);
+      unsettledTimeline.advance("engage-lock", 10);
+      unsettledTimeline.advance("lock-ack-reply", 10);
+      unsettledTimeline.step({
+        id: "display-name-shown", op: "assert",
+        target: { surface: "lock-dp-1", testId: "lock-user-dp-1" },
+        check: { property: "text", equals: "Ada Lovelace" },
+      });
+      unsettledTimeline.step({
+        id: "focus-password", op: "pointer.click",
+        target: { surface: "lock-dp-1", testId: "lock-password" }, button: "primary",
+      });
+      unsettledTimeline.step({ id: "enter-password", op: "text.commit", surface: "lock-dp-1", text: "correct" });
+      unsettledTimeline.advance("password-committed", 1);
+      unsettledTimeline.step({
+        id: "submit-password", op: "pointer.click",
+        target: { surface: "lock-dp-1", testId: "lock-submit" }, button: "primary",
+      });
+      const unsettledAuthAtMs = unsettledTimeline.after(9);
+      const unsettledUnlockedAtMs = unsettledTimeline.after(14);
+      const unsettledConsumeAtMs = unsettledTimeline.after(19);
+      unsettledTimeline.advance("auth-reply", 10);
+      unsettledTimeline.advance("daemon-unlocked", 5);
+      unsettledTimeline.advance("consume-unlock-reply", 5);
+      unsettledTimeline.step({ id: "unlock-settled", op: "settle" });
+      unsettledTimeline.step({ id: "after-unlock", op: "monitors.set", monitors: [monitors[0]] });
+
+      writeFileSync(unsettledFixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-phase-4-lock-unsettled-user",
+        sessionLock: { outcome: "locked" },
+        initialTopics: {
+          "system.user": {
+            uid: 1000,
+            username: null,
+            display_name: "Ada Lovelace",
+            avatar: null,
+          },
+        },
+        topicUpdates: [
+          {
+            topic: "session.lock",
+            atMs: unsettledEngageAtMs,
+            revision: 2,
+            data: {
+              phase: "engaging", lock_id: 8, sleep_hold: false, host_connected: true,
+              ui_session_generation: 1, last_error: null,
+            },
+          },
+          {
+            topic: "session.lock",
+            atMs: unsettledLockedAtMs,
+            revision: 3,
+            data: {
+              phase: "locked", lock_id: 8, sleep_hold: false, host_connected: true,
+              ui_session_generation: 1, last_error: null,
+            },
+          },
+          {
+            topic: "session.lock",
+            atMs: unsettledUnlockedAtMs,
+            revision: 4,
+            data: {
+              phase: "unlocked", lock_id: null, sleep_hold: false, host_connected: true,
+              ui_session_generation: 1, last_error: null,
+            },
+          },
+        ],
+        commands: [
+          {
+            socket: "host", id: 3, name: "host.lock-ack",
+            payload: { lock_id: 8, ui_session_generation: 1 }, atMs: unsettledLockedAtMs,
+          },
+          {
+            socket: "host", id: 4, name: "host.lock-authenticate",
+            payload: { password: "correct", lock_id: 8, ui_session_generation: 1 },
+            atMs: unsettledAuthAtMs,
+            result: {
+              data: {
+                token: "unlock-8", daemon_instance_id: "preview-daemon",
+                ui_session_generation: 1, lock_id: 8, auth_attempt_id: 1,
+              },
+            },
+          },
+          {
+            socket: "host", id: 5, name: "host.lock-consume-unlock",
+            payload: { token: "unlock-8", lock_id: 8, ui_session_generation: 1 }, atMs: unsettledConsumeAtMs,
+          },
+        ],
+      }), null, 2));
+      writeFileSync(unsettledScenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-phase-4-lock-unsettled-user",
+        requiredCapabilities: ["session-lock", "surface.multiple", "virtual-time"],
+        steps: unsettledTimeline.steps,
+      }, null, 2));
+
+      const unsettledResult = runPreview(unsettledFixture, unsettledScenario, unsettledOut);
+      expectCleanPreview(unsettledResult, 0, 1);
+      expect(previewSessionLock(unsettledOut, "after-unlock").state).toBe("unlocked");
+      expect(sessionLockTrace(unsettledOut)).toMatchObject({ state: "unlocked", unlockCount: 1 });
     } finally {
       cleanup();
     }
@@ -1826,6 +1958,143 @@ describe("apps/shell preview", () => {
       expect(previewSurfaces(out, "after-switch-qs-to-sysmon-250ms")).toContain("panel-system-monitor");
 
       expect(previewSurfaces(out, "after-same-trigger-close")).not.toContain("panel-system-monitor");
+    } finally {
+      cleanup();
+    }
+  });
+
+  previewTest("Notification toasts and Calendar popover dismiss immediately (instantExit) and stay suppressed across sleep_hold, engaging, and locked", () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-lock-notif-");
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const monitor = {
+        id: "dp-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900,
+        scale: 1, refreshRateMilliHz: 60000,
+      };
+      const makeToast = (id: number) => ({
+        id,
+        revision: 1,
+        app_name: "Chat",
+        summary: `Message ${id}`,
+        body: "Sensitive preview",
+        icon: null,
+        attachment: null,
+        actions: [{ key: "open", label: "Open" }],
+        urgency: 1,
+      });
+
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+
+      timeline.step({ id: "open-calendar", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-clock" }, button: "primary" });
+      timeline.advance("calendar-present", 60);
+      timeline.step({ id: "before-lock", op: "monitors.set", monitors: [monitor] });
+
+      const sleepHoldAtMs = timeline.after(2);
+      timeline.advance("sleep-hold-instant-exit", 5);
+      timeline.step({ id: "during-sleep-hold", op: "monitors.set", monitors: [monitor] });
+
+      timeline.step({ id: "try-open-calendar-during-hold", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-clock" }, button: "primary" });
+      timeline.advance("suppressed-hold-check", 20);
+      timeline.step({ id: "suppressed-while-held", op: "monitors.set", monitors: [monitor] });
+
+      const wakeUnlockedAtMs = timeline.after(2);
+      timeline.advance("wake-unlocked", 10);
+      timeline.step({ id: "reopen-calendar", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-clock" }, button: "primary" });
+      timeline.advance("reopen-present", 60);
+      timeline.step({ id: "reopened-unlocked", op: "monitors.set", monitors: [monitor] });
+
+      const engagingAtMs = timeline.after(2);
+      const lockFailedReplyAtMs = timeline.after(15);
+      timeline.advance("engaging-instant-exit", 5);
+      timeline.step({ id: "during-engaging", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("lock-failed-drain", 20);
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-lock-notif-suppression",
+        sessionLock: { outcome: "finished" },
+        initialTopics: {
+          "desktop.notifications": {
+            available: true,
+            dnd: false,
+            popups: [makeToast(1)],
+            history: [makeToast(1)],
+          },
+        },
+        topicUpdates: [
+          {
+            topic: "session.lock",
+            atMs: sleepHoldAtMs,
+            revision: 2,
+            data: {
+              phase: "unlocked", lock_id: null, sleep_hold: true, host_connected: true,
+              ui_session_generation: 1, last_error: null,
+            },
+          },
+          {
+            topic: "session.lock",
+            atMs: wakeUnlockedAtMs,
+            revision: 3,
+            data: {
+              phase: "unlocked", lock_id: null, sleep_hold: false, host_connected: true,
+              ui_session_generation: 1, last_error: null,
+            },
+          },
+          {
+            topic: "desktop.notifications",
+            atMs: wakeUnlockedAtMs,
+            revision: 2,
+            data: {
+              available: true,
+              dnd: false,
+              popups: [makeToast(2)],
+              history: [makeToast(2), makeToast(1)],
+            },
+          },
+          {
+            topic: "session.lock",
+            atMs: engagingAtMs,
+            revision: 4,
+            data: {
+              phase: "engaging", lock_id: 15, sleep_hold: false, host_connected: true,
+              ui_session_generation: 1, last_error: null,
+            },
+          },
+        ],
+        commands: [
+          {
+            socket: "host", id: 3, name: "host.lock-failed",
+            payload: { lock_id: 15, reason: "compositor lock refused" }, atMs: lockFailedReplyAtMs,
+          },
+        ],
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-lock-notif-suppression",
+        requiredCapabilities: ["session-lock", "pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(fixture, scenario, out);
+      expectCleanPreview(result, 0, 0);
+
+      expect(previewSurfaces(out, "before-lock")).toContain("notification-toasts");
+      expect(previewSurfaces(out, "before-lock")).toContain("panel-calendar");
+
+      expect(previewSurfaces(out, "during-sleep-hold")).not.toContain("notification-toasts");
+      expect(previewSurfaces(out, "during-sleep-hold")).not.toContain("panel-calendar");
+
+      expect(previewSurfaces(out, "suppressed-while-held")).not.toContain("notification-toasts");
+      expect(previewSurfaces(out, "suppressed-while-held")).not.toContain("panel-calendar");
+
+      expect(previewSurfaces(out, "reopened-unlocked")).toContain("notification-toasts");
+      expect(previewSurfaces(out, "reopened-unlocked")).toContain("panel-calendar");
+
+      expect(previewSurfaces(out, "during-engaging")).not.toContain("notification-toasts");
+      expect(previewSurfaces(out, "during-engaging")).not.toContain("panel-calendar");
     } finally {
       cleanup();
     }

@@ -2,8 +2,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
 use z_shell_session::coordinator::{
-    Coordinator, CoordinatorAction, CoordinatorError, LockPhase, LockPhaseName, SleepInhibitor,
-    SleepInhibitorError, SleepSignal,
+    Coordinator, CoordinatorAction, CoordinatorError, LockPhase, LockPhaseName, LogindEvent,
+    LogindSleepInhibitor, SleepInhibitor, SleepInhibitorError, SleepSignal,
 };
 use z_shell_session::pam::AuthOutcome;
 
@@ -368,4 +368,251 @@ async fn on_suspend_failed_is_generation_guarded_against_newer_prepare_for_sleep
     assert!(!coordinator.snapshot().sleep_hold);
     assert_eq!(coordinator.snapshot().phase, LockPhaseName::Locked);
     assert!(inhibitor.is_held());
+}
+
+#[tokio::test]
+async fn logind_sleep_inhibitor_self_heals_late_session_lock_and_service_restart() {
+    use std::io::{BufRead, BufReader};
+    use std::process::{Child, Command, Stdio};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+    use tokio::time::timeout;
+    use zbus::connection::Builder;
+    use zbus::object_server::SignalEmitter;
+    use zbus::zvariant::{OwnedFd, OwnedObjectPath};
+
+    struct TestBus(Child);
+    impl Drop for TestBus {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    let mut daemon = Command::new("dbus-daemon")
+        .args(["--session", "--nofork", "--nosyslog", "--print-address=1"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("start private dbus-daemon");
+    let mut address = String::new();
+    BufReader::new(daemon.stdout.take().expect("dbus stdout"))
+        .read_line(&mut address)
+        .expect("read dbus address");
+    let _bus = TestBus(daemon);
+    let address = address.trim().to_owned();
+
+    struct MockLogindManager {
+        session_ready: Arc<AtomicBool>,
+        unready_observed: Arc<tokio::sync::Notify>,
+        session_resolved: Arc<tokio::sync::Notify>,
+        session_path: String,
+    }
+
+    #[zbus::interface(name = "org.freedesktop.login1.Manager")]
+    impl MockLogindManager {
+        #[zbus(name = "Inhibit")]
+        fn inhibit(
+            &self,
+            _what: &str,
+            _who: &str,
+            _why: &str,
+            _mode: &str,
+        ) -> zbus::fdo::Result<OwnedFd> {
+            let (reader, _writer) = std::os::unix::net::UnixStream::pair()
+                .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+            Ok(OwnedFd::from(std::os::fd::OwnedFd::from(reader)))
+        }
+
+        #[zbus(name = "GetSessionByPID")]
+        fn get_session_by_pid(&self, _pid: u32) -> zbus::fdo::Result<OwnedObjectPath> {
+            if !self.session_ready.load(Ordering::SeqCst) {
+                self.unready_observed.notify_waiters();
+                return Err(zbus::fdo::Error::UnknownObject("session not ready".into()));
+            }
+            self.session_resolved.notify_waiters();
+            Ok(OwnedObjectPath::try_from(self.session_path.as_str()).expect("valid path"))
+        }
+
+        #[zbus(signal)]
+        async fn prepare_for_sleep(emitter: &SignalEmitter<'_>, start: bool) -> zbus::Result<()>;
+    }
+
+    struct MockLogindSession;
+
+    #[zbus::interface(name = "org.freedesktop.login1.Session")]
+    impl MockLogindSession {
+        #[zbus(signal, name = "Lock")]
+        async fn lock(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
+    }
+
+    let session_ready = Arc::new(AtomicBool::new(false));
+    let unready_observed = Arc::new(tokio::sync::Notify::new());
+    let session_1_resolved = Arc::new(tokio::sync::Notify::new());
+    let logind_conn_1 = Builder::address(address.as_str())
+        .expect("builder")
+        .name("org.freedesktop.login1")
+        .expect("name")
+        .serve_at(
+            "/org/freedesktop/login1",
+            MockLogindManager {
+                session_ready: Arc::clone(&session_ready),
+                unready_observed: Arc::clone(&unready_observed),
+                session_resolved: Arc::clone(&session_1_resolved),
+                session_path: "/org/freedesktop/login1/session/s1".into(),
+            },
+        )
+        .expect("serve manager")
+        .serve_at("/org/freedesktop/login1/session/s1", MockLogindSession)
+        .expect("serve session 1")
+        .build()
+        .await
+        .expect("build logind 1");
+
+    let client_conn = Builder::address(address.as_str())
+        .expect("client builder")
+        .build()
+        .await
+        .expect("client build");
+    let inhibitor = Arc::new(LogindSleepInhibitor::from_connection(client_conn));
+    inhibitor.acquire().await.expect("acquire delay inhibitor");
+    assert!(inhibitor.is_held());
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+    let monitor_inhibitor = Arc::clone(&inhibitor);
+    let first_unready = unready_observed.notified();
+    let healed_session = session_1_resolved.notified();
+    let monitor_task = tokio::spawn(async move { monitor_inhibitor.monitor_events(tx).await });
+
+    // Deterministically wait for monitor_events to observe `session_ready == false`, then enable it.
+    timeout(Duration::from_secs(2), first_unready)
+        .await
+        .expect("monitor_events must probe GetSessionByPID on startup");
+    session_ready.store(true, Ordering::SeqCst);
+    timeout(Duration::from_secs(3), healed_session)
+        .await
+        .expect("monitor_events must retry GetSessionByPID with backoff");
+
+    // Emit Session.Lock until the newly registered match rule delivers it.
+    let session_1_iface = logind_conn_1
+        .object_server()
+        .interface::<_, MockLogindSession>("/org/freedesktop/login1/session/s1")
+        .await
+        .expect("session 1 interface");
+    let got_lock = timeout(Duration::from_secs(3), async {
+        loop {
+            MockLogindSession::lock(session_1_iface.signal_emitter())
+                .await
+                .expect("emit Lock");
+            if let Ok(Some(event)) = timeout(Duration::from_millis(80), rx.recv()).await
+                && event == LogindEvent::SessionLock
+            {
+                break;
+            }
+        }
+    })
+    .await;
+    assert!(
+        got_lock.is_ok(),
+        "monitor_events must self-heal Session.Lock when session resolves after startup"
+    );
+
+    // Simulate systemd-logind restart by releasing org.freedesktop.login1.
+    assert!(
+        logind_conn_1
+            .release_name("org.freedesktop.login1")
+            .await
+            .expect("release logind name")
+    );
+
+    let exit_res = timeout(Duration::from_secs(3), monitor_task)
+        .await
+        .expect("monitor_events must return promptly when logind loses bus name")
+        .expect("join monitor task");
+    assert!(
+        exit_res.is_err(),
+        "monitor_events must report error on logind owner loss so supervisor re-arms inhibitors"
+    );
+    assert!(
+        !inhibitor.is_held(),
+        "stale delay inhibitor FD must be cleared when logind owner disappears"
+    );
+
+    // Bring up a fresh systemd-logind instance with a new session object path and reconnect.
+    let session_2_resolved = Arc::new(tokio::sync::Notify::new());
+    let logind_conn_2 = Builder::address(address.as_str())
+        .expect("builder 2")
+        .name("org.freedesktop.login1")
+        .expect("name 2")
+        .serve_at(
+            "/org/freedesktop/login1",
+            MockLogindManager {
+                session_ready: Arc::new(AtomicBool::new(true)),
+                unready_observed: Arc::new(tokio::sync::Notify::new()),
+                session_resolved: Arc::clone(&session_2_resolved),
+                session_path: "/org/freedesktop/login1/session/s2".into(),
+            },
+        )
+        .expect("serve manager 2")
+        .serve_at("/org/freedesktop/login1/session/s2", MockLogindSession)
+        .expect("serve session 2")
+        .build()
+        .await
+        .expect("build logind 2");
+
+    inhibitor
+        .reconnect_address(&address)
+        .await
+        .expect("reconnect logind inhibitor");
+    assert!(inhibitor.is_connected());
+    inhibitor
+        .acquire()
+        .await
+        .expect("re-acquire delay inhibitor after logind restart");
+    assert!(inhibitor.is_held());
+
+    let (tx2, mut rx2) = tokio::sync::mpsc::channel(16);
+    let monitor_inhibitor_2 = Arc::clone(&inhibitor);
+    let ready_2 = session_2_resolved.notified();
+    let monitor_task_2 = tokio::spawn(async move { monitor_inhibitor_2.monitor_events(tx2).await });
+    timeout(Duration::from_secs(2), ready_2)
+        .await
+        .expect("reconnected monitor_events must resolve session 2");
+
+    let manager_2_iface = logind_conn_2
+        .object_server()
+        .interface::<_, MockLogindManager>("/org/freedesktop/login1")
+        .await
+        .expect("manager 2 interface");
+    MockLogindManager::prepare_for_sleep(manager_2_iface.signal_emitter(), true)
+        .await
+        .expect("emit PrepareForSleep");
+    assert_eq!(
+        timeout(Duration::from_secs(2), rx2.recv())
+            .await
+            .expect("PrepareForSleep timeout"),
+        Some(LogindEvent::PrepareForSleep)
+    );
+
+    let session_2_iface = logind_conn_2
+        .object_server()
+        .interface::<_, MockLogindSession>("/org/freedesktop/login1/session/s2")
+        .await
+        .expect("session 2 interface");
+    let got_lock_2 = timeout(Duration::from_secs(2), async {
+        loop {
+            MockLogindSession::lock(session_2_iface.signal_emitter())
+                .await
+                .expect("emit Lock on session 2");
+            if let Ok(Some(event)) = timeout(Duration::from_millis(80), rx2.recv()).await
+                && event == LogindEvent::SessionLock
+            {
+                break;
+            }
+        }
+    })
+    .await;
+    assert!(got_lock_2.is_ok(), "Session.Lock on session 2 must arrive");
+
+    drop(rx2);
+    monitor_task_2.abort();
 }

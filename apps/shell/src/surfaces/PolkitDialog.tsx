@@ -11,7 +11,7 @@ import {
   type M3Spring,
 } from "../motion.ts";
 import { usePinnedOutput, useShellStore } from "../store.ts";
-import { resolveMonitorLogicalSize, type PolkitPromptView } from "../topics.ts";
+import { isSessionLockActive, resolveMonitorLogicalSize, type PolkitPromptView } from "../topics.ts";
 import styles from "./PolkitDialog.module.css";
 
 function PolkitContent(props: {
@@ -256,7 +256,7 @@ function PolkitContent(props: {
 export function PolkitDialog(): NativeChild {
   const { monitors, outputs, polkit, sessionLock } = useShellStore();
   const scheme = useMotionScheme();
-  const locked = () => polkit.data()?.locked_suppressed === true || (sessionLock.data()?.phase ?? "unlocked") !== "unlocked";
+  const locked = () => polkit.data()?.locked_suppressed === true || isSessionLockActive(sessionLock.data());
   const pinnedOutput = usePinnedOutput(() => (locked() ? null : polkit.data()?.active?.request_id ?? null));
   const target = createMemo(() => {
     const output = pinnedOutput();

@@ -6,7 +6,7 @@ import { createRetainedPresence, panelMotionStyle, popoverContentMotionStyle, us
 import { POPOVER_SHADOW_INSETS, resolvePopoverGeometry, shellPanelsStyles } from "../panels/ShellPanels.tsx";
 import { useShellStore, type ImeMenuTarget, type TrayMenuTarget, type TrayOverflowTarget } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
-import { isImeTrayItem, partitionTrayItems, type BarPosition, type BarStyle, type TrayItem, type TrayMenuNode } from "../topics.ts";
+import { isImeTrayItem, isSessionLockActive, partitionTrayItems, type BarPosition, type BarStyle, type TrayItem, type TrayMenuNode } from "../topics.ts";
 import styles from "./BarPopups.module.css";
 
 const MENU_MIN_WIDTH = 220;
@@ -353,9 +353,11 @@ export function BarPopups(): NativeChild {
     activeImeMenu,
     closeImeMenu,
     settings,
+    sessionLock,
     invokePublic,
   } = useShellStore();
   const scheme = useMotionScheme();
+  const lockActive = () => isSessionLockActive(sessionLock.data());
   const [instantExitNext, setInstantExitNext] = createSignal(false);
   const position = (): BarPosition => settings.data()?.bar.position ?? "top";
   const barStyle = (): BarStyle => settings.data()?.bar.style ?? "floating";
@@ -381,6 +383,7 @@ export function BarPopups(): NativeChild {
   });
   const overflowWidth = createMemo(() => resolveTrayOverflowWidth(collapsedTrayItems().length));
   const activePopup = createMemo((): ActiveBarPopup | null => {
+    if (lockActive()) return null;
     const trayMenuTarget = activeTrayMenu();
     if (trayMenuTarget) {
       const item = tray.data()?.items.find(candidate => candidate.id === trayMenuTarget.itemId);
@@ -424,7 +427,7 @@ export function BarPopups(): NativeChild {
     enterRole: "defaultSpatial",
     enterOpacityRole: "fastEffects",
     exitRole: "fastEffects",
-    instantExit: () => instantExitNext() || (overlayKind() !== null && activePopup() === null),
+    instantExit: () => lockActive() || instantExitNext() || (overlayKind() !== null && activePopup() === null),
   });
   const mountedKey = createMemo(() => presence.value()?.key ?? null);
   const trayRows = createMemo(() => {

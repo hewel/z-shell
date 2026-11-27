@@ -13,7 +13,7 @@ import {
 import { POPOVER_SHADOW_INSETS, resolvePopoverGeometry, shellPanelsStyles } from "../panels/ShellPanels.tsx";
 import { useShellStore, type ShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
-import { PANEL_MAX_HEIGHTS, formatSurfaceName, resolveBarLayout, resolveBarPopupAnchor, type BarPosition, type BarStyle } from "../topics.ts";
+import { PANEL_MAX_HEIGHTS, formatSurfaceName, isSessionLockActive, resolveBarLayout, resolveBarPopupAnchor, type BarPosition, type BarStyle } from "../topics.ts";
 import { composedPlugins, type ComposedEntryInstanceDescriptor, type ComposedServiceDescriptor } from "./composed.ts";
 import styles from "./PluginHost.module.css";
 import { createComposedServiceController, type ComposedServiceController } from "./services.ts";
@@ -101,14 +101,16 @@ function formatPluginTitle(pluginId: string, entryId: string): string {
 function ActivePluginHost(props: { readonly bundle: ComposedPluginBundle }): NativeChild {
   const {
     publicClient, invokeHostResult, registerPluginBarWidget, registerPluginSettingsPage, pluginSettingsPages, openSettingsWindow,
-    monitors, outputs, settings, theme,
+    monitors, outputs, settings, theme, sessionLock,
     activePluginPanelId, overlayKind, barPopupGrab, togglePluginPanel, closePluginPanel, dismissBarPopupFromCompositor, recordActiveMonitor,
   } = useShellStore();
   const [pluginPanelData, setPluginPanelData] = createSignal<ActivePluginPanel | null>(null);
   let serviceController: ComposedServiceController | undefined;
   const panels = () => props.bundle.entryInstances.filter(instance => instance.kind === "panel");
   const scheme = useMotionScheme();
+  const lockActive = () => isSessionLockActive(sessionLock.data());
   const activePluginPanel = createMemo(() => {
+    if (lockActive()) return null;
     const activeId = activePluginPanelId();
     const data = pluginPanelData();
     return activeId !== null && data?.instanceId === activeId ? data : null;
@@ -118,7 +120,7 @@ function ActivePluginHost(props: { readonly bundle: ComposedPluginBundle }): Nat
     enterRole: "defaultSpatial",
     enterOpacityRole: "fastEffects",
     exitRole: "fastEffects",
-    instantExit: () => overlayKind() !== null && activePluginPanel() === null,
+    instantExit: () => lockActive() || (overlayKind() !== null && activePluginPanel() === null),
   });
   const mountedPanelKey = createMemo(() => {
     const entry = panelPresence.value();

@@ -769,3 +769,188 @@ async fn dropping_the_service_cancels_the_helper_and_unregisters() {
     .expect("dropped service reaped its helper");
     registration.shutdown().await;
 }
+
+#[tokio::test]
+async fn late_authority_startup_and_authority_restart_self_heal_without_settings_toggle() {
+    let (bus, address) = TestBus::start();
+    // Start ONLY logind first — Polkit Authority is not running yet!
+    let _logind_conn = timeout(
+        WAIT,
+        Builder::address(address.as_str())
+            .unwrap()
+            .name("org.freedesktop.login1")
+            .unwrap()
+            .serve_at(LOGIND_PATH, MockLogind)
+            .unwrap()
+            .serve_at(SESSION_PATH, MockSession)
+            .unwrap()
+            .build(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let dir = TempDir::new().unwrap();
+    let helper = dir.path().join("helper");
+    fs::write(
+        &helper,
+        "#!/bin/sh\nIFS= read -r _cookie || exit 2\nprintf 'PAM_PROMPT_ECHO_OFF Password: \\n'\nIFS= read -r _resp || exit 3\nprintf 'SUCCESS\\n'\n",
+    )
+    .unwrap();
+    fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
+
+    let service = Arc::new(PolkitService::with_helper(
+        &PolkitSettings::default(),
+        PolkitHelperConfig::with_path(helper),
+    ));
+    let hub = BusHub::new("test", dir.path().join("media"));
+    service.install_on_bus(&hub);
+    let (observer, outbound) = hub.register_client(ClientRole::Public).unwrap();
+    hub.handle_inline_message(
+        observer,
+        ClientMessage::request(
+            RequestId::Number(1),
+            methods::BUS_HELLO,
+            Some(json!({"protocol_version": PROTOCOL_VERSION})),
+        ),
+    );
+    outbound.next_line().await.unwrap();
+    hub.handle_inline_message(
+        observer,
+        ClientMessage::request(
+            RequestId::Number(2),
+            methods::TOPIC_SUBSCRIBE,
+            Some(json!({"topic": POLKIT_TOPIC})),
+        ),
+    );
+    let baseline: Value = serde_json::from_str(&outbound.next_line().await.unwrap()).unwrap();
+    assert_eq!(baseline["result"]["data"]["registered"], false);
+
+    let registration = service.start_registration(
+        PolkitBus::Address(address.clone()),
+        &tokio::runtime::Handle::current(),
+    );
+
+    let wait_topic = |predicate: fn(&Value) -> bool| {
+        let outbound = &outbound;
+        async move {
+            timeout(WAIT, async {
+                loop {
+                    let line = outbound.next_line().await.unwrap();
+                    let frame: Value = serde_json::from_str(&line).unwrap();
+                    let state = &frame["params"]["data"];
+                    if predicate(state) {
+                        return state.clone();
+                    }
+                }
+            })
+            .await
+            .expect("expected session.polkit state update within timeout")
+        }
+    };
+
+    // Initial registration fails because org.freedesktop.PolicyKit1 has no owner yet.
+    wait_topic(|state| {
+        state["enabled"] == true
+            && state["registered"] == false
+            && state["last_error"].as_str().is_some()
+    })
+    .await;
+
+    // Now start the first Polkit Authority WITHOUT toggling settings!
+    let (tx1, mut events1) = mpsc::unbounded_channel();
+    let authority1 = timeout(
+        WAIT,
+        Builder::address(address.as_str())
+            .unwrap()
+            .name(AUTHORITY_NAME)
+            .unwrap()
+            .serve_at(AUTHORITY_PATH, MockAuthority(tx1))
+            .unwrap()
+            .build(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let RegistrationEvent::Register(_dest1) = timeout(WAIT, events1.recv())
+        .await
+        .expect("late-started Polkit Authority must receive RegisterAuthenticationAgent")
+        .unwrap()
+    else {
+        panic!("expected RegisterAuthenticationAgent on late startup");
+    };
+    wait_topic(|state| state["registered"] == true && state["last_error"].is_null()).await;
+
+    // Simulate polkitd restart: authority1 releases org.freedesktop.PolicyKit1, then authority2 claims it.
+    assert!(authority1.release_name(AUTHORITY_NAME).await.unwrap());
+    wait_topic(|state| state["registered"] == false && state["last_error"].as_str().is_some())
+        .await;
+    let _ = timeout(WAIT, events1.recv()).await;
+
+    let (tx2, mut events2) = mpsc::unbounded_channel();
+    let authority2 = timeout(
+        WAIT,
+        Builder::address(address.as_str())
+            .unwrap()
+            .name(AUTHORITY_NAME)
+            .unwrap()
+            .serve_at(AUTHORITY_PATH, MockAuthority(tx2))
+            .unwrap()
+            .build(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let RegistrationEvent::Register(dest2) = timeout(WAIT, events2.recv())
+        .await
+        .expect("restarted Polkit Authority must receive RegisterAuthenticationAgent")
+        .unwrap()
+    else {
+        panic!("expected RegisterAuthenticationAgent after Authority restart");
+    };
+    wait_topic(|state| state["registered"] == true && state["last_error"].is_null()).await;
+
+    // Verify the re-registered agent actually serves BeginAuthentication from authority2!
+    let ((uid, _), _) = users();
+    let (client_id, _) = hub.register_client(ClientRole::PrivilegedHost).unwrap();
+    let host = CallerContext {
+        client_id,
+        role: ClientRole::PrivilegedHost,
+    };
+    let auth_call = {
+        let conn = authority2.clone();
+        let dest = dest2.clone();
+        tokio::spawn(async move {
+            begin(
+                &conn,
+                &dest,
+                "restarted-action",
+                "cookie-secret-restarted",
+                identities(&[uid]),
+            )
+            .await
+        })
+    };
+    let prompt_state = wait_topic(|state| {
+        state["active"]["action_id"] == "restarted-action"
+            && state["active"]["prompt"] == "Password: "
+    })
+    .await;
+    invoke(
+        &hub,
+        host,
+        "host.polkit-respond",
+        json!({
+            "request_id": prompt_state["active"]["request_id"],
+            "response": "any-pw",
+        }),
+    )
+    .await
+    .unwrap();
+    finished(auth_call).await.unwrap();
+
+    registration.shutdown().await;
+    drop(bus);
+}

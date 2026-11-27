@@ -6,7 +6,7 @@ use common::{TestBus, invoke, next_update, paths, subscribe};
 use image::{Rgba, RgbaImage};
 use serde_json::{Value, json};
 use z_shell_bus::{BusHub, hub::ClientOutbound};
-use z_shell_desktop::{DesktopOptions, DesktopServices, SessionBusAddress};
+use z_shell_desktop::{DesktopOptions, DesktopServices, ImeLockState, SessionBusAddress};
 use z_shell_protocol::{ClientRole, ErrorCode, MediaRef};
 use zbus::{
     Connection, Proxy,
@@ -846,6 +846,301 @@ async fn publishes_app_key_and_dismiss_popups_checks_revisions_atomically() {
         .code,
         ErrorCode::InvalidParams
     );
+
+    desktop.shutdown().await;
+}
+
+#[tokio::test]
+async fn archived_history_clears_actions_isolates_replaces_id_and_rejects_closed_dbus_close() {
+    let bus = TestBus::new();
+    let client = bus.connection().await;
+    let root = tempfile::tempdir().unwrap();
+    let paths = paths(root.path());
+    let hub = BusHub::new("test", paths.media_dir());
+    let desktop = DesktopServices::install_with_options(
+        &hub,
+        &paths,
+        DesktopOptions {
+            session_bus: SessionBusAddress::Address(bus.address().to_owned()),
+            tray: false,
+            xdg_data_dirs: Vec::new(),
+            ..DesktopOptions::default()
+        },
+    );
+    let (initial, stream) = subscribe(&hub, TOPIC).await;
+    assert_eq!(ready(initial, &stream).await["available"], true);
+    let proxy = dbus_proxy(&client).await;
+    let mut closed = proxy.receive_signal("NotificationClosed").await.unwrap();
+
+    // 1. Expiring notification starts with actions while open, then clears actions once archived.
+    let id1: u32 = proxy
+        .call(
+            "Notify",
+            &(
+                "Chat",
+                0_u32,
+                "",
+                "Expiring message",
+                "Original body",
+                vec!["default", "Open", "reply", "Reply"],
+                HashMap::<String, OwnedValue>::new(),
+                40_i32,
+            ),
+        )
+        .await
+        .unwrap();
+    let live1 = next_update(&stream).await;
+    assert_eq!(live1["popups"][0]["id"], id1);
+    assert_eq!(live1["popups"][0]["actions"].as_array().unwrap().len(), 2);
+    assert_eq!(live1["history"][0]["actions"].as_array().unwrap().len(), 2);
+
+    let sig1 = tokio::time::timeout(
+        Duration::from_secs(3),
+        poll_fn(|cx| Pin::new(&mut closed).poll_next(cx)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(sig1.body().deserialize::<(u32, u32)>().unwrap(), (id1, 1));
+
+    let expired1 = next_update(&stream).await;
+    assert_eq!(expired1["popups"], json!([]));
+    assert_eq!(expired1["history"][0]["id"], id1);
+    assert_eq!(expired1["history"][0]["summary"], "Expiring message");
+    assert_eq!(
+        expired1["history"][0]["actions"],
+        json!([]),
+        "expired history entries must strip actions so no dead buttons render"
+    );
+    assert_eq!(
+        invoke(
+            &hub,
+            ClientRole::Public,
+            "notifications.invoke-action",
+            json!({"id": id1, "action_key": "default"}),
+        )
+        .await
+        .unwrap_err()
+        .code,
+        ErrorCode::NotFound
+    );
+
+    // 2. Notify with replaces_id targeting closed id1 must allocate a new ID and keep id1 immutable.
+    let id2: u32 = proxy
+        .call(
+            "Notify",
+            &(
+                "Chat",
+                id1,
+                "",
+                "Replacement attempt",
+                "New body",
+                vec!["open", "Open"],
+                HashMap::<String, OwnedValue>::new(),
+                0_i32,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_ne!(
+        id2, id1,
+        "replaces_id targeting an archived notification must allocate a fresh ID"
+    );
+    let after_replace = next_update(&stream).await;
+    assert_eq!(after_replace["popups"].as_array().unwrap().len(), 1);
+    assert_eq!(after_replace["popups"][0]["id"], id2);
+    assert_eq!(after_replace["history"].as_array().unwrap().len(), 2);
+    assert_eq!(after_replace["history"][0]["id"], id2);
+    assert_eq!(
+        after_replace["history"][0]["actions"],
+        json!([{"key": "open", "label": "Open"}])
+    );
+    assert_eq!(after_replace["history"][1]["id"], id1);
+    assert_eq!(after_replace["history"][1]["summary"], "Expiring message");
+    assert_eq!(after_replace["history"][1]["actions"], json!([]));
+
+    // 3. Dismissing popups into history also clears actions and prevents future replaces_id mutation.
+    let rev2 = after_replace["popups"][0]["revision"].as_u64().unwrap();
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "notifications.dismiss-popups",
+        json!({"items": [{"id": id2, "revision": rev2}]}),
+    )
+    .await
+    .unwrap();
+    let after_dismiss_popup = next_update(&stream).await;
+    assert_eq!(after_dismiss_popup["popups"], json!([]));
+    assert_eq!(after_dismiss_popup["history"][0]["id"], id2);
+    assert_eq!(
+        after_dismiss_popup["history"][0]["actions"],
+        json!([]),
+        "dismissed popup retained in history must also clear actions"
+    );
+    let sig2 = tokio::time::timeout(
+        Duration::from_secs(2),
+        poll_fn(|cx| Pin::new(&mut closed).poll_next(cx)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(sig2.body().deserialize::<(u32, u32)>().unwrap(), (id2, 2));
+
+    let id3: u32 = proxy
+        .call(
+            "Notify",
+            &(
+                "Chat",
+                id2,
+                "",
+                "Open target",
+                "Body 3",
+                vec!["open", "Open"],
+                HashMap::<String, OwnedValue>::new(),
+                0_i32,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_ne!(id3, id2);
+    let s3 = next_update(&stream).await;
+    assert_eq!(s3["history"].as_array().unwrap().len(), 3);
+
+    // 4. CloseNotification rejects 0, unknown IDs, and already-closed history IDs with InvalidArgs.
+    for bad_id in [0_u32, 999_999_u32, id1, id2] {
+        let err = proxy
+            .call::<_, _, ()>("CloseNotification", &(bad_id,))
+            .await
+            .expect_err("CloseNotification must error for 0, unknown, or closed ID");
+        assert!(
+            matches!(
+                &err,
+                zbus::Error::MethodError(name, _, _)
+                    if name.as_str() == "org.freedesktop.DBus.Error.InvalidArgs"
+            ),
+            "expected InvalidArgs for CloseNotification({bad_id}), got {err:?}"
+        );
+    }
+
+    // Open notification id3 closes cleanly with CLOSED_BY_CLIENT (3), then rejects a repeat close.
+    proxy
+        .call::<_, _, ()>("CloseNotification", &(id3,))
+        .await
+        .expect("CloseNotification succeeds for open notification");
+    let after_close3 = next_update(&stream).await;
+    assert_eq!(after_close3["popups"], json!([]));
+    assert_eq!(
+        after_close3["history"].as_array().unwrap().len(),
+        2,
+        "archived entries id1 and id2 remain untouched"
+    );
+    let sig3 = tokio::time::timeout(
+        Duration::from_secs(2),
+        poll_fn(|cx| Pin::new(&mut closed).poll_next(cx)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(sig3.body().deserialize::<(u32, u32)>().unwrap(), (id3, 3));
+
+    let repeat_err = proxy
+        .call::<_, _, ()>("CloseNotification", &(id3,))
+        .await
+        .expect_err("repeat CloseNotification on closed ID must error");
+    assert!(matches!(
+        &repeat_err,
+        zbus::Error::MethodError(name, _, _)
+            if name.as_str() == "org.freedesktop.DBus.Error.InvalidArgs"
+    ));
+
+    desktop.shutdown().await;
+}
+
+#[tokio::test]
+async fn locking_hides_popups_suppresses_live_toasts_and_denies_invoke_action() {
+    let bus = TestBus::new();
+    let client = bus.connection().await;
+    let root = tempfile::tempdir().unwrap();
+    let paths = paths(root.path());
+    let hub = BusHub::new("test", paths.media_dir());
+    let desktop = DesktopServices::install_with_options(
+        &hub,
+        &paths,
+        DesktopOptions {
+            session_bus: SessionBusAddress::Address(bus.address().to_owned()),
+            tray: false,
+            xdg_data_dirs: Vec::new(),
+            ..DesktopOptions::default()
+        },
+    );
+    let (initial, stream) = subscribe(&hub, TOPIC).await;
+    assert_eq!(ready(initial, &stream).await["available"], true);
+    let proxy = dbus_proxy(&client).await;
+    let mut actions = proxy.receive_signal("ActionInvoked").await.unwrap();
+
+    let id1 = notify(&proxy, 0, "before-lock", blob_hint()).await;
+    let live1 = next_update(&stream).await;
+    assert_eq!(live1["popups"][0]["id"], id1);
+
+    // Transitioning to Locked must immediately hide active popups while retaining history.
+    desktop.set_locked(ImeLockState::Locked);
+    let locked_snap = next_update(&stream).await;
+    assert_eq!(locked_snap["popups"], json!([]));
+    assert_eq!(locked_snap["history"][0]["id"], id1);
+
+    // Invoking actions while locked must fail with PermissionDenied without emitting ActionInvoked.
+    for payload in [json!({"id": id1, "action_key": "open"}), json!({})] {
+        assert_eq!(
+            invoke(
+                &hub,
+                ClientRole::Public,
+                "notifications.invoke-action",
+                payload,
+            )
+            .await
+            .expect_err("notifications.invoke-action must be denied while locked")
+            .code,
+            ErrorCode::PermissionDenied
+        );
+    }
+
+    // Incoming notifications while locked are recorded in history without live popup delivery.
+    let id2 = notify(&proxy, 0, "during-lock", blob_hint()).await;
+    let during_lock = next_update(&stream).await;
+    assert_eq!(
+        during_lock["popups"],
+        json!([]),
+        "live popups must stay suppressed while locked"
+    );
+    assert_eq!(during_lock["history"][0]["id"], id2);
+    assert_eq!(during_lock["history"][1]["id"], id1);
+
+    // Unlocking restores action invocation on open notifications and resumes popup delivery for new arrivals.
+    desktop.set_locked(ImeLockState::Unlocked);
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "notifications.invoke-action",
+        json!({"id": id2, "action_key": "open"}),
+    )
+    .await
+    .expect("open notification action succeeds once unlocked");
+    let invoked = tokio::time::timeout(
+        Duration::from_secs(3),
+        poll_fn(|cx| Pin::new(&mut actions).poll_next(cx)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        invoked.body().deserialize::<(u32, &str)>().unwrap(),
+        (id2, "open")
+    );
+
+    let id3 = notify(&proxy, 0, "after-unlock", blob_hint()).await;
+    let unlocked_live = next_update(&stream).await;
+    assert_eq!(unlocked_live["popups"].as_array().unwrap().len(), 1);
+    assert_eq!(unlocked_live["popups"][0]["id"], id3);
 
     desktop.shutdown().await;
 }

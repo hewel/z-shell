@@ -130,9 +130,12 @@ pub trait Authenticator: fmt::Debug + Send + Sync {
 /// Authenticator spawning the short-lived standalone PAM helper.
 #[derive(Clone, Debug)]
 pub struct HelperAuthenticator {
-    helper_path: PathBuf,
+    helper_path: Option<PathBuf>,
     timeout: Duration,
 }
+
+/// Type alias matching daemon configuration terminology for [`HelperAuthenticator`].
+pub type PamHelperAuthenticator = HelperAuthenticator;
 
 impl HelperAuthenticator {
     /// Creates a helper authenticator with a thirty-second process bound.
@@ -141,20 +144,83 @@ impl HelperAuthenticator {
         Self::with_timeout(helper_path, DEFAULT_HELPER_TIMEOUT)
     }
 
+    /// Creates a helper authenticator from an optional pre-resolved absolute executable path.
+    ///
+    /// When `None`, authentication fails closed with [`AuthOutcome::Unavailable`] without spawning.
+    #[must_use]
+    pub fn from_resolved(helper_path: Option<PathBuf>) -> Self {
+        Self {
+            helper_path,
+            timeout: DEFAULT_HELPER_TIMEOUT,
+        }
+    }
+
+    /// Resolves a trusted helper path via [`resolve_trusted_pam_helper_path`] and constructs an
+    /// authenticator that fails closed when no verified executable exists.
+    #[must_use]
+    pub fn resolve(override_path: Option<&Path>) -> Self {
+        Self::from_resolved(resolve_trusted_pam_helper_path(override_path))
+    }
+
     /// Creates a helper authenticator with an explicit process bound.
     #[must_use]
     pub fn with_timeout(helper_path: impl Into<PathBuf>, timeout: Duration) -> Self {
         Self {
-            helper_path: helper_path.into(),
+            helper_path: Some(helper_path.into()),
             timeout,
         }
     }
 
-    /// Returns the executable launched for each authentication attempt.
+    /// Returns the executable path configured for authentication attempts, if any.
     #[must_use]
-    pub fn helper_path(&self) -> &Path {
-        &self.helper_path
+    pub fn helper_path(&self) -> Option<&Path> {
+        self.helper_path.as_deref()
     }
+}
+
+/// Resolves the standalone `z-shell-pam-helper` executable without ever consulting `$PATH`.
+///
+/// Checks in order:
+/// 1. An explicit override path, accepted only if it is a verified absolute regular executable.
+/// 2. A sibling `z-shell-pam-helper` adjacent to [`std::env::current_exe`].
+/// 3. A compile-time `Z_SHELL_PAM_HELPER` absolute installation path.
+#[must_use]
+pub fn resolve_trusted_pam_helper_path(override_path: Option<&Path>) -> Option<PathBuf> {
+    if let Some(path) = override_path {
+        return validate_trusted_helper_path(path).ok();
+    }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+        && let Ok(sibling) = validate_trusted_helper_path(&dir.join("z-shell-pam-helper"))
+    {
+        return Some(sibling);
+    }
+    option_env!("Z_SHELL_PAM_HELPER")
+        .map(Path::new)
+        .and_then(|path| validate_trusted_helper_path(path).ok())
+}
+
+fn validate_trusted_helper_path(path: &Path) -> Result<PathBuf, String> {
+    if path.as_os_str().is_empty() {
+        return Err("no trusted PAM helper executable found".to_owned());
+    }
+    if !path.is_absolute() {
+        return Err("PAM helper path must be an absolute path".to_owned());
+    }
+    let metadata = std::fs::metadata(path)
+        .map_err(|error| format!("PAM helper executable is unavailable: {error}"))?;
+    if !metadata.is_file() {
+        return Err("PAM helper path is not a regular file".to_owned());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        if metadata.permissions().mode() & 0o111 == 0 {
+            return Err("PAM helper path is not executable".to_owned());
+        }
+    }
+    Ok(path.to_path_buf())
 }
 
 impl Authenticator for HelperAuthenticator {
@@ -162,6 +228,15 @@ impl Authenticator for HelperAuthenticator {
         let path = self.helper_path.clone();
         let timeout = self.timeout;
         Box::pin(async move {
+            let Some(path) = path else {
+                return AuthOutcome::Unavailable {
+                    reason: "no trusted PAM helper executable found".to_owned(),
+                };
+            };
+            let verified_path = match validate_trusted_helper_path(&path) {
+                Ok(verified) => verified,
+                Err(reason) => return AuthOutcome::Unavailable { reason },
+            };
             let request = match serde_json::to_vec(&credentials) {
                 Ok(bytes) => Zeroizing::new(bytes),
                 Err(error) => {
@@ -170,8 +245,10 @@ impl Authenticator for HelperAuthenticator {
                     };
                 }
             };
-            match tokio::task::spawn_blocking(move || run_helper_process(&path, timeout, &request))
-                .await
+            match tokio::task::spawn_blocking(move || {
+                run_helper_process(&verified_path, timeout, &request)
+            })
+            .await
             {
                 Ok(outcome) => outcome,
                 Err(error) => AuthOutcome::Unavailable {
@@ -184,7 +261,8 @@ impl Authenticator for HelperAuthenticator {
 
 fn run_helper_process(path: &Path, timeout: Duration, request: &[u8]) -> AuthOutcome {
     let result = (|| {
-        let mut child = Command::new(path)
+        let verified_path = validate_trusted_helper_path(path)?;
+        let mut child = Command::new(&verified_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

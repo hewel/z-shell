@@ -1533,11 +1533,15 @@ describe("apps/shell design geometry & pixel lint", () => {
         expect(calList.scrollMetrics.overflowY, "17 notifications overflow inside isolated list scroll").toBe(true);
       }
 
-      // 3. Empty-label "default" action (Ghostty) renders NO blank pill button, while binding default card click button.
+      // 3. Empty-label "default" action (Ghostty) renders NO blank pill button while binding default card click button;
+      //    open notification #2 preserves labelled action buttons; archived history (#3, actions: []) omits both while keeping dismiss interactive.
       //    Tall portrait notification screenshot (82x643) routes to bounded contain preview without overflowing card bottom.
       expect(calChaos.tree.nodes.some(node => node.testId === "cal-notif-action-1-default"), "no blank default pill button").toBe(false);
-      expect(treeNode(calChaos.tree, "cal-notif-default-1").boundsLogical, "default action bound to card body").toBeDefined();
-      expect(treeNode(calChaos.tree, "cal-notif-action-2-open").boundsLogical, "labelled action buttons preserved").toBeDefined();
+      expect(treeNode(calChaos.tree, "cal-notif-default-1").boundsLogical, "default action bound to open notification card body").toBeDefined();
+      expect(treeNode(calChaos.tree, "cal-notif-action-2-open").boundsLogical, "labelled action buttons preserved on open notification").toBeDefined();
+      expect(calChaos.tree.nodes.some(node => node.testId === "cal-notif-default-3"), "archived history omits clickable default card trigger").toBe(false);
+      expect(calChaos.tree.nodes.some(node => node.testId?.startsWith("cal-notif-action-3-")), "archived history omits dead action buttons").toBe(false);
+      expect(treeNode(calChaos.tree, "cal-notif-dismiss-3").boundsLogical, "archived history keeps dismiss interactive").toBeDefined();
       {
         const card2 = treeNode(calChaos.tree, "cal-notif-2").boundsLogical!;
         const preview2 = treeNode(calChaos.tree, "cal-notif-preview-2").boundsLogical!;
@@ -2824,7 +2828,7 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.advance("dock-app-hover-settle", 180);
       timeline.step({ id: "capture-dock-app-hover", op: "capture", surface: "dock-dp-1", captureId: "dock-app-hover" });
 
-      // 2. CalendarPanel: full-card body hover vs right × dismiss button hover
+      // 2. CalendarPanel: open notification (#1) full-card body hover vs × dismiss, plus archived (#2, actions: []) read-only body hover (0 diff) vs × dismiss
       timeline.step({ id: "open-cal", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-clock" }, button: "primary" });
       timeline.advance("cal-open-settle", 400);
       timeline.step({ id: "capture-cal-rest", op: "capture", surface: "panel-calendar", captureId: "cal-rest" });
@@ -2834,6 +2838,12 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.step({ id: "hover-cal-dismiss", op: "pointer.move", target: { surface: "panel-calendar", testId: "cal-notif-dismiss-1" } });
       timeline.advance("cal-dismiss-hover-settle", 150);
       timeline.step({ id: "capture-cal-dismiss-hover", op: "capture", surface: "panel-calendar", captureId: "cal-dismiss-hover" });
+      timeline.step({ id: "hover-cal-archived-body", op: "pointer.move", target: { surface: "panel-calendar", testId: "cal-notif-leading-2" } });
+      timeline.advance("cal-archived-hover-settle", 150);
+      timeline.step({ id: "capture-cal-archived-hover", op: "capture", surface: "panel-calendar", captureId: "cal-archived-hover" });
+      timeline.step({ id: "hover-cal-archived-dismiss", op: "pointer.move", target: { surface: "panel-calendar", testId: "cal-notif-dismiss-2" } });
+      timeline.advance("cal-archived-dismiss-settle", 150);
+      timeline.step({ id: "capture-cal-archived-dismiss", op: "capture", surface: "panel-calendar", captureId: "cal-archived-dismiss" });
 
       // 3. ClipboardPanel: entry body hover vs Pin / Forget hover
       timeline.step({
@@ -3095,7 +3105,7 @@ describe("apps/shell design geometry & pixel lint", () => {
       }, null, 2));
 
       const result = runPreview(published.dist, fixture, scenario, out);
-      expectCleanPreview(result, 25, 0);
+      expectCleanPreview(result, 27, 0);
 
       const assertRoundedHoverCorners = (
         beforeImg: ReturnType<typeof readCapture>["image"],
@@ -3120,19 +3130,25 @@ describe("apps/shell design geometry & pixel lint", () => {
         }
       };
 
-      // 1. CalendarPanel: full-card highlight spans right edge beyond × vs isolated × with zero card double-highlight
+      // 1. CalendarPanel: open notification (#1) full-card highlight spans right edge beyond × vs isolated ×,
+      //    while archived history (#2, actions: []) card body is read-only (0 hover diff) with isolated × highlight
       const calRest = readCapture(out, "panel-calendar", "cal-rest");
       const calBodyHover = readCapture(out, "panel-calendar", "cal-card-hover");
       const calDismissHover = readCapture(out, "panel-calendar", "cal-dismiss-hover");
+      const calArchivedHover = readCapture(out, "panel-calendar", "cal-archived-hover");
+      const calArchivedDismissHover = readCapture(out, "panel-calendar", "cal-archived-dismiss");
       const calCard = treeNode(calRest.tree, "cal-notif-1").boundsDevice!;
       const calDismiss = treeNode(calRest.tree, "cal-notif-dismiss-1").boundsDevice!;
+      const calArchivedCard = treeNode(calRest.tree, "cal-notif-2").boundsDevice!;
+      const calArchivedDismiss = treeNode(calRest.tree, "cal-notif-dismiss-2").boundsDevice!;
+      expect(treeNode(calRest.tree, "cal-notif-action-1-open").boundsDevice, "open notification preserves action button").toBeDefined();
       expect(
         diffRegionPixels(calRest.image, calBodyHover.image, { x: calCard.x + 4, y: calCard.y + 18, width: 20, height: 24 }),
-        "Calendar card body hover reaches left card edge",
+        "Calendar open notification card body hover reaches left card edge",
       ).toBeGreaterThan(20);
       expect(
         diffRegionPixels(calRest.image, calBodyHover.image, { x: calCard.x + calCard.width - 28, y: calCard.y + calCard.height - 28, width: 22, height: 18 }),
-        "Calendar card body hover reaches right-bottom edge (no clipped box-in-box before ×)",
+        "Calendar open notification card body hover reaches right-bottom edge (no clipped box-in-box before ×)",
       ).toBeGreaterThan(20);
       assertRoundedHoverCorners(calRest.image, calBodyHover.image, calCard, "cal-notif-1");
       expect(
@@ -3143,6 +3159,16 @@ describe("apps/shell design geometry & pixel lint", () => {
         diffRegionPixels(calRest.image, calDismissHover.image, { x: calCard.x + 6, y: calCard.y + 10, width: 120, height: 32 }),
         "Calendar × hover produces zero double-highlight on card body",
       ).toBe(0);
+      expect(calRest.tree.nodes.some(node => node.testId === "cal-notif-default-2"), "archived history omits default card trigger").toBe(false);
+      expect(calRest.tree.nodes.some(node => node.testId?.startsWith("cal-notif-action-2-")), "archived history omits action buttons").toBe(false);
+      expect(
+        diffRegionPixels(calRest.image, calArchivedHover.image, calArchivedCard),
+        "Calendar archived history card body hover produces 0 diff (read-only)",
+      ).toBe(0);
+      expect(
+        diffRegionPixels(calRest.image, calArchivedDismissHover.image, calArchivedDismiss),
+        "Calendar archived history × hover highlights × button",
+      ).toBeGreaterThan(20);
 
       // 2. ClipboardPanel: full-card body hover vs isolated Pin & Forget buttons
       const clipRest = readCapture(out, "clipboard-overlay", "clip-rest");

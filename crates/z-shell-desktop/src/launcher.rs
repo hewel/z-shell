@@ -16,7 +16,9 @@ use z_shell_protocol::{
 };
 
 use crate::apps::{self, Catalog, MAX_ACTIONS};
-use crate::{data, disabled, failed, invalid, not_found, ok, payload, publish, register};
+use crate::{
+    ImeLockState, data, disabled, failed, invalid, not_found, ok, payload, publish, register,
+};
 
 const APPS_TOPIC: &str = "desktop.apps";
 const APPS: &str = "desktop";
@@ -40,6 +42,7 @@ pub(crate) struct Launcher {
 #[derive(Debug, Default)]
 struct State {
     disconnected: bool,
+    lock: ImeLockState,
     apps: Option<Catalog>,
     pinned_apps: Vec<String>,
     providers: BTreeMap<String, Provider>,
@@ -181,6 +184,13 @@ struct List {
 struct PinApp {
     id: String,
     pinned: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LaunchApp {
+    id: String,
+    action_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -368,6 +378,13 @@ impl Launcher {
         register(
             hub,
             &launcher,
+            "apps.launch",
+            "Launch an installed XDG desktop entry or desktop action",
+            |this, call| async move { this.launch(&call).await },
+        );
+        register(
+            hub,
+            &launcher,
             "launcher.query",
             "Query installed apps and registered launcher providers",
             |this, call| async move { this.query(&call).await },
@@ -443,6 +460,13 @@ impl Launcher {
         state.pending.clear();
         state.queries.clear();
         state.providers.clear();
+    }
+
+    pub(crate) fn set_locked(&self, lock: ImeLockState) {
+        self.state
+            .lock()
+            .expect("launcher state lock poisoned")
+            .lock = lock;
     }
 
     /// Look up an installed app's cached icon from the scanned desktop catalog.
@@ -522,6 +546,21 @@ impl Launcher {
         })
         .await
         .map_err(|_| failed("pin write task failed"))?
+    }
+
+    async fn launch(&self, call: &CommandCall) -> Result<CommandInvokeResult, RpcError> {
+        let command = {
+            let state = self.state.lock().expect("launcher state lock poisoned");
+            state.ensure_connected()?;
+            if state.lock == ImeLockState::Locked {
+                return Err(denied(
+                    "launching apps is denied while the session is locked",
+                ));
+            }
+            let request: LaunchApp = payload(call)?;
+            state.command(&request.id, request.action_id.as_deref())?
+        };
+        self.execute(command).await
     }
 
     async fn execute(&self, mut command: Command) -> Result<CommandInvokeResult, RpcError> {

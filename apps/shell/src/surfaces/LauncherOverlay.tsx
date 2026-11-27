@@ -4,7 +4,7 @@ import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
 import { SPRING_EPSILON, createM3Spring, createRetainedPresence, dialogMotionStyle, scrimBackdrop, useMotionScheme, type M3Spring } from "../motion.ts";
 import { useShellStore } from "../store.ts";
-import { resolveActiveMonitor, resolveMonitorLogicalSize, type LauncherItem, type LauncherQueryResponse } from "../topics.ts";
+import { isSessionLockActive, resolveActiveMonitor, resolveMonitorLogicalSize, type LauncherItem, type LauncherQueryResponse } from "../topics.ts";
 import styles from "./LauncherOverlay.module.css";
 
 const columns = 6;
@@ -224,10 +224,11 @@ function LauncherContent(props: {
 }
 
 export function LauncherOverlay(): NativeChild {
-  const { activePanel, activePanelTarget, activeMonitor, monitors, outputs, windows } = useShellStore();
+  const { activePanel, activePanelTarget, activeMonitor, monitors, outputs, windows, sessionLock } = useShellStore();
   const scheme = useMotionScheme();
+  const lockActive = () => isSessionLockActive(sessionLock.data());
   const targetOutputId = () => {
-    if (activePanel() !== "launcher") return null;
+    if (lockActive() || activePanel() !== "launcher") return null;
     return resolveActiveMonitor(monitors(), {
       preferredMonitorId: activePanelTarget()?.monitorId,
       windows: windows.data(),
@@ -240,6 +241,7 @@ export function LauncherOverlay(): NativeChild {
     enterRole: "defaultSpatial",
     enterOpacityRole: "defaultEffects",
     exitRole: "fastEffects",
+    instantExit: lockActive,
   });
   // IDs must keep increasing on the same bus connection, including after reopening the overlay.
   let nextQueryId = 1;

@@ -9,7 +9,7 @@ use common::{invoke, next_update, paths, subscribe};
 use serde_json::{Value, json};
 use z_shell_bus::{BusHub, hub::ClientOutbound};
 use z_shell_config::ConfigStore;
-use z_shell_desktop::{DesktopOptions, DesktopServices, SessionBusAddress};
+use z_shell_desktop::{DesktopOptions, DesktopServices, ImeLockState, SessionBusAddress};
 use z_shell_protocol::{
     ClientMessage, ClientRole, ErrorCode, PROTOCOL_VERSION, RequestId, RpcError,
 };
@@ -514,4 +514,249 @@ async fn scoped_provider_replies_activation_and_query_supersession() {
         1,
         "unregistered provider does not contribute"
     );
+}
+
+#[tokio::test]
+async fn apps_launch_executes_catalog_entries_without_query_and_enforces_catalog_errors() {
+    let dir = tempfile::tempdir().expect("isolated XDG roots");
+    let paths = paths(dir.path());
+    let state_fifo = paths.state_file();
+    assert!(
+        std::process::Command::new("mkfifo")
+            .arg(&state_fifo)
+            .status()
+            .expect("invoke mkfifo")
+            .success(),
+        "create state.toml FIFO gate"
+    );
+    let fifo_hold = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&state_fifo)
+        .expect("hold FIFO writer open until dropped");
+
+    let xdg = dir.path().join("data");
+    let exe = dir.path().join("record-launch");
+    let record_default = dir.path().join("default-launch-output");
+    let record_action = dir.path().join("action-launch-output");
+    put(
+        dir.path(),
+        "record-launch",
+        "#!/bin/sh\noutput=$1\nshift\nprintf '%s\\n' \"$@\" > \"$output.tmp\" && mv \"$output.tmp\" \"$output\"\n",
+    );
+    fs::set_permissions(&exe, fs::Permissions::from_mode(0o700)).expect("fixture executable");
+    put(
+        &xdg,
+        "applications/vendor/dock-app.desktop",
+        &format!(
+            "[Desktop Entry]\nType=Application\nName=Dock App\nExec=\"{}\" \"{}\" default-run\nActions=NewWindow;\n[Desktop Action NewWindow]\nName=New Window\nExec=\"{}\" \"{}\" action-new-window\n",
+            exe.display(),
+            record_default.display(),
+            exe.display(),
+            record_action.display(),
+        ),
+    );
+    put(
+        &xdg,
+        "applications/hidden.desktop",
+        "[Desktop Entry]\nType=Application\nName=Hidden App\nNoDisplay=true\nExec=/bin/true\n",
+    );
+
+    let hub = BusHub::new("test", paths.media_dir());
+    let _services = DesktopServices::install_with_options(
+        &hub,
+        &paths,
+        DesktopOptions {
+            session_bus: SessionBusAddress::Disabled,
+            xdg_data_dirs: vec![xdg],
+            ..DesktopOptions::default()
+        },
+    );
+
+    let cold_client = Client::connect(&hub).await;
+    assert_eq!(
+        cold_client
+            .invoke("apps.launch", json!({"id": "vendor-dock-app.desktop"}))
+            .await
+            .expect_err("apps.launch must report disabled while catalog scan is still loading")
+            .code,
+        ErrorCode::Disabled
+    );
+
+    // Unblock initial catalog scan deterministically and remove FIFO so normal state files work.
+    drop(fifo_hold);
+    fs::remove_file(&state_fifo).expect("clean up state.toml FIFO");
+    ready(&hub).await;
+
+    // Cold-boot launch without any prior launcher.query on this connection.
+    assert_eq!(
+        cold_client
+            .invoke(
+                "launcher.activate",
+                json!({"provider_id": "desktop", "item_id": "vendor-dock-app.desktop"})
+            )
+            .await
+            .expect_err("launcher.activate still requires an active query on the connection")
+            .code,
+        ErrorCode::InvalidParams
+    );
+    cold_client
+        .invoke("apps.launch", json!({"id": "vendor-dock-app.desktop"}))
+        .await
+        .expect("cold-boot apps.launch succeeds without launcher.query");
+    let recorded_default = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(got) = fs::read_to_string(&record_default) {
+                break got;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("default apps.launch invocation executed");
+    assert_eq!(recorded_default, "default-run\n");
+
+    // Filtered search excluding the app blocks launcher.activate, but never blocks apps.launch.
+    let filtered = cold_client
+        .invoke(
+            "launcher.query",
+            json!({"query": "zzz-unrelated-filter", "limit": 5}),
+        )
+        .await
+        .expect("filtered query succeeds");
+    assert_eq!(filtered["items"], json!([]));
+    assert_eq!(
+        cold_client
+            .invoke(
+                "launcher.activate",
+                json!({
+                    "query_id": filtered["query_id"],
+                    "provider_id": "desktop",
+                    "item_id": "vendor-dock-app.desktop"
+                })
+            )
+            .await
+            .expect_err("launcher.activate still rejects items absent from filtered query")
+            .code,
+        ErrorCode::NotFound
+    );
+    cold_client
+        .invoke(
+            "apps.launch",
+            json!({"id": "vendor-dock-app.desktop", "action_id": "NewWindow"}),
+        )
+        .await
+        .expect("apps.launch with action_id succeeds after unrelated launcher.query");
+
+    let recorded_action = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(got) = fs::read_to_string(&record_action) {
+                break got;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("action apps.launch invocation executed");
+    assert_eq!(recorded_action, "action-new-window\n");
+
+    // Unknown or non-catalog desktop IDs and unknown action_ids return NotFound.
+    for bad in [
+        json!({"id": "does-not-exist.desktop"}),
+        json!({"id": "hidden.desktop"}),
+        json!({"id": "vendor-dock-app.desktop", "action_id": "MissingAction"}),
+    ] {
+        assert_eq!(
+            cold_client
+                .invoke("apps.launch", bad.clone())
+                .await
+                .expect_err("invalid catalog entry or action must return NotFound")
+                .code,
+            ErrorCode::NotFound,
+            "payload: {bad}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn apps_launch_is_denied_while_session_is_locked() {
+    let dir = tempfile::tempdir().expect("isolated XDG roots");
+    let paths = paths(dir.path());
+    let xdg = dir.path().join("data");
+    let exe = dir.path().join("record-locked-launch");
+    let record = dir.path().join("locked-launch-output");
+    put(
+        dir.path(),
+        "record-locked-launch",
+        "#!/bin/sh\noutput=$1\nshift\nprintf '%s\\n' \"$@\" >> \"$output\"\n",
+    );
+    fs::set_permissions(&exe, fs::Permissions::from_mode(0o700)).expect("fixture executable");
+    put(
+        &xdg,
+        "applications/locked-check.desktop",
+        &format!(
+            "[Desktop Entry]\nType=Application\nName=Locked Check\nExec=\"{}\" \"{}\" launched\n",
+            exe.display(),
+            record.display(),
+        ),
+    );
+
+    let hub = BusHub::new("test", paths.media_dir());
+    let services = DesktopServices::install_with_options(
+        &hub,
+        &paths,
+        DesktopOptions {
+            session_bus: SessionBusAddress::Disabled,
+            xdg_data_dirs: vec![xdg],
+            ..DesktopOptions::default()
+        },
+    );
+    ready(&hub).await;
+
+    let client = Client::connect(&hub).await;
+    services.set_locked(ImeLockState::Locked);
+
+    for payload in [json!({"id": "locked-check.desktop"}), json!({})] {
+        assert_eq!(
+            client
+                .invoke("apps.launch", payload)
+                .await
+                .expect_err("apps.launch must be denied while locked")
+                .code,
+            ErrorCode::PermissionDenied
+        );
+    }
+    assert!(
+        !record.exists(),
+        "locked apps.launch must not spawn desktop entry"
+    );
+
+    services.set_ime_locked(ImeLockState::Locked);
+    assert_eq!(
+        client
+            .invoke("apps.launch", json!({"id": "locked-check.desktop"}))
+            .await
+            .expect_err("set_ime_locked also gates apps.launch")
+            .code,
+        ErrorCode::PermissionDenied
+    );
+
+    services.set_locked(ImeLockState::Unlocked);
+    client
+        .invoke("apps.launch", json!({"id": "locked-check.desktop"}))
+        .await
+        .expect("apps.launch resumes once unlocked");
+    let recorded = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(got) = fs::read_to_string(&record)
+                && got.ends_with('\n')
+            {
+                break got;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("unlocked apps.launch executed");
+    assert_eq!(recorded, "launched\n");
 }

@@ -19,7 +19,7 @@ use zbus::{
 };
 
 use crate::{
-    apps,
+    ImeLockState, apps,
     assets::{
         Blobs, ImageDimensions, MAX_IMAGE_BYTES, cache_icon_with_dimensions,
         cache_image_with_dimensions, local_path, png_rgba, read_bounded,
@@ -57,6 +57,7 @@ pub(crate) struct Notifications {
 #[derive(Default)]
 struct State {
     epoch: u64,
+    lock: ImeLockState,
     connection: Option<Connection>,
     next_id: u32,
     next_revision: u64,
@@ -70,6 +71,16 @@ struct Entry {
     notification: Notification,
     popup: bool,
     lifetime: Lifetime,
+}
+
+impl Entry {
+    fn archive(&mut self) -> bool {
+        let snapshot_changed = self.popup || !self.notification.actions.is_empty();
+        self.popup = false;
+        self.lifetime = Lifetime::Closed;
+        self.notification.actions.clear();
+        snapshot_changed
+    }
 }
 
 enum Lifetime {
@@ -279,6 +290,22 @@ impl Notifications {
         }
     }
 
+    pub(crate) fn set_locked(&self, lock: ImeLockState) {
+        let mut state = self.state();
+        if state.lock != lock {
+            state.lock = lock;
+            if lock == ImeLockState::Locked {
+                let mut had_popups = false;
+                for entry in &mut state.history {
+                    had_popups |= std::mem::replace(&mut entry.popup, false);
+                }
+                if had_popups {
+                    self.publish(&state, UpdateKind::Live);
+                }
+            }
+        }
+    }
+
     fn state(&self) -> MutexGuard<'_, State> {
         self.state.lock().expect("notification state lock poisoned")
     }
@@ -322,11 +349,10 @@ impl Notifications {
         if state.epoch != epoch || state.connection.is_none() {
             return Err(NotificationError::Unavailable);
         }
-        let id = if let Some(index) = state
-            .history
-            .iter()
-            .position(|entry| entry.notification.id == incoming.replaces)
-        {
+        let id = if incoming.replaces > 0
+            && let Some(index) = state.history.iter().position(|entry| {
+                entry.notification.id == incoming.replaces && entry.lifetime.is_open()
+            }) {
             state.remove(index).notification.id
         } else {
             state.allocate_id()
@@ -361,7 +387,7 @@ impl Notifications {
             }
             None => None,
         };
-        let popup = !state.dnd;
+        let popup = !state.dnd && state.lock == ImeLockState::Unlocked;
         let paused = state.paused;
         let app_key = compute_app_key(incoming.desktop_entry.as_deref(), &incoming.app_name, id);
         state.history.push_front(Entry {
@@ -404,24 +430,22 @@ impl Notifications {
         }
         let mut closed = Vec::new();
         let now = Instant::now();
-        let mut popup_changed = false;
+        let mut snapshot_changed = false;
         for entry in &mut state.history {
             if entry.lifetime.deadline().is_some_and(|when| when <= now) {
-                popup_changed |= entry.popup;
-                entry.popup = false;
-                entry.lifetime = Lifetime::Closed;
+                snapshot_changed |= entry.archive();
                 closed.push(entry.notification.id);
             }
         }
-        if popup_changed {
+        if snapshot_changed {
             self.publish(&state, UpdateKind::Live);
         }
         closed
     }
 
-    fn remove(&self, id: u32, epoch: Option<u64>) -> Result<Option<Connection>, NotificationError> {
+    fn remove(&self, id: u32) -> Result<Option<Connection>, NotificationError> {
         let mut state = self.state();
-        if epoch.is_some_and(|epoch| epoch != state.epoch) || state.connection.is_none() {
+        if state.connection.is_none() {
             return Err(NotificationError::Unavailable);
         }
         let index = state
@@ -439,13 +463,41 @@ impl Notifications {
             .cloned())
     }
 
+    fn close_open(&self, id: u32, epoch: u64) -> fdo::Result<Connection> {
+        if id == 0 {
+            return Err(fdo::Error::InvalidArgs(
+                "notification id must be non-zero".to_owned(),
+            ));
+        }
+        let mut state = self.state();
+        if state.epoch != epoch {
+            return Err(source_unavailable());
+        }
+        let Some(connection) = state.connection.clone() else {
+            return Err(source_unavailable());
+        };
+        let Some(index) = state
+            .history
+            .iter()
+            .position(|entry| entry.notification.id == id && entry.lifetime.is_open())
+        else {
+            return Err(fdo::Error::InvalidArgs(format!(
+                "notification {id} is not open"
+            )));
+        };
+        state.remove(index);
+        self.publish(&state, UpdateKind::Live);
+        self.timer_changed.notify_one();
+        Ok(connection)
+    }
+
     async fn dismiss(self: Arc<Self>, call: CommandCall) -> Result<CommandInvokeResult, RpcError> {
         #[derive(Deserialize)]
         struct Dismiss {
             id: u32,
         }
         let Dismiss { id } = payload(&call)?;
-        if let Some(connection) = self.remove(id, None)? {
+        if let Some(connection) = self.remove(id)? {
             emit_closed(&connection, id, DISMISSED).await;
         }
         Ok(ok())
@@ -477,20 +529,21 @@ impl Notifications {
         let (dismissed_ids, connection) = {
             let mut state = self.state();
             let mut dismissed_ids = Vec::new();
+            let mut snapshot_changed = false;
             for item in items {
                 if let Some(entry) = state.history.iter_mut().find(|entry| {
                     entry.popup
                         && entry.notification.id == item.id
                         && entry.notification.revision == item.revision
                 }) {
-                    entry.popup = false;
-                    if entry.lifetime.is_open() {
-                        entry.lifetime = Lifetime::Closed;
+                    let was_open = entry.lifetime.is_open();
+                    snapshot_changed |= entry.archive();
+                    if was_open {
                         dismissed_ids.push(entry.notification.id);
                     }
                 }
             }
-            if !dismissed_ids.is_empty() {
+            if snapshot_changed {
                 self.publish(&state, UpdateKind::Live);
                 self.timer_changed.notify_one();
             }
@@ -542,9 +595,15 @@ impl Notifications {
             id: u32,
             action_key: &'a str,
         }
-        let Invoke { id, action_key } = payload(&call)?;
-        let connection = {
+        let (connection, id, action_key) = {
             let state = self.state();
+            if state.lock == ImeLockState::Locked {
+                return Err(RpcError::new(
+                    ErrorCode::PermissionDenied,
+                    "notification actions are denied while the session is locked",
+                ));
+            }
+            let Invoke { id, action_key } = payload(&call)?;
             let entry = state
                 .history
                 .iter()
@@ -558,10 +617,11 @@ impl Notifications {
             {
                 return Err(NotificationError::UnknownAction.into());
             }
-            state
+            let connection = state
                 .connection
                 .clone()
-                .ok_or(NotificationError::Unavailable)?
+                .ok_or(NotificationError::Unavailable)?;
+            (connection, id, action_key)
         };
         Interface::action_invoked(&signal_emitter(&connection)?, id, action_key)
             .await
@@ -796,11 +856,8 @@ impl Interface {
 
     async fn close_notification(&self, id: u32) -> fdo::Result<()> {
         let service = self.service.upgrade().ok_or_else(source_unavailable)?;
-        match service.remove(id, Some(self.epoch)) {
-            Ok(Some(connection)) => emit_closed(&connection, id, CLOSED_BY_CLIENT).await,
-            Ok(None) | Err(NotificationError::Unknown) => {}
-            Err(error) => return Err(fdo::Error::Failed(error.to_string())),
-        }
+        let connection = service.close_open(id, self.epoch)?;
+        emit_closed(&connection, id, CLOSED_BY_CLIENT).await;
         Ok(())
     }
 

@@ -276,7 +276,12 @@ export function SessionLockOverlay(): NativeChild {
   const [authenticating, setAuthenticating] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const sleepHold = createMemo(() => sessionLock.data()?.sleep_hold === true);
-  const username = () => user.data()?.username ?? user.data()?.display_name ?? "user";
+  const username = () => {
+    const canonical = user.data()?.username?.trim();
+    if (canonical) return canonical;
+    const display = user.data()?.display_name?.trim();
+    return display || "Locked session";
+  };
   const disabled = () => authenticating() || sleepHold();
   let lastRequest: LockScope | undefined;
   let previousRefusal = false;
@@ -386,8 +391,12 @@ export function SessionLockOverlay(): NativeChild {
 
     try {
       if (!isCurrent()) return;
+      const canonicalUsername = user.data()?.username?.trim();
       const authRes = await invokeHostResult("host.lock-authenticate", {
-        username: username(), password: submittedPassword, lock_id: lockId, ui_session_generation: getSessionGeneration(),
+        ...(canonicalUsername ? { username: canonicalUsername } : {}),
+        password: submittedPassword,
+        lock_id: lockId,
+        ui_session_generation: getSessionGeneration(),
       });
       flush();
       if (!isCurrent()) return;

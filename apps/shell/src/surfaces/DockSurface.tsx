@@ -35,10 +35,10 @@ function DockApp(props: { entry: Accessor<DockEntry> }) {
     return String.fromCodePoint(id.codePointAt(id.lastIndexOf(".") + 1) ?? 0x3f).toUpperCase();
   });
   function activate() {
-    const { appId, windows } = props.entry();
+    const { appId, desktopId, windows } = props.entry();
     const window = windows[0];
     if (window) void invokePublic("wayland.window.activate", { window_id: window.window_id });
-    else void invokePublic("launcher.activate", { provider_id: "desktop", item_id: appId });
+    else void invokePublic("apps.launch", { id: desktopId ?? appId });
   }
   function togglePin() {
     const { appId, pinned } = props.entry();

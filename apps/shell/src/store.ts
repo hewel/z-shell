@@ -5,7 +5,7 @@ import { ZShellClient, type BusHelloResult, type BusTransport, type CommandInvok
 import { createZguiSocketTransport, setGlobalMotionScheme, useTopic, type TopicState } from "@z-shell/sdk/zgui";
 import { composedPlugins } from "./plugins/composed.ts";
 import type { ThemeTopicSnapshot } from "./theme.ts";
-import { formatSurfaceName, resolveActiveMonitor, resolveBarLayout, resolveBarPopupAnchor, resolvePinnedOutput } from "./topics.ts";
+import { formatSurfaceName, isSessionLockActive, resolveActiveMonitor, resolveBarLayout, resolveBarPopupAnchor, resolvePinnedOutput } from "./topics.ts";
 import type {
   ClipboardSnapshot,
   DesktopAppsSnapshot,
@@ -413,7 +413,9 @@ export function createShellStore(): ShellStore {
     }
     return defaultPanelAnchor(id, currentOutputs, explicitMonitorId ?? overlayMonitorId(fallbackOverlay, currentOutputs));
   }
+  const isLocked = () => isSessionLockActive(topics?.sessionLock.data());
   const togglePanel = (id: PanelId, target?: PanelAnchor) => {
+    if (isLocked()) return;
     const currentOutputs = monitors();
     const explicitMonitorId = target?.monitorId ?? inferMonitorId(target?.parentSurface, currentOutputs);
     if (explicitMonitorId) recordActiveMonitor(explicitMonitorId);
@@ -449,6 +451,7 @@ export function createShellStore(): ShellStore {
     commitBarOverlay({ kind: "panel", target: { ...resolved, id } }, inPlace, recent, current);
   };
   const toggleQuickSettingsPage = (page: QuickSettingsPageId, target?: PanelAnchor) => {
+    if (isLocked()) return;
     const { current, recent, effective } = readOverlayTransition();
     const resolved = resolveAnchor(target, "quick-settings", effective);
     const effectiveQsPage = current ? quickSettingsPage() : (recent?.quickSettingsPage ?? quickSettingsPage());
@@ -471,6 +474,7 @@ export function createShellStore(): ShellStore {
     clearOverlayWithGrab();
   };
   const togglePluginPanel = (instanceId: string, monitorId?: string, pluginId?: string): boolean => {
+    if (isLocked()) return false;
     if (monitorId) recordActiveMonitor(monitorId);
     const { current, recent, effective } = readOverlayTransition();
     if (
@@ -722,6 +726,12 @@ export function createShellStore(): ShellStore {
       polkit: useTopic<PolkitSnapshot>(publicClient, "session.polkit"),
     };
     createEffect(() => topics.settings.data()?.theme.motion_scheme, setGlobalMotionScheme);
+    createEffect(
+      () => isSessionLockActive(topics.sessionLock.data()),
+      locked => {
+        if (locked) clearOverlayWithGrab();
+      },
+    );
   }));
 
   onControlMessage((args): JsonValue | undefined => {
@@ -807,6 +817,7 @@ export function createShellStore(): ShellStore {
     toggleQuickSettingsPage,
     pendingQuickSettingsSubpage,
     openQuickSettingsSubpage: page => {
+      if (isLocked()) return;
       const { current, recent, effective } = readOverlayTransition();
       const resolved = resolveAnchor(undefined, "quick-settings", effective);
       const inPlace = current?.kind === "panel"
@@ -830,6 +841,7 @@ export function createShellStore(): ShellStore {
     activePluginPanelTarget,
     togglePluginPanel,
     openPluginPanel: (instanceId, monitorId, pluginId) => {
+      if (isLocked()) return;
       if (monitorId) recordActiveMonitor(monitorId);
       const { current, recent } = readOverlayTransition();
       const inPlace = current?.kind === "plugin"
@@ -850,6 +862,7 @@ export function createShellStore(): ShellStore {
     closePluginPanel: () => closeOverlay("plugin"),
     activeTrayMenu,
     openTrayMenu: target => {
+      if (isLocked()) return;
       const monitorId = target.monitorId ?? inferMonitorId(target.parentSurface, monitors());
       if (monitorId) recordActiveMonitor(monitorId);
       const { current, recent } = readOverlayTransition();
@@ -861,6 +874,7 @@ export function createShellStore(): ShellStore {
     closeTrayMenu: () => closeOverlay("tray"),
     activeTrayOverflow,
     openTrayOverflow: target => {
+      if (isLocked()) return;
       const monitorId = target.monitorId ?? inferMonitorId(target.parentSurface, monitors());
       if (monitorId) recordActiveMonitor(monitorId);
       const { current, recent, effective } = readOverlayTransition();
@@ -873,6 +887,7 @@ export function createShellStore(): ShellStore {
     closeTrayOverflow: () => closeOverlay("tray-overflow"),
     activeImeMenu,
     openImeMenu: target => {
+      if (isLocked()) return;
       const monitorId = target.monitorId ?? inferMonitorId(target.parentSurface, monitors());
       if (monitorId) recordActiveMonitor(monitorId);
       const { current, recent } = readOverlayTransition();

@@ -7,6 +7,7 @@ import { usePinnedOutput, useShellStore } from "../store.ts";
 import {
   formatNotificationBody,
   groupNotificationPopups,
+  isSessionLockActive,
   resolveMonitorLogicalSize,
   resolveNotificationMediaLayout,
   splitNotificationActions,
@@ -386,12 +387,14 @@ function ToastSurface(props: {
 }
 
 export function NotificationToasts(): NativeChild {
-  const { monitors, notifications, outputs } = useShellStore();
+  const { monitors, notifications, outputs, sessionLock } = useShellStore();
   const scheme = useMotionScheme();
   const dnd = () => notifications.data()?.dnd === true;
-  const hasPopups = createMemo(() => !dnd() && (notifications.data()?.popups.length ?? 0) > 0);
+  const suppressToasts = () => dnd() || isSessionLockActive(sessionLock.data());
+  const hasPopups = createMemo(() => !suppressToasts() && (notifications.data()?.popups.length ?? 0) > 0);
   const pinnedOutput = usePinnedOutput(() => (hasPopups() ? true : null));
   const target = createMemo(() => {
+    if (suppressToasts()) return null;
     const output = pinnedOutput();
     const popups = notifications.data()?.popups;
     return output && popups?.length ? { output, popups } : null;
@@ -401,7 +404,7 @@ export function NotificationToasts(): NativeChild {
     enterRole: "defaultSpatial",
     enterOpacityRole: "fastEffects",
     exitRole: "fastEffects",
-    instantExit: dnd,
+    instantExit: suppressToasts,
   });
   return (
     <Show when={presence.value()?.output} keyed>

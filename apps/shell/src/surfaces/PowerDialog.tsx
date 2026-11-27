@@ -3,7 +3,7 @@ import { M3Button, M3DialogShell } from "@z-shell/sdk/primitives";
 import { ShellIcon } from "../icons.tsx";
 import { createRetainedPresence, dialogMotionStyle, scrimBackdrop, useMotionScheme, type M3Spring } from "../motion.ts";
 import { useShellStore } from "../store.ts";
-import { POWER_DIALOG_COPY, resolveMonitorLogicalSize, type PowerConfirmAction } from "../topics.ts";
+import { POWER_DIALOG_COPY, isSessionLockActive, resolveMonitorLogicalSize, type PowerConfirmAction } from "../topics.ts";
 import styles from "./PowerDialog.module.css";
 
 function PowerDialogContent(props: {
@@ -84,7 +84,7 @@ function PowerDialogContent(props: {
 export function PowerDialog(): NativeChild {
   const { monitors, outputs, pendingPowerAction, powerDialogMonitor, sessionLock } = useShellStore();
   const scheme = useMotionScheme();
-  const locked = () => (sessionLock.data()?.phase ?? "unlocked") !== "unlocked";
+  const locked = () => isSessionLockActive(sessionLock.data());
   const target = createMemo(() => {
     if (locked()) return null;
     const action = pendingPowerAction();

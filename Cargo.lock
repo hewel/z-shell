@@ -2076,6 +2076,7 @@ dependencies = [
  "z-shell-theme",
  "z-shell-wallpaper",
  "z-shell-wayland",
+ "zbus",
 ]
 
 [[package]]

@@ -31,7 +31,7 @@ pub const LOCK_TOPIC: &str = "session.lock";
 /// Idle rules, inhibitors, Caffeine, and warning state topic.
 pub const IDLE_TOPIC: &str = "session.idle";
 
-const COMMANDS: [(&str, &str); 10] = [
+const COMMANDS: [(&str, &str); 11] = [
     ("lock.request", "Request a host-verified session lock"),
     (
         "idle.caffeine",
@@ -60,6 +60,10 @@ const COMMANDS: [(&str, &str); 10] = [
         "Consume one scoped unlock approval",
     ),
     ("host.suspend", "Lock, await host ACK, and suspend"),
+    (
+        "power.suspend",
+        "Suspend the system after host-verified session lock (privileged host only)",
+    ),
 ];
 
 const MAX_CAFFEINE_DURATION_SECONDS: u32 = 86_400;
@@ -92,12 +96,17 @@ impl Drop for ExplicitSuspendGuard<'_> {
     }
 }
 
+type LockGuard = Box<dyn Fn(LockPhaseName) + Send + Sync>;
+type SleepGuard = Box<dyn Fn(SleepState) + Send + Sync>;
+type AccountResolver = Box<dyn Fn() -> Result<String, String> + Send + Sync>;
+
 /// Owns session state and all public/privileged bus command handlers.
 pub struct SessionService {
     coordinator: tokio::sync::Mutex<Coordinator>,
     lock_snapshot: Mutex<LockSnapshot>,
-    lock_guard: Option<Box<dyn Fn(LockPhaseName) + Send + Sync>>,
-    sleep_guard: Option<Box<dyn Fn(SleepState) + Send + Sync>>,
+    lock_guard: Option<LockGuard>,
+    sleep_guard: Option<SleepGuard>,
+    account_resolver: AccountResolver,
     host_client_id: Mutex<Option<u64>>,
     idle: Mutex<IdlePolicy>,
     caffeine_timer: Mutex<CaffeineTimer>,
@@ -153,6 +162,7 @@ impl SessionService {
             lock_snapshot: Mutex::new(lock_snapshot),
             lock_guard: None,
             sleep_guard: None,
+            account_resolver: Box::new(resolve_effective_username),
             host_client_id: Mutex::new(None),
             idle: Mutex::new(idle),
             caffeine_timer: Mutex::new(CaffeineTimer::default()),
@@ -167,10 +177,23 @@ impl SessionService {
         }
     }
 
+    /// Overrides how the authoritative session-owner account name is resolved during lock
+    /// authentication (defaults to [`resolve_effective_username`]).
+    #[must_use]
+    pub fn with_account_resolver(
+        mut self,
+        resolver: impl Fn() -> Result<String, String> + Send + Sync + 'static,
+    ) -> Self {
+        self.account_resolver = Box::new(resolver);
+        self
+    }
+
     /// Installs a synchronous privacy guard before the service starts handling lock transitions.
     ///
-    /// The guard runs before each lock snapshot is committed. It must not reenter the session
-    /// service or block on asynchronous work.
+    /// The guard runs before each lock snapshot is committed. Whenever `sleep_hold` is engaged
+    /// while the underlying phase is [`LockPhaseName::Unlocked`] or
+    /// [`LockPhaseName::FallbackSpawned`], [`LockPhaseName::Engaging`] is reported so privacy
+    /// listeners never treat a sleep-held session as unlocked.
     #[must_use]
     pub fn with_lock_guard(
         mut self,
@@ -679,7 +702,16 @@ impl SessionService {
 
     fn publish_lock(&self, snapshot: LockSnapshot) {
         if let Some(guard) = &self.lock_guard {
-            guard(snapshot.phase);
+            let effective_phase = if snapshot.sleep_hold
+                && matches!(
+                    snapshot.phase,
+                    LockPhaseName::Unlocked | LockPhaseName::FallbackSpawned
+                ) {
+                LockPhaseName::Engaging
+            } else {
+                snapshot.phase
+            };
+            guard(effective_phase);
         }
         if let Some(guard) = &self.sleep_guard {
             guard(if snapshot.sleep_hold {
@@ -886,11 +918,17 @@ impl SessionService {
                                 {
                                     ActionCompletion::Failed
                                 } else {
+                                    let (actions, hold_generation) = {
+                                        let mut coordinator = self.coordinator.lock().await;
+                                        let actions = coordinator.request_idle_suspend();
+                                        let hold_generation = coordinator.sleep_hold_generation();
+                                        let snapshot = coordinator.snapshot();
+                                        self.publish_lock(snapshot);
+                                        (actions, hold_generation)
+                                    };
                                     action_completion(
-                                        self.sleep_inhibitor
-                                            .suspend()
-                                            .await
-                                            .map_err(|e| internal(e.to_string())),
+                                        self.finish_coordinator_actions(actions, hold_generation)
+                                            .await,
                                     )
                                 }
                             }
@@ -1095,13 +1133,31 @@ async fn dispatch(
                 lock_id,
                 ui_session_generation,
             } = params;
+            let daemon_username = (service.account_resolver)()
+                .and_then(|name| {
+                    if name.is_empty() {
+                        Err("resolved daemon account name is empty".to_owned())
+                    } else {
+                        Ok(name)
+                    }
+                })
+                .map_err(|reason| internal(format!("authentication unavailable: {reason}")))?;
+            if let Some(supplied) = username.as_deref()
+                && !supplied.is_empty()
+                && supplied != daemon_username
+            {
+                return Err(RpcError::new(
+                    ErrorCode::PermissionDenied,
+                    "lock authentication username does not match session owner",
+                ));
+            }
             let attempt = service
                 .coordinator
                 .lock()
                 .await
                 .begin_authentication(lock_id, ui_session_generation)
                 .map_err(coordinator_error)?;
-            let credentials = Credentials::new(username, std::mem::take(&mut *password.0));
+            let credentials = Credentials::new(daemon_username, std::mem::take(&mut *password.0));
             let outcome = service.authenticator.authenticate(credentials).await;
             let result = {
                 let mut coordinator = service.coordinator.lock().await;
@@ -1129,7 +1185,14 @@ async fn dispatch(
             }
             Ok(serde_json::to_value(service.lock_snapshot()).expect("lock snapshot serializes"))
         }
-        "host.suspend" => {
+        "host.suspend" | "power.suspend" => {
+            require_host(call.caller.role)?;
+            if !call.params.args.is_empty() {
+                return Err(RpcError::new(
+                    ErrorCode::InvalidParams,
+                    "suspend command takes no positional arguments",
+                ));
+            }
             parse_params::<EmptyParams>(call.params.payload)?;
             let (actions, hold_generation) = {
                 let mut coordinator = service.coordinator.lock().await;
@@ -1253,10 +1316,124 @@ struct LockFailedParams {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AuthenticateParams {
-    username: String,
+    #[serde(default)]
+    username: Option<String>,
     password: SecretPassword,
     lock_id: u64,
     ui_session_generation: u64,
+}
+
+/// Resolves the canonical login username owning the current process's effective UID.
+///
+/// # Errors
+///
+/// Returns a diagnostic if the target OS is unsupported, if the effective UID has no local/NSS
+/// `passwd` entry, or if its username is empty or non-UTF-8.
+pub fn resolve_effective_username() -> Result<String, String> {
+    #[cfg(target_os = "linux")]
+    {
+        linux_account::resolve_effective_username()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err("effective-UID account lookup is only supported on Linux".to_owned())
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod linux_account {
+    use std::ffi::{CStr, c_char, c_int};
+    use std::io;
+    use std::ptr;
+    use zeroize::Zeroizing;
+
+    const ERANGE: c_int = 34;
+    const INITIAL_PWBUF_LEN: usize = 4096;
+    const MAX_PWBUF_LEN: usize = 1024 * 1024;
+
+    #[repr(C)]
+    struct Passwd {
+        pw_name: *mut c_char,
+        pw_passwd: *mut c_char,
+        pw_uid: u32,
+        pw_gid: u32,
+        pw_gecos: *mut c_char,
+        pw_dir: *mut c_char,
+        pw_shell: *mut c_char,
+    }
+
+    unsafe extern "C" {
+        fn geteuid() -> u32;
+        fn getpwuid_r(
+            uid: u32,
+            pwd: *mut Passwd,
+            buf: *mut c_char,
+            buflen: usize,
+            result: *mut *mut Passwd,
+        ) -> c_int;
+    }
+
+    pub(super) fn resolve_effective_username() -> Result<String, String> {
+        // SAFETY: `geteuid` has no preconditions and is thread-safe on POSIX platforms.
+        let uid = unsafe { geteuid() };
+        resolve_username_by_uid(uid)
+    }
+
+    fn resolve_username_by_uid(uid: u32) -> Result<String, String> {
+        let mut buf_len = INITIAL_PWBUF_LEN;
+        loop {
+            let mut buffer = Zeroizing::new(vec![0_u8; buf_len]);
+            let mut pwd = Passwd {
+                pw_name: ptr::null_mut(),
+                pw_passwd: ptr::null_mut(),
+                pw_uid: 0,
+                pw_gid: 0,
+                pw_gecos: ptr::null_mut(),
+                pw_dir: ptr::null_mut(),
+                pw_shell: ptr::null_mut(),
+            };
+            let mut result: *mut Passwd = ptr::null_mut();
+            // SAFETY: `pwd`, `buffer`, and `result` are uniquely owned valid storage outliving the
+            // reentrant `getpwuid_r` call and the `CStr` read below.
+            let status = unsafe {
+                getpwuid_r(
+                    uid,
+                    &raw mut pwd,
+                    buffer.as_mut_ptr().cast::<c_char>(),
+                    buffer.len(),
+                    &raw mut result,
+                )
+            };
+            if status == 0 {
+                if result.is_null() {
+                    return Err(format!("no account entry found for effective uid {uid}"));
+                }
+                // SAFETY: When `getpwuid_r` returns 0 with non-null `result`, `(*result).pw_name`
+                // points to a NUL-terminated string stored inside `buffer`.
+                let name_ptr = unsafe { (*result).pw_name };
+                if name_ptr.is_null() {
+                    return Err(format!("passwd entry for uid {uid} has a null username"));
+                }
+                // SAFETY: `name_ptr` is NUL-terminated and backed by `buffer` for this scope.
+                let raw_name = unsafe { CStr::from_ptr(name_ptr) };
+                let username = raw_name
+                    .to_str()
+                    .map_err(|_| format!("passwd username for uid {uid} is not valid UTF-8"))?;
+                if username.is_empty() {
+                    return Err(format!("passwd username for uid {uid} is empty"));
+                }
+                return Ok(username.to_owned());
+            }
+            if status == ERANGE && buf_len < MAX_PWBUF_LEN {
+                buf_len = (buf_len * 2).min(MAX_PWBUF_LEN);
+                continue;
+            }
+            return Err(format!(
+                "getpwuid_r({uid}) failed: {}",
+                io::Error::from_raw_os_error(status)
+            ));
+        }
+    }
 }
 
 struct SecretPassword(Zeroizing<String>);

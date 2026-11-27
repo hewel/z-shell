@@ -8,7 +8,11 @@
 //!
 //! `desktop.notifications` separates `popups` from retained `history`. Both
 //! carry notification IDs, `icon` (theme name or media token), and `attachment`
-//! (media token or null). `notifications.dismiss` takes `{id}`,
+//! (media token or null). Only open notifications retain invokable `actions`
+//! or match `replaces_id` / `CloseNotification`; expired or popup-dismissed
+//! archived `history` entries clear `actions` to `[]`. Locking immediately
+//! hides live `popups`, suppresses toast delivery while locked, and denies
+//! `notifications.invoke-action`. `notifications.dismiss` takes `{id}`,
 //! `notifications.invoke-action` takes `{id, action_key}`, `notifications.clear`
 //! takes no payload, and `notifications.set-dnd` takes `{dnd}`.
 //!
@@ -51,7 +55,8 @@
 //! ## Apps and launcher
 //!
 //! The `desktop.apps` topic carries `{available, count, pinned_apps, apps}`. `apps.list`
-//! pages `{items, total}` with optional `offset` and `limit`; `apps.pin` (host only)
+//! pages `{items, total}` with optional `offset` and `limit`; `apps.launch` spawns an
+//! installed catalog entry `{id, action_id?}` when unlocked; `apps.pin` (host only)
 //! persists `{id, pinned}`.
 //!
 //! `launcher.query {query, query_id?, limit?}` returns `{query_id, items}`. IDs
@@ -249,7 +254,7 @@ impl DesktopServices {
         if options.session_bus != SessionBusAddress::Disabled {
             workers.extend([
                 tokio::spawn(supervise(
-                    DbusDomain::Notifications(notifications),
+                    DbusDomain::Notifications(Arc::clone(&notifications)),
                     options.session_bus.clone(),
                     running.clone(),
                     Some(notifications_setting),
@@ -274,6 +279,7 @@ impl DesktopServices {
             workers,
             notifications_enabled,
             tray_enabled,
+            notifications,
             ime,
             media,
             launcher,
@@ -288,6 +294,7 @@ pub struct DesktopHandle {
     workers: Vec<JoinHandle<()>>,
     notifications_enabled: watch::Sender<bool>,
     tray_enabled: watch::Sender<bool>,
+    notifications: Arc<notifications::Notifications>,
     ime: Arc<ime::Ime>,
     media: Arc<media::Media>,
     launcher: Arc<launcher::Launcher>,
@@ -333,9 +340,16 @@ impl DesktopHandle {
         self.ime.set_settings(settings);
     }
 
-    /// Applies the session privacy policy synchronously and clears locked composition.
-    pub fn set_ime_locked(&self, state: ImeLockState) {
+    /// Applies the session lock policy synchronously across IME, app launching, and notifications.
+    pub fn set_locked(&self, state: ImeLockState) {
         self.ime.set_locked(state);
+        self.launcher.set_locked(state);
+        self.notifications.set_locked(state);
+    }
+
+    /// Applies the session privacy policy synchronously across desktop services.
+    pub fn set_ime_locked(&self, state: ImeLockState) {
+        self.set_locked(state);
     }
 
     /// Stops the integrations and waits until the session D-Bus connections are closed.

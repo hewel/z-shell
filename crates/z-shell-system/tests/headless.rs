@@ -115,6 +115,10 @@ async fn headless_install_publishes_all_topics_and_keeps_commands_safe() {
         .await
         .unwrap_err();
     assert_eq!(failure.code, ErrorCode::PermissionDenied);
+    let missing_suspend = invoke(&hub, ClientRole::PrivilegedHost, "power.suspend", None)
+        .await
+        .unwrap_err();
+    assert_eq!(missing_suspend.code, ErrorCode::NotFound);
     let failure = invoke(&hub, ClientRole::Public, "audio.set-mute", None)
         .await
         .unwrap_err();

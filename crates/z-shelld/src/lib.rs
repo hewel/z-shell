@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
-use tokio::sync::{Mutex as AsyncMutex, OnceCell, watch};
+use tokio::sync::{Mutex as AsyncMutex, watch};
 use tracing::info;
 use z_shell_bus::{
     BusHub, BusLimits, BusServer, CommandCall, CommandHandler, ShutdownHandle, UpdateKind,
@@ -14,7 +14,7 @@ use z_shell_bus::{
 use z_shell_clipboard::{ClipboardService, History as ClipboardHistory, LockedState};
 use z_shell_config::{ConfigStore, RuntimeState, ShellPaths, UserSettings};
 use z_shell_desktop::{
-    DesktopHandle, DesktopOptions, DesktopServices, ImeLockState, OfflinePolicy,
+    DesktopHandle, DesktopOptions, DesktopServices, ImeLockState, OfflinePolicy, SessionBusAddress,
 };
 use z_shell_protocol::{
     ClientMessage, ClientRole, CommandInvokeResult, CommandName, ErrorCode, PROTOCOL_VERSION,
@@ -27,7 +27,7 @@ use z_shell_session::{
         SleepInhibitorError, SleepSignal,
     },
     idle::{ActionCompletion, IdleAction, IdleEffect, MediaPlayback, SleepState},
-    pam::HelperAuthenticator,
+    pam::PamHelperAuthenticator,
     polkit::{PolkitBus, PolkitEnabled, PolkitLockState, PolkitRegistration, PolkitService},
     screensaver::{ScreenSaverRegistry, ScreenSaverServer},
     service::SessionService,
@@ -65,6 +65,81 @@ struct SettingsTargets {
     theme: ThemeEngine,
 }
 
+/// D-Bus endpoint selection for daemon-managed D-Bus integrations.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DaemonBus {
+    /// Connect to the default system or session bus from the environment.
+    #[default]
+    Default,
+    /// Connect to an explicit D-Bus address.
+    Address(String),
+    /// Disable the D-Bus integration.
+    Disabled,
+}
+
+/// Runtime configuration overrides for [`DaemonApp::bootstrap_with_options`].
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct DaemonOptions {
+    limits: BusLimits,
+    pam_helper_path: Option<PathBuf>,
+    logind_bus: DaemonBus,
+    polkit_bus: DaemonBus,
+    session_bus: DaemonBus,
+    xdg_data_dirs: Option<Vec<PathBuf>>,
+}
+
+impl DaemonOptions {
+    /// Creates default daemon bootstrap options.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets explicit [`BusLimits`] for public and host connections.
+    #[must_use]
+    pub fn with_limits(mut self, limits: BusLimits) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    /// Overrides the standalone PAM helper executable path.
+    #[must_use]
+    pub fn with_pam_helper_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.pam_helper_path = Some(path.into());
+        self
+    }
+
+    /// Overrides the D-Bus endpoint used for `systemd-logind`.
+    #[must_use]
+    pub fn with_logind_bus(mut self, bus: DaemonBus) -> Self {
+        self.logind_bus = bus;
+        self
+    }
+
+    /// Overrides the D-Bus endpoint used for Polkit agent registration.
+    #[must_use]
+    pub fn with_polkit_bus(mut self, bus: DaemonBus) -> Self {
+        self.polkit_bus = bus;
+        self
+    }
+
+    /// Overrides the session D-Bus endpoint used for desktop integrations.
+    #[must_use]
+    pub fn with_session_bus(mut self, bus: DaemonBus) -> Self {
+        self.session_bus = bus;
+        self
+    }
+
+    /// Overrides XDG data directories scanned by the desktop application catalog.
+    #[must_use]
+    pub fn with_xdg_data_dirs(mut self, dirs: Vec<PathBuf>) -> Self {
+        self.xdg_data_dirs = Some(dirs);
+        self
+    }
+}
+
 /// Running daemon assembly owning the config store, bus hub, domain services, and dual Unix socket server.
 pub struct DaemonApp {
     hub: BusHub,
@@ -99,6 +174,23 @@ impl DaemonApp {
     ///
     /// Returns an error if directories, configuration files, single-instance lock, or sockets fail.
     pub fn bootstrap_with_limits(paths: ShellPaths, limits: BusLimits) -> Result<Self> {
+        Self::bootstrap_with_options(paths, DaemonOptions::new().with_limits(limits))
+    }
+
+    /// Bootstraps the daemon with explicit [`DaemonOptions`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if directories, configuration files, single-instance lock, or sockets fail.
+    pub fn bootstrap_with_options(paths: ShellPaths, options: DaemonOptions) -> Result<Self> {
+        let DaemonOptions {
+            limits,
+            pam_helper_path,
+            logind_bus,
+            polkit_bus,
+            session_bus,
+            xdg_data_dirs,
+        } = options;
         paths
             .ensure_dirs()
             .context("initializing verified z-shell XDG directories")?;
@@ -187,26 +279,33 @@ impl DaemonApp {
             } else {
                 OfflinePolicy::Online
             };
-            let handle = DesktopServices::install_with_options(
-                &hub,
-                &paths,
-                DesktopOptions {
-                    offline_policy,
-                    ime: settings.ime.clone(),
-                    ..DesktopOptions::default()
-                },
-            );
+            let session_bus = match session_bus {
+                DaemonBus::Default => SessionBusAddress::Default,
+                DaemonBus::Address(addr) => SessionBusAddress::Address(addr),
+                DaemonBus::Disabled => SessionBusAddress::Disabled,
+            };
+            let mut desktop_options = DesktopOptions {
+                session_bus,
+                offline_policy,
+                ime: settings.ime.clone(),
+                ..DesktopOptions::default()
+            };
+            if let Some(dirs) = xdg_data_dirs {
+                desktop_options.xdg_data_dirs = dirs;
+            }
+            let handle = DesktopServices::install_with_options(&hub, &paths, desktop_options);
             Arc::new(Mutex::new(Some(handle)))
         });
 
         let polkit = Arc::new(PolkitService::new(&settings.polkit));
         polkit.install_on_bus(&hub);
 
-        let sleep_inhibitor = Arc::new(LazyLogindSleepInhibitor::new());
+        let sleep_inhibitor = Arc::new(LazyLogindSleepInhibitor::new(logind_bus));
+        let authenticator = Arc::new(PamHelperAuthenticator::resolve(pam_helper_path.as_deref()));
         let session = Arc::new(
             SessionService::new(
                 hub.daemon_instance_id().to_owned(),
-                Arc::new(HelperAuthenticator::new(resolve_pam_helper_path())),
+                authenticator,
                 Arc::clone(&sleep_inhibitor) as Arc<dyn SleepInhibitor>,
                 &settings.idle,
             )
@@ -235,6 +334,7 @@ impl DaemonApp {
             sleep_inhibitor,
             wayland.as_ref().map(Arc::downgrade),
             &polkit,
+            polkit_bus,
         );
 
         let bridge = CrossDomainBridge::start(&hub, Arc::downgrade(&session));
@@ -888,56 +988,95 @@ fn cmd(name: &str) -> CommandName {
     CommandName::try_new(name).expect("hardcoded core command name is valid")
 }
 
-fn resolve_pam_helper_path() -> PathBuf {
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(dir) = exe.parent()
-    {
-        let sibling = dir.join("z-shell-pam-helper");
-        if sibling.is_file() {
-            return sibling;
-        }
-    }
-    PathBuf::from("z-shell-pam-helper")
-}
+/// Initial retry delay when `systemd-logind` connection or inhibitor setup fails.
+const LOGIND_BACKOFF_INITIAL: std::time::Duration = std::time::Duration::from_millis(250);
+/// Upper bound on `systemd-logind` supervision exponential backoff.
+const LOGIND_BACKOFF_MAX: std::time::Duration = std::time::Duration::from_secs(10);
+/// Minimum healthy `monitor_events` span that resets the supervision backoff to `LOGIND_BACKOFF_INITIAL`.
+const LOGIND_HEALTHY_UPTIME: std::time::Duration = std::time::Duration::from_secs(10);
 
 #[derive(Debug)]
 struct LazyLogindSleepInhibitor {
-    inner: OnceCell<LogindSleepInhibitor>,
+    bus: DaemonBus,
+    inner: Mutex<Option<Arc<LogindSleepInhibitor>>>,
+    connect_lock: AsyncMutex<()>,
 }
 
 impl LazyLogindSleepInhibitor {
-    fn new() -> Self {
+    fn new(bus: DaemonBus) -> Self {
         Self {
-            inner: OnceCell::new(),
+            bus,
+            inner: Mutex::new(None),
+            connect_lock: AsyncMutex::new(()),
         }
     }
 
-    async fn get_or_connect(&self) -> Result<&LogindSleepInhibitor, SleepInhibitorError> {
+    fn is_disabled(&self) -> bool {
+        self.bus == DaemonBus::Disabled
+    }
+
+    fn current(&self) -> Option<Arc<LogindSleepInhibitor>> {
         self.inner
-            .get_or_try_init(LogindSleepInhibitor::connect_system)
-            .await
+            .lock()
+            .expect("logind inhibitor slot poisoned")
+            .clone()
+    }
+
+    async fn ensure_connected(&self) -> Result<Arc<LogindSleepInhibitor>, SleepInhibitorError> {
+        if self.is_disabled() {
+            return Err(SleepInhibitorError::new("systemd-logind disabled"));
+        }
+        if let Some(existing) = self.current()
+            && existing.is_connected()
+        {
+            return Ok(existing);
+        }
+        let _guard = self.connect_lock.lock().await;
+        if let Some(existing) = self.current() {
+            if existing.is_connected() {
+                return Ok(existing);
+            }
+            match &self.bus {
+                DaemonBus::Default => existing.reconnect_system().await?,
+                DaemonBus::Address(addr) => existing.reconnect_address(addr).await?,
+                DaemonBus::Disabled => {
+                    return Err(SleepInhibitorError::new("systemd-logind disabled"));
+                }
+            }
+            return Ok(existing);
+        }
+        let connected = match &self.bus {
+            DaemonBus::Default => LogindSleepInhibitor::connect_system().await?,
+            DaemonBus::Address(addr) => LogindSleepInhibitor::connect_address(addr).await?,
+            DaemonBus::Disabled => {
+                return Err(SleepInhibitorError::new("systemd-logind disabled"));
+            }
+        };
+        let shared = Arc::new(connected);
+        *self.inner.lock().expect("logind inhibitor slot poisoned") = Some(Arc::clone(&shared));
+        Ok(shared)
     }
 }
 
 impl SleepInhibitor for LazyLogindSleepInhibitor {
     fn acquire(&self) -> InhibitorFuture<'_> {
-        Box::pin(async move { self.get_or_connect().await?.acquire().await })
+        Box::pin(async move { self.ensure_connected().await?.acquire().await })
     }
 
     fn release(&self) {
-        if let Some(inhibitor) = self.inner.get() {
+        if let Some(inhibitor) = self.current() {
             inhibitor.release();
         }
     }
 
     fn is_held(&self) -> bool {
-        self.inner.get().is_some_and(SleepInhibitor::is_held)
+        self.current().is_some_and(|inhibitor| inhibitor.is_held())
     }
 
     fn acquire_sleep_block(&self, reason: &str) -> InhibitorFuture<'_> {
         let reason = reason.to_owned();
         Box::pin(async move {
-            self.get_or_connect()
+            self.ensure_connected()
                 .await?
                 .acquire_sleep_block(&reason)
                 .await
@@ -945,19 +1084,18 @@ impl SleepInhibitor for LazyLogindSleepInhibitor {
     }
 
     fn release_sleep_block(&self) {
-        if let Some(inhibitor) = self.inner.get() {
+        if let Some(inhibitor) = self.current() {
             inhibitor.release_sleep_block();
         }
     }
 
     fn is_sleep_block_held(&self) -> bool {
-        self.inner
-            .get()
-            .is_some_and(SleepInhibitor::is_sleep_block_held)
+        self.current()
+            .is_some_and(|inhibitor| inhibitor.is_sleep_block_held())
     }
 
     fn suspend(&self) -> InhibitorFuture<'_> {
-        Box::pin(async move { self.get_or_connect().await?.suspend().await })
+        Box::pin(async move { self.ensure_connected().await?.suspend().await })
     }
 }
 
@@ -975,10 +1113,17 @@ impl SessionRuntimeDrivers {
         sleep_inhibitor: Arc<LazyLogindSleepInhibitor>,
         wayland: Option<Weak<WaylandHandle>>,
         polkit: &Arc<PolkitService>,
+        polkit_bus: DaemonBus,
     ) -> Option<Self> {
         let runtime = tokio::runtime::Handle::try_current().ok()?;
         let (stop, stop_rx) = watch::channel(false);
-        let polkit = polkit.start_registration(PolkitBus::System, &runtime);
+        let polkit = match polkit_bus {
+            DaemonBus::Default => Some(polkit.start_registration(PolkitBus::System, &runtime)),
+            DaemonBus::Address(addr) => {
+                Some(polkit.start_registration(PolkitBus::Address(addr), &runtime))
+            }
+            DaemonBus::Disabled => None,
+        };
 
         let wayland_idle = match WaylandIdle::connect_from_env() {
             Ok(idle) => match WaylandIdleDriver::spawn(idle, Arc::clone(&session), runtime.clone())
@@ -1099,64 +1244,127 @@ impl SessionRuntimeDrivers {
             }));
         }
 
-        // 3. systemd-logind delay & block inhibitors + PrepareForSleep + Session.Lock monitor.
-        {
+        // 3. Supervised systemd-logind delay & block inhibitors + PrepareForSleep + Session.Lock monitor.
+        if !sleep_inhibitor.is_disabled() {
             let session_weak = Arc::downgrade(&session);
             let sleep_inhibitor_task = Arc::clone(&sleep_inhibitor);
             let mut stop_logind = stop_rx;
             tasks.push(runtime.spawn(async move {
-                let logind = tokio::select! {
-                    biased;
-                    _ = stop_logind.changed() => return,
-                    res = sleep_inhibitor_task.get_or_connect() => match res {
-                        Ok(logind) => logind,
-                        Err(error) => {
-                            tracing::info!(%error, "systemd-logind unavailable; sleep/lock signals inactive");
-                            return;
-                        }
-                    }
-                };
-                if let Some(svc) = session_weak.upgrade() {
-                    if let Err(error) = svc.arm_sleep_delay().await {
-                        tracing::info!(%error, "could not acquire initial logind sleep delay inhibitor");
-                    }
-                    svc.sync_sleep_block_inhibitor().await;
-                }
-                let (tx, mut rx) = tokio::sync::mpsc::channel(16);
-                let monitor = logind.monitor_events(tx);
-                tokio::pin!(monitor);
+                let mut backoff = LOGIND_BACKOFF_INITIAL;
                 loop {
-                    tokio::select! {
+                    if *stop_logind.borrow() || session_weak.strong_count() == 0 {
+                        break;
+                    }
+
+                    let logind = tokio::select! {
                         biased;
                         _ = stop_logind.changed() => break,
-                        res = &mut monitor => {
-                            if let Err(error) = res {
-                                tracing::info!(%error, "logind event monitor stopped");
+                        res = sleep_inhibitor_task.ensure_connected() => match res {
+                            Ok(logind) => logind,
+                            Err(error) => {
+                                tracing::debug!(%error, ?backoff, "systemd-logind unavailable; retrying with backoff");
+                                tokio::select! {
+                                    biased;
+                                    _ = stop_logind.changed() => break,
+                                    () = tokio::time::sleep(backoff) => {}
+                                }
+                                backoff = backoff.saturating_mul(2).min(LOGIND_BACKOFF_MAX);
+                                continue;
                             }
-                            break;
                         }
-                        maybe_event = rx.recv() => {
-                            let Some(event) = maybe_event else {
-                                break;
-                            };
-                            let Some(svc) = session_weak.upgrade() else {
-                                break;
-                            };
-                            match event {
-                                LogindEvent::PrepareForSleep => {
-                                    svc.handle_sleep_signal(SleepSignal::PrepareForSleep).await;
+                    };
+
+                    let armed = if let Some(svc) = session_weak.upgrade() {
+                        let delay_ok = if svc.lock_snapshot().sleep_hold {
+                            true
+                        } else {
+                            match tokio::select! {
+                                biased;
+                                _ = stop_logind.changed() => break,
+                                res = svc.arm_sleep_delay() => res,
+                            } {
+                                Ok(()) => true,
+                                Err(error) => {
+                                    tracing::debug!(%error, ?backoff, "could not acquire logind sleep delay inhibitor; retrying");
+                                    false
                                 }
-                                LogindEvent::Wake => {
-                                    svc.handle_sleep_signal(SleepSignal::Wake).await;
+                            }
+                        };
+                        tokio::select! {
+                            biased;
+                            _ = stop_logind.changed() => break,
+                            () = svc.sync_sleep_block_inhibitor() => {}
+                        }
+                        delay_ok
+                    } else {
+                        break;
+                    };
+
+                    if !armed {
+                        tokio::select! {
+                            biased;
+                            _ = stop_logind.changed() => break,
+                            () = tokio::time::sleep(backoff) => {}
+                        }
+                        backoff = backoff.saturating_mul(2).min(LOGIND_BACKOFF_MAX);
+                        continue;
+                    }
+
+                    let monitor_started = tokio::time::Instant::now();
+                    let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+                    let monitor = logind.monitor_events(tx);
+                    tokio::pin!(monitor);
+                    let mut stop_requested = false;
+                    loop {
+                        tokio::select! {
+                            biased;
+                            _ = stop_logind.changed() => {
+                                stop_requested = true;
+                                break;
+                            }
+                            res = &mut monitor => {
+                                if let Err(error) = res {
+                                    tracing::info!(%error, "logind event monitor ended; scheduling reconnect");
                                 }
-                                LogindEvent::SessionLock => {
-                                    if let Err(error) = svc.request_lock().await {
-                                        tracing::warn!(%error, "logind Session.Lock request failed");
+                                break;
+                            }
+                            maybe_event = rx.recv() => {
+                                let Some(event) = maybe_event else {
+                                    break;
+                                };
+                                let Some(svc) = session_weak.upgrade() else {
+                                    stop_requested = true;
+                                    break;
+                                };
+                                match event {
+                                    LogindEvent::PrepareForSleep => {
+                                        svc.handle_sleep_signal(SleepSignal::PrepareForSleep).await;
+                                    }
+                                    LogindEvent::Wake => {
+                                        svc.handle_sleep_signal(SleepSignal::Wake).await;
+                                    }
+                                    LogindEvent::SessionLock => {
+                                        if let Err(error) = svc.request_lock().await {
+                                            tracing::warn!(%error, "logind Session.Lock request failed");
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+
+                    if stop_requested || *stop_logind.borrow() || session_weak.strong_count() == 0 {
+                        break;
+                    }
+                    if monitor_started.elapsed() >= LOGIND_HEALTHY_UPTIME {
+                        backoff = LOGIND_BACKOFF_INITIAL;
+                    }
+                    tokio::select! {
+                        biased;
+                        _ = stop_logind.changed() => break,
+                        () = tokio::time::sleep(backoff) => {}
+                    }
+                    backoff = backoff.saturating_mul(2).min(LOGIND_BACKOFF_MAX);
                 }
                 sleep_inhibitor_task.release();
                 sleep_inhibitor_task.release_sleep_block();
@@ -1167,7 +1375,7 @@ impl SessionRuntimeDrivers {
             stop,
             sleep_inhibitor,
             _wayland_idle: wayland_idle,
-            polkit: Some(polkit),
+            polkit,
             tasks,
         })
     }
@@ -1225,7 +1433,7 @@ impl CrossDomainBridge {
             if let Some(slot) = desktop.as_ref().and_then(Weak::upgrade)
                 && let Some(desktop) = slot.lock().expect("desktop slot mutex poisoned").as_ref()
             {
-                desktop.set_ime_locked(ime);
+                desktop.set_locked(ime);
             }
             if let Some(clipboard) = clipboard.upgrade() {
                 clipboard.set_locked(clip);

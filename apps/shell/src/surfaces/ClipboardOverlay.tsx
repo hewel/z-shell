@@ -2,7 +2,7 @@ import { LayerSurface, Show, type NativeChild } from "@hewel/zgui";
 import { createRetainedPresence, dialogMotionStyle, scrimBackdrop, useMotionScheme, type M3Spring } from "../motion.ts";
 import { ClipboardPanel } from "../panels/ClipboardPanel.tsx";
 import { useShellStore } from "../store.ts";
-import { resolveActiveMonitor, resolveMonitorLogicalSize } from "../topics.ts";
+import { isSessionLockActive, resolveActiveMonitor, resolveMonitorLogicalSize } from "../topics.ts";
 import styles from "./ClipboardOverlay.module.css";
 
 function ClipboardOverlayContent(props: {
@@ -38,10 +38,11 @@ function ClipboardOverlayContent(props: {
 }
 
 export function ClipboardOverlay(): NativeChild {
-  const { activePanel, activePanelTarget, activeMonitor, monitors, outputs, windows } = useShellStore();
+  const { activePanel, activePanelTarget, activeMonitor, monitors, outputs, windows, sessionLock } = useShellStore();
   const scheme = useMotionScheme();
+  const lockActive = () => isSessionLockActive(sessionLock.data());
   const targetOutputId = () => {
-    if (activePanel() !== "clipboard") return null;
+    if (lockActive() || activePanel() !== "clipboard") return null;
     return resolveActiveMonitor(monitors(), {
       preferredMonitorId: activePanelTarget()?.monitorId,
       windows: windows.data(),
@@ -54,6 +55,7 @@ export function ClipboardOverlay(): NativeChild {
     enterRole: "defaultSpatial",
     enterOpacityRole: "defaultEffects",
     exitRole: "fastEffects",
+    instantExit: lockActive,
   });
 
   return (

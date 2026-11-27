@@ -20,7 +20,7 @@ use z_shell_session::idle::{
 use z_shell_session::pam::{
     AuthFuture, AuthOutcome, Authenticator, Credentials, MockAuthenticator,
 };
-use z_shell_session::service::{LOCK_TOPIC, SessionService};
+use z_shell_session::service::{LOCK_TOPIC, SessionService, resolve_effective_username};
 use z_shell_session::wayland_idle::WaylandIdleEvent;
 
 #[derive(Debug, Default)]
@@ -111,12 +111,15 @@ fn hub() -> BusHub {
 
 fn service(authenticator: Arc<dyn Authenticator>) -> (Arc<SessionService>, Arc<MockSleep>, BusHub) {
     let inhibitor = Arc::new(MockSleep::default());
-    let service = Arc::new(SessionService::new(
-        "daemon-test",
-        authenticator,
-        inhibitor.clone(),
-        &IdleSettings::default(),
-    ));
+    let service = Arc::new(
+        SessionService::new(
+            "daemon-test",
+            authenticator,
+            inhibitor.clone(),
+            &IdleSettings::default(),
+        )
+        .with_account_resolver(|| Ok("alice".to_owned())),
+    );
     let hub = hub();
     service.install_on_bus(&hub);
     (service, inhibitor, hub)
@@ -167,6 +170,7 @@ async fn every_host_command_is_hard_denied_on_the_public_channel() {
             json!({"token": "token", "lock_id": 1, "ui_session_generation": 1}),
         ),
         ("host.suspend", json!({})),
+        ("power.suspend", json!({})),
     ];
     for (command, payload) in cases {
         let denied = invoke(&hub, ClientRole::Public, command, payload)
@@ -964,5 +968,445 @@ async fn stale_suspend_failure_does_not_clear_newer_external_prepare_for_sleep_h
     assert!(
         !inhibitor.is_held(),
         "stale suspend failure must not re-arm delay FD during newer PrepareForSleep"
+    );
+}
+
+#[tokio::test]
+async fn lock_authenticate_resolves_daemon_uid_account_and_rejects_mismatched_username() {
+    let authenticator = Arc::new(MockAuthenticator::new([
+        AuthOutcome::Authenticated,
+        AuthOutcome::Authenticated,
+    ]));
+    let inhibitor = Arc::new(MockSleep::default());
+    let service = Arc::new(SessionService::new(
+        "daemon-uid-test",
+        authenticator.clone(),
+        inhibitor,
+        &IdleSettings::default(),
+    ));
+    let hub = hub();
+    service.install_on_bus(&hub);
+
+    invoke(
+        &hub,
+        ClientRole::PrivilegedHost,
+        "host.session-register",
+        json!({ "ui_session_generation": 1 }),
+    )
+    .await
+    .expect("register host");
+    invoke(&hub, ClientRole::Public, "lock.request", json!({}))
+        .await
+        .expect("lock");
+    let lock_id = service.lock_snapshot().lock_id.expect("lock ID");
+    invoke(
+        &hub,
+        ClientRole::PrivilegedHost,
+        "host.lock-ack",
+        json!({ "lock_id": lock_id, "ui_session_generation": 1 }),
+    )
+    .await
+    .expect("ack");
+
+    // Non-empty mismatched username (e.g. UI fallback or display name) must be denied without calling PAM.
+    for mismatched in [
+        "__definitely_not_daemon_owner__",
+        "Display Name With Spaces",
+    ] {
+        let err = invoke(
+            &hub,
+            ClientRole::PrivilegedHost,
+            "host.lock-authenticate",
+            json!({
+                "username": mismatched,
+                "password": "secret-password",
+                "lock_id": lock_id,
+                "ui_session_generation": 1,
+            }),
+        )
+        .await
+        .expect_err("mismatched username must fail");
+        assert_eq!(err.code, ErrorCode::PermissionDenied);
+        assert!(!err.message.contains("secret-password"));
+    }
+    assert!(
+        authenticator.recorded_usernames().is_empty(),
+        "mismatched username must never reach the PAM authenticator"
+    );
+
+    // Omitting `username` authenticates against the daemon owner's effective UID account.
+    let approval = invoke(
+        &hub,
+        ClientRole::PrivilegedHost,
+        "host.lock-authenticate",
+        json!({
+            "password": "secret-password",
+            "lock_id": lock_id,
+            "ui_session_generation": 1,
+        }),
+    )
+    .await
+    .expect("omitted username must authenticate daemon owner");
+    assert!(approval["token"].as_str().is_some());
+
+    // Empty string `username` also resolves to the daemon owner's effective UID account.
+    let second_approval = invoke(
+        &hub,
+        ClientRole::PrivilegedHost,
+        "host.lock-authenticate",
+        json!({
+            "username": "",
+            "password": "secret-password",
+            "lock_id": lock_id,
+            "ui_session_generation": 1,
+        }),
+    )
+    .await
+    .expect("empty username must authenticate daemon owner");
+    assert!(second_approval["token"].as_str().is_some());
+
+    let expected_owner = resolve_effective_username().expect("current effective uid username");
+    let recorded = authenticator.recorded_usernames();
+    assert_eq!(recorded, [expected_owner.clone(), expected_owner]);
+
+    // If account resolution fails, authentication fails closed without calling PAM or leaking secrets.
+    let failing_auth = Arc::new(MockAuthenticator::new([AuthOutcome::Authenticated]));
+    let failing_service = Arc::new(
+        SessionService::new(
+            "daemon-uid-missing",
+            failing_auth.clone(),
+            Arc::new(MockSleep::default()),
+            &IdleSettings::default(),
+        )
+        .with_account_resolver(|| Err("uid missing from passwd".to_owned())),
+    );
+    let failing_hub = BusHub::new("test", PathBuf::from("/tmp/z-shell-session-test-media"));
+    failing_service.install_on_bus(&failing_hub);
+    invoke(
+        &failing_hub,
+        ClientRole::PrivilegedHost,
+        "host.session-register",
+        json!({ "ui_session_generation": 1 }),
+    )
+    .await
+    .expect("register");
+    invoke(&failing_hub, ClientRole::Public, "lock.request", json!({}))
+        .await
+        .expect("lock");
+    let fail_lock_id = failing_service.lock_snapshot().lock_id.expect("lock ID");
+    invoke(
+        &failing_hub,
+        ClientRole::PrivilegedHost,
+        "host.lock-ack",
+        json!({ "lock_id": fail_lock_id, "ui_session_generation": 1 }),
+    )
+    .await
+    .expect("ack");
+    let unavailable = invoke(
+        &failing_hub,
+        ClientRole::PrivilegedHost,
+        "host.lock-authenticate",
+        json!({
+            "password": "unresolvable-secret",
+            "lock_id": fail_lock_id,
+            "ui_session_generation": 1,
+        }),
+    )
+    .await
+    .expect_err("unresolvable daemon owner must fail closed");
+    assert_eq!(unavailable.code, ErrorCode::Internal);
+    assert!(!unavailable.message.contains("unresolvable-secret"));
+    assert!(failing_auth.recorded_usernames().is_empty());
+}
+
+#[tokio::test]
+async fn power_suspend_and_idle_suspend_route_through_lock_coordinator_and_lock_guard() {
+    let observed_phases = Arc::new(Mutex::new(Vec::new()));
+    let observed_clone = Arc::clone(&observed_phases);
+    let inhibitor = Arc::new(MockSleep::default());
+    let service = Arc::new(
+        SessionService::new(
+            "daemon-suspend-test",
+            Arc::new(MockAuthenticator::new([AuthOutcome::Authenticated])),
+            inhibitor.clone(),
+            &IdleSettings {
+                fallback_locker: Some(vec!["/bin/true".into()]),
+                ..IdleSettings::default()
+            },
+        )
+        .with_account_resolver(|| Ok("alice".to_owned()))
+        .with_lock_guard(move |phase| {
+            observed_clone.lock().expect("observed phases").push(phase);
+        }),
+    );
+    let bus = hub();
+    service.install_on_bus(&bus);
+    service.arm_sleep_delay().await.expect("arm delay");
+
+    // External PrepareForSleep with no host connected and a fallback locker sets phase=FallbackSpawned
+    // and sleep_hold=true: lock_guard MUST still observe a non-unlocked phase!
+    service
+        .handle_sleep_signal(SleepSignal::PrepareForSleep)
+        .await;
+    assert_eq!(
+        service.lock_snapshot().phase,
+        LockPhaseName::FallbackSpawned
+    );
+    assert!(service.lock_snapshot().sleep_hold);
+    assert_eq!(
+        observed_phases.lock().expect("phases").last().copied(),
+        Some(LockPhaseName::Engaging),
+        "sleep_hold=true must notify lock_guard as non-unlocked even when phase is FallbackSpawned"
+    );
+    service.handle_sleep_signal(SleepSignal::Wake).await;
+    assert!(!service.lock_snapshot().sleep_hold);
+    assert_eq!(
+        observed_phases.lock().expect("phases").last().copied(),
+        Some(LockPhaseName::FallbackSpawned)
+    );
+
+    // Register host and unlock cleanly via lock.request + ack + auth + consume.
+    invoke(
+        &bus,
+        ClientRole::PrivilegedHost,
+        "host.session-register",
+        json!({ "ui_session_generation": 2 }),
+    )
+    .await
+    .expect("register");
+    invoke(&bus, ClientRole::Public, "lock.request", json!({}))
+        .await
+        .expect("lock");
+    let first_lock = service.lock_snapshot().lock_id.expect("lock ID");
+    invoke(
+        &bus,
+        ClientRole::PrivilegedHost,
+        "host.lock-ack",
+        json!({ "lock_id": first_lock, "ui_session_generation": 2 }),
+    )
+    .await
+    .expect("ack");
+    let approval = invoke(
+        &bus,
+        ClientRole::PrivilegedHost,
+        "host.lock-authenticate",
+        json!({
+            "password": "pw",
+            "lock_id": first_lock,
+            "ui_session_generation": 2,
+        }),
+    )
+    .await
+    .expect("auth");
+    invoke(
+        &bus,
+        ClientRole::PrivilegedHost,
+        "host.lock-consume-unlock",
+        json!({
+            "token": approval["token"],
+            "lock_id": first_lock,
+            "ui_session_generation": 2,
+        }),
+    )
+    .await
+    .expect("unlock");
+    assert_eq!(service.lock_snapshot().phase, LockPhaseName::Unlocked);
+
+    // `power.suspend` rejects unexpected arguments/payload, enters Engaging + sleep_hold, and waits for ACK.
+    let bad_args = bus
+        .invoke_command(
+            CallerContext {
+                client_id: 99,
+                role: ClientRole::PrivilegedHost,
+            },
+            CommandInvokeParams {
+                name: CommandName::try_new("power.suspend").expect("cmd"),
+                args: vec!["extra".into()],
+                payload: None,
+            },
+        )
+        .await
+        .expect_err("power.suspend must reject positional args");
+    assert_eq!(bad_args.code, ErrorCode::InvalidParams);
+
+    let bad_payload = invoke(
+        &bus,
+        ClientRole::PrivilegedHost,
+        "power.suspend",
+        json!({ "unexpected": true }),
+    )
+    .await
+    .expect_err("power.suspend must reject unknown payload fields");
+    assert_eq!(bad_payload.code, ErrorCode::InvalidParams);
+
+    bus.invoke_command(
+        CallerContext {
+            client_id: 99,
+            role: ClientRole::PrivilegedHost,
+        },
+        CommandInvokeParams {
+            name: CommandName::try_new("power.suspend").expect("cmd"),
+            args: Vec::new(),
+            payload: None,
+        },
+    )
+    .await
+    .expect("power.suspend with None payload");
+    assert_eq!(service.lock_snapshot().phase, LockPhaseName::Engaging);
+    assert!(service.lock_snapshot().sleep_hold);
+    assert_eq!(*inhibitor.suspends.lock().expect("suspends"), 0);
+
+    let power_lock_id = service.lock_snapshot().lock_id.expect("lock ID");
+    invoke(
+        &bus,
+        ClientRole::PrivilegedHost,
+        "host.lock-ack",
+        json!({ "lock_id": power_lock_id, "ui_session_generation": 2 }),
+    )
+    .await
+    .expect("power.suspend ACK");
+    assert_eq!(*inhibitor.suspends.lock().expect("suspends"), 1);
+    assert_eq!(service.lock_snapshot().phase, LockPhaseName::Locked);
+
+    // Test IdleAction::Suspend from Unlocked state on a fresh service instance.
+    let (idle_service, idle_inhibitor, idle_bus) =
+        crate::service(Arc::new(MockAuthenticator::new([])));
+    idle_service.arm_sleep_delay().await.expect("arm delay");
+    invoke(
+        &idle_bus,
+        ClientRole::PrivilegedHost,
+        "host.session-register",
+        json!({ "ui_session_generation": 4 }),
+    )
+    .await
+    .expect("register");
+    let config = IdleConfig {
+        rules: vec![IdleRule {
+            name: "plain-suspend".into(),
+            enabled: true,
+            timeout_seconds: 30,
+            locked_timeout_seconds: None,
+            action: IdleAction::Suspend,
+            resume_command: None,
+            pre_action_fade_seconds: 0,
+        }],
+    };
+    invoke(
+        &idle_bus,
+        ClientRole::PrivilegedHost,
+        "idle.configure",
+        serde_json::to_value(config).expect("config JSON"),
+    )
+    .await
+    .expect("configure");
+    let (rule_index, token, _) = idle_service
+        .active_idle_watches()
+        .into_iter()
+        .next()
+        .expect("watch");
+    idle_service
+        .handle_wayland_idle(WaylandIdleEvent::Idled { rule_index, token })
+        .await;
+    assert_eq!(
+        idle_service.lock_snapshot().phase,
+        LockPhaseName::Engaging,
+        "IdleAction::Suspend must enter Engaging and wait for host ACK before suspending"
+    );
+    assert!(idle_service.lock_snapshot().sleep_hold);
+    assert_eq!(*idle_inhibitor.suspends.lock().expect("suspends"), 0);
+
+    let idle_lock_id = idle_service.lock_snapshot().lock_id.expect("lock ID");
+    invoke(
+        &idle_bus,
+        ClientRole::PrivilegedHost,
+        "host.lock-ack",
+        json!({ "lock_id": idle_lock_id, "ui_session_generation": 4 }),
+    )
+    .await
+    .expect("idle suspend ACK");
+    assert_eq!(*idle_inhibitor.suspends.lock().expect("suspends"), 1);
+
+    // Enabling Caffeine while `IdleAction::Suspend` is Engaging must cancel suspend on ACK
+    // instead of overriding the sleep:block inhibitor!
+    let (cancel_service, cancel_inhibitor, cancel_bus) =
+        crate::service(Arc::new(MockAuthenticator::new([])));
+    cancel_service.arm_sleep_delay().await.expect("arm delay");
+    invoke(
+        &cancel_bus,
+        ClientRole::PrivilegedHost,
+        "host.session-register",
+        json!({ "ui_session_generation": 8 }),
+    )
+    .await
+    .expect("register");
+    let cancel_config = IdleConfig {
+        rules: vec![IdleRule {
+            name: "plain-suspend-cancelled".into(),
+            enabled: true,
+            timeout_seconds: 30,
+            locked_timeout_seconds: None,
+            action: IdleAction::Suspend,
+            resume_command: None,
+            pre_action_fade_seconds: 0,
+        }],
+    };
+    invoke(
+        &cancel_bus,
+        ClientRole::PrivilegedHost,
+        "idle.configure",
+        serde_json::to_value(cancel_config).expect("config JSON"),
+    )
+    .await
+    .expect("configure");
+    let (c_rule, c_token, _) = cancel_service
+        .active_idle_watches()
+        .into_iter()
+        .next()
+        .expect("watch");
+    cancel_service
+        .handle_wayland_idle(WaylandIdleEvent::Idled {
+            rule_index: c_rule,
+            token: c_token,
+        })
+        .await;
+    assert_eq!(
+        cancel_service.lock_snapshot().phase,
+        LockPhaseName::Engaging
+    );
+    assert!(cancel_service.lock_snapshot().sleep_hold);
+    let cancel_lock_id = cancel_service.lock_snapshot().lock_id.expect("lock ID");
+
+    invoke(
+        &cancel_bus,
+        ClientRole::Public,
+        "idle.caffeine",
+        json!({ "enabled": true }),
+    )
+    .await
+    .expect("caffeine on while IdleAction::Suspend is Engaging");
+    assert!(cancel_inhibitor.is_sleep_block_held());
+
+    invoke(
+        &cancel_bus,
+        ClientRole::PrivilegedHost,
+        "host.lock-ack",
+        json!({ "lock_id": cancel_lock_id, "ui_session_generation": 8 }),
+    )
+    .await
+    .expect("ACK succeeds cleanly when IdleAction::Suspend is inhibited");
+    assert_eq!(
+        *cancel_inhibitor.suspends.lock().expect("suspends"),
+        0,
+        "IdleAction::Suspend must not suspend when Caffeine was enabled before ACK"
+    );
+    assert_eq!(cancel_service.lock_snapshot().phase, LockPhaseName::Locked);
+    assert!(!cancel_service.lock_snapshot().sleep_hold);
+    assert!(
+        cancel_inhibitor.is_held(),
+        "delay inhibitor must be re-armed"
+    );
+    assert!(
+        cancel_inhibitor.is_sleep_block_held(),
+        "sleep:block inhibitor must stay held"
     );
 }

@@ -225,11 +225,6 @@ pub(crate) fn install(hub: &BusHub, commands: &Commands, bus: SystemBus) -> Join
             "PowerOff",
         ),
         (
-            "power.suspend",
-            "Suspend the system (privileged host only)",
-            "Suspend",
-        ),
-        (
             "power.logout",
             "Terminate this login session (privileged host only)",
             "Terminate",

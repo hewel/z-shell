@@ -8,7 +8,7 @@ import {
 } from "../motion.ts";
 import { useShellStore, type PanelId, type ShellStore } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
-import { PANEL_MAX_HEIGHTS, type BarPosition, type BarStyle } from "../topics.ts";
+import { PANEL_MAX_HEIGHTS, isSessionLockActive, type BarPosition, type BarStyle } from "../topics.ts";
 import { BatteryPanel } from "./BatteryPanel.tsx";
 import { CalendarPanel } from "./CalendarPanel.tsx";
 import { MediaPanel } from "./MediaPanel.tsx";
@@ -100,9 +100,11 @@ function PanelContent(props: {
 }
 
 export function ShellPanels(): NativeChild {
-  const { activePanelTarget, overlayKind, barPopupGrab, dismissBarPopupFromCompositor, theme, settings } = useShellStore();
+  const { activePanelTarget, overlayKind, barPopupGrab, dismissBarPopupFromCompositor, theme, settings, sessionLock } = useShellStore();
   const scheme = useMotionScheme();
+  const lockActive = () => isSessionLockActive(sessionLock.data());
   const popup = createMemo(() => {
+    if (lockActive()) return null;
     const target = activePanelTarget();
     if (!target?.parentSurface || target.id === "launcher" || target.id === "overview" || target.id === "clipboard") return null;
     return { target, panel: panels[target.id] };
@@ -112,7 +114,7 @@ export function ShellPanels(): NativeChild {
     enterRole: "defaultSpatial",
     enterOpacityRole: "fastEffects",
     exitRole: "fastEffects",
-    instantExit: () => overlayKind() !== null && popup() === null,
+    instantExit: () => lockActive() || (overlayKind() !== null && popup() === null),
   });
   const mountedKey = createMemo(() => {
     const entry = presence.value();

@@ -33,6 +33,9 @@ const LOGIND_PATH: &str = "/org/freedesktop/login1";
 const LOGIND_MANAGER: &str = "org.freedesktop.login1.Manager";
 const LOGIND_SESSION: &str = "org.freedesktop.login1.Session";
 const BUS_TIMEOUT: Duration = Duration::from_secs(3);
+const INITIAL_RETRY_BACKOFF: Duration = Duration::from_millis(250);
+const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(10);
+const HEALTHY_REGISTRATION_WINDOW: Duration = Duration::from_secs(2);
 
 type Subject = (&'static str, HashMap<&'static str, Value<'static>>);
 type Identity = (String, HashMap<String, OwnedValue>);
@@ -181,10 +184,17 @@ async fn run(
     mut changes: watch::Receiver<RegistrationSettings>,
     mut stopped: watch::Receiver<()>,
 ) {
+    let mut consecutive_failures: u32 = 0;
+    let mut tracked_generation = changes.borrow().generation;
+
     loop {
         let settings = *changes.borrow_and_update();
-        if settings.enabled == PolkitEnabled::Enabled {
-            let prepared = tokio::select! {
+        if settings.generation != tracked_generation {
+            tracked_generation = settings.generation;
+            consecutive_failures = 0;
+        }
+        if settings.enabled == PolkitEnabled::Disabled {
+            tokio::select! {
                 biased;
                 _ = stopped.changed() => break,
                 changed = changes.wait_for(|current| current.generation != settings.generation) => {
@@ -193,27 +203,72 @@ async fn run(
                     }
                     continue;
                 }
-                result = Attempt::prepare(&bus, service.clone()) => result,
-            };
-            match prepared {
-                Ok(mut attempt) => {
-                    let result = attempt
-                        .serve(&service, settings.generation, &mut changes, &mut stopped)
-                        .await;
-                    if stopped.has_changed().is_err() || changes.has_changed().is_err() {
-                        let reaped = service
-                            .upgrade()
-                            .and_then(|service| service.stop_registration());
-                        attempt.cleanup().await;
-                        wait_for_reap(reaped).await;
-                        return;
-                    }
-                    end_generation(&service, settings.generation, result);
-                    attempt.cleanup().await;
-                }
-                Err(error) => end_generation(&service, settings.generation, Err(error)),
             }
         }
+
+        let prepared = tokio::select! {
+            biased;
+            _ = stopped.changed() => break,
+            changed = changes.wait_for(|current| current.generation != settings.generation) => {
+                if changed.is_err() {
+                    break;
+                }
+                continue;
+            }
+            result = Attempt::prepare(&bus, service.clone()) => result,
+        };
+
+        let watch_authority_owner;
+        match prepared {
+            Ok(mut attempt) => {
+                let serve_started = tokio::time::Instant::now();
+                let result = attempt
+                    .serve(&service, settings.generation, &mut changes, &mut stopped)
+                    .await;
+                if stopped.has_changed().is_err() || changes.has_changed().is_err() {
+                    let reaped = service
+                        .upgrade()
+                        .and_then(|service| service.stop_registration());
+                    attempt.cleanup().await;
+                    wait_for_reap(reaped).await;
+                    return;
+                }
+                let healthy = attempt.registration == RemoteRegistration::Confirmed
+                    && serve_started.elapsed() >= HEALTHY_REGISTRATION_WINDOW;
+                watch_authority_owner = matches!(result, Err(RegistrationError::AuthorityLost));
+                end_generation(&service, settings.generation, result);
+                attempt.cleanup().await;
+                if changes.borrow().generation != settings.generation {
+                    continue;
+                }
+                if healthy {
+                    consecutive_failures = 1;
+                } else {
+                    consecutive_failures = consecutive_failures.saturating_add(1);
+                }
+            }
+            Err(error) => {
+                watch_authority_owner = is_missing_authority(&error);
+                end_generation(&service, settings.generation, Err(error));
+                if changes.borrow().generation != settings.generation {
+                    continue;
+                }
+                consecutive_failures = consecutive_failures.saturating_add(1);
+            }
+        }
+
+        if service.upgrade().is_none() {
+            break;
+        }
+
+        let delay = retry_backoff(consecutive_failures);
+        let retry_mode = if !watch_authority_owner {
+            RetryMode::FixedBackoff
+        } else if consecutive_failures == 1 {
+            RetryMode::WatchAuthorityImmediate
+        } else {
+            RetryMode::WatchAuthorityAfterQuietWindow
+        };
         tokio::select! {
             biased;
             _ = stopped.changed() => break,
@@ -222,12 +277,126 @@ async fn run(
                     break;
                 }
             }
+            () = wait_for_retry(&bus, delay, retry_mode) => {}
         }
     }
     let reaped = service
         .upgrade()
         .and_then(|service| service.stop_registration());
     wait_for_reap(reaped).await;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RetryMode {
+    FixedBackoff,
+    WatchAuthorityImmediate,
+    WatchAuthorityAfterQuietWindow,
+}
+
+fn retry_backoff(consecutive_failures: u32) -> Duration {
+    let shift = consecutive_failures.saturating_sub(1).min(6);
+    INITIAL_RETRY_BACKOFF
+        .saturating_mul(1_u32 << shift)
+        .min(MAX_RETRY_BACKOFF)
+}
+
+fn is_missing_authority(error: &RegistrationError) -> bool {
+    match error {
+        RegistrationError::AuthorityLost => true,
+        RegistrationError::Bus {
+            operation: "resolving the Polkit Authority owner",
+            source,
+        } => match source.as_ref() {
+            zbus::Error::FDO(fdo_err) => matches!(
+                fdo_err.as_ref(),
+                fdo::Error::NameHasNoOwner(_) | fdo::Error::ServiceUnknown(_)
+            ),
+            zbus::Error::MethodError(name, _, _) => matches!(
+                name.as_str(),
+                "org.freedesktop.DBus.Error.NameHasNoOwner"
+                    | "org.freedesktop.DBus.Error.ServiceUnknown"
+            ),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+async fn wait_for_retry(bus: &PolkitBus, delay: Duration, mode: RetryMode) {
+    let remaining = match mode {
+        RetryMode::FixedBackoff => {
+            tokio::time::sleep(delay).await;
+            return;
+        }
+        RetryMode::WatchAuthorityImmediate => delay,
+        RetryMode::WatchAuthorityAfterQuietWindow => {
+            let quiet = INITIAL_RETRY_BACKOFF.min(delay);
+            tokio::time::sleep(quiet).await;
+            match delay.checked_sub(quiet) {
+                Some(rem) if !rem.is_zero() => rem,
+                _ => return,
+            }
+        }
+    };
+    tokio::select! {
+        () = tokio::time::sleep(remaining) => {}
+        () = wait_for_authority_owner_appeared(bus) => {}
+    }
+}
+
+async fn wait_for_authority_owner_appeared(bus: &PolkitBus) {
+    let Ok(connection) = bounded("connecting Polkit retry watcher to D-Bus", async {
+        let builder = match bus {
+            PolkitBus::System => Builder::system()?,
+            PolkitBus::Address(address) => Builder::address(address.as_str())?,
+        };
+        builder.build().await
+    })
+    .await
+    else {
+        std::future::pending::<()>().await;
+        return;
+    };
+
+    let Ok(mut owner_changes) = bounded("watching Polkit Authority owner appearance", async {
+        let rule = MatchRule::builder()
+            .msg_type(Type::Signal)
+            .sender(DBUS_NAME)?
+            .path(DBUS_PATH)?
+            .interface(DBUS_NAME)?
+            .member("NameOwnerChanged")?
+            .add_arg(AUTHORITY_NAME)?
+            .build();
+        MessageStream::for_match_rule(rule, &connection, None).await
+    })
+    .await
+    else {
+        std::future::pending::<()>().await;
+        return;
+    };
+
+    if let Ok(dbus) = DBusProxy::new(&connection).await
+        && let Ok(name) = AUTHORITY_NAME.try_into()
+        && timeout(BUS_TIMEOUT, dbus.get_name_owner(name))
+            .await
+            .is_ok_and(|res| res.is_ok())
+    {
+        return;
+    }
+
+    loop {
+        let Some(Ok(message)) = poll_fn(|cx| Pin::new(&mut owner_changes).poll_next(cx)).await
+        else {
+            std::future::pending::<()>().await;
+            return;
+        };
+        let body = message.body();
+        if let Ok((_, _, new_owner)) = body.deserialize::<(&str, &str, &str)>()
+            && !new_owner.is_empty()
+        {
+            return;
+        }
+    }
 }
 
 fn end_generation(

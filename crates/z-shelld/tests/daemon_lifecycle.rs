@@ -10,7 +10,7 @@ use z_shell_config::ShellPaths;
 use z_shell_protocol::{
     CommandInvokeParams, CommandName, ErrorCode, ServerMessage, TopicName, TopicUpdate, methods,
 };
-use z_shelld::DaemonApp;
+use z_shelld::{DaemonApp, DaemonBus, DaemonOptions};
 
 #[tokio::test]
 async fn enforces_host_trust_atomic_state_and_deduped_settings_reload() {
@@ -1248,6 +1248,794 @@ priority = 10
         })
         .await
         .unwrap();
+    timeout(Duration::from_secs(3), server_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+struct TestDbus {
+    child: std::process::Child,
+    address: String,
+}
+
+impl TestDbus {
+    fn spawn() -> Self {
+        use std::io::{BufRead, BufReader};
+        use std::process::{Command, Stdio};
+
+        let mut child = Command::new("dbus-daemon")
+            .args(["--session", "--nofork", "--nosyslog", "--print-address=1"])
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn isolated dbus-daemon");
+        let mut address = String::new();
+        BufReader::new(child.stdout.take().expect("dbus-daemon stdout"))
+            .read_line(&mut address)
+            .expect("read dbus-daemon address");
+        let address = address.trim().to_owned();
+        assert!(!address.is_empty(), "dbus-daemon address must not be empty");
+        Self { child, address }
+    }
+
+    fn address(&self) -> &str {
+        &self.address
+    }
+}
+
+impl Drop for TestDbus {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+#[tokio::test]
+async fn locks_apps_launch_and_notifications_and_authenticates_with_trusted_pam_helper() {
+    let dir = TempDir::new().unwrap();
+    let bus = TestDbus::spawn();
+
+    // 1. Default bootstrap without a sibling `z-shell-pam-helper` next to the test binary must
+    // fail closed with "no trusted PAM helper executable found" instead of falling back to a
+    // relative `$PATH` name ("z-shell-pam-helper").
+    {
+        let untrusted_paths = ShellPaths::from_roots(
+            dir.path().join("untrusted/config"),
+            dir.path().join("untrusted/state"),
+            dir.path().join("untrusted/runtime"),
+            dir.path().join("untrusted/runtime/bus.sock"),
+        );
+        let app = DaemonApp::bootstrap_with_options(
+            untrusted_paths.clone(),
+            DaemonOptions::new()
+                .with_logind_bus(DaemonBus::Disabled)
+                .with_polkit_bus(DaemonBus::Disabled)
+                .with_session_bus(DaemonBus::Disabled),
+        )
+        .unwrap();
+        let server_task = tokio::spawn(async move { app.run().await });
+        let public = BusClient::connect(untrusted_paths.socket_path())
+            .await
+            .unwrap();
+        let host = BusClient::connect(untrusted_paths.host_socket_path())
+            .await
+            .unwrap();
+        host.invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("host.session-register").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({ "ui_session_generation": 1 })),
+        })
+        .await
+        .unwrap();
+        let lock = public
+            .invoke_command(CommandInvokeParams {
+                name: CommandName::try_new("lock.request").unwrap(),
+                args: Vec::new(),
+                payload: None,
+            })
+            .await
+            .unwrap()
+            .data
+            .unwrap();
+        let lock_id = lock[0]["data"]["lock_id"].as_u64().unwrap();
+        host.invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("host.lock-ack").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({ "lock_id": lock_id, "ui_session_generation": 1 })),
+        })
+        .await
+        .unwrap();
+        let err = host
+            .invoke_command(CommandInvokeParams {
+                name: CommandName::try_new("host.lock-authenticate").unwrap(),
+                args: Vec::new(),
+                payload: Some(json!({
+                    "password": "secret",
+                    "lock_id": lock_id,
+                    "ui_session_generation": 1,
+                })),
+            })
+            .await
+            .unwrap_err();
+        match err {
+            ClientError::Rpc(rpc) => {
+                assert_eq!(rpc.code, ErrorCode::Internal);
+                assert!(
+                    rpc.message
+                        .contains("no trusted PAM helper executable found"),
+                    "expected resolved trusted-helper absence message (never relative $PATH fallback), got: {}",
+                    rpc.message
+                );
+            }
+            other => panic!("expected RpcError, got {other:?}"),
+        }
+        host.invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("quit").unwrap(),
+            args: Vec::new(),
+            payload: None,
+        })
+        .await
+        .unwrap();
+        timeout(Duration::from_secs(3), server_task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
+
+    // 2. Full daemon integration with a verified absolute PAM helper, cold-boot `apps.launch`,
+    // notification popup suppression + action denial on lock engagement, and UID-bound unlock
+    // without passing a client username.
+    let paths = ShellPaths::from_roots(
+        dir.path().join("config"),
+        dir.path().join("state"),
+        dir.path().join("runtime"),
+        dir.path().join("runtime/bus.sock"),
+    );
+    let data_dir = dir.path().join("xdg-data");
+    let apps_dir = data_dir.join("applications");
+    std::fs::create_dir_all(&apps_dir).unwrap();
+    let launch_marker = dir.path().join("launched.txt");
+    let launch_script = dir.path().join("launch-probe.sh");
+    std::fs::write(
+        &launch_script,
+        format!(
+            "#!/bin/sh\nprintf 'launched' > '{}'\n",
+            launch_marker.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&launch_script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        apps_dir.join("probe.desktop"),
+        format!(
+            "[Desktop Entry]\nType=Application\nName=Probe App\nExec={}\n",
+            launch_script.display()
+        ),
+    )
+    .unwrap();
+
+    let pam_helper = dir.path().join("mock-pam-helper.sh");
+    std::fs::write(
+        &pam_helper,
+        r#"#!/bin/sh
+payload="$(cat)"
+case "$payload" in
+  *'"password":"correct-password"'*)
+    printf '{"status":"authenticated"}\n'
+    ;;
+  *)
+    printf '{"status":"denied","message":"Invalid password"}\n'
+    ;;
+esac
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&pam_helper, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let app = DaemonApp::bootstrap_with_options(
+        paths.clone(),
+        DaemonOptions::new()
+            .with_pam_helper_path(&pam_helper)
+            .with_logind_bus(DaemonBus::Disabled)
+            .with_polkit_bus(DaemonBus::Disabled)
+            .with_session_bus(DaemonBus::Address(bus.address().to_owned()))
+            .with_xdg_data_dirs(vec![data_dir]),
+    )
+    .unwrap();
+    let server_task = tokio::spawn(async move { app.run().await });
+
+    let mut public = BusClient::connect(paths.socket_path()).await.unwrap();
+    let host = BusClient::connect(paths.host_socket_path()).await.unwrap();
+
+    // Wait for `desktop.apps` and `desktop.notifications` to become available.
+    let apps_snap = public
+        .subscribe(TopicName::try_new("desktop.apps").unwrap())
+        .await
+        .unwrap();
+    if apps_snap.data["available"] != json!(true) {
+        timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(ServerMessage::Notification { method, params }) =
+                    public.next_notification().await
+                    && method == methods::TOPIC_UPDATE
+                {
+                    let update: TopicUpdate = serde_json::from_value(params).unwrap();
+                    if update.topic.as_str() == "desktop.apps"
+                        && update.data["available"] == json!(true)
+                    {
+                        break;
+                    }
+                }
+            }
+        })
+        .await
+        .expect("desktop.apps scan must complete");
+    }
+
+    let notif_snap = public
+        .subscribe(TopicName::try_new("desktop.notifications").unwrap())
+        .await
+        .unwrap();
+    if notif_snap.data["available"] != json!(true) {
+        timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(ServerMessage::Notification { method, params }) =
+                    public.next_notification().await
+                    && method == methods::TOPIC_UPDATE
+                {
+                    let update: TopicUpdate = serde_json::from_value(params).unwrap();
+                    if update.topic.as_str() == "desktop.notifications"
+                        && update.data["available"] == json!(true)
+                    {
+                        break;
+                    }
+                }
+            }
+        })
+        .await
+        .expect("desktop.notifications D-Bus name must become available");
+    }
+
+    // Cold-boot `apps.launch` succeeds without any prior `launcher.query`.
+    public
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("apps.launch").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({ "id": "probe.desktop" })),
+        })
+        .await
+        .unwrap();
+    timeout(Duration::from_secs(3), async {
+        while !launch_marker.exists() {
+            tokio::time::sleep(Duration::from_millis(15)).await;
+        }
+    })
+    .await
+    .expect("apps.launch must execute probe.desktop");
+
+    // Emit a live notification with an action over D-Bus so `popups` has 1 item.
+    let dbus_conn = zbus::connection::Builder::address(bus.address())
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
+    let notif_id: u32 = dbus_conn
+        .call_method(
+            Some("org.freedesktop.Notifications"),
+            "/org/freedesktop/Notifications",
+            Some("org.freedesktop.Notifications"),
+            "Notify",
+            &(
+                "ChatApp",
+                0u32,
+                "",
+                "Secret DM",
+                "Lock test",
+                vec!["open", "Open"],
+                std::collections::HashMap::<&str, zbus::zvariant::Value<'_>>::new(),
+                0i32,
+            ),
+        )
+        .await
+        .unwrap()
+        .body()
+        .deserialize()
+        .unwrap();
+    assert!(notif_id >= 1);
+
+    timeout(Duration::from_secs(3), async {
+        loop {
+            if let Some(ServerMessage::Notification { method, params }) =
+                public.next_notification().await
+                && method == methods::TOPIC_UPDATE
+            {
+                let update: TopicUpdate = serde_json::from_value(params).unwrap();
+                if update.topic.as_str() == "desktop.notifications"
+                    && update.data["popups"]
+                        .as_array()
+                        .is_some_and(|p| p.len() == 1)
+                {
+                    break;
+                }
+            }
+        }
+    })
+    .await
+    .expect("live notification popup must publish");
+
+    // Register host and request lock (`engaging` phase BEFORE `host.lock-ack`!).
+    host.invoke_command(CommandInvokeParams {
+        name: CommandName::try_new("host.session-register").unwrap(),
+        args: Vec::new(),
+        payload: Some(json!({ "ui_session_generation": 3 })),
+    })
+    .await
+    .unwrap();
+    let lock_data = public
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("lock.request").unwrap(),
+            args: Vec::new(),
+            payload: None,
+        })
+        .await
+        .unwrap()
+        .data
+        .unwrap();
+    let lock_id = lock_data[0]["data"]["lock_id"].as_u64().unwrap();
+
+    // Immediately during `engaging`, notification popups must be cleared and both `apps.launch`
+    // and `notifications.invoke-action` must be denied with PermissionDenied!
+    let notif_while_engaging = public
+        .subscribe(TopicName::try_new("desktop.notifications").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(notif_while_engaging.data["popups"], json!([]));
+    assert_eq!(
+        notif_while_engaging.data["history"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    for (cmd_name, payload) in [
+        ("apps.launch", json!({ "id": "probe.desktop" })),
+        (
+            "notifications.invoke-action",
+            json!({ "id": notif_id, "action_key": "open" }),
+        ),
+    ] {
+        let denied = public
+            .invoke_command(CommandInvokeParams {
+                name: CommandName::try_new(cmd_name).unwrap(),
+                args: Vec::new(),
+                payload: Some(payload),
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(denied, ClientError::Rpc(ref rpc) if rpc.code == ErrorCode::PermissionDenied),
+            "expected PermissionDenied for {cmd_name} while engaging, got {denied:?}"
+        );
+    }
+
+    // Acknowledge lock, verify mismatched username is rejected, then unlock with omitted username.
+    host.invoke_command(CommandInvokeParams {
+        name: CommandName::try_new("host.lock-ack").unwrap(),
+        args: Vec::new(),
+        payload: Some(json!({ "lock_id": lock_id, "ui_session_generation": 3 })),
+    })
+    .await
+    .unwrap();
+
+    let wrong_user = host
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("host.lock-authenticate").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({
+                "username": "definitely-not-this-uid-account",
+                "password": "correct-password",
+                "lock_id": lock_id,
+                "ui_session_generation": 3,
+            })),
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(wrong_user, ClientError::Rpc(ref rpc) if rpc.code == ErrorCode::PermissionDenied),
+        "mismatched username must fail with PermissionDenied: {wrong_user:?}"
+    );
+
+    let approval = host
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("host.lock-authenticate").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({
+                "password": "correct-password",
+                "lock_id": lock_id,
+                "ui_session_generation": 3,
+            })),
+        })
+        .await
+        .unwrap()
+        .data
+        .unwrap();
+    host.invoke_command(CommandInvokeParams {
+        name: CommandName::try_new("host.lock-consume-unlock").unwrap(),
+        args: Vec::new(),
+        payload: Some(json!({
+            "token": approval["token"],
+            "lock_id": lock_id,
+            "ui_session_generation": 3,
+        })),
+    })
+    .await
+    .unwrap();
+
+    // After unlock, `apps.launch` is permitted again.
+    std::fs::remove_file(&launch_marker).unwrap();
+    public
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("apps.launch").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({ "id": "probe.desktop" })),
+        })
+        .await
+        .unwrap();
+    timeout(Duration::from_secs(3), async {
+        while !launch_marker.exists() {
+            tokio::time::sleep(Duration::from_millis(15)).await;
+        }
+    })
+    .await
+    .expect("apps.launch must succeed again after unlock");
+
+    host.invoke_command(CommandInvokeParams {
+        name: CommandName::try_new("quit").unwrap(),
+        args: Vec::new(),
+        payload: None,
+    })
+    .await
+    .unwrap();
+    timeout(Duration::from_secs(3), server_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn supervises_logind_restart_inhibitors_session_lock_and_power_suspend() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    use zbus::{
+        Connection,
+        connection::Builder,
+        object_server::SignalEmitter,
+        zvariant::{OwnedFd, OwnedObjectPath},
+    };
+
+    struct MockLogindManager {
+        session_path: String,
+        delay_inhibits: Arc<AtomicUsize>,
+        block_inhibits: Arc<AtomicUsize>,
+        suspends: Arc<AtomicUsize>,
+    }
+
+    #[zbus::interface(name = "org.freedesktop.login1.Manager")]
+    impl MockLogindManager {
+        #[zbus(name = "Inhibit")]
+        fn inhibit(
+            &self,
+            _what: &str,
+            _who: &str,
+            _why: &str,
+            mode: &str,
+        ) -> zbus::fdo::Result<OwnedFd> {
+            match mode {
+                "delay" => {
+                    self.delay_inhibits.fetch_add(1, Ordering::SeqCst);
+                }
+                "block" => {
+                    self.block_inhibits.fetch_add(1, Ordering::SeqCst);
+                }
+                _ => {}
+            }
+            let (reader, _writer) = std::os::unix::net::UnixStream::pair()
+                .map_err(|err| zbus::fdo::Error::Failed(err.to_string()))?;
+            Ok(OwnedFd::from(std::os::fd::OwnedFd::from(reader)))
+        }
+
+        #[zbus(name = "GetSessionByPID")]
+        fn get_session_by_pid(&self, _pid: u32) -> zbus::fdo::Result<OwnedObjectPath> {
+            Ok(OwnedObjectPath::try_from(self.session_path.as_str()).expect("valid session path"))
+        }
+
+        #[zbus(name = "Suspend")]
+        fn suspend(&self, _interactive: bool) -> zbus::fdo::Result<()> {
+            self.suspends.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    struct MockLogindSession;
+
+    #[zbus::interface(name = "org.freedesktop.login1.Session")]
+    impl MockLogindSession {
+        #[zbus(signal, name = "Lock")]
+        async fn lock(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
+    }
+
+    async fn serve_mock_logind(
+        address: &str,
+        session_path: &str,
+        delay_inhibits: Arc<AtomicUsize>,
+        block_inhibits: Arc<AtomicUsize>,
+        suspends: Arc<AtomicUsize>,
+    ) -> Connection {
+        Builder::address(address)
+            .expect("builder")
+            .name("org.freedesktop.login1")
+            .expect("logind bus name")
+            .serve_at(
+                "/org/freedesktop/login1",
+                MockLogindManager {
+                    session_path: session_path.to_owned(),
+                    delay_inhibits,
+                    block_inhibits,
+                    suspends,
+                },
+            )
+            .expect("serve Manager")
+            .serve_at(session_path, MockLogindSession)
+            .expect("serve Session")
+            .build()
+            .await
+            .expect("build mock logind")
+    }
+
+    let dir = TempDir::new().unwrap();
+    let bus = TestDbus::spawn();
+    let paths = ShellPaths::from_roots(
+        dir.path().join("config"),
+        dir.path().join("state"),
+        dir.path().join("runtime"),
+        dir.path().join("runtime/bus.sock"),
+    );
+
+    // Attach a D-Bus monitor BEFORE booting `DaemonApp` so we deterministically observe the
+    // daemon's initial `org.freedesktop.login1` `Inhibit` call fail (`ServiceUnknown`) before
+    // spawning `logind_1`, proving bounded backoff recovery without arbitrary sleeps.
+    let monitor_conn = Builder::address(bus.address())
+        .expect("monitor builder")
+        .build()
+        .await
+        .expect("connect D-Bus monitor");
+    let mut monitor_stream = zbus::MessageStream::from(&monitor_conn);
+    monitor_conn
+        .call_method(
+            Some("org.freedesktop.DBus"),
+            "/org/freedesktop/DBus",
+            Some("org.freedesktop.DBus.Monitoring"),
+            "BecomeMonitor",
+            &(Vec::<&str>::new(), 0u32),
+        )
+        .await
+        .expect("BecomeMonitor on isolated TestDbus");
+
+    let app = DaemonApp::bootstrap_with_options(
+        paths.clone(),
+        DaemonOptions::new()
+            .with_logind_bus(DaemonBus::Address(bus.address().to_owned()))
+            .with_polkit_bus(DaemonBus::Disabled)
+            .with_session_bus(DaemonBus::Disabled),
+    )
+    .unwrap();
+    let server_task = tokio::spawn(async move { app.run().await });
+
+    let mut public = BusClient::connect(paths.socket_path()).await.unwrap();
+    let host = BusClient::connect(paths.host_socket_path()).await.unwrap();
+
+    timeout(Duration::from_secs(3), async {
+        use zbus::export::futures_core::Stream;
+        let mut inhibit_serial = None;
+        loop {
+            let item =
+                std::future::poll_fn(|cx| std::pin::Pin::new(&mut monitor_stream).poll_next(cx))
+                    .await
+                    .expect("D-Bus monitor stream ended unexpectedly")
+                    .expect("D-Bus monitor message decode");
+            match item.message_type() {
+                zbus::message::Type::MethodCall
+                    if item.header().member().map(|m| m.as_str()) == Some("Inhibit") =>
+                {
+                    inhibit_serial = Some(item.primary_header().serial_num());
+                }
+                zbus::message::Type::Error
+                    if inhibit_serial.is_some()
+                        && item.header().reply_serial() == inhibit_serial =>
+                {
+                    break;
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("daemon must attempt initial logind Inhibit and receive ServiceUnknown before logind_1 starts");
+    drop(monitor_stream);
+    drop(monitor_conn);
+
+    let delay_1 = Arc::new(AtomicUsize::new(0));
+    let block_1 = Arc::new(AtomicUsize::new(0));
+    let suspends_1 = Arc::new(AtomicUsize::new(0));
+    let logind_1 = serve_mock_logind(
+        bus.address(),
+        "/org/freedesktop/login1/session/s1",
+        Arc::clone(&delay_1),
+        Arc::clone(&block_1),
+        Arc::clone(&suspends_1),
+    )
+    .await;
+
+    // Wait for supervised logind loop to acquire the initial delay inhibitor.
+    timeout(Duration::from_secs(3), async {
+        while delay_1.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("supervised logind loop must acquire delay inhibitor once logind appears");
+
+    // Enable Keep Awake (Caffeine) so `sleep:block` inhibitor is also held.
+    let caffeine_snap = public
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("idle.caffeine").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({ "enabled": true })),
+        })
+        .await
+        .unwrap()
+        .data
+        .unwrap();
+    assert_eq!(caffeine_snap["sleep_block_status"]["status"], json!("held"));
+    assert_eq!(block_1.load(Ordering::SeqCst), 1);
+
+    // Simulate `systemd-logind` restart on the bus with a new session object path `s2`.
+    assert!(
+        logind_1
+            .release_name("org.freedesktop.login1")
+            .await
+            .unwrap()
+    );
+    drop(logind_1);
+
+    let delay_2 = Arc::new(AtomicUsize::new(0));
+    let block_2 = Arc::new(AtomicUsize::new(0));
+    let suspends_2 = Arc::new(AtomicUsize::new(0));
+    let logind_2 = serve_mock_logind(
+        bus.address(),
+        "/org/freedesktop/login1/session/s2",
+        Arc::clone(&delay_2),
+        Arc::clone(&block_2),
+        Arc::clone(&suspends_2),
+    )
+    .await;
+
+    // Without `settings.reload` or daemon restart, `z-shelld` must re-acquire both delay and block
+    // inhibitors and re-subscribe to `Session.Lock` on `s2`!
+    timeout(Duration::from_secs(3), async {
+        while delay_2.load(Ordering::SeqCst) == 0 || block_2.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("supervised logind loop must re-acquire delay + block inhibitors after logind restart");
+
+    host.invoke_command(CommandInvokeParams {
+        name: CommandName::try_new("host.session-register").unwrap(),
+        args: Vec::new(),
+        payload: Some(json!({ "ui_session_generation": 9 })),
+    })
+    .await
+    .unwrap();
+
+    let lock_snap = public
+        .subscribe(TopicName::try_new("session.lock").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(lock_snap.data["phase"], json!("unlocked"));
+
+    let session_2_iface = logind_2
+        .object_server()
+        .interface::<_, MockLogindSession>("/org/freedesktop/login1/session/s2")
+        .await
+        .unwrap();
+    let lock_id = timeout(Duration::from_secs(3), async {
+        loop {
+            MockLogindSession::lock(session_2_iface.signal_emitter())
+                .await
+                .unwrap();
+            if let Ok(Some(ServerMessage::Notification { method, params })) =
+                timeout(Duration::from_millis(120), public.next_notification()).await
+                && method == methods::TOPIC_UPDATE
+            {
+                let update: TopicUpdate = serde_json::from_value(params).unwrap();
+                if update.topic.as_str() == "session.lock"
+                    && update.data["phase"] == json!("engaging")
+                {
+                    break update.data["lock_id"].as_u64().unwrap();
+                }
+            }
+        }
+    })
+    .await
+    .expect("Session.Lock on restarted logind must engage session lock");
+
+    // Cancel that lock via `host.lock-failed` so we return to `unlocked`, then verify `power.suspend`
+    // engages `sleep_hold` + `engaging` and waits for `host.lock-ack` before calling `Suspend`!
+    host.invoke_command(CommandInvokeParams {
+        name: CommandName::try_new("host.lock-failed").unwrap(),
+        args: Vec::new(),
+        payload: Some(json!({ "lock_id": lock_id, "reason": "reset for suspend check" })),
+    })
+    .await
+    .unwrap();
+
+    public
+        .invoke_command(CommandInvokeParams {
+            name: CommandName::try_new("idle.caffeine").unwrap(),
+            args: Vec::new(),
+            payload: Some(json!({ "enabled": false })),
+        })
+        .await
+        .unwrap();
+
+    host.invoke_command(CommandInvokeParams {
+        name: CommandName::try_new("power.suspend").unwrap(),
+        args: Vec::new(),
+        payload: None,
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        suspends_2.load(Ordering::SeqCst),
+        0,
+        "power.suspend must not call logind Suspend before host.lock-ack"
+    );
+
+    let engaging_suspend = public
+        .subscribe(TopicName::try_new("session.lock").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(engaging_suspend.data["phase"], json!("engaging"));
+    assert_eq!(engaging_suspend.data["sleep_hold"], json!(true));
+    let suspend_lock_id = engaging_suspend.data["lock_id"].as_u64().unwrap();
+
+    host.invoke_command(CommandInvokeParams {
+        name: CommandName::try_new("host.lock-ack").unwrap(),
+        args: Vec::new(),
+        payload: Some(json!({ "lock_id": suspend_lock_id, "ui_session_generation": 9 })),
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        suspends_2.load(Ordering::SeqCst),
+        1,
+        "logind Suspend must execute once host.lock-ack completes"
+    );
+
+    host.invoke_command(CommandInvokeParams {
+        name: CommandName::try_new("quit").unwrap(),
+        args: Vec::new(),
+        payload: None,
+    })
+    .await
+    .unwrap();
     timeout(Duration::from_secs(3), server_task)
         .await
         .unwrap()

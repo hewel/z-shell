@@ -43,6 +43,7 @@ import {
   hasWindowsOnMonitor,
   isImeTrayItem,
   isMediaPlayerAudible,
+  isSessionLockActive,
   maxThermalCelsius,
   notificationGroupKey,
   partitionPluginBarWidgets,
@@ -1788,5 +1789,40 @@ describe("System Monitor telemetry helpers, chart paths & backwards compatibilit
     expect(configured.left.map(s => s.id)).toEqual(["ai-default"]);
     expect(configured.center.map(s => s.id)).toEqual(["ai-primary"]);
     expect(configured.right.map(s => s.id)).toEqual(["clock-extra"]);
+  });
+});
+
+describe("isSessionLockActive & buildDockItems desktopId", () => {
+  test("treats engaging, locked, fallback_spawned, and sleep_hold as active lock states", () => {
+    const base = {
+      phase: "unlocked" as const,
+      lock_id: null,
+      sleep_hold: false,
+      host_connected: true,
+      ui_session_generation: 1,
+      last_error: null,
+    };
+    expect(isSessionLockActive(undefined)).toBe(false);
+    expect(isSessionLockActive(null)).toBe(false);
+    expect(isSessionLockActive(base)).toBe(false);
+    expect(isSessionLockActive({ ...base, sleep_hold: true })).toBe(true);
+    expect(isSessionLockActive({ ...base, phase: "engaging", lock_id: 1 })).toBe(true);
+    expect(isSessionLockActive({ ...base, phase: "locked", lock_id: 1 })).toBe(true);
+    expect(isSessionLockActive({ ...base, phase: "fallback_spawned", lock_id: 1 })).toBe(true);
+  });
+
+  test("resolves canonical desktopId when pinned app omits .desktop suffix", () => {
+    const catalog: readonly DesktopAppSummary[] = [
+      { id: "org.mozilla.firefox.desktop", title: "Firefox", startup_wm_class: "firefox" },
+    ];
+    const dock = buildDockItems(["firefox"], [], catalog);
+    expect(dock.pinned).toEqual([{
+      appId: "firefox",
+      desktopId: "org.mozilla.firefox.desktop",
+      title: "Firefox",
+      pinned: true,
+      windows: [],
+      focused: false,
+    }]);
   });
 });

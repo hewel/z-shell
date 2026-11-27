@@ -5,6 +5,7 @@ import { createRetainedPresence, dialogMotionStyle, scrimBackdrop, useMotionSche
 import { useShellStore } from "../store.ts";
 import {
   filterWorkspacesForMonitor,
+  isSessionLockActive,
   resolveActiveMonitor,
   resolveDesktopApp,
   resolveMonitorLogicalSize,
@@ -317,10 +318,11 @@ function OverviewContent(props: {
 }
 
 export function OverviewOverlay(): NativeChild {
-  const { activePanel, activePanelTarget, activeMonitor, monitors, outputs, windows } = useShellStore();
+  const { activePanel, activePanelTarget, activeMonitor, monitors, outputs, windows, sessionLock } = useShellStore();
   const scheme = useMotionScheme();
+  const lockActive = () => isSessionLockActive(sessionLock.data());
   const targetOutputId = () => {
-    if (activePanel() !== "overview") return null;
+    if (lockActive() || activePanel() !== "overview") return null;
     return resolveActiveMonitor(monitors(), {
       preferredMonitorId: activePanelTarget()?.monitorId,
       windows: windows.data(),
@@ -333,6 +335,7 @@ export function OverviewOverlay(): NativeChild {
     enterRole: "slowSpatial",
     enterOpacityRole: "slowEffects",
     exitRole: "slowEffects",
+    instantExit: lockActive,
   });
 
   return (
