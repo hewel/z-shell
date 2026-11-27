@@ -1,6 +1,7 @@
 import { Button, For, Image, LayerSurface, Show, TextField, createEffect, createMemo, createSignal, cx, flush, focus, onCleanup, scrollIntoView, type Accessor, type NativeChild, type NativeKeyEvent, type NativeNode } from "@hewel/zgui";
 import { createVirtualFocus } from "@hewel/zgui/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
+import { launcherActivationAppId, mintActivationToken, withActivationToken } from "../activation.ts";
 import { ShellIcon } from "../icons.tsx";
 import { SPRING_EPSILON, createM3Spring, createRetainedPresence, dialogMotionStyle, scrimBackdrop, useMotionScheme, type M3Spring } from "../motion.ts";
 import { useShellStore } from "../store.ts";
@@ -80,11 +81,19 @@ function LauncherContent(props: {
   }
 
   function activateItem(item: LauncherItem): void {
-    if (resolvedQueryId() !== latestQueryId) return;
-    void invokePublic("launcher.activate", {
-      query_id: resolvedQueryId(), provider_id: item.provider_id, item_id: item.item_id,
-    });
+    const queryId = resolvedQueryId();
+    if (queryId !== latestQueryId) return;
+    const tokenPromise = mintActivationToken(launcherActivationAppId(item));
     dismiss();
+    void tokenPromise.then(token =>
+      invokePublic(
+        "launcher.activate",
+        withActivationToken(
+          { query_id: queryId, provider_id: item.provider_id, item_id: item.item_id },
+          token,
+        ),
+      ),
+    );
   }
 
   const virtualFocus = createVirtualFocus({

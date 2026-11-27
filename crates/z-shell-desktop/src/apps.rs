@@ -12,6 +12,7 @@ use z_shell_protocol::MediaRef;
 use zbus::names::OwnedWellKnownName;
 use zbus::zvariant::OwnedObjectPath;
 
+use crate::ActivationToken;
 use crate::assets::{cache_icon, read_bounded};
 
 const DESKTOP_FILE_BYTES: usize = 256 * 1024;
@@ -34,6 +35,7 @@ pub(crate) struct DbusTarget {
 pub(crate) struct DbusActivation {
     pub(crate) target: DbusTarget,
     pub(crate) action: Option<String>,
+    pub(crate) token: Option<ActivationToken>,
 }
 
 #[derive(Debug)]
@@ -65,15 +67,22 @@ pub(crate) struct Action {
 }
 
 impl App {
-    pub(crate) fn launch_plan(&self, action: Option<&str>) -> Option<LaunchPlan> {
+    pub(crate) fn launch_plan(
+        &self,
+        action: Option<&str>,
+        token: Option<ActivationToken>,
+    ) -> Option<LaunchPlan> {
         let exec = match action {
             Some(id) => &self.actions.iter().find(|action| action.id == id)?.exec,
             None => &self.exec,
         };
-        let command = exec.as_deref().and_then(|argv| self.build_command(argv));
+        let command = exec
+            .as_deref()
+            .and_then(|argv| self.build_command(argv, token.as_ref()));
         let dbus = self.dbus_activatable.clone().map(|target| DbusActivation {
             target,
             action: action.map(str::to_owned),
+            token,
         });
         if dbus.is_none() && command.is_none() {
             return None;
@@ -81,7 +90,7 @@ impl App {
         Some(LaunchPlan { dbus, command })
     }
 
-    fn build_command(&self, argv: &[String]) -> Option<Command> {
+    fn build_command(&self, argv: &[String], token: Option<&ActivationToken>) -> Option<Command> {
         let (program, args) = argv.split_first()?;
         let mut command = if self.terminal {
             // Use the platform's terminal selection instead of an implicit command shell.
@@ -94,6 +103,10 @@ impl App {
         command.args(args);
         if let Some(path) = &self.working_directory {
             command.current_dir(path);
+        }
+        if let Some(token) = token {
+            command.env("XDG_ACTIVATION_TOKEN", token.as_str());
+            command.env("DESKTOP_STARTUP_ID", token.as_str());
         }
         Some(command)
     }

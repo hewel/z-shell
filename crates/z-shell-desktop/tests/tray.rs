@@ -836,3 +836,321 @@ async fn lazy_menus_submenus_mnemonics_timeout_preservation_and_activate_fallbac
 
     desktop.shutdown().await;
 }
+
+#[derive(Debug, PartialEq, Eq)]
+enum TokenCall {
+    Token(String),
+    Activate(i32, i32),
+    MenuClick(i32, u32),
+    MenuClose(i32, u32),
+}
+
+type TokenHold = (
+    tokio::sync::oneshot::Sender<()>,
+    tokio::sync::oneshot::Receiver<()>,
+);
+
+struct TokenAwareSniItem {
+    calls: mpsc::UnboundedSender<TokenCall>,
+    hold_next_token: std::sync::Mutex<Option<TokenHold>>,
+    fail_unknown_object: Arc<AtomicBool>,
+}
+
+#[zbus::interface(name = "org.kde.StatusNotifierItem")]
+impl TokenAwareSniItem {
+    #[zbus(property)]
+    fn title(&self) -> &str {
+        "Token-aware Telegram"
+    }
+
+    #[zbus(property)]
+    fn menu(&self) -> ObjectPath<'_> {
+        ObjectPath::try_from("/TokenMenu").expect("valid menu path")
+    }
+
+    #[zbus(name = "ProvideXdgActivationToken")]
+    async fn provide_xdg_activation_token(&self, token: String) {
+        self.calls.send(TokenCall::Token(token)).unwrap();
+        let hold = self.hold_next_token.lock().unwrap().take();
+        if let Some((entered, release)) = hold {
+            let _ = entered.send(());
+            let _ = release.await;
+        }
+    }
+
+    fn activate(&self, x: i32, y: i32) -> zbus::fdo::Result<()> {
+        if self.fail_unknown_object.load(Ordering::Relaxed) {
+            return Err(zbus::fdo::Error::UnknownObject("object vanished".into()));
+        }
+        self.calls.send(TokenCall::Activate(x, y)).unwrap();
+        Ok(())
+    }
+}
+
+struct TokenAwareMenu(mpsc::UnboundedSender<TokenCall>);
+
+#[zbus::interface(name = "com.canonical.dbusmenu")]
+impl TokenAwareMenu {
+    fn get_layout(&self, _parent: i32, _depth: i32, _properties: Vec<String>) -> (u32, Layout) {
+        let child = Structure::from((
+            77i32,
+            HashMap::from([("label", DbusValue::from("Show Window"))]),
+            Vec::<OwnedValue>::new(),
+        ));
+        (
+            1,
+            (
+                0,
+                HashMap::new(),
+                vec![OwnedValue::try_from(DbusValue::from(child)).unwrap()],
+            ),
+        )
+    }
+
+    fn event(&self, id: i32, event: String, _data: OwnedValue, timestamp: u32) {
+        match event.as_str() {
+            "clicked" => self.0.send(TokenCall::MenuClick(id, timestamp)).unwrap(),
+            "closed" => self.0.send(TokenCall::MenuClose(id, timestamp)).unwrap(),
+            _ => {}
+        }
+    }
+}
+
+#[tokio::test]
+async fn tray_activation_tokens_validate_precede_actions_and_ignore_legacy_unknown_method() {
+    let session = TestBus::new();
+    let modern_conn = session.connection().await;
+    let legacy_conn = session.connection().await;
+    let dir = tempfile::tempdir().expect("temporary shell root");
+    let paths = paths(dir.path());
+    let hub = BusHub::new("tray-token-test", paths.media_dir());
+
+    let (modern_tx, mut modern_rx) = mpsc::unbounded_channel();
+    let (legacy_tx, mut legacy_rx) = mpsc::unbounded_channel();
+    let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+    let fail_unknown_object = Arc::new(AtomicBool::new(false));
+
+    modern_conn
+        .object_server()
+        .at(
+            "/StatusNotifierItem",
+            TokenAwareSniItem {
+                calls: modern_tx.clone(),
+                hold_next_token: std::sync::Mutex::new(Some((entered_tx, release_rx))),
+                fail_unknown_object: Arc::clone(&fail_unknown_object),
+            },
+        )
+        .await
+        .unwrap();
+    modern_conn
+        .object_server()
+        .at("/TokenMenu", TokenAwareMenu(modern_tx))
+        .await
+        .unwrap();
+    modern_conn
+        .request_name("org.example.ModernTray")
+        .await
+        .unwrap();
+
+    // `Item` does NOT implement `ProvideXdgActivationToken`, so zbus replies UnknownMethod.
+    legacy_conn
+        .object_server()
+        .at(
+            "/StatusNotifierItem",
+            Item {
+                alternate: Arc::new(AtomicBool::new(false)),
+                actions: legacy_tx.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    legacy_conn
+        .object_server()
+        .at(MENU, Menu(legacy_tx))
+        .await
+        .unwrap();
+    legacy_conn.request_name(ITEM).await.unwrap();
+
+    let desktop = DesktopServices::install_with_options(
+        &hub,
+        &paths,
+        DesktopOptions {
+            session_bus: SessionBusAddress::Address(session.address().to_owned()),
+            tray: true,
+            notifications: false,
+            xdg_data_dirs: Vec::new(),
+            ..Default::default()
+        },
+    );
+    let (snapshot, outbound) = subscribe(&hub, "desktop.tray").await;
+    let snapshot = wait_for(snapshot, &outbound, |state| state["available"] == true).await;
+
+    let watcher: Proxy<'_> = Proxy::new(&modern_conn, WATCHER, WATCHER_PATH, WATCHER)
+        .await
+        .unwrap();
+    watcher
+        .call::<_, _, ()>("RegisterStatusNotifierItem", &("org.example.ModernTray",))
+        .await
+        .unwrap();
+    watcher
+        .call::<_, _, ()>("RegisterStatusNotifierItem", &(ITEM,))
+        .await
+        .unwrap();
+
+    let modern_id = "org.example.ModernTray/StatusNotifierItem";
+    let _snapshot = wait_for(snapshot, &outbound, |state| {
+        item(state, modern_id).is_some_and(|entry| entry["menu"]["root"]["children"][0]["id"] == 77)
+            && item(state, ITEM_ID)
+                .is_some_and(|entry| entry["menu"]["root"]["children"][0]["id"] == 42)
+    })
+    .await;
+
+    // 1. Boundary validation on tray.activate and tray.menu-item.
+    let too_long = "t".repeat(257);
+    for bad in [too_long.as_str(), "tok\nen", "tok\0en", "tok\x7fen"] {
+        assert_eq!(
+            invoke(
+                &hub,
+                ClientRole::Public,
+                "tray.activate",
+                json!({"id": modern_id, "activation_token": bad}),
+            )
+            .await
+            .expect_err("malformed token rejected on tray.activate")
+            .code,
+            ErrorCode::InvalidParams
+        );
+        assert_eq!(
+            invoke(
+                &hub,
+                ClientRole::Public,
+                "tray.menu-item",
+                json!({"id": modern_id, "menu_id": 77, "activation_token": bad}),
+            )
+            .await
+            .expect_err("malformed token rejected on tray.menu-item")
+            .code,
+            ErrorCode::InvalidParams
+        );
+    }
+
+    // 2. Modern SNI item: pipelined tray.menu-item (with token) + tray.close-menu preserves
+    // ProvideXdgActivationToken -> Event(clicked) -> Event(closed) order even when close-menu
+    // arrives while ProvideXdgActivationToken is in flight.
+    let menu_item_hub = hub.clone();
+    let menu_item_task = tokio::spawn(async move {
+        invoke(
+            &menu_item_hub,
+            ClientRole::Public,
+            "tray.menu-item",
+            json!({
+                "id": modern_id,
+                "menu_id": 77,
+                "timestamp": 101,
+                "activation_token": "tok-tray-pipelined",
+            }),
+        )
+        .await
+    });
+    tokio::time::timeout(Duration::from_secs(2), entered_rx)
+        .await
+        .expect("ProvideXdgActivationToken entered")
+        .unwrap();
+    let close_hub = hub.clone();
+    let close_task = tokio::spawn(async move {
+        invoke(
+            &close_hub,
+            ClientRole::Public,
+            "tray.close-menu",
+            json!({"id": modern_id, "menu_id": 0, "timestamp": 102}),
+        )
+        .await
+    });
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+    }
+    let _ = release_tx.send(());
+    menu_item_task
+        .await
+        .unwrap()
+        .expect("pipelined tray.menu-item succeeds");
+    close_task
+        .await
+        .unwrap()
+        .expect("pipelined tray.close-menu succeeds");
+    assert_eq!(
+        receive(&mut modern_rx).await,
+        TokenCall::Token("tok-tray-pipelined".to_owned())
+    );
+    assert_eq!(receive(&mut modern_rx).await, TokenCall::MenuClick(77, 101));
+    assert_eq!(receive(&mut modern_rx).await, TokenCall::MenuClose(0, 102));
+
+    // Direct tray.activate with token also sends ProvideXdgActivationToken strictly before Activate.
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "tray.activate",
+        json!({"id": modern_id, "x": 14, "y": 28, "activation_token": "tok-tray-act-1"}),
+    )
+    .await
+    .expect("tray.activate with token succeeds");
+    assert_eq!(
+        receive(&mut modern_rx).await,
+        TokenCall::Token("tok-tray-act-1".to_owned())
+    );
+    assert_eq!(receive(&mut modern_rx).await, TokenCall::Activate(14, 28));
+
+    // Omitted / empty token skips ProvideXdgActivationToken.
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "tray.activate",
+        json!({"id": modern_id, "x": 1, "y": 2, "activation_token": ""}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(receive(&mut modern_rx).await, TokenCall::Activate(1, 2));
+
+    // UnknownObject from Activate on an item with has_menu fails rather than claiming menu fallback.
+    fail_unknown_object.store(true, Ordering::Relaxed);
+    assert_eq!(
+        invoke(
+            &hub,
+            ClientRole::Public,
+            "tray.activate",
+            json!({"id": modern_id, "x": 3, "y": 4}),
+        )
+        .await
+        .expect_err("UnknownObject on Activate must not trigger menu fallback")
+        .code,
+        ErrorCode::Internal
+    );
+    fail_unknown_object.store(false, Ordering::Relaxed);
+
+    // 3. Legacy SNI item returning UnknownMethod on ProvideXdgActivationToken still runs Activate & menu click.
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "tray.activate",
+        json!({"id": ITEM_ID, "x": 7, "y": 8, "activation_token": "tok-legacy-act"}),
+    )
+    .await
+    .expect("legacy tray.activate ignores UnknownMethod on ProvideXdgActivationToken");
+    assert_eq!(receive(&mut legacy_rx).await, Call::Activate(7, 8));
+
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "tray.menu-item",
+        json!({"id": ITEM_ID, "menu_id": 42, "timestamp": 55, "activation_token": "tok-legacy-menu"}),
+    )
+    .await
+    .expect("legacy tray.menu-item ignores UnknownMethod on ProvideXdgActivationToken");
+    assert_eq!(
+        receive(&mut legacy_rx).await,
+        Call::Menu(42, "clicked".to_owned(), 55)
+    );
+
+    desktop.shutdown().await;
+}

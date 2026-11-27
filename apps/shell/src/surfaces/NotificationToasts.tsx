@@ -1,6 +1,7 @@
 import { Button, For, Image, LayerSurface, Show, createEffect, createMemo, createSignal, cx, onCleanup, type Accessor, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { M3CardAction, M3Collapsible, M3InteractiveCard } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
+import { invokeNotificationAction } from "../activation.ts";
 import { ShellIcon } from "../icons.tsx";
 import { createEnterProgress, createOpacityEnter, createRetainedPresence, useMotionScheme, type M3Spring } from "../motion.ts";
 import { usePinnedOutput, useShellStore } from "../store.ts";
@@ -43,6 +44,7 @@ function ToastCard(props: {
   groupExpanded?: Accessor<boolean> | boolean;
   onToggleGroup?: () => void;
   onDismissGroup?: () => void;
+  onActionDispatch?: (pending: Promise<void>) => void;
 }): NativeChild {
   const { hostClient, invokePublic } = useShellStore();
   const countValue = () => (typeof props.groupCount === "function" ? props.groupCount() : (props.groupCount ?? 1));
@@ -106,7 +108,8 @@ function ToastCard(props: {
       onClick={actions().defaultAction
         ? () => {
             const def = actions().defaultAction;
-            if (def) void invokePublic("notifications.invoke-action", { id: props.toast().id, action_key: def.key });
+            if (!def) return;
+            props.onActionDispatch?.(invokeNotificationAction(invokePublic, props.toast(), def.key));
           }
         : undefined}
       class={styles.toastCard}
@@ -167,7 +170,11 @@ function ToastCard(props: {
                 <Button
                   testId={`toast-action-${props.toast().id}-${action().key}`}
                   class={styles.actionButton}
-                  onClick={() => { void invokePublic("notifications.invoke-action", { id: props.toast().id, action_key: action().key }); }}
+                  onClick={() => {
+                    props.onActionDispatch?.(
+                      invokeNotificationAction(invokePublic, props.toast(), action().key),
+                    );
+                  }}
                 >
                   <text class={styles.clipped}>{action().label}</text>
                 </Button>
@@ -239,9 +246,22 @@ function ToastSurface(props: {
 
   // Pause daemon 5s auto-expiry whenever the user is hovering or viewing any expanded app group.
   let lastPaused = false;
+  let pendingActionDispatch: Promise<void> | null = null;
+  const trackActionDispatch = (pending: Promise<void>) => {
+    pendingActionDispatch = pending;
+  };
   createEffect(() => props.visible() && (expandedKeys().length > 0 || hovered()), paused => {
     if (paused === lastPaused) return;
     lastPaused = paused;
+    const waitForAction = pendingActionDispatch;
+    pendingActionDispatch = null;
+    if (waitForAction) {
+      void waitForAction.finally(() => {
+        if (disposed || lastPaused !== paused) return;
+        void invokePublic("notifications.set-paused", { paused });
+      });
+      return;
+    }
     void invokePublic("notifications.set-paused", { paused });
   });
   onCleanup(() => {
@@ -349,6 +369,7 @@ function ToastSurface(props: {
                       groupExpanded={isExpanded}
                       onToggleGroup={() => toggleGroup(group().appKey)}
                       onDismissGroup={() => { void dismissGroup(group().items); }}
+                      onActionDispatch={trackActionDispatch}
                     />
                     <Show when={isMulti() && !isExpanded()}>
                       <ToastDeckPeek
@@ -370,6 +391,7 @@ function ToastSurface(props: {
                               stackOpacity={props.opacity}
                               promoted={false}
                               staggerIndex={itemIndex() + 1}
+                              onActionDispatch={trackActionDispatch}
                             />
                           )}
                         </For>

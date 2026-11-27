@@ -3,6 +3,7 @@ import {
   type Accessor, type ButtonProps, type Monitor, type NativeNode, type NativeStyle, type NativeWheelEvent, type NativeWindowRect,
 } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
+import { activateTrayItemWithFallback } from "../activation.ts";
 import { MiniSparkline, SplitDualArcGauge } from "../charts/TelemetryCharts.tsx";
 import { MediaEqIcon, ShellIcon } from "../icons.tsx";
 import { SPRING_EPSILON, createEnterProgress, createM3Spring, useMotionScheme } from "../motion.ts";
@@ -10,7 +11,7 @@ import { useShellStore, type PluginBarWidgetSlot } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import {
   DEFAULT_BAR_SETTINGS, computeMemoryBreakdown, filterWorkspacesForMonitor, findActiveWindowForMonitor,
-  formatBarClock, formatSurfaceName, hasTrayMenu, isImeTrayItem, isMediaPlayerAudible, isTrayActivateMenuFallback, partitionPluginBarWidgets, partitionTrayItems, resolveBarLayout, resolveBarPopupAnchor, resolveDesktopApp, resolveWorkspaceLabel, selectActiveMediaPlayer,
+  formatBarClock, formatSurfaceName, hasTrayMenu, isImeTrayItem, isMediaPlayerAudible, partitionPluginBarWidgets, partitionTrayItems, resolveBarLayout, resolveBarPopupAnchor, resolveDesktopApp, resolveWorkspaceLabel, selectActiveMediaPlayer,
   type ResolvedBarLayout, type TrayItem, type WaylandWindow, type WaylandWorkspace,
 } from "../topics.ts";
 import styles from "./StatusBar.module.css";
@@ -312,21 +313,19 @@ function TrayButton(props: { item: TrayItem; vertical: boolean; docked: boolean;
       data-docked={props.docked ? "true" : "false"}
       class={styles.trayButton}
       onClick={event => {
-        const item = props.item;
+        const { item, monitorId, surfaceName } = props;
         const anchorRect = anchorFor(event.currentTarget);
         if (item.item_is_menu && hasTrayMenu(item)) {
           event.stopPropagation();
-          openTrayMenu({ itemId: item.id, monitorId: props.monitorId, parentSurface: props.surfaceName, anchorRect });
+          openTrayMenu({ itemId: item.id, monitorId, parentSurface: surfaceName, anchorRect });
         } else {
-          void invokePublic("tray.activate", { id: item.id }).then(res => {
-            if (isTrayActivateMenuFallback(res)) {
-              openTrayMenu({
-                itemId: item.id,
-                monitorId: props.monitorId,
-                parentSurface: props.surfaceName,
-                anchorRect,
-              });
-            }
+          activateTrayItemWithFallback(invokePublic, item.id, () => {
+            openTrayMenu({
+              itemId: item.id,
+              monitorId,
+              parentSurface: surfaceName,
+              anchorRect,
+            });
           });
         }
       }}

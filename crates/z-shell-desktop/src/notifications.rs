@@ -26,7 +26,7 @@ use crate::{
     },
     failed,
     launcher::Launcher,
-    ok, payload, publish, register,
+    ok, parse_activation_token, payload, publish, register,
 };
 
 const TOPIC: &str = "desktop.notifications";
@@ -117,6 +117,8 @@ struct Notification {
     revision: u64,
     app_name: String,
     app_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    desktop_entry: Option<String>,
     summary: String,
     body: String,
     icon: Option<NotificationMedia>,
@@ -415,6 +417,7 @@ impl Notifications {
                 revision,
                 app_name: incoming.app_name,
                 app_key,
+                desktop_entry: incoming.desktop_entry,
                 summary: incoming.summary,
                 body: incoming.body,
                 icon: incoming.icon,
@@ -609,11 +612,14 @@ impl Notifications {
         call: CommandCall,
     ) -> Result<CommandInvokeResult, RpcError> {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Invoke<'a> {
             id: u32,
             action_key: &'a str,
+            #[serde(default)]
+            activation_token: Option<String>,
         }
-        let (connection, id, action_key, close_after) = {
+        let (connection, id, action_key, token, close_after) = {
             let mut state = self.state();
             if state.lock == ImeLockState::Locked {
                 return Err(RpcError::new(
@@ -621,7 +627,12 @@ impl Notifications {
                     "notification actions are denied while the session is locked",
                 ));
             }
-            let Invoke { id, action_key } = payload(&call)?;
+            let Invoke {
+                id,
+                action_key,
+                activation_token,
+            } = payload(&call)?;
+            let token = parse_activation_token(activation_token)?;
             let index = state
                 .history
                 .iter()
@@ -646,9 +657,18 @@ impl Notifications {
                 }
                 self.timer_changed.notify_one();
             }
-            (connection, id, action_key, close_after)
+            (connection, id, action_key, token, close_after)
         };
-        Interface::action_invoked(&signal_emitter(&connection)?, id, action_key)
+        let emitter = signal_emitter(&connection)?;
+        if let Some(token) = &token {
+            Interface::activation_token(&emitter, id, token.as_str())
+                .await
+                .map_err(|error| {
+                    tracing::debug!(%error, id, "failed to emit Notification ActivationToken");
+                    failed("cannot signal notification activation token")
+                })?;
+        }
+        Interface::action_invoked(&emitter, id, action_key)
             .await
             .map_err(|error| {
                 tracing::debug!(%error, id, "failed to emit Notification ActionInvoked");
@@ -827,7 +847,7 @@ impl Interface {
         let desktop_entry = hints
             .get("desktop-entry")
             .and_then(|value| <&str>::try_from(value).ok())
-            .map(|value| clip_text(value, 256))
+            .map(|value| clip_text(value.trim(), 256))
             .filter(|value| !value.is_empty());
         let has_image = hints.keys().any(|key| {
             matches!(
@@ -916,6 +936,13 @@ impl Interface {
         emitter: &zbus::object_server::SignalEmitter<'_>,
         id: u32,
         action_key: &str,
+    ) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn activation_token(
+        emitter: &zbus::object_server::SignalEmitter<'_>,
+        id: u32,
+        activation_token: &str,
     ) -> zbus::Result<()>;
 }
 

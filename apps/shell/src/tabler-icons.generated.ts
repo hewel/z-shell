@@ -66,6 +66,10 @@ export const TABLER_ICON_PATHS = {
     viewBox: "0 0 24 24",
     d: "M5 12l14 0\nM5 12l6 6\nM5 12l6 -6",
   },
+  keyboardCapslock: {
+    viewBox: "0 0 24 24",
+    d: "M9 12h-3.586a1 1 0 0 1 -.707 -1.707l6.586 -6.586a1 1 0 0 1 1.414 0l6.586 6.586a1 1 0 0 1 -.707 1.707h-3.586v6h-6v-6\nM9 21h6",
+  },
   add: {
     viewBox: "0 0 24 24",
     d: "M12 5l0 14\nM5 12l14 0",

@@ -1,6 +1,6 @@
 import {
   Button, For, Image, SessionLockSurface, Show, TextField, createDelay, createEffect, createMemo, createSignal, cx, flush,
-  focus, getSessionGeneration, onCleanup, requestSessionLock,
+  focus, getSessionGeneration, onCleanup, requestSessionLock, useCapsLock,
   type Accessor, type Monitor, type NativeChild, type NativeNode, type SessionLockRequest,
 } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
@@ -81,6 +81,7 @@ function LockScreen(props: {
   readonly controls: LockControls;
 }): NativeChild {
   const { hostClient, wallpaper, power, ime, media } = useShellStore();
+  const capsLock = useCapsLock();
   const scheme = useMotionScheme();
   const entryFade = createOpacityEnter("slowEffects", scheme);
   const shakeX = createM3Spring(() => 0, "fastSpatial", {
@@ -214,18 +215,28 @@ function LockScreen(props: {
             </Button>
           </row>
         </row>
-        <Show when={props.controls.sleepHold()}><text testId="lock-sleep-hold">Preparing for sleep…</text></Show>
-        <Show when={props.controls.authenticating()}>
-          <row testId="lock-verifying" role="status" class={styles.verifyingPill}>
-            <box ariaHidden class={styles.verifyingDot} />
-            <text class={styles.verifyingText}>Verifying PAM credentials...</text>
-          </row>
-        </Show>
-        <Show when={props.controls.error()}>
-          <text testId="lock-error" role="alert" class={styles.errorText}>
-            {props.controls.error()}
-          </text>
-        </Show>
+        <column class={styles.statusSlot}>
+          <Show when={capsLock()}>
+            <row testId="lock-caps-lock" role="status" class={styles.capsLockPill}>
+              <ShellIcon name="keyboardCapslock" size={14} color="var(--color-on-secondary-container)" />
+              <text class={styles.capsLockText}>Caps Lock is on</text>
+            </row>
+          </Show>
+          <Show when={props.controls.sleepHold()}>
+            <text testId="lock-sleep-hold">Preparing for sleep…</text>
+          </Show>
+          <Show when={props.controls.authenticating()}>
+            <row testId="lock-verifying" role="status" class={styles.verifyingPill}>
+              <box ariaHidden class={styles.verifyingDot} />
+              <text class={styles.verifyingText}>Verifying PAM credentials...</text>
+            </row>
+          </Show>
+          <Show when={props.controls.error()}>
+            <text testId="lock-error" role="alert" class={styles.errorText}>
+              {props.controls.error()}
+            </text>
+          </Show>
+        </column>
         <Show when={playing()}>{player => (
           <row class={styles.playingRow}>
             <ShellIcon name="play" size={14} color="var(--color-on-surface)" />

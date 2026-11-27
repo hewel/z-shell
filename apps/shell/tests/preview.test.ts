@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect } from "bun:test";
-import { cpSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { buildShellApplication } from "@z-shell/composer";
@@ -781,13 +781,13 @@ describe("apps/shell preview", () => {
             payload: { id: 1, action_key: "open" },
             atMs: 40,
           },
-          { id: 27, name: "notifications.set-paused", payload: { paused: true }, atMs: 40 },
           {
-            id: 28,
+            id: 27,
             name: "notifications.dismiss-popups",
             payload: { items: [{ id: 1, revision: 1 }, { id: 2, revision: 1 }] },
             atMs: 40,
           },
+          { id: 28, name: "notifications.set-paused", payload: { paused: true }, atMs: 50 },
           { id: 29, name: "ime.select-candidate", payload: { index: 1 }, atMs: 2070 },
           { id: 30, name: "ime.page-down", payload: {}, atMs: 2070 },
         ],
@@ -2864,6 +2864,518 @@ export default composedPlugins;
 
       expect(previewSurfaces(out, "after-empty-lazy")).not.toContain("tray-menu");
       expect(previewSurfaces(out, "after-cal-open")).toContain("panel-calendar");
+    } finally {
+      cleanup();
+    }
+  });
+
+  previewTest("gesture-bound xdg_activation_v1 tokens forward across Dock, Launcher, Notifications, and Tray, and SessionLockOverlay renders reactive Caps Lock indicator without layout shift", async () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-activation-caps-");
+    const monitor = {
+      id: "dp-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900,
+      scale: 1, refreshRateMilliHz: 60000,
+    };
+    try {
+      const stagedShellDir = join(workspace, "shell");
+      mkdirSync(stagedShellDir, { recursive: true });
+      for (const entry of ["package.json", "tsconfig.json", "assets", "src", "preview"]) {
+        cpSync(join(shellDir, entry), join(stagedShellDir, entry), { recursive: true });
+      }
+      symlinkSync(join(repoRoot, "node_modules"), join(stagedShellDir, "node_modules"), "dir");
+
+      writeFileSync(
+        join(stagedShellDir, "src", "test-activation-shim.ts"),
+        `const host = globalThis as unknown as {
+  __zguiShell?: {
+    requestActivationToken: (options?: { readonly appId?: string }) => Promise<string | null>;
+    openLock: (
+      name: string,
+      output: string,
+      attach: (root: unknown, bridge: Record<string, unknown>) => () => void,
+    ) => number;
+  };
+};
+
+let installed = false;
+let tokenSeq = 0;
+let capsLockActive = true;
+const capsSubscribers = new Map<number, (next: boolean) => void>();
+let nextSubId = 1;
+
+export function installTestActivationShim(): void {
+  if (installed) return;
+  const shell = host.__zguiShell;
+  if (!shell) return;
+  installed = true;
+
+  shell.requestActivationToken = (options?: { readonly appId?: string }) => {
+    tokenSeq += 1;
+    const tag = options?.appId ?? "<none>";
+    return Promise.resolve(\`tok-\${tokenSeq}:\${tag}\`);
+  };
+
+  const origOpenLock = shell.openLock.bind(shell);
+  shell.openLock = (name, output, attach) =>
+    origOpenLock(name, output, (root, bridge) => {
+      bridge.getCapsLock = () => capsLockActive;
+      bridge.subscribeCapsLock = (cb: (next: boolean) => void) => {
+        const id = nextSubId++;
+        capsSubscribers.set(id, cb);
+        return () => {
+          capsSubscribers.delete(id);
+        };
+      };
+      const origSetProperty = (
+        bridge.setProperty as (node: unknown, prop: string, value: unknown, prev?: unknown) => void
+      ).bind(bridge);
+      const nodeTestIds = new WeakMap<object, unknown>();
+      bridge.setProperty = (node: unknown, prop: string, value: unknown, prev?: unknown) => {
+        if (typeof node === "object" && node !== null && prop === "testId") {
+          nodeTestIds.set(node, value);
+        }
+        if (
+          typeof node === "object" &&
+          node !== null &&
+          prop === "onKeyDown" &&
+          typeof value === "function" &&
+          nodeTestIds.get(node) === "lock-password"
+        ) {
+          const origHandler = value as (ev: { readonly key?: string }) => void;
+          origSetProperty(
+            node,
+            prop,
+            (ev: { readonly key?: string }) => {
+              if (ev.key === "PageDown") {
+                capsLockActive = !capsLockActive;
+                for (const notify of [...capsSubscribers.values()]) notify(capsLockActive);
+                return;
+              }
+              origHandler(ev);
+            },
+            prev,
+          );
+          return;
+        }
+        origSetProperty(node, prop, value, prev);
+      };
+      return attach(root, bridge);
+    });
+}
+`,
+      );
+
+      const baseMainSource = readFileSync(join(shellDir, "src", "main.tsx"), "utf8");
+      expect(baseMainSource).toContain("export function mount(): () => void {\n");
+      writeFileSync(
+        join(stagedShellDir, "src", "main.tsx"),
+        `import { installTestActivationShim } from "./test-activation-shim.ts";\n` +
+          baseMainSource.replace(
+            "export function mount(): () => void {\n",
+            "export function mount(): () => void {\n  installTestActivationShim();\n",
+          ),
+      );
+
+      const stagedPublished = await buildShellApplication({
+        app: "shell",
+        appDirectory: stagedShellDir,
+      });
+
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+
+      // 1. Dock inactive pinned app click -> apps.launch with tok-1:org.gnome.TextEditor
+      const dockLaunchAtMs = timeline.after(5);
+      timeline.step({
+        id: "click-dock-pinned",
+        op: "pointer.click",
+        target: { surface: "dock-dp-1", testId: "dock-app-org.gnome.TextEditor.desktop" },
+        button: "primary",
+      });
+      timeline.advance("dock-launch-settle", 20);
+
+      // 2. Launcher open + Enter keydown -> launcher.activate with tok-2:Alacritty and immediate overlay dismiss
+      const launcherQueryAtMs = timeline.after(5);
+      timeline.step({
+        id: "open-launcher",
+        op: "pointer.click",
+        target: { surface: "bar-dp-1", testId: "bar-launcher" },
+        button: "primary",
+      });
+      timeline.advance("launcher-open-settle", 250);
+      const launcherActivateAtMs = timeline.after(5);
+      timeline.step({ id: "enter-launcher-item", op: "key.press", surface: "launcher-overlay", key: "Enter" });
+      timeline.advance("launcher-dismiss-settle", 250);
+      timeline.step({ id: "after-launcher-dismiss", op: "monitors.set", monitors: [monitor] });
+
+      // 3. Notification toast action click -> notifications.invoke-action with tok-3:org.signal.Signal (uses desktop_entry, NOT app_name!)
+      const notifActionAtMs = timeline.after(5);
+      const notifPausedAtMs = timeline.after(8);
+      timeline.step({
+        id: "click-toast-reply",
+        op: "pointer.click",
+        target: { surface: "notification-toasts", testId: "toast-action-1-reply" },
+        button: "primary",
+      });
+      timeline.advance("notif-action-settle", 20);
+
+      // 4. Tray icon click -> tray.activate with tok-4:<none>, and DBusMenu leaf click -> tray.menu-item (tok-5:<none>) strictly before tray.close-menu!
+      const trayActivateAtMs = timeline.after(5);
+      timeline.step({
+        id: "click-tray-discord",
+        op: "pointer.click",
+        target: { surface: "bar-dp-1", testId: "tray-item-discord" },
+        button: "primary",
+      });
+      timeline.advance("tray-activate-settle", 20);
+
+      const prepareTelegramAtMs = timeline.after(5);
+      timeline.step({
+        id: "open-telegram-menu",
+        op: "pointer.click",
+        target: { surface: "bar-dp-1", testId: "tray-item-telegram" },
+        button: "primary",
+      });
+      timeline.advance("telegram-menu-open", 250);
+
+      const trayMenuItemAtMs = timeline.after(5);
+      const trayCloseMenuAtMs = timeline.after(8);
+      timeline.step({
+        id: "click-telegram-menu-item",
+        op: "pointer.click",
+        target: { surface: "tray-menu", testId: "tray-menu-item-101" },
+        button: "primary",
+      });
+      timeline.advance("telegram-menu-close", 250);
+
+      // 5. Engage SessionLockOverlay with Caps Lock pre-engaged (`true`), toggle off -> 0px shift, toggle on + error -> no overlap, then unlock!
+      const engageLockAtMs = timeline.after(5);
+      const notifUnpauseOnLockAtMs = timeline.after(8);
+      const lockedAckAtMs = timeline.after(10);
+      timeline.advance("engage-lock", 30);
+      timeline.step({
+        id: "assert-caps-initial",
+        op: "assert",
+        target: { surface: "lock-dp-1", testId: "lock-caps-lock" },
+        check: { property: "text", equals: "Caps Lock is on" },
+      });
+      timeline.step({ id: "capture-lock-caps-on", op: "capture", surface: "lock-dp-1", captureId: "caps-on" });
+
+      timeline.step({ id: "toggle-caps-off", op: "key.press", surface: "lock-dp-1", key: "PageDown" });
+      timeline.advance("caps-off-settle", 10);
+      timeline.step({ id: "capture-lock-caps-off", op: "capture", surface: "lock-dp-1", captureId: "caps-off" });
+
+      timeline.step({ id: "toggle-caps-back-on", op: "key.press", surface: "lock-dp-1", key: "PageDown" });
+      timeline.step({ id: "enter-wrong-pw", op: "text.commit", surface: "lock-dp-1", text: "WRONG" });
+      timeline.advance("wrong-pw-committed", 2);
+      const wrongAuthAtMs = timeline.after(5);
+      timeline.step({
+        id: "submit-wrong-pw",
+        op: "pointer.click",
+        target: { surface: "lock-dp-1", testId: "lock-submit" },
+        button: "primary",
+      });
+      timeline.advance("wrong-auth-settle", 200);
+      timeline.step({ id: "capture-lock-caps-and-error", op: "capture", surface: "lock-dp-1", captureId: "caps-and-error" });
+
+      timeline.step({
+        id: "focus-pw-again",
+        op: "pointer.click",
+        target: { surface: "lock-dp-1", testId: "lock-password" },
+        button: "primary",
+      });
+      timeline.step({ id: "enter-right-pw", op: "text.commit", surface: "lock-dp-1", text: "correct" });
+      timeline.advance("right-pw-committed", 2);
+      const rightAuthAtMs = timeline.after(5);
+      const unlockedTopicAtMs = timeline.after(10);
+      const consumeUnlockAtMs = timeline.after(15);
+      timeline.step({
+        id: "submit-right-pw",
+        op: "pointer.click",
+        target: { surface: "lock-dp-1", testId: "lock-submit" },
+        button: "primary",
+      });
+      timeline.advance("unlock-complete", 30);
+
+      const fixtureValue = buildShellPreviewFixture({
+        id: "z-shell-activation-and-capslock",
+        sessionLock: { outcome: "locked" },
+        initialTopics: {
+          "desktop.apps": {
+            available: true,
+            count: 2,
+            pinned_apps: ["org.gnome.TextEditor.desktop"],
+            apps: [
+              { id: "org.gnome.TextEditor.desktop", title: "Text Editor" },
+              { id: "Alacritty.desktop", title: "Alacritty" },
+            ],
+          },
+          "desktop.notifications": {
+            available: true,
+            dnd: false,
+            popups: [{
+              id: 1,
+              revision: 1,
+              app_name: "Signal Messenger",
+              desktop_entry: "org.signal.Signal.desktop",
+              app_key: "desktop:org.signal.signal",
+              summary: "Ada Lovelace",
+              body: "Ping from Wayland",
+              icon: null,
+              attachment: null,
+              actions: [{ key: "reply", label: "Reply" }],
+              urgency: 1,
+            }],
+            history: [],
+          },
+          "desktop.tray": {
+            available: true,
+            items: [
+              {
+                id: "discord",
+                app_id: "com.discordapp.Discord",
+                title: "Discord",
+                category: "Communications",
+                status: "Active",
+                icon_name: "discord",
+                item_is_menu: false,
+                has_menu: false,
+                tooltip: null,
+                icon: null,
+                menu: null,
+              },
+              {
+                id: "telegram",
+                app_id: "org.telegram.desktop",
+                title: "Telegram",
+                category: "Communications",
+                status: "Active",
+                icon_name: "telegram",
+                item_is_menu: true,
+                has_menu: true,
+                tooltip: null,
+                icon: null,
+                menu: {
+                  revision: 1,
+                  root: {
+                    id: 0,
+                    label: "",
+                    enabled: true,
+                    visible: true,
+                    separator: false,
+                    toggle_type: null,
+                    toggle_state: null,
+                    children: [{
+                      id: 101,
+                      label: "Show Telegram",
+                      enabled: true,
+                      visible: true,
+                      separator: false,
+                      toggle_type: null,
+                      toggle_state: null,
+                      children: [],
+                    }],
+                  },
+                },
+              },
+            ],
+          },
+        },
+        topicUpdates: [
+          {
+            topic: "session.lock",
+            atMs: engageLockAtMs,
+            revision: 2,
+            data: {
+              phase: "engaging", lock_id: 21, sleep_hold: false, host_connected: true,
+              ui_session_generation: 1, last_error: null,
+            },
+          },
+          {
+            topic: "session.lock",
+            atMs: lockedAckAtMs,
+            revision: 3,
+            data: {
+              phase: "locked", lock_id: 21, sleep_hold: false, host_connected: true,
+              ui_session_generation: 1, last_error: null,
+            },
+          },
+          {
+            topic: "session.lock",
+            atMs: unlockedTopicAtMs,
+            revision: 4,
+            data: {
+              phase: "unlocked", lock_id: null, sleep_hold: false, host_connected: true,
+              ui_session_generation: 1, last_error: null,
+            },
+          },
+        ],
+        commands: [
+          {
+            id: 26,
+            name: "apps.launch",
+            payload: { id: "org.gnome.TextEditor.desktop", activation_token: "tok-1:org.gnome.TextEditor" },
+            atMs: dockLaunchAtMs,
+          },
+          {
+            id: 27,
+            name: "launcher.query",
+            payload: { query: "", query_id: 1, limit: 18 },
+            atMs: launcherQueryAtMs,
+            result: {
+              data: {
+                query_id: 1,
+                items: [{
+                  provider_id: "desktop",
+                  item_id: "Alacritty.desktop",
+                  title: "Alacritty",
+                  actions: [],
+                  score: 100,
+                }],
+              },
+            },
+          },
+          {
+            id: 28,
+            name: "launcher.activate",
+            payload: {
+              query_id: 1,
+              provider_id: "desktop",
+              item_id: "Alacritty.desktop",
+              activation_token: "tok-2:Alacritty",
+            },
+            atMs: launcherActivateAtMs,
+          },
+          {
+            id: 29,
+            name: "notifications.invoke-action",
+            payload: {
+              id: 1,
+              action_key: "reply",
+              activation_token: "tok-3:org.signal.Signal",
+            },
+            atMs: notifActionAtMs,
+          },
+          {
+            id: 30,
+            name: "notifications.set-paused",
+            payload: { paused: true },
+            atMs: notifPausedAtMs,
+          },
+          {
+            id: 31,
+            name: "tray.activate",
+            payload: { id: "discord", activation_token: "tok-4:<none>" },
+            atMs: trayActivateAtMs,
+          },
+          {
+            id: 32,
+            name: "tray.prepare-menu",
+            payload: { id: "telegram" },
+            atMs: prepareTelegramAtMs,
+          },
+          {
+            id: 33,
+            name: "tray.menu-item",
+            payload: { id: "telegram", menu_id: 101, activation_token: "tok-5:<none>" },
+            atMs: trayMenuItemAtMs,
+          },
+          {
+            id: 34,
+            name: "tray.close-menu",
+            payload: { id: "telegram" },
+            atMs: trayCloseMenuAtMs,
+          },
+          {
+            id: 35,
+            name: "notifications.set-paused",
+            payload: { paused: false },
+            atMs: notifUnpauseOnLockAtMs,
+          },
+          {
+            socket: "host",
+            id: 3,
+            name: "host.lock-ack",
+            payload: { lock_id: 21, ui_session_generation: 1 },
+            atMs: lockedAckAtMs,
+          },
+          {
+            socket: "host",
+            id: 4,
+            name: "host.lock-authenticate",
+            payload: { username: "hewel", password: "WRONG", lock_id: 21, ui_session_generation: 1 },
+            atMs: wrongAuthAtMs,
+          },
+          {
+            socket: "host",
+            id: 5,
+            name: "host.lock-authenticate",
+            payload: { username: "hewel", password: "correct", lock_id: 21, ui_session_generation: 1 },
+            atMs: rightAuthAtMs,
+            result: {
+              data: {
+                token: "unlock-21",
+                daemon_instance_id: "preview-daemon",
+                ui_session_generation: 1,
+                lock_id: 21,
+                auth_attempt_id: 2,
+              },
+            },
+          },
+          {
+            socket: "host",
+            id: 6,
+            name: "host.lock-consume-unlock",
+            payload: { token: "unlock-21", lock_id: 21, ui_session_generation: 1 },
+            atMs: consumeUnlockAtMs,
+          },
+        ],
+      });
+      const hostSocket = fixtureValue.services.sockets[1]!;
+      const failedAuth = hostSocket.events.find(
+        event => event.kind === "message" && JSON.parse(event.text).id === 4,
+      );
+      expect(failedAuth).toBeDefined();
+      failedAuth!.text = JSON.stringify({
+        jsonrpc: "2.0",
+        id: 4,
+        error: { code: "permission_denied", message: "Authentication failed" },
+      });
+
+      writeFileSync(fixture, JSON.stringify(fixtureValue, null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-activation-and-capslock",
+        requiredCapabilities: ["session-lock", "pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreviewBundle(stagedPublished.dist, fixture, scenario, out);
+      expectCleanPreview(result, 3, 1);
+
+      expect(previewSurfaces(out, "after-launcher-dismiss")).not.toContain("launcher-overlay");
+
+      const capsOn = readCapture(out, "lock-dp-1", "caps-on");
+      const capsOff = readCapture(out, "lock-dp-1", "caps-off");
+      const capsAndError = readCapture(out, "lock-dp-1", "caps-and-error");
+
+      const capsPillBounds = treeNode(capsOn.tree, "lock-caps-lock").boundsDevice!;
+      expect(capsPillBounds.width).toBeGreaterThan(80);
+      expect(capsPillBounds.height).toBe(28);
+      expect(capsOff.tree.nodes.some(node => node.testId === "lock-caps-lock")).toBe(false);
+
+      // Toggling Caps Lock on/off must cause 0px vertical shift on the password capsule and avatar.
+      const capsuleWhenOn = treeNode(capsOn.tree, "lock-password-capsule").boundsDevice!;
+      const capsuleWhenOff = treeNode(capsOff.tree, "lock-password-capsule").boundsDevice!;
+      expect(capsuleWhenOn).toEqual(capsuleWhenOff);
+
+      // Simultaneous Caps Lock warning and PAM error stack cleanly with zero vertical overlap.
+      const capsBothBounds = treeNode(capsAndError.tree, "lock-caps-lock").boundsDevice!;
+      const errorBounds = treeNode(capsAndError.tree, "lock-error").boundsDevice!;
+      expect(capsBothBounds.y + capsBothBounds.height).toBeLessThanOrEqual(errorBounds.y);
     } finally {
       cleanup();
     }

@@ -3,6 +3,7 @@ import {
   type Accessor, type Monitor, type NativeChild, type NativeNode, type NativeWindowRect,
 } from "@hewel/zgui";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
+import { mintActivationToken, withActivationToken } from "../activation.ts";
 import { ShellIcon } from "../icons.tsx";
 import { SPRING_EPSILON, createM3Spring, useMotionScheme, type M3Spring } from "../motion.ts";
 import { useShellStore } from "../store.ts";
@@ -37,8 +38,15 @@ function DockApp(props: { entry: Accessor<DockEntry> }) {
   function activate() {
     const { appId, desktopId, windows } = props.entry();
     const window = windows[0];
-    if (window) void invokePublic("wayland.window.activate", { window_id: window.window_id });
-    else void invokePublic("apps.launch", { id: desktopId ?? appId });
+    if (window) {
+      void invokePublic("wayland.window.activate", { window_id: window.window_id });
+      return;
+    }
+    const id = desktopId ?? appId;
+    const tokenPromise = mintActivationToken(id);
+    void tokenPromise.then(token =>
+      invokePublic("apps.launch", withActivationToken({ id }, token)),
+    );
   }
   function togglePin() {
     const { appId, pinned } = props.entry();

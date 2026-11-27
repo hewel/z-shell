@@ -19,8 +19,8 @@ use zbus::Connection;
 
 use crate::apps::{self, Catalog, LaunchPlan, MAX_ACTIONS};
 use crate::{
-    ImeLockState, SessionBusAddress, connect, data, disabled, failed, invalid, not_found, ok,
-    payload, publish, register,
+    ActivationToken, ImeLockState, SessionBusAddress, connect, data, disabled, failed, invalid,
+    not_found, ok, parse_activation_token, payload, publish, register,
 };
 
 const APPS_TOPIC: &str = "desktop.apps";
@@ -201,6 +201,8 @@ struct PinApp {
 struct LaunchApp {
     id: String,
     action_id: Option<String>,
+    #[serde(default)]
+    activation_token: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -212,11 +214,14 @@ struct Query {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Activate {
     query_id: Option<u64>,
     provider_id: String,
     item_id: String,
     action_id: Option<String>,
+    #[serde(default)]
+    activation_token: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -293,14 +298,19 @@ impl State {
         });
     }
 
-    fn launch_plan(&self, id: &str, action: Option<&str>) -> Result<LaunchPlan, RpcError> {
+    fn launch_plan(
+        &self,
+        id: &str,
+        action: Option<&str>,
+        token: Option<ActivationToken>,
+    ) -> Result<LaunchPlan, RpcError> {
         self.ensure_connected()?;
         let apps = self
             .apps
             .as_ref()
             .ok_or_else(|| disabled("app catalog is still loading"))?;
         apps.get(id)
-            .and_then(|app| app.launch_plan(action))
+            .and_then(|app| app.launch_plan(action, token))
             .ok_or_else(|| not_found("app or desktop action not found"))
     }
 
@@ -591,7 +601,8 @@ impl Launcher {
                 ));
             }
             let request: LaunchApp = payload(call)?;
-            state.launch_plan(&request.id, request.action_id.as_deref())?
+            let token = parse_activation_token(request.activation_token)?;
+            state.launch_plan(&request.id, request.action_id.as_deref(), token)?
         };
         self.execute_plan(plan).await
     }
@@ -620,7 +631,17 @@ impl Launcher {
             };
             let bus_name = dbus.target.bus_name.as_str();
             let object_path = dbus.target.object_path.as_str();
-            let platform_data = HashMap::<&str, zbus::zvariant::Value<'_>>::new();
+            let mut platform_data = HashMap::<&str, zbus::zvariant::Value<'_>>::new();
+            if let Some(token) = &dbus.token {
+                platform_data.insert(
+                    "activation-token",
+                    zbus::zvariant::Value::from(token.as_str()),
+                );
+                platform_data.insert(
+                    "desktop-startup-id",
+                    zbus::zvariant::Value::from(token.as_str()),
+                );
+            }
             let call_fut = async {
                 match &dbus.action {
                     None => {
@@ -902,7 +923,8 @@ impl Launcher {
     }
 
     async fn activate(&self, call: &CommandCall) -> Result<CommandInvokeResult, RpcError> {
-        let request: Activate = payload(call)?;
+        let mut request: Activate = payload(call)?;
+        let token = parse_activation_token(request.activation_token.take())?;
         let client = call.caller.client_id;
         require_active(&call.hub, client)?;
         enum Execute<'a> {
@@ -931,9 +953,11 @@ impl Launcher {
                 ));
             }
             if request.provider_id == APPS {
-                Execute::App(Box::new(
-                    state.launch_plan(&request.item_id, request.action_id.as_deref())?,
-                ))
+                Execute::App(Box::new(state.launch_plan(
+                    &request.item_id,
+                    request.action_id.as_deref(),
+                    token,
+                )?))
             } else {
                 let owner = state
                     .providers
@@ -941,11 +965,26 @@ impl Launcher {
                     .map(|provider| provider.owner)
                     .filter(|&owner| active_client(&call.hub, owner))
                     .ok_or_else(|| not_found("launcher provider is not active"))?;
-                let pending = self.dispatch(&mut state, &call.hub, owner, &request.provider_id, Scope::Activation, |request_id| {
-                    ServerMessage::notification("launcher.provider-activate", json!({
-                        "request_id": request_id, "query_id": query_id, "provider_id": request.provider_id, "item_id": request.item_id, "action_id": request.action_id,
-                    }))
-                })?;
+                let pending = self.dispatch(
+                    &mut state,
+                    &call.hub,
+                    owner,
+                    &request.provider_id,
+                    Scope::Activation,
+                    |request_id| {
+                        let mut params = json!({
+                            "request_id": request_id,
+                            "query_id": query_id,
+                            "provider_id": request.provider_id,
+                            "item_id": request.item_id,
+                            "action_id": request.action_id,
+                        });
+                        if let Some(token) = &token {
+                            params["activation_token"] = json!(token.as_str());
+                        }
+                        ServerMessage::notification("launcher.provider-activate", params)
+                    },
+                )?;
                 Execute::Provider(pending)
             }
         };

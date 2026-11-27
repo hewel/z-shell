@@ -22,7 +22,10 @@ use zbus::zvariant::{Array, Dict, ObjectPath, Signature, Structure, Value};
 use zbus::{Connection, MatchRule, Message, MessageStream};
 
 use crate::assets::{Blobs, cache_icon, local_path, png_rgba};
-use crate::{data, disabled, failed, not_found, ok, payload, publish, register};
+use crate::{
+    ActivationToken, data, disabled, failed, not_found, ok, parse_activation_token, payload,
+    publish, register,
+};
 
 const TOPIC: &str = "desktop.tray";
 pub(crate) const WATCHER: &str = "org.kde.StatusNotifierWatcher";
@@ -104,6 +107,8 @@ struct Item {
     properties_refresh: Refresh,
     #[serde(skip)]
     menu_refresh: Refresh,
+    #[serde(skip)]
+    menu_op: Arc<tokio::sync::Mutex<()>>,
 }
 
 #[derive(Clone)]
@@ -228,6 +233,19 @@ enum Control {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ActivateAction<'a> {
+    id: &'a str,
+    #[serde(default)]
+    x: i32,
+    #[serde(default)]
+    y: i32,
+    #[serde(default)]
+    activation_token: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PointAction<'a> {
     id: &'a str,
     #[serde(default)]
@@ -237,11 +255,14 @@ struct PointAction<'a> {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct MenuAction<'a> {
     id: &'a str,
     menu_id: i32,
     #[serde(default)]
     timestamp: u32,
+    #[serde(default)]
+    activation_token: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -406,7 +427,8 @@ impl Tray {
     ) -> Result<CommandInvokeResult, RpcError> {
         match kind {
             Control::Activate => {
-                let request: PointAction<'_> = payload(call)?;
+                let request: ActivateAction<'_> = payload(call)?;
+                let token = parse_activation_token(request.activation_token)?;
                 let (connection, endpoint, has_menu) = {
                     let state = self.state();
                     let (connection, item) = action_item(&state, request.id)?;
@@ -416,8 +438,12 @@ impl Tray {
                         item.menu_path.is_some(),
                     )
                 };
-                match timeout(
-                    TIMEOUT,
+                let deadline = Instant::now() + TIMEOUT;
+                if let Some(token) = &token {
+                    provide_activation_token(&connection, &endpoint, token, deadline).await?;
+                }
+                match timeout_at(
+                    deadline,
                     connection.call_method(
                         Some(endpoint.owner.as_str()),
                         endpoint.path.as_str(),
@@ -462,7 +488,20 @@ impl Tray {
             }
             Control::MenuItem => {
                 let request: MenuAction<'_> = payload(call)?;
-                let (connection, owner, path) = {
+                let token = parse_activation_token(request.activation_token)?;
+                let menu_op = {
+                    let state = self.state();
+                    let (_, item) = action_item(&state, request.id)?;
+                    if item.menu_path.is_none() {
+                        return Err(not_found("tray menu item not found"));
+                    }
+                    Arc::clone(&item.menu_op)
+                };
+                let deadline = Instant::now() + TIMEOUT;
+                let _menu_guard = timeout_at(deadline, menu_op.lock_owned())
+                    .await
+                    .map_err(|_| RpcError::new(ErrorCode::Timeout, "tray action timed out"))?;
+                let (connection, endpoint, path) = {
                     let state = self.state();
                     let (connection, item) = action_item(&state, request.id)?;
                     let path = item
@@ -475,16 +514,15 @@ impl Tray {
                             })
                         })
                         .ok_or_else(|| not_found("tray menu item not found"))?;
-                    (
-                        connection.clone(),
-                        item.endpoint.owner.clone(),
-                        path.clone(),
-                    )
+                    (connection.clone(), item.endpoint.clone(), path.clone())
                 };
-                match timeout(
-                    TIMEOUT,
+                if let Some(token) = &token {
+                    provide_activation_token(&connection, &endpoint, token, deadline).await?;
+                }
+                match timeout_at(
+                    deadline,
                     connection.call_method(
-                        Some(owner.as_str()),
+                        Some(endpoint.owner.as_str()),
                         path.as_str(),
                         Some(MENU),
                         "Event",
@@ -505,6 +543,18 @@ impl Tray {
             }
             Control::CloseMenu => {
                 let request: MenuLifecycle<'_> = payload(call)?;
+                let menu_op = {
+                    let state = self.state();
+                    let (_, item) = action_item(&state, request.id)?;
+                    if item.menu_path.is_none() {
+                        return Err(not_found("tray item has no menu"));
+                    }
+                    Arc::clone(&item.menu_op)
+                };
+                let deadline = Instant::now() + TIMEOUT;
+                let _menu_guard = timeout_at(deadline, menu_op.lock_owned())
+                    .await
+                    .map_err(|_| RpcError::new(ErrorCode::Timeout, "tray menu close timed out"))?;
                 let (connection, owner, path) = {
                     let state = self.state();
                     let (connection, item) = action_item(&state, request.id)?;
@@ -514,8 +564,8 @@ impl Tray {
                         .ok_or_else(|| not_found("tray item has no menu"))?;
                     (connection.clone(), item.endpoint.owner.clone(), path)
                 };
-                match timeout(
-                    TIMEOUT,
+                match timeout_at(
+                    deadline,
                     connection.call_method(
                         Some(owner.as_str()),
                         path.as_str(),
@@ -544,6 +594,18 @@ impl Tray {
         menu_id: i32,
         timestamp: u32,
     ) -> Result<CommandInvokeResult, RpcError> {
+        let menu_op = {
+            let state = self.state();
+            let (_, item) = action_item(&state, id)?;
+            if item.menu_path.is_none() {
+                return Err(not_found("tray item has no menu"));
+            }
+            Arc::clone(&item.menu_op)
+        };
+        let deadline = Instant::now() + TIMEOUT;
+        let _menu_guard = timeout_at(deadline, menu_op.lock_owned())
+            .await
+            .map_err(|_| RpcError::new(ErrorCode::Timeout, "tray menu preparation timed out"))?;
         let (connection, owner, path, cached_empty, has_cached_menu) = {
             let state = self.state();
             let (connection, item) = action_item(&state, id)?;
@@ -573,7 +635,6 @@ impl Tray {
                 item.menu.is_some(),
             )
         };
-        let deadline = Instant::now() + TIMEOUT;
         let opened = timeout_at(
             deadline,
             connection.call_method(
@@ -855,6 +916,7 @@ impl Monitor<'_> {
                 menu_path: None,
                 properties_refresh: Refresh::default(),
                 menu_refresh: Refresh::default(),
+                menu_op: Arc::new(tokio::sync::Mutex::new(())),
             };
             self.refresh_properties(&mut item);
             state.items.push(item);
@@ -1399,6 +1461,53 @@ fn parse_menu_node(
         },
         children: nodes,
     }
+}
+
+async fn provide_activation_token(
+    connection: &Connection,
+    endpoint: &Endpoint,
+    token: &ActivationToken,
+    deadline: Instant,
+) -> Result<(), RpcError> {
+    match timeout_at(
+        deadline,
+        connection.call_method(
+            Some(endpoint.owner.as_str()),
+            endpoint.path.as_str(),
+            Some(endpoint.interface),
+            "ProvideXdgActivationToken",
+            &(token.as_str(),),
+        ),
+    )
+    .await
+    {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(error)) if is_unsupported_token_handoff(&error) => Ok(()),
+        Ok(Err(error)) => {
+            tracing::debug!(
+                %error,
+                owner = endpoint.owner.as_str(),
+                path = endpoint.path.as_str(),
+                interface = endpoint.interface,
+                "tray ProvideXdgActivationToken failed; continuing with action"
+            );
+            Ok(())
+        }
+        Err(_) => Err(RpcError::new(ErrorCode::Timeout, "tray action timed out")),
+    }
+}
+
+fn is_unsupported_token_handoff(error: &zbus::Error) -> bool {
+    is_unsupported_dbus_method(error)
+        || matches!(
+            error,
+            zbus::Error::MethodError(name, _, _)
+                if matches!(
+                    name.as_str(),
+                    "org.freedesktop.DBus.Error.UnknownInterface"
+                        | "org.freedesktop.DBus.Error.UnknownObject"
+                )
+        )
 }
 
 fn is_unsupported_dbus_method(error: &zbus::Error) -> bool {

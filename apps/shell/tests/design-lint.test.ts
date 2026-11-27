@@ -1272,9 +1272,9 @@ describe("Exact-Geometry Shape & Material-First Icon contracts", () => {
     expect(resolveIconStrokeWidthPx(24)).toBe("2px");
 
     const entries = Object.entries(TABLER_ICON_PATHS) as [string, Record<string, unknown> & { readonly viewBox: string; readonly d: string }][];
-    expect(entries.length).toBe(79);
+    expect(entries.length).toBe(80);
     const names = new Set(entries.map(([name]) => name));
-    for (const required of ["apps", "overview", "ethernet", "mediaEq", "gpu", "memory", "wifiLock"]) {
+    for (const required of ["apps", "overview", "ethernet", "mediaEq", "gpu", "memory", "wifiLock", "keyboardCapslock"]) {
       expect(names.has(required), `missing TABLER_ICON_PATHS.${required}`).toBe(true);
     }
     for (const [name, def] of entries) {

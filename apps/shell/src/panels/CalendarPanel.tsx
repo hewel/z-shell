@@ -1,6 +1,7 @@
 import { Button, For, Image, Show, createDelay, createMemo, createSignal, cx, type Accessor } from "@hewel/zgui";
 import { M3Button, M3CardAction, M3InteractiveCard } from "@z-shell/sdk/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
+import { invokeNotificationAction } from "../activation.ts";
 import { ShellIcon } from "../icons.tsx";
 import { useShellStore } from "../store.ts";
 import { PANEL_MAX_HEIGHTS, buildMonthCalendarGrid, formatBarClock, formatFullDate, formatMonthYear, formatNotificationBody, resolveNotificationMediaLayout, splitNotificationActions, type NotificationItem } from "../topics.ts";
@@ -73,7 +74,7 @@ function NotificationRow(props: { item: Accessor<NotificationItem> }) {
       onClick={actions().defaultAction
         ? () => {
             const def = actions().defaultAction;
-            if (def) void invokePublic("notifications.invoke-action", { id: props.item().id, action_key: def.key });
+            if (def) void invokeNotificationAction(invokePublic, props.item(), def.key);
           }
         : undefined}
       class={styles.notifCard}
@@ -104,7 +105,9 @@ function NotificationRow(props: { item: Accessor<NotificationItem> }) {
                 <Button
                   testId={`cal-notif-action-${props.item().id}-${action().key}`}
                   class={cx(styles.pill, styles.notifActionBtn)}
-                  onClick={() => { void invokePublic("notifications.invoke-action", { id: props.item().id, action_key: action().key }); }}
+                  onClick={() => {
+                    void invokeNotificationAction(invokePublic, props.item(), action().key);
+                  }}
                 >
                   <text>{action().label}</text>
                 </Button>

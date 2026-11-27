@@ -1027,3 +1027,372 @@ async fn live_desktop_watcher_updates_catalog_on_create_modify_and_delete_preser
 
     desktop.shutdown().await;
 }
+
+struct TokenRecordingFdoApp {
+    calls: mpsc::UnboundedSender<(String, Option<String>, Option<String>)>,
+}
+
+#[zbus::interface(name = "org.freedesktop.Application")]
+impl TokenRecordingFdoApp {
+    fn activate(&self, platform_data: HashMap<String, OwnedValue>) {
+        let act = platform_data
+            .get("activation-token")
+            .and_then(|v| <&str>::try_from(v).ok())
+            .map(str::to_owned);
+        let startup = platform_data
+            .get("desktop-startup-id")
+            .and_then(|v| <&str>::try_from(v).ok())
+            .map(str::to_owned);
+        self.calls
+            .send(("activate".to_owned(), act, startup))
+            .unwrap();
+    }
+
+    fn activate_action(
+        &self,
+        action_name: String,
+        _parameter: Vec<OwnedValue>,
+        platform_data: HashMap<String, OwnedValue>,
+    ) {
+        let act = platform_data
+            .get("activation-token")
+            .and_then(|v| <&str>::try_from(v).ok())
+            .map(str::to_owned);
+        let startup = platform_data
+            .get("desktop-startup-id")
+            .and_then(|v| <&str>::try_from(v).ok())
+            .map(str::to_owned);
+        self.calls
+            .send((format!("action:{action_name}"), act, startup))
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn activation_tokens_validate_and_forward_across_exec_dbus_and_providers() {
+    let bus = TestBus::new();
+    let conn = bus.connection().await;
+    let (dbus_tx, mut dbus_rx) = mpsc::unbounded_channel();
+    conn.object_server()
+        .at(
+            "/org/example/TokenApp",
+            TokenRecordingFdoApp { calls: dbus_tx },
+        )
+        .await
+        .unwrap();
+    conn.request_name("org.example.TokenApp").await.unwrap();
+
+    let dir = tempfile::tempdir().expect("isolated XDG roots");
+    let paths = paths(dir.path());
+    let xdg = dir.path().join("data");
+    let exe = dir.path().join("record-env");
+    let out_launch = dir.path().join("env-launch");
+    let out_activate = dir.path().join("env-activate");
+    let out_empty = dir.path().join("env-empty");
+    let out_fallback = dir.path().join("env-fallback");
+    put(
+        dir.path(),
+        "record-env",
+        "#!/bin/sh\noutput=$1\nprintf '%s|%s\\n' \"${XDG_ACTIVATION_TOKEN-<unset>}\" \"${DESKTOP_STARTUP_ID-<unset>}\" > \"$output.tmp\" && mv \"$output.tmp\" \"$output\"\n",
+    );
+    fs::set_permissions(&exe, fs::Permissions::from_mode(0o700)).unwrap();
+
+    put(
+        &xdg,
+        "applications/env-app.desktop",
+        &format!(
+            "[Desktop Entry]\nType=Application\nName=Env App\nExec=\"{}\" \"{}\"\nActions=FromQuery;EmptyTok;\n[Desktop Action FromQuery]\nName=From Query\nExec=\"{}\" \"{}\"\n[Desktop Action EmptyTok]\nName=Empty Token\nExec=\"{}\" \"{}\"\n",
+            exe.display(),
+            out_launch.display(),
+            exe.display(),
+            out_activate.display(),
+            exe.display(),
+            out_empty.display(),
+        ),
+    );
+    put(
+        &xdg,
+        "applications/org.example.TokenApp.desktop",
+        "[Desktop Entry]\nType=Application\nName=Token D-Bus App\nDBusActivatable=true\nActions=new-tab;\n[Desktop Action new-tab]\nName=New Tab\n",
+    );
+    put(
+        &xdg,
+        "applications/org.example.FallbackToken.desktop",
+        &format!(
+            "[Desktop Entry]\nType=Application\nName=Fallback Token App\nDBusActivatable=true\nExec=\"{}\" \"{}\"\n",
+            exe.display(),
+            out_fallback.display(),
+        ),
+    );
+
+    let hub = BusHub::new("test", paths.media_dir());
+    let desktop = DesktopServices::install_with_options(
+        &hub,
+        &paths,
+        DesktopOptions {
+            session_bus: SessionBusAddress::Address(bus.address().to_owned()),
+            notifications: false,
+            tray: false,
+            xdg_data_dirs: vec![xdg],
+            ..DesktopOptions::default()
+        },
+    );
+    ready(&hub).await;
+
+    let client = Client::connect(&hub).await;
+    let provider_owner = Client::connect(&hub).await;
+    let provider_id = provider_owner
+        .invoke(
+            "launcher.register-provider",
+            json!({"entry": "example/win:switcher", "prefix": "win "}),
+        )
+        .await
+        .unwrap()["provider_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // 1. Boundary validation: >256 bytes and ASCII control characters fail with InvalidParams.
+    let too_long = "t".repeat(257);
+    for bad_token in [
+        too_long.as_str(),
+        "bad\ntoken",
+        "bad\x00token",
+        "bad\x7ftoken",
+    ] {
+        assert_eq!(
+            client
+                .invoke(
+                    "apps.launch",
+                    json!({"id": "env-app.desktop", "activation_token": bad_token}),
+                )
+                .await
+                .expect_err("malformed activation_token rejected by apps.launch")
+                .code,
+            ErrorCode::InvalidParams
+        );
+        assert_eq!(
+            client
+                .invoke(
+                    "launcher.activate",
+                    json!({
+                        "provider_id": "desktop",
+                        "item_id": "env-app.desktop",
+                        "activation_token": bad_token
+                    }),
+                )
+                .await
+                .expect_err("malformed activation_token rejected by launcher.activate")
+                .code,
+            ErrorCode::InvalidParams
+        );
+    }
+
+    // 2. Subprocess Exec via apps.launch and launcher.activate sets child env only.
+    client
+        .invoke(
+            "apps.launch",
+            json!({"id": "env-app.desktop", "activation_token": "tok-launch-1"}),
+        )
+        .await
+        .expect("apps.launch with valid activation_token");
+    let launch_env = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(got) = fs::read_to_string(&out_launch) {
+                break got;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(launch_env, "tok-launch-1|tok-launch-1\n");
+    assert!(
+        std::env::var_os("XDG_ACTIVATION_TOKEN").as_deref()
+            != Some(std::ffi::OsStr::new("tok-launch-1")),
+        "daemon process environment must never be mutated"
+    );
+
+    // Empty string "" degrades to None (no token env injected).
+    client
+        .invoke(
+            "apps.launch",
+            json!({"id": "env-app.desktop", "action_id": "EmptyTok", "activation_token": ""}),
+        )
+        .await
+        .expect("empty activation_token treated as None");
+    let empty_env = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(got) = fs::read_to_string(&out_empty) {
+                break got;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(empty_env, "<unset>|<unset>\n");
+
+    let q = client
+        .invoke("launcher.query", json!({"query": "Env App"}))
+        .await
+        .unwrap();
+    client
+        .invoke(
+            "launcher.activate",
+            json!({
+                "query_id": q["query_id"],
+                "provider_id": "desktop",
+                "item_id": "env-app.desktop",
+                "action_id": "FromQuery",
+                "activation_token": "tok-query-2"
+            }),
+        )
+        .await
+        .expect("launcher.activate with valid activation_token");
+    let query_env = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(got) = fs::read_to_string(&out_activate) {
+                break got;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(query_env, "tok-query-2|tok-query-2\n");
+
+    // 3. DBusActivatable populates platform_data and forwards token to Exec fallback on ServiceUnknown.
+    client
+        .invoke(
+            "apps.launch",
+            json!({"id": "org.example.TokenApp.desktop", "activation_token": "tok-dbus-3"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(3), dbus_rx.recv())
+            .await
+            .unwrap(),
+        Some((
+            "activate".to_owned(),
+            Some("tok-dbus-3".to_owned()),
+            Some("tok-dbus-3".to_owned()),
+        ))
+    );
+
+    client
+        .invoke(
+            "apps.launch",
+            json!({
+                "id": "org.example.TokenApp.desktop",
+                "action_id": "new-tab",
+                "activation_token": "tok-dbus-action-4"
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(3), dbus_rx.recv())
+            .await
+            .unwrap(),
+        Some((
+            "action:new-tab".to_owned(),
+            Some("tok-dbus-action-4".to_owned()),
+            Some("tok-dbus-action-4".to_owned()),
+        ))
+    );
+
+    client
+        .invoke(
+            "apps.launch",
+            json!({"id": "org.example.FallbackToken.desktop", "activation_token": "tok-fallback-5"}),
+        )
+        .await
+        .unwrap();
+    let fallback_env = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(got) = fs::read_to_string(&out_fallback) {
+                break got;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(fallback_env, "tok-fallback-5|tok-fallback-5\n");
+
+    // 4. launcher_provider receives activation_token when Some, and omits it when None / "".
+    let (pq, ()) = tokio::join!(
+        client.invoke("launcher.query", json!({"query": "win term"})),
+        async {
+            let ev = provider_owner.next().await;
+            provider_owner
+                .invoke(
+                    "launcher.provider-reply",
+                    json!({
+                        "request_id": ev["params"]["request_id"],
+                        "items": [{"item_id": "w1", "title": "Terminal Window", "score": 900}]
+                    }),
+                )
+                .await
+                .unwrap();
+        }
+    );
+    let pq = pq.unwrap();
+
+    let (act1, ()) = tokio::join!(
+        client.invoke(
+            "launcher.activate",
+            json!({
+                "query_id": pq["query_id"],
+                "provider_id": provider_id,
+                "item_id": "w1",
+                "activation_token": "tok-provider-6"
+            }),
+        ),
+        async {
+            let ev = provider_owner.next().await;
+            assert_eq!(ev["method"], "launcher.provider-activate");
+            assert_eq!(ev["params"]["activation_token"], "tok-provider-6");
+            provider_owner
+                .invoke(
+                    "launcher.provider-reply",
+                    json!({"request_id": ev["params"]["request_id"], "activated": true}),
+                )
+                .await
+                .unwrap();
+        }
+    );
+    act1.unwrap();
+
+    let (act2, ()) = tokio::join!(
+        client.invoke(
+            "launcher.activate",
+            json!({
+                "query_id": pq["query_id"],
+                "provider_id": provider_id,
+                "item_id": "w1",
+                "activation_token": ""
+            }),
+        ),
+        async {
+            let ev = provider_owner.next().await;
+            assert_eq!(ev["method"], "launcher.provider-activate");
+            assert!(
+                ev["params"].get("activation_token").is_none(),
+                "empty activation_token must be omitted from launcher.provider-activate: {ev}"
+            );
+            provider_owner
+                .invoke(
+                    "launcher.provider-reply",
+                    json!({"request_id": ev["params"]["request_id"], "activated": true}),
+                )
+                .await
+                .unwrap();
+        }
+    );
+    act2.unwrap();
+
+    desktop.shutdown().await;
+}

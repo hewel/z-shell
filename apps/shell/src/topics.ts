@@ -377,6 +377,7 @@ export interface NotificationItem {
   readonly id: number;
   readonly revision: number;
   readonly app_name: string;
+  readonly desktop_entry?: string | null;
   readonly app_key?: string;
   readonly summary: string;
   readonly body: string;

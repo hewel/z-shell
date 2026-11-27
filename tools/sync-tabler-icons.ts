@@ -34,6 +34,7 @@ export const TABLER_ICON_MAP = {
   expandMore: "chevron-down",
   expandLess: "chevron-up",
   arrowLeft: "arrow-left",
+  keyboardCapslock: "arrow-big-up-line",
   add: "plus",
 
   wifi: "wifi",

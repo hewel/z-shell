@@ -1,12 +1,13 @@
 import { Button, For, Image, PopupSurface, Show, createEffect, createMemo, createSignal, cx, onCleanup, untrack, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { MenuItemPrimitive, MenuListPrimitive, MenuRootPrimitive } from "@hewel/zgui/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
+import { activateTrayItemWithFallback, mintActivationToken, withActivationToken } from "../activation.ts";
 import { ShellIcon } from "../icons.tsx";
 import { createRetainedPresence, panelMotionStyle, popoverContentMotionStyle, useMotionScheme, type M3Spring } from "../motion.ts";
 import { POPOVER_SHADOW_INSETS, resolvePopoverGeometry, shellPanelsStyles } from "../panels/ShellPanels.tsx";
 import { useShellStore, type ImeMenuTarget, type TrayMenuTarget, type TrayOverflowTarget } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
-import { hasTrayMenu, isImeTrayItem, isSessionLockActive, isTrayActivateMenuFallback, isTraySubmenuNode, partitionTrayItems, type BarPosition, type BarStyle, type TrayItem, type TrayMenuNode } from "../topics.ts";
+import { hasTrayMenu, isImeTrayItem, isSessionLockActive, isTraySubmenuNode, partitionTrayItems, type BarPosition, type BarStyle, type TrayItem, type TrayMenuNode } from "../topics.ts";
 import styles from "./BarPopups.module.css";
 
 const MENU_MIN_WIDTH = 220;
@@ -242,11 +243,7 @@ function TrayOverflowTile(props: {
         if (props.item.item_is_menu && hasTrayMenu(props.item)) {
           openMenuOnBar();
         } else {
-          void invokePublic("tray.activate", { id: props.item.id }).then(res => {
-            if (isTrayActivateMenuFallback(res)) {
-              openMenuOnBar();
-            }
-          });
+          activateTrayItemWithFallback(invokePublic, props.item.id, openMenuOnBar);
         }
       }}
       onPointerDown={event => {
@@ -377,8 +374,10 @@ export function BarPopups(): NativeChild {
   const [instantExitNext, setInstantExitNext] = createSignal(false);
   const [collapsedSubmenuIds, setCollapsedSubmenuIds] = createSignal<ReadonlySet<number>>(new Set<number>());
   let preparedTrayItemId: string | null = null;
+  let pendingMenuItemDispatch: Promise<void> | null = null;
   onCleanup(() => {
     preparedTrayItemId = null;
+    pendingMenuItemDispatch = null;
   });
   createEffect(
     () => {
@@ -393,11 +392,20 @@ export function BarPopups(): NativeChild {
       if (preparedTrayItemId !== null && preparedTrayItemId !== nextItemId) {
         const closingId = preparedTrayItemId;
         preparedTrayItemId = null;
+        const waitForMenuItem = pendingMenuItemDispatch;
+        pendingMenuItemDispatch = null;
         const stillHasMenu = untrack(() =>
           tray.data()?.items.some(candidate => candidate.id === closingId && candidate.has_menu) ?? false,
         );
         if (stillHasMenu) {
-          void invokePublic("tray.close-menu", { id: closingId });
+          if (waitForMenuItem) {
+            void waitForMenuItem.finally(() => {
+              if (preparedTrayItemId === closingId) return;
+              void invokePublic("tray.close-menu", { id: closingId });
+            });
+          } else {
+            void invokePublic("tray.close-menu", { id: closingId });
+          }
         }
       }
       if (key === null || !nextTarget) return;
@@ -563,7 +571,15 @@ export function BarPopups(): NativeChild {
                             toggleTraySubmenu(entry.target.itemId, row());
                             return;
                           }
-                          void invokePublic("tray.menu-item", { id: entry.target.itemId, menu_id: row().node.id });
+                          const itemId = entry.target.itemId;
+                          const menuId = row().node.id;
+                          const tokenPromise = mintActivationToken();
+                          pendingMenuItemDispatch = tokenPromise.then(token =>
+                            invokePublic(
+                              "tray.menu-item",
+                              withActivationToken({ id: itemId, menu_id: menuId }, token),
+                            ).then(() => {}),
+                          );
                           closeTrayMenu();
                         }} />
                     </Show>

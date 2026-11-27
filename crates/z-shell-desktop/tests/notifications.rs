@@ -1441,3 +1441,184 @@ async fn honors_transient_resident_and_critical_urgency_hints() {
 
     desktop.shutdown().await;
 }
+
+#[tokio::test]
+async fn invoke_action_validates_and_emits_activation_token_strictly_before_action_invoked() {
+    let bus = TestBus::new();
+    let client = bus.connection().await;
+    let root = tempfile::tempdir().unwrap();
+    let paths = paths(root.path());
+    let hub = BusHub::new("test", paths.media_dir());
+    let desktop = DesktopServices::install_with_options(
+        &hub,
+        &paths,
+        DesktopOptions {
+            session_bus: SessionBusAddress::Address(bus.address().to_owned()),
+            tray: false,
+            xdg_data_dirs: Vec::new(),
+            ..DesktopOptions::default()
+        },
+    );
+    let (initial, stream) = subscribe(&hub, TOPIC).await;
+    assert_eq!(ready(initial, &stream).await["available"], true);
+
+    let mut wire = zbus::MessageStream::for_match_rule(
+        zbus::MatchRule::builder()
+            .msg_type(zbus::message::Type::Signal)
+            .interface(NAME)
+            .unwrap()
+            .build(),
+        &client,
+        None,
+    )
+    .await
+    .unwrap();
+    let proxy = dbus_proxy(&client).await;
+
+    let id1: u32 = proxy
+        .call(
+            "Notify",
+            &(
+                "Telegram",
+                0_u32,
+                "",
+                "Direct message",
+                "Reply now",
+                vec!["open", "Open"],
+                HashMap::from([(
+                    "desktop-entry",
+                    OwnedValue::try_from(DbusValue::from("org.telegram.desktop.desktop")).unwrap(),
+                )]),
+                0_i32,
+            ),
+        )
+        .await
+        .unwrap();
+    let live1 = next_update(&stream).await;
+    assert_eq!(
+        live1["popups"][0]["desktop_entry"],
+        "org.telegram.desktop.desktop"
+    );
+    assert_eq!(
+        live1["history"][0]["desktop_entry"],
+        "org.telegram.desktop.desktop"
+    );
+
+    // 1. Malformed activation_token strings fail with InvalidParams before closing or signaling.
+    let too_long = "t".repeat(257);
+    for bad in [too_long.as_str(), "tok\nen", "tok\0en", "tok\x7fen"] {
+        assert_eq!(
+            invoke(
+                &hub,
+                ClientRole::Public,
+                "notifications.invoke-action",
+                json!({"id": id1, "action_key": "open", "activation_token": bad}),
+            )
+            .await
+            .expect_err("malformed activation_token rejected")
+            .code,
+            ErrorCode::InvalidParams
+        );
+    }
+
+    // 2. Valid activation_token emits ActivationToken strictly before ActionInvoked and NotificationClosed.
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "notifications.invoke-action",
+        json!({"id": id1, "action_key": "open", "activation_token": "tok-notif-1"}),
+    )
+    .await
+    .expect("invoke-action with valid activation_token");
+    let after1 = next_update(&stream).await;
+    assert_eq!(after1["popups"], json!([]));
+    assert!(
+        !after1.to_string().contains("tok-notif-1"),
+        "activation tokens must never leak into desktop.notifications topic snapshots"
+    );
+
+    let mut wire_events = Vec::new();
+    for _ in 0..3 {
+        let msg = tokio::time::timeout(
+            Duration::from_secs(3),
+            poll_fn(|cx| Pin::new(&mut wire).poll_next(cx)),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+        let member = msg.header().member().unwrap().as_str().to_owned();
+        let detail = match member.as_str() {
+            "ActivationToken" | "ActionInvoked" => {
+                let (nid, s): (u32, String) = msg.body().deserialize().unwrap();
+                format!("{member}:{nid}:{s}")
+            }
+            "NotificationClosed" => {
+                let (nid, reason): (u32, u32) = msg.body().deserialize().unwrap();
+                format!("{member}:{nid}:{reason}")
+            }
+            other => other.to_owned(),
+        };
+        wire_events.push(detail);
+    }
+    assert_eq!(
+        wire_events,
+        vec![
+            format!("ActivationToken:{id1}:tok-notif-1"),
+            format!("ActionInvoked:{id1}:open"),
+            format!("NotificationClosed:{id1}:2"),
+        ]
+    );
+
+    // 3. Omitted or empty activation_token omits ActivationToken signal completely.
+    let id2: u32 = proxy
+        .call(
+            "Notify",
+            &(
+                "Player",
+                0_u32,
+                "",
+                "Track",
+                "",
+                vec!["play", "Play"],
+                HashMap::from([(
+                    "resident",
+                    OwnedValue::try_from(DbusValue::from(true)).unwrap(),
+                )]),
+                0_i32,
+            ),
+        )
+        .await
+        .unwrap();
+    let live2 = next_update(&stream).await;
+    assert!(live2["popups"][0].get("desktop_entry").is_none());
+
+    for payload in [
+        json!({"id": id2, "action_key": "play"}),
+        json!({"id": id2, "action_key": "play", "activation_token": ""}),
+    ] {
+        invoke(
+            &hub,
+            ClientRole::Public,
+            "notifications.invoke-action",
+            payload,
+        )
+        .await
+        .unwrap();
+        let msg = tokio::time::timeout(
+            Duration::from_secs(3),
+            poll_fn(|cx| Pin::new(&mut wire).poll_next(cx)),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+        assert_eq!(msg.header().member().unwrap().as_str(), "ActionInvoked");
+        assert_eq!(
+            msg.body().deserialize::<(u32, String)>().unwrap(),
+            (id2, "play".to_owned())
+        );
+    }
+
+    desktop.shutdown().await;
+}

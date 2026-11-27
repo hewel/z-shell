@@ -7,14 +7,16 @@
 //! ## Notifications
 //!
 //! `desktop.notifications` separates `popups` from retained `history`. Both
-//! carry notification IDs, `icon` (theme name or media token), and `attachment`
-//! (media token or null). Only open notifications retain invokable `actions`
-//! or match `replaces_id` / `CloseNotification`; expired or popup-dismissed
-//! archived `history` entries clear `actions` to `[]`. Locking immediately
-//! hides live `popups`, suppresses toast delivery while locked, and denies
-//! `notifications.invoke-action`. `notifications.dismiss` takes `{id}`,
-//! `notifications.invoke-action` takes `{id, action_key}`, `notifications.clear`
-//! takes no payload, and `notifications.set-dnd` takes `{dnd}`.
+//! carry notification IDs, optional `desktop_entry` stems, `icon` (theme name
+//! or media token), and `attachment` (media token or null). Only open
+//! notifications retain invokable `actions` or match `replaces_id` /
+//! `CloseNotification`; expired or popup-dismissed archived `history` entries
+//! clear `actions` to `[]`. Locking immediately hides live `popups`, suppresses
+//! toast delivery while locked, and denies `notifications.invoke-action`.
+//! `notifications.dismiss` takes `{id}`, `notifications.invoke-action` takes
+//! `{id, action_key, activation_token?}` (emitting `ActivationToken` ahead of
+//! `ActionInvoked` when present), `notifications.clear` takes no payload, and
+//! `notifications.set-dnd` takes `{dnd}`.
 //!
 //! `notifications.fetch-blob` and `tray.fetch-blob` take `{token}` and only
 //! accept the host control channel. They return bounded PNG octets on demand
@@ -24,9 +26,12 @@
 //!
 //! `desktop.tray` reports registered items (`has_menu` plus optional `icon` and
 //! `DBusMenu` `menu` layouts with stripped mnemonics and `is_submenu` flags).
-//! `tray.activate` (returning `{fallback_menu}`) and `tray.context-menu` take
-//! `{id, x?, y?}`; `tray.prepare-menu` and `tray.close-menu` take
-//! `{id, menu_id?, timestamp?}`; `tray.menu-item` takes `{id, menu_id, timestamp?}`.
+//! `tray.activate` takes `{id, x?, y?, activation_token?}` (returning
+//! `{fallback_menu}`), `tray.context-menu` takes `{id, x?, y?}`,
+//! `tray.prepare-menu` and `tray.close-menu` take `{id, menu_id?, timestamp?}`,
+//! and `tray.menu-item` takes `{id, menu_id, timestamp?, activation_token?}`.
+//! When `activation_token` is supplied, `ProvideXdgActivationToken` is sent on
+//! the SNI item before the click action.
 //!
 //! `desktop.media` reports the MPRIS players, `selected_player_id`,
 //! `any_playing`, and the selected player's `cover`. `media.play-pause`,
@@ -58,16 +63,16 @@
 //!
 //! The `desktop.apps` topic carries `{available, count, pinned_apps, apps}`. `apps.list`
 //! pages `{items, total}` with optional `offset` and `limit`; `apps.launch` spawns an
-//! installed catalog entry `{id, action_id?}` when unlocked; `apps.pin` (host only)
-//! persists `{id, pinned}`.
+//! installed catalog entry `{id, action_id?, activation_token?}` when unlocked; `apps.pin`
+//! (host only) persists `{id, pinned}`.
 //!
 //! `launcher.query {query, query_id?, limit?}` returns `{query_id, items}`. IDs
 //! increase per connection; a supplied ID must exceed the last accepted one.
 //! Starting a newer query invalidates both the previous result and any outstanding
 //! query. Results have `{provider_id, item_id, title, subtitle?, icon?, actions,
 //! score, pinned?}`. Invoke `launcher.activate {query_id?, provider_id, item_id,
-//! action_id?}` from the same connection. Omit `query_id` to use the latest
-//! result, and `action_id` to use the default action.
+//! action_id?, activation_token?}` from the same connection. Omit `query_id` to use
+//! the latest result, and `action_id` to use the default action.
 //! Clients should correlate replies with the latest `query_id` before displaying them.
 //!
 //! A plugin invokes `launcher.register-provider {entry, prefix?}` on a persistent
@@ -80,7 +85,7 @@
 //! Only the owning connection receives `launcher.provider-query` events with
 //! `{request_id, query_id, provider_id, query, limit}` and
 //! `launcher.provider-activate` events with
-//! `{request_id, query_id, provider_id, item_id, action_id}`. It replies using
+//! `{request_id, query_id, provider_id, item_id, action_id, activation_token?}`. It replies using
 //! `launcher.provider-reply {request_id, items}` or `{request_id, activated}`,
 //! respectively. Provider items accept `item_id`, `title`, optional `subtitle`,
 //! optional `score` (0–1000), and optional `{action_id, title}` actions. IDs are
@@ -577,4 +582,38 @@ fn failed(reason: &'static str) -> RpcError {
 
 fn not_found(reason: &'static str) -> RpcError {
     RpcError::new(ErrorCode::NotFound, reason)
+}
+
+const MAX_ACTIVATION_TOKEN_BYTES: usize = 256;
+
+#[derive(Clone)]
+pub(crate) struct ActivationToken(String);
+
+impl std::fmt::Debug for ActivationToken {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ActivationToken([redacted])")
+    }
+}
+
+impl ActivationToken {
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+pub(crate) fn parse_activation_token(
+    raw: Option<String>,
+) -> Result<Option<ActivationToken>, RpcError> {
+    let Some(token) = raw else {
+        return Ok(None);
+    };
+    if token.is_empty() {
+        return Ok(None);
+    }
+    if token.len() > MAX_ACTIVATION_TOKEN_BYTES || token.bytes().any(|b| b <= 0x1f || b == 0x7f) {
+        return Err(invalid(
+            "activation_token exceeds 256 bytes or contains ASCII control characters",
+        ));
+    }
+    Ok(Some(ActivationToken(token)))
 }
