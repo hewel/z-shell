@@ -26,8 +26,8 @@
     }
   },
   "dependencies": {
-    "@hewel/zgui": "0.1.0",
-    "@hewel/zgui-services": "0.1.0",
+    "@hewel/zgui": "0.1.3",
+    "@hewel/zgui-services": "0.1.3",
     "@stylexjs/stylex": "0.19.2",
     "@z-shell/plugin-api": "workspace:*",
     "@z-shell/sdk": "workspace:*",
@@ -35,7 +35,7 @@
     "styleq": "0.2.1"
   },
   "devDependencies": {
-    "@hewel/zgui-build": "0.1.0",
+    "@hewel/zgui-build": "0.1.3",
     "@types/bun": "1.4.4"
   }
 }
