@@ -145,7 +145,7 @@ function LockScreen(props: {
         <box ariaHidden class={styles.avatarBox}>
           <vector ariaHidden d={SHELL_ROSETTE_PATH} viewBox="0 0 64 64" class={styles.avatarRosette} />
           <Show when={props.avatar()} fallback={
-            <ShellIcon name="person" filled size={46} color="var(--color-on-primary-container)" />
+            <ShellIcon name="person" size={46} color="var(--color-on-primary-container)" />
           }>{src => <Image ariaHidden src={src()} class={styles.avatarImage} style={{ clipPath: SHELL_ROSETTE_CLIP_104 }} />}</Show>
         </box>
         <text testId={`lock-user-${monitor().id}`} class={styles.username}>
@@ -230,7 +230,7 @@ function LockScreen(props: {
         </Show>
         <Show when={playing()}>{player => (
           <row class={styles.playingRow}>
-            <ShellIcon name="play" filled size={14} color="var(--color-on-surface)" />
+            <ShellIcon name="play" size={14} color="var(--color-on-surface)" />
             <text class={styles.playingText}>
               {player().metadata.title ?? player().identity}
               {player().metadata.artists.length > 0 ? ` · ${player().metadata.artists.join(", ")}` : ""}

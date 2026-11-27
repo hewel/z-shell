@@ -171,7 +171,7 @@ export function ApprovalReviewDialog(props: {
         </column>
 
         <row class={styles.trustBanner}>
-          <ShellIcon name="shield" filled size={16} color="var(--color-on-primary-container)" />
+          <ShellIcon name="shield" size={16} color="var(--color-on-primary-container)" />
           <text class={styles.trustBannerText}>
             Plugins compose directly into the shared shell bundle and share host trust once enabled and built.
           </text>

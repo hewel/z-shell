@@ -134,7 +134,7 @@ function PolkitContent(props: {
       >
         <row class={styles.headerRow}>
           <box ariaHidden class={styles.headerBadge}>
-            <ShellIcon name="lock" filled size={22} color="var(--color-on-primary-container)" />
+            <ShellIcon name="lock" size={22} color="var(--color-on-primary-container)" />
           </box>
           <column class={styles.headerText}>
             <text role="heading" class={styles.headerTitle}>Authentication required</text>
@@ -165,7 +165,7 @@ function PolkitContent(props: {
               {identity => (
                 <row testId={`polkit-identity-${identity().uid}`} class={styles.identityRow}>
                   <box ariaHidden class={styles.identityAvatar}>
-                    <ShellIcon name="person" filled size={14} color="var(--color-primary)" />
+                    <ShellIcon name="person" size={14} color="var(--color-primary)" />
                   </box>
                   <text class={styles.identityName}>{identity().username}</text>
                   <text class={styles.identityUid}>{`uid ${identity().uid}`}</text>
@@ -188,7 +188,6 @@ function PolkitContent(props: {
                     >
                       <ShellIcon
                         name="person"
-                        filled={selected()}
                         size={13}
                         color={selected() ? "var(--color-on-primary-container)" : "var(--color-on-surface-variant)"}
                       />

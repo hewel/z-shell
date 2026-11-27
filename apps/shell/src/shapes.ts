@@ -115,3 +115,11 @@ export const LOCK_MORPH_SHAPES = Object.freeze({
     d: rosettePath({ lobes: 5, cx: 12, cy: 12, outerRadius: 10, innerRadius: 6.4, outerTension: 1.25, innerTension: 0.75 }),
   },
 });
+
+/**
+ * Convert a stroke width authored on the 24x24 icon viewBox into non-scaling
+ * CSS pixels for `zgui-paint` (`--zgui-stroke-width`).
+ */
+export function resolveIconStrokeWidthPx(size: number, strokeWidth = 2, viewBoxSize = 24): string {
+  return `${Number(((strokeWidth * size) / viewBoxSize).toFixed(3))}px`;
+}

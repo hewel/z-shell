@@ -334,7 +334,7 @@
   height: 11px;
   --zgui-fill: transparent;
   --zgui-stroke: var(--color-on-primary-container);
-  --zgui-stroke-width: 2.6px;
+  --zgui-stroke-width: 1.2px;
   --zgui-stroke-linecap: round;
   --zgui-stroke-linejoin: round;
 
@@ -641,7 +641,7 @@
   height: 14px;
   --zgui-fill: transparent;
   --zgui-stroke: var(--color-on-primary-container);
-  --zgui-stroke-width: 2.2px;
+  --zgui-stroke-width: 1.167px;
   --zgui-stroke-linecap: round;
   --zgui-stroke-linejoin: round;
 }

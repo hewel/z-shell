@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 
 import { M3_EASINGS, M3_SPRINGS } from "@z-shell/sdk/zgui";
 import { buildTablerIconsModule } from "../../../tools/sync-tabler-icons.ts";
-import { LOCK_MORPH_SHAPES, SHELL_ROSETTE_PATH } from "../src/shapes.ts";
+import { LOCK_MORPH_SHAPES, SHELL_ROSETTE_PATH, resolveIconStrokeWidthPx } from "../src/shapes.ts";
 import { TABLER_ICON_PATHS } from "../src/tabler-icons.generated.ts";
 import { SHELL_DEFAULT_SCHEME, buildThemeStylesheet } from "../src/theme.ts";
 import {
@@ -1250,14 +1250,22 @@ describe("Exact-Geometry Shape & Material-First Icon contracts", () => {
     }
   });
 
-  test("all Tier 1 system UI icons in SHELL_ICON_PATHS use the 24x24 grid and stay synced with Tabler", () => {
+  test("all Tier 1 system UI icons in SHELL_ICON_PATHS use pure 24x24 Tabler Outline (Col B) and proportional CSS stroke scaling", () => {
     const iconsSource = readFileSync(join(shellDir, "src/icons.tsx"), "utf8");
     expect(iconsSource).toContain("shellEmblem:");
     expect(iconsSource).toContain(`viewBox: "0 0 64 64"`);
     expect(iconsSource).toContain("d: SHELL_ROSETTE_PATH");
     expect(iconsSource).toContain("...TABLER_ICON_PATHS");
+    expect(iconsSource).toContain("resolveIconStrokeWidthPx(");
+    expect(iconsSource).not.toContain("filledD");
 
-    const entries = Object.entries(TABLER_ICON_PATHS) as [string, { readonly viewBox: string; readonly d: string; readonly filledD?: string }][];
+    expect(resolveIconStrokeWidthPx(12)).toBe("1px");
+    expect(resolveIconStrokeWidthPx(15)).toBe("1.25px");
+    expect(resolveIconStrokeWidthPx(16)).toBe("1.333px");
+    expect(resolveIconStrokeWidthPx(18)).toBe("1.5px");
+    expect(resolveIconStrokeWidthPx(24)).toBe("2px");
+
+    const entries = Object.entries(TABLER_ICON_PATHS) as [string, Record<string, unknown> & { readonly viewBox: string; readonly d: string }][];
     expect(entries.length).toBe(79);
     const names = new Set(entries.map(([name]) => name));
     for (const required of ["apps", "overview", "ethernet", "mediaEq", "gpu", "memory", "wifiLock"]) {
@@ -1266,6 +1274,7 @@ describe("Exact-Geometry Shape & Material-First Icon contracts", () => {
     for (const [name, def] of entries) {
       expect(def.viewBox, `TABLER_ICON_PATHS.${name}`).toBe("0 0 24 24");
       expect(def.d.trim().length, `TABLER_ICON_PATHS.${name}.d`).toBeGreaterThan(0);
+      expect("filledD" in def, `TABLER_ICON_PATHS.${name} must remain pure outline (Col B)`).toBe(false);
     }
     expect(TABLER_ICON_PATHS.wifiLock.d).toContain("M17 19a1 1 0 0 1 1 -1h3a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-3a1 1 0 0 1 -1 -1v-2");
     const generated = readFileSync(join(shellDir, "src/tabler-icons.generated.ts"), "utf8");

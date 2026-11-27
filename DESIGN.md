@@ -221,7 +221,7 @@ Tightened from mobile `28px`–`30px` sheets for desktop precision [[M3-Shape]](
 
 | Tier | Source & Grid | Scope |
 |---|---|---|
-| **1. System UI (Primary)** | **Tabler Icons v3.53** (`24×24`, Hybrid: `2px` round Outline default + native Filled active/hero accents; pre-generated composite `wifiLock` via `bun run icons:sync`) [[Tabler-Icons]](#references) | All bars, popovers, toggles, headers, nav rails, dialogs, Launcher (`apps`), Overview (`overview`), and system utilities (`12px`–`22px` optical sizes, semantic `color` tokens). |
+| **1. System UI (Primary)** | **Tabler Icons v3.53** (`24×24`, Pure `2px` round Outline across all states—scaled by `size / 24` in `--zgui-stroke-width`; pre-generated composite `wifiLock` via `bun run icons:sync`) [[Tabler-Icons]](#references) | All bars, popovers, toggles, headers, nav rails, dialogs, Launcher (`apps`), Overview (`overview`), and system utilities (`12px`–`22px` optical sizes, semantic `color` tokens). |
 | **2. M3 Expressive Shapes** | Analytically symmetric SVG (`0 0 64 64` or `0 0 24 24`) [[M3-Shape]](#references) | Strictly limited to the $D_8$ scalloped `z-shell` brand mark, user avatar badges, and Lock Screen morphing password shapes (`Cookie4`, `Clover4`, `Sunny`, `Circle`, `Cookie6`, `Flower5`). |
 | **3. Third-Party Apps** | Runtime XDG Icon Theme (`.desktop` `Icon=`) [[XDG-Icon]](#references); canonical brand SVG on canvas | `18 · Launcher`, `10 · Dock`, `Tray Island`, active window indicator—one consistent icon & backing color per app. |
 
@@ -285,7 +285,7 @@ Non-mechanical rules requiring human/agent judgement during design and code revi
 4. **[M3-Shape]** Google Material Design 3 — *Shape Scale & Expressive Shapes*: https://m3.material.io/styles/shape/overview
 5. **[M3-Typography]** Google Material Design 3 — *Typography Scale*: https://m3.material.io/styles/typography/overview
 6. **[M3-Motion]** Google Material Design 3 — *Motion Physics System, Spring Tokens, Easing & Transitions*: https://m3.material.io/styles/motion/overview · https://m3.material.io/styles/motion/overview/specs · https://m3.material.io/styles/motion/easing-and-duration/tokens-specs · [docs/design/motion.md](docs/design/motion.md)
-7. **[Tabler-Icons]** Tabler Icons v3.53 — *24×24 System UI Icon Set (`@tabler/icons`, Outline 2px + Filled)*: https://tabler.io/icons · https://github.com/tabler/tabler-icons
+7. **[Tabler-Icons]** Tabler Icons v3.53 — *24×24 System UI Icon Set (`@tabler/icons`, Pure Outline 2px)*: https://tabler.io/icons · https://github.com/tabler/tabler-icons
 8. **[M3-Components]** Google Material Design 3 — *Components Overview & Expressive Specs*: https://m3.material.io/components · [docs/design/components.md](docs/design/components.md)
 9. **[M3-Web]** Google `material-components/material-web` — *Official M3 Component & State Tokens (`tokens/versions/v0_192/`)*: https://github.com/material-components/material-web/tree/main/tokens/versions/v0_192
 10. **[XDG-Icon]** freedesktop.org — *XDG Icon Theme Specification* (runtime Linux desktop application icon lookup): https://specifications.freedesktop.org/icon-theme-spec/latest/

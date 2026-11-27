@@ -255,7 +255,7 @@ function OverviewContent(props: {
       >
         <row class={styles.headerRow}>
           <box ariaHidden class={styles.headerBadge}>
-            <ShellIcon name="overview" filled size={22} color="var(--color-on-primary-container)" />
+            <ShellIcon name="overview" size={22} color="var(--color-on-primary-container)" />
           </box>
           <column class={styles.headerText}>
             <text role="heading" class={styles.headerTitle}>

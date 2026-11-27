@@ -71,7 +71,7 @@ function ClipboardRow(props: {
           data-pinned={entry().pinned ? "true" : "false"}
           onClick={() => { void invokePublic(entry().pinned ? "clipboard.unpin" : "clipboard.pin", { id: entry().id }); }}
         >
-          <ShellIcon name="pin" filled={entry().pinned} size={14} color={entry().pinned ? onPrimaryContainer : muted} />
+          <ShellIcon name="pin" size={14} color={entry().pinned ? onPrimaryContainer : muted} />
         </Button>
       </M3CardAction>
       <M3CardAction class={styles.rowActionWrap}>

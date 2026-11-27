@@ -185,7 +185,7 @@ export function TrayRulesView(props: { readonly onBack: () => void }): NativeChi
       <Show when={errorMessage()}>
         {msg => (
           <row testId="settings-tray-rules-error" class={cx(styles.errorBanner)}>
-            <ShellIcon name="warning" filled size={16} color="var(--color-on-error-container)" />
+            <ShellIcon name="warning" size={16} color="var(--color-on-error-container)" />
             <text class={cx(styles.errorText)}>{msg()}</text>
           </row>
         )}

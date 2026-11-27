@@ -952,7 +952,6 @@ function SystemMonitorWindowContent(): NativeChild {
                     >
                       <ShellIcon
                         name={item().icon}
-                        filled={active()}
                         size={15}
                         color={active() ? "var(--color-on-primary-container)" : "var(--color-on-surface-variant)"}
                       />

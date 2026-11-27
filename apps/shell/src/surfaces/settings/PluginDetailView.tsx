@@ -175,7 +175,7 @@ export function PluginDetailView(props: {
 
       <column class={styles.body}>
         <row class={styles.trustBanner}>
-          <ShellIcon name="shield" filled size={16} color="var(--color-on-primary-container)" />
+          <ShellIcon name="shield" size={16} color="var(--color-on-primary-container)" />
           <text class={styles.trustBannerText}>
             Enabled plugins compile directly into the host shell bundle (`bun run build:shell`). Review capabilities before approving.
           </text>
@@ -256,7 +256,7 @@ export function PluginDetailView(props: {
         <Show when={errorMsg()}>
           {err => (
             <row class={styles.errorBanner}>
-              <ShellIcon name="warning" filled size={16} color="var(--color-on-error-container)" />
+              <ShellIcon name="warning" size={16} color="var(--color-on-error-container)" />
               <text class={styles.errorBannerText}>{err()}</text>
             </row>
           )}

@@ -50,7 +50,7 @@ Desktop standard height is **`34px`** with **`10px` (`--radius-md`)** radius; co
 
 ### 2.2 Icon Buttons (`C2`)
 
-Desktop standard hit box is **`32×32px`** (compact **`28×28px`**, minimum hit target ≥ `24×24px` per WCAG 2.2 SC 2.5.8) with uniform **`10px` (`--radius-md`)** radius across both unselected and selected states (no circle-to-square morph). Icon optical size: `16px`–`18px` on the `24×24` Material grid.
+Desktop standard hit box is **`32×32px`** (compact **`28×28px`**, minimum hit target ≥ `24×24px` per WCAG 2.2 SC 2.5.8) with uniform **`10px` (`--radius-md`)** radius across both unselected and selected states (no circle-to-square morph). Icon optical size: `16px`–`18px` on the `24×24` Tabler grid.
 
 - **Variants**:
   - `Standard`: transparent rest → `primary @ 14%` container + `primary` icon when selected.
@@ -74,7 +74,7 @@ Follows `material-web` `_md-comp-switch.scss` color and state semantics scaled p
 |---|---|---|---|---|
 | **Off (Unselected)** | `44×24px`, `surface-container-highest`, `999px` | `1.5px solid outline` | `14×14px` circle, `outline` (`5px` inset) | None |
 | **Off (Hover)** | Same + subtle `+8%` halo centered around thumb | `1.5px solid outline` | `14×14px` circle, `outline` (retains muted tone; halo supplies hover feedback) | None |
-| **On (Selected)** | `44×24px`, `primary`, `999px` | None | `18×18px` circle, `on-primary` (`3px` inset) | `11×11px` Material `check`, `on-primary-container` |
+| **On (Selected)** | `44×24px`, `primary`, `999px` | None | `18×18px` circle, `on-primary` (`3px` inset) | `11×11px` Tabler `check`, `on-primary-container` |
 | **Pressed (On / Off)** | Same as state + state layer | Same as state | Stretches smoothly to `20×18px` (`fast.spatial`) staying cleanly inside `3px` track inset | Retains check when On |
 | **Disabled (Off)** | `surface-container-highest @ 12%` | `1.5px solid on-surface @ 12%` | `14×14px`, `on-surface @ 38%` | None |
 | **Disabled (On)** | `on-surface @ 12%` | `1px solid outline-variant @ 50%` | `18×18px`, opaque `surface-container` + `1px outline-variant @ 50%` | `11×11px` `check`, `on-surface @ 38%` |

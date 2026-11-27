@@ -147,7 +147,6 @@ function SettingsWindowContent(): NativeChild {
                     >
                       <ShellIcon
                         name={tab().icon}
-                        filled={active()}
                         size={15}
                         color={active() ? "var(--color-on-primary-container)" : "var(--color-on-surface-variant)"}
                       />
@@ -188,7 +187,6 @@ function SettingsWindowContent(): NativeChild {
                       >
                         <ShellIcon
                           name="layers"
-                          filled={active()}
                           size={15}
                           color={active() ? "var(--color-on-primary-container)" : "var(--color-on-surface-variant)"}
                         />

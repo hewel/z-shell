@@ -364,7 +364,6 @@ function NotificationBadgePill(props: { count: number; dnd: boolean; vertical: b
     >
       <ShellIcon
         name={props.dnd ? "bellOff" : "bell"}
-        filled={!props.dnd}
         size={props.vertical ? 10 : props.docked ? 11 : 12}
         color="var(--color-on-primary-container)"
       />
@@ -774,7 +773,6 @@ function SystemPill(props: {
         <box data-press-visual="compact" ariaHidden class={styles.pressInner}>
           <ShellIcon
             name="tune"
-            filled={mainQsActive()}
             size={15}
             color={mainQsActive() ? "var(--color-on-primary-container)" : "var(--color-on-surface)"}
           />
@@ -937,7 +935,6 @@ function BarContent(props: {
             <box data-press-visual="compact" ariaHidden class={styles.pressInner}>
               <ShellIcon
                 name="overview"
-                filled={activePanel() === "overview"}
                 size={docked() ? 14 : 15}
                 color={activePanel() === "overview" ? "var(--color-primary)" : "var(--color-on-surface-variant)"}
               />

@@ -169,7 +169,7 @@ export function CalendarPanel() {
             data-active={dnd() ? "true" : "false"}
             onClick={() => { void invokePublic("notifications.set-dnd", { dnd: !dnd() }); }}
           >
-            <ShellIcon name="sleep" size={14} filled={dnd()} color={dnd() ? onPrimaryContainer : onSurface} />
+            <ShellIcon name="sleep" size={14} color={dnd() ? onPrimaryContainer : onSurface} />
             <text>Do Not Disturb</text>
           </Button>
         </row>

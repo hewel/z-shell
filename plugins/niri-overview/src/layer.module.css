@@ -240,7 +240,11 @@
 .headerBadgeIcon {
   width: 22px;
   height: 22px;
-  --zgui-fill: var(--color-on-primary-container);
+  --zgui-fill: transparent;
+  --zgui-stroke: var(--color-on-primary-container);
+  --zgui-stroke-width: 1.833px;
+  --zgui-stroke-linecap: round;
+  --zgui-stroke-linejoin: round;
 }
 
 .headerTitles {
@@ -286,7 +290,7 @@
   height: 18px;
   --zgui-fill: transparent;
   --zgui-stroke: var(--color-on-surface);
-  --zgui-stroke-width: 2px;
+  --zgui-stroke-width: 1.5px;
   --zgui-stroke-linecap: round;
   --zgui-stroke-linejoin: round;
 }

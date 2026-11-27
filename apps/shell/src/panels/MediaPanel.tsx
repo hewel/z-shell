@@ -192,7 +192,7 @@ function TrackControls(props: { player: Accessor<MediaPlayer> }) {
           class={styles.skipBtn}
           onClick={() => { void invokePublic("media.previous", { player_id: player().id }); }}
         >
-          <ShellIcon name="skipPrev" filled size={24} color={onSurface} />
+          <ShellIcon name="skipPrev" size={20} color={onSurface} />
         </Button>
         <Button
           testId="media-play-pause"
@@ -201,7 +201,7 @@ function TrackControls(props: { player: Accessor<MediaPlayer> }) {
           class={styles.playPauseBtn}
           onClick={() => { void invokePublic("media.play-pause", { player_id: player().id }); }}
         >
-          <ShellIcon name={playing() ? "pause" : "play"} filled size={26} color={onPrimary} />
+          <ShellIcon name={playing() ? "pause" : "play"} size={22} color={onPrimary} />
         </Button>
         <Button
           testId="media-next"
@@ -210,7 +210,7 @@ function TrackControls(props: { player: Accessor<MediaPlayer> }) {
           class={styles.skipBtn}
           onClick={() => { void invokePublic("media.next", { player_id: player().id }); }}
         >
-          <ShellIcon name="skipNext" filled size={24} color={onSurface} />
+          <ShellIcon name="skipNext" size={20} color={onSurface} />
         </Button>
         <Button
           testId="media-seek-forward"

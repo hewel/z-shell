@@ -155,7 +155,7 @@ function QuickTile(props: {
               transform: scheme() === "reduced" ? "none" : `scale(${Math.max(0.8, Math.min(1.12, iconPop())).toFixed(4)})`,
             }}
           >
-            <ShellIcon name={props.icon} filled={props.active} size={16} color={props.active ? primary : muted} />
+            <ShellIcon name={props.icon} size={16} color={props.active ? primary : muted} />
           </box>
           <column class={cx(styles.grow, styles.qsTileTextCol)}>
             <text class={cx(styles.clipped, styles.qsTileLabel)}>{props.label}</text>
@@ -462,7 +462,7 @@ function MainPage(props: {
           <vector ariaHidden d={SHELL_ROSETTE_PATH} viewBox="0 0 64 64" class={styles.avatarRosette} />
           <Show when={avatar.src()} fallback={
             <box testId={props.outgoing ? null : "qs-avatar-fallback"} ariaHidden class={styles.avatarFallback}>
-              <ShellIcon name="person" filled size={18} color={onPrimaryContainer} />
+              <ShellIcon name="person" size={18} color={onPrimaryContainer} />
             </box>
           }>
             {src => <Image ariaHidden src={src()} class={styles.avatarImg} style={{ clipPath: SHELL_ROSETTE_CLIP_40 }} />}

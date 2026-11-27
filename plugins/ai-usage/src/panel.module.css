@@ -40,7 +40,7 @@
   color: var(--color-primary);
   --zgui-fill: transparent;
   --zgui-stroke: var(--color-primary);
-  --zgui-stroke-width: 2px;
+  --zgui-stroke-width: 1.333px;
   --zgui-stroke-linecap: round;
   --zgui-stroke-linejoin: round;
 }
@@ -77,7 +77,7 @@
   color: var(--color-on-surface-variant);
   --zgui-fill: transparent;
   --zgui-stroke: var(--color-on-surface-variant);
-  --zgui-stroke-width: 2px;
+  --zgui-stroke-width: 1.5px;
   --zgui-stroke-linecap: round;
   --zgui-stroke-linejoin: round;
   flex-shrink: 0;
@@ -161,7 +161,7 @@
   color: var(--color-on-surface);
   --zgui-fill: transparent;
   --zgui-stroke: var(--color-on-surface);
-  --zgui-stroke-width: 2px;
+  --zgui-stroke-width: 1.333px;
   --zgui-stroke-linecap: round;
   --zgui-stroke-linejoin: round;
 }
