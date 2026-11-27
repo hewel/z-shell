@@ -54,6 +54,14 @@ _Avoid_: Image URL, data URI, image handle
 A session-scoped opaque `zgui-blob://<id>` reference owned by the `zgui-js` native host after fetching and validating bytes from a daemon media token outside the QuickJS heap.
 _Avoid_: Media token, blob URL
 
+**Shell bundle**:
+The compiled, self-contained `zgui-js` application artifact directory (`manifest.json` and prebuilt UI modules) mounted by `zgui-host` at runtime.
+_Avoid_: Frontend dist, app build, client package
+
+**Session launcher**:
+The installed session entrypoint (`z-shell-session`) that prepares per-display runtime paths, ensures a running shell daemon when launching standalone, and execs `zgui-host` or forwards UI control commands.
+_Avoid_: Dev script, startup wrapper, UI daemon
+
 ### Configuration & State
 
 **User settings**:

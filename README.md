@@ -107,6 +107,49 @@ bun run test:rust           # cargo test + clippy -D warnings + cargo doc --no-d
 bun run test:ts             # Builds binaries and runs all packages/ and plugins/ Bun tests
 ```
 
+### Install Locally
+
+Run `./install.sh` from the repository root to build release binaries (`z-shelld`, `z-shell`, `z-shell-pam-helper`), resolve or build the ABI-matched `zgui-host`, compose the **Shell bundle**, and install everything under your user XDG directories without `sudo`. When executed inside an active Wayland session, it automatically starts (or smoothly restarts) `z-shell` unless `--no-start` is passed:
+
+```bash
+# Standard user-local install (uses currently enabled plugins and starts/restarts in active Wayland)
+./install.sh
+
+# Register, approve, and enable all 3 first-party plugins before building the bundle
+./install.sh --enable-first-party --init-config
+
+# Install without starting, or build a zero-plugin standalone shell and enable systemd --user units
+./install.sh --no-start
+./install.sh --standalone --enable-systemd
+
+# Preflight check, force restart, or uninstall
+./install.sh --doctor
+./install.sh --restart
+./install.sh --uninstall        # Add --purge to also remove config/state/cache
+```
+
+Installed layout (override with `--prefix <DIR>`):
+
+- `${XDG_BIN_HOME:-~/.local/bin}/{z-shelld,z-shell,z-shell-pam-helper,z-shell-session}`
+- `${XDG_DATA_HOME:-~/.local/share}/z-shell/{bundle,libexec/zgui-host,bundled-plugins}`
+- `${XDG_CONFIG_HOME:-~/.config}/systemd/user/{z-shelld.service,z-shell-ui.service}`
+
+Start a session directly from your Wayland compositor (for example Niri `spawn-at-startup "z-shell-session"`), or via `systemd --user`:
+
+```bash
+systemctl --user enable --now z-shelld.service z-shell-ui.service
+```
+
+Bind compositor hotkeys to UI surfaces through the **Session launcher** (`z-shell-session msg`):
+
+```bash
+z-shell-session msg panel launcher
+z-shell-session msg panel clipboard
+z-shell-session msg settings
+z-shell-session msg monitor
+z-shell-session msg power lock
+```
+
 ### Running the Daemon & CLI
 
 ```bash
