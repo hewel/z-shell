@@ -1,9 +1,8 @@
-import { Show, createMemo, cx } from "@hewel/zgui";
+import { createDelay, createEffect, createMemo, createSignal, cx, onCleanup } from "@hewel/zgui";
 import styles from "./icons.module.css";
 import { createM3Spring, createPhaseLoop, useMotionScheme } from "./motion.ts";
 import {
   SHELL_ROSETTE_PATH,
-  buildMediaEqStatePath,
   buildMediaEqWavePath,
   resolveIconStrokeWidthPx,
 } from "./shapes.ts";
@@ -90,7 +89,8 @@ export function ShellIcon(props: {
 
 interface MediaEqIconProps {
   readonly active: boolean;
-  readonly mode?: "continuous" | "state" | undefined;
+  /** Optional timer cadence in ms (e.g. `42` for ~24fps) to avoid full-refresh bar redraws. */
+  readonly stepMs?: number | undefined;
   readonly size?: number | undefined;
   readonly color?: string | undefined;
   readonly inactiveColor?: string | undefined;
@@ -99,29 +99,46 @@ interface MediaEqIconProps {
   readonly label?: string | undefined;
 }
 
-function ContinuousMediaEq(props: MediaEqIconProps) {
+/**
+ * Playback-driven 5-bar waveform glyph on the canonical 24x24 Tabler grid.
+ * Breathes smoothly while `active` is true and `scheme !== "reduced"` (either on the shared
+ * frame loop or throttled via `stepMs`), and settles back to the exact resting `mediaEq`
+ * silhouette at 0% idle CPU when inactive, muted, or in reduced motion.
+ */
+export function MediaEqIcon(props: MediaEqIconProps) {
   const scheme = useMotionScheme();
+  const useThrottledTimer = () => (props.stepMs ?? 0) > 0;
   const waveAmplitude = createM3Spring(() => (props.active && scheme() !== "reduced" ? 1 : 0), "defaultSpatial", { scheme });
-  const phase = createPhaseLoop(() => props.active, 1, scheme);
-  const path = createMemo(() => buildMediaEqWavePath(waveAmplitude(), phase()));
-  return (
-    <VectorGlyph
-      d={path()}
-      viewBox="0 0 24 24"
-      size={props.size ?? 16}
-      color={props.color ?? "var(--color-on-surface)"}
-      strokeWidth={props.strokeWidth ?? 2}
-      testId={props.testId}
-      label={props.label}
-    />
-  );
-}
-
-function StateMediaEq(props: MediaEqIconProps) {
-  const scheme = useMotionScheme();
-  const expandedScale = createM3Spring(() => (props.active ? 1 : 0), "defaultSpatial", { scheme });
   const colorMix = createM3Spring(() => (props.active ? 1 : 0), "fastEffects", { scheme });
-  const path = createMemo(() => buildMediaEqStatePath(expandedScale()));
+  const sharedPhase = createPhaseLoop(() => props.active && !useThrottledTimer(), 1, scheme);
+  const [throttledPhase, setThrottledPhase] = createSignal(0);
+
+  const delay = createDelay();
+  let lastMs: number | undefined;
+  onCleanup(() => delay.cancel());
+  createEffect(
+    () => (props.active && scheme() !== "reduced" && useThrottledTimer() ? props.stepMs! : 0),
+    intervalMs => {
+      delay.cancel();
+      if (intervalMs <= 0) {
+        lastMs = undefined;
+        return;
+      }
+      lastMs = Date.now();
+      const tick = () => {
+        const nowMs = Date.now();
+        const dt = Math.min(0.1, Math.max(intervalMs / 1000, (nowMs - (lastMs ?? nowMs)) / 1000));
+        lastMs = nowMs;
+        setThrottledPhase(prev => prev + dt);
+        delay.schedule(intervalMs, tick);
+      };
+      delay.schedule(intervalMs, tick);
+    },
+  );
+
+  const path = createMemo(() =>
+    buildMediaEqWavePath(waveAmplitude(), useThrottledTimer() ? throttledPhase() : sharedPhase()),
+  );
   const resolvedColor = () => {
     const activeColor = props.color ?? "var(--color-on-surface)";
     const inactiveColor = props.inactiveColor;
@@ -143,40 +160,5 @@ function StateMediaEq(props: MediaEqIconProps) {
       testId={props.testId}
       label={props.label}
     />
-  );
-}
-
-/**
- * Playback-driven 5-bar waveform glyph on the canonical 24x24 Tabler grid.
- * - `"continuous"` mode breathes smoothly while `active` is true (stopping at 0% idle CPU when false or `reduced`),
- *   settling back to the exact resting `mediaEq` silhouette.
- * - `"state"` mode performs a single `defaultSpatial` expand/compress transition paired with a `fastEffects`
- *   color transition without a background loop (0% steady-state bar CPU).
- */
-export function MediaEqIcon(props: MediaEqIconProps) {
-  return (
-    <Show
-      when={(props.mode ?? "continuous") === "continuous"}
-      fallback={
-        <StateMediaEq
-          active={props.active}
-          size={props.size}
-          color={props.color}
-          inactiveColor={props.inactiveColor}
-          strokeWidth={props.strokeWidth}
-          testId={props.testId}
-          label={props.label}
-        />
-      }
-    >
-      <ContinuousMediaEq
-        active={props.active}
-        size={props.size}
-        color={props.color}
-        strokeWidth={props.strokeWidth}
-        testId={props.testId}
-        label={props.label}
-      />
-    </Show>
   );
 }

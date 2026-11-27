@@ -119,10 +119,9 @@ function WavyProgressTrack(props: {
 }
 
 function TrackControls(props: { player: Accessor<MediaPlayer> }) {
-  const { media, audio, hostClient, invokePublic } = useShellStore();
+  const { media, hostClient, invokePublic } = useShellStore();
   const { src } = useDaemonMedia(hostClient, () => media.data()?.cover, { fetchCommand: "media.fetch-blob" });
   const playing = () => props.player().playback_status === "playing";
-  const audible = () => isMediaPlayerAudible(props.player(), audio.data());
   const length = () => props.player().metadata.length_us;
   const position = () => props.player().position_us;
   const canSeek = () => props.player().capabilities.can_seek;
@@ -140,7 +139,7 @@ function TrackControls(props: { player: Accessor<MediaPlayer> }) {
       <row class={styles.trackHeader}>
         <Show when={src()} fallback={
           <box class={cx(styles.coverTile, styles.coverFallback)}>
-            <MediaEqIcon active={audible()} mode="continuous" size={28} color={primary} testId="media-cover-eq" />
+            <ShellIcon name="musicNote" size={28} color={primary} testId="media-cover-fallback" />
           </box>
         }>
           <Image testId="media-cover" src={src()} class={cx(styles.coverTile, styles.coverImage)} />
@@ -276,7 +275,6 @@ export function MediaPanel() {
                     >
                       <MediaEqIcon
                         active={isMediaPlayerAudible(player(), audio.data())}
-                        mode="continuous"
                         size={12}
                         color={active() ? onPrimaryContainer : muted}
                         testId={`media-player-eq-${player().id}`}

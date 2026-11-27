@@ -10,7 +10,6 @@ import {
   LOCK_MORPH_SHAPES,
   MEDIA_EQ_REST_PATH,
   SHELL_ROSETTE_PATH,
-  buildMediaEqStatePath,
   buildMediaEqWavePath,
   resolveIconStrokeWidthPx,
 } from "../src/shapes.ts";
@@ -1288,13 +1287,9 @@ describe("Exact-Geometry Shape & Material-First Icon contracts", () => {
     expect(generated).toBe(buildTablerIconsModule(repoRoot));
   });
 
-  test("analytical mediaEq wave and state paths match resting Tabler geometry and preserve vertical symmetry", () => {
+  test("analytical mediaEq wave paths match resting Tabler geometry and preserve vertical symmetry", () => {
     expect(MEDIA_EQ_REST_PATH).toBe(TABLER_ICON_PATHS.mediaEq.d);
     expect(buildMediaEqWavePath(0, 1.25)).toBe(MEDIA_EQ_REST_PATH);
-    expect(buildMediaEqStatePath(1)).toBe(MEDIA_EQ_REST_PATH);
-    expect(buildMediaEqStatePath(0)).toBe(
-      "M4 10.75v2.5\nM8 10.25v3.5\nM12 10.75v2.5\nM16 10.25v3.5\nM20 10.75v2.5",
-    );
 
     const frameA = buildMediaEqWavePath(1, 0);
     const frameB = buildMediaEqWavePath(1, 0.18);

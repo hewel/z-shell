@@ -1002,7 +1002,7 @@ function BarContent(props: {
                 <row data-press-visual="compact" data-docked={docked() ? "true" : "false"} class={styles.mediaInner}>
                   <MediaEqIcon
                     active={mediaAudible()}
-                    mode="state"
+                    stepMs={42}
                     size={16}
                     color={mediaActiveColor()}
                     inactiveColor={mediaInactiveColor()}

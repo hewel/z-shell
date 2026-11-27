@@ -753,13 +753,14 @@ describe("apps/shell design geometry & pixel lint", () => {
           expect(pixel(mediaReduced.image, sx, centerY - 6), `reduced media flat above at ${frac}`).toEqual(bgSample);
           expect(pixel(mediaReduced.image, sx, centerY + 6), `reduced media flat below at ${frac}`).toEqual(bgSample);
         }
-        expect(
-          diffRegionPixels(mediaReduced.image, mediaReducedT180.image, treeNode(mediaReduced.tree, "media-cover-eq").boundsDevice!),
-          "reduced media cover eq remains static over 180ms",
-        ).toBe(0);
+        expect(treeNode(mediaReduced.tree, "media-cover-fallback").boundsDevice, "static musicNote cover fallback rendered").toBeDefined();
         expect(
           diffRegionPixels(mediaReduced.image, mediaReducedT180.image, treeNode(mediaReduced.tree, "media-player-eq-spotify").boundsDevice!),
           "reduced media player pill eq remains static over 180ms",
+        ).toBe(0);
+        expect(
+          diffRegionPixels(mediaReduced.image, mediaReducedT180.image, treeNode(mediaReduced.tree, "media-cover-fallback").boundsDevice!),
+          "reduced media cover fallback remains static over 180ms",
         ).toBe(0);
       }
 
@@ -5784,7 +5785,7 @@ describe("apps/shell design geometry & pixel lint", () => {
     }
   }, 30_000);
 
-  previewTest("MediaPanel & StatusBar animated waveform icon: continuous playback breathing, mute/pause suppression, and 0% steady-state bar CPU", () => {
+  previewTest("MediaPanel & StatusBar animated waveform icon: throttled ~24fps bar wave, static cover fallback, mute suppression, and resting restoration", () => {
     const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-media-eq-");
     try {
       const fixture = join(workspace, "fixture.json");
@@ -5796,19 +5797,19 @@ describe("apps/shell design geometry & pixel lint", () => {
       timeline.advance("daemon-events", 30);
       timeline.step({ id: "ready", op: "settle" });
 
-      // StatusBar bar-media-eq stays stationary in steady state while playing (0% bar CPU).
+      // StatusBar bar-media-eq animates at throttled ~24fps (42ms steps) while playing & unmuted.
       timeline.step({ id: "capture-bar-audible-0", op: "capture", surface: "bar-dp-1", captureId: "bar-audible-0" });
-      timeline.advance("bar-audible-hold", 180);
+      timeline.advance("bar-audible-step", 180);
       timeline.step({ id: "capture-bar-audible-1", op: "capture", surface: "bar-dp-1", captureId: "bar-audible-1" });
 
-      // MediaPanel cover fallback (28px) and playing pill (12px) breathe while paused pill stays still.
+      // MediaPanel playing pill (12px) breathes while static cover fallback (28px musicNote) and paused pill stay still.
       timeline.step({ id: "open-media", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-media" }, button: "primary" });
       timeline.advance("media-open-settle", 400);
       timeline.step({ id: "capture-media-audible-0", op: "capture", surface: "panel-media", captureId: "media-audible-0" });
       timeline.advance("media-audible-step", 180);
       timeline.step({ id: "capture-media-audible-1", op: "capture", surface: "panel-media", captureId: "media-audible-1" });
 
-      // Muting default sink compresses StatusBar icon and converges MediaPanel waveforms to rest.
+      // Muting default sink dims StatusBar icon and restores canonical mediaEq resting silhouette at 0% idle CPU.
       const muteAtMs = timeline.after(10);
       timeline.advance("mute-deliver", 10);
       timeline.advance("mute-spring-settle", 380);
@@ -5905,12 +5906,15 @@ describe("apps/shell design geometry & pixel lint", () => {
       const mediaMuted1 = readCapture(out, "panel-media", "media-muted-1");
 
       const barEqBounds = treeNode(barAudible0.tree, "bar-media-eq").boundsDevice!;
-      expect(diffRegionPixels(barAudible0.image, barAudible1.image, barEqBounds), "StatusBar bar-media-eq does not loop continuously while playing").toBe(0);
+      expect(
+        diffRegionPixels(barAudible0.image, barAudible1.image, barEqBounds),
+        "StatusBar bar-media-eq animates across 42ms steps while audible",
+      ).toBeGreaterThan(0);
 
       expect(
-        diffRegionPixels(mediaAudible0.image, mediaAudible1.image, treeNode(mediaAudible0.tree, "media-cover-eq").boundsDevice!),
-        "MediaPanel 28px cover fallback waveform animates while audible",
-      ).toBeGreaterThan(0);
+        diffRegionPixels(mediaAudible0.image, mediaAudible1.image, treeNode(mediaAudible0.tree, "media-cover-fallback").boundsDevice!),
+        "MediaPanel 28px musicNote cover fallback remains stationary",
+      ).toBe(0);
       expect(
         diffRegionPixels(mediaAudible0.image, mediaAudible1.image, treeNode(mediaAudible0.tree, "media-player-eq-spotify").boundsDevice!),
         "MediaPanel 12px playing pill waveform animates while audible",
@@ -5922,15 +5926,11 @@ describe("apps/shell design geometry & pixel lint", () => {
 
       expect(
         diffRegionPixels(barAudible0.image, barMuted0.image, barEqBounds),
-        "StatusBar bar-media-eq transitions visually when default sink is muted",
+        "StatusBar bar-media-eq updates visually when default sink is muted",
       ).toBeGreaterThan(0);
       expect(
         diffRegionPixels(barMuted0.image, barMuted1.image, barEqBounds),
-        "StatusBar bar-media-eq settles to 0 diff after mute transition",
-      ).toBe(0);
-      expect(
-        diffRegionPixels(mediaMuted0.image, mediaMuted1.image, treeNode(mediaMuted0.tree, "media-cover-eq").boundsDevice!),
-        "MediaPanel 28px cover fallback settles to 0 diff when muted",
+        "StatusBar bar-media-eq settles to 0 diff after mute restoration",
       ).toBe(0);
       expect(
         diffRegionPixels(mediaMuted0.image, mediaMuted1.image, treeNode(mediaMuted0.tree, "media-player-eq-spotify").boundsDevice!),

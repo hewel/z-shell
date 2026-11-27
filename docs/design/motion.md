@@ -135,7 +135,7 @@ Every surface designed in Paper and documented in [DESIGN.md](../../DESIGN.md) b
 | **Bar island active highlight** | State & border tint | — | `fast.effects` | Background steps `surface-container → surface-container-high` (or `primary-container` in docked mode) with `primary` border fade. |
 | **Unread notification pill** (`🔔 2`) | Count pop & reveal | `fast.spatial` | `fast.effects` | Appears from `scale(0.85) → 1.0` when count `0 → ≥1`; numeral crossfades on increment. |
 | **AI usage circular ring** | Radial sweep | `default.spatial` | — | SVG `stroke-dashoffset` springs smoothly on quota poll updates. |
-| **Media island waveform (`bar-media`)** | State morph | `default.spatial` | `fast.effects` | One-shot transition between expanded `mediaEq` (`primary`) when audible and quiet stubs (`on-surface-variant`) when paused or muted (`0%` steady-state CPU). |
+| **Media island waveform (`bar-media`)** | Throttled wave | `default.spatial` | `fast.effects` | Timer-stepped `~24fps` (`42ms`, zero `rAF` wakeups) 5-bar waveform strictly while audible; cancels timer (`0%` idle CPU), crossfades `primary → on-surface-variant`, and restores the canonical `mediaEq` silhouette when paused, muted, or in `reduced` motion. |
 | **Bar mode switch** (Floating ↔ Docked) | Layout shift | `default.spatial` | `default.effects` | Bar height (`46px ↔ 38px`), corner radii (`16px ↔ 0px`), and outer margin (`14px ↔ 0px`) morph cleanly without flashing. |
 
 ### 5.2 Anchored Bar Popovers (`01 · Main`, `13 · Calendar`, `14 · Media Player`, `15 · Nosleep`, `16 · AI Usage`)
@@ -199,7 +199,7 @@ Uses **M3 Fade Through** + **Sliding Sidebar Indicator** [[M3-Transitions]](#ref
   - **Unlock success**: Content scales `1.0 → 1.04` + fades `1 → 0` via `slow.effects` (`~240ms`) as `ext-session-lock-v1` unlocks.
 - **`14 · Media Player`**:
   - **Wavy progress track**: Continuous horizontal phase travel (`24px/s`, `linear`) **strictly while `playback_status == "Playing"`**. When paused, the wave amplitude springs smoothly `1.0 → 0.0` (flattening into a calm straight track) via `default.spatial`, stopping the animation loop completely so idle CPU drops to `0%`.
-  - **Waveform icon (`MediaEqIcon`)**: The `28px` cover-art fallback and `12px` per-player pills breathe smoothly across 5 bars (`~1.15–1.68Hz`) while that player is `Playing` and the default sink is unmuted with positive volume, settling via `default.spatial` back to the canonical `mediaEq` silhouette at `0%` idle CPU when paused, muted, or in `reduced` motion.
+  - **Waveform icon (`MediaEqIcon`)**: The `12px` per-player pills breathe smoothly across 5 bars (`~1.15–1.68Hz`) while that player is `Playing` and the default sink is unmuted with positive volume, settling via `default.spatial` back to the canonical `mediaEq` silhouette at `0%` idle CPU when paused, muted, or in `reduced` motion; the `72×72px` cover-art fallback uses a static `28px` `musicNote` placeholder.
 
 ### 5.8 Micro-Interactions & Controls
 

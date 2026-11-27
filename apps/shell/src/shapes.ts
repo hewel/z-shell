@@ -129,7 +129,6 @@ export const MEDIA_EQ_REST_PATH = "M4 10.5v3\nM8 7v10\nM12 8v8\nM16 4v16\nM20 10
 
 const MEDIA_EQ_XS = [4, 8, 12, 16, 20] as const;
 const MEDIA_EQ_REST_HEIGHTS = [3, 10, 8, 16, 4] as const;
-const MEDIA_EQ_QUIET_HEIGHTS = [2.5, 3.5, 2.5, 3.5, 2.5] as const;
 const MEDIA_EQ_WAVE_SPECS = [
   { min: 3.0, max: 9.5, freqHz: 1.21, phase: 0.3 },
   { min: 4.5, max: 14.5, freqHz: 1.54, phase: 1.7 },
@@ -161,22 +160,6 @@ export function buildMediaEqWavePath(amplitudeScale: number, phaseSec: number): 
     const span = (spec.max - spec.min) / 2;
     const wave = mid + span * Math.sin(phaseSec * Math.PI * 2 * spec.freqHz + spec.phase);
     return Math.max(2.5, Math.min(16.5, rest + amp * (wave - rest)));
-  });
-  return formatMediaEqBars(heights);
-}
-
-/**
- * Generates a one-shot 5-bar state transition SVG path on `0 0 24 24` between quiet stubs
- * (`activeScale = 0`) and the canonical resting `mediaEq` silhouette (`activeScale = 1`).
- */
-export function buildMediaEqStatePath(activeScale: number): string {
-  if (Math.abs(activeScale - 1) <= 0.005) {
-    return MEDIA_EQ_REST_PATH;
-  }
-  const scale = Math.max(0, Math.min(1.08, activeScale));
-  const heights = MEDIA_EQ_REST_HEIGHTS.map((rest, index) => {
-    const quiet = MEDIA_EQ_QUIET_HEIGHTS[index]!;
-    return Math.max(2, Math.min(17.5, quiet + scale * (rest - quiet)));
   });
   return formatMediaEqBars(heights);
 }
