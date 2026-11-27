@@ -1147,53 +1147,19 @@ impl SessionRuntimeDrivers {
         // 1. DPMS ScreenOff / ResumeAction consumer bridging idle effects to wlr-output-power.
         {
             let session_weak = Arc::downgrade(&session);
-            let mut effects = session.subscribe_idle_effects();
-            let mut stop_dpms = stop_rx.clone();
-            tasks.push(runtime.spawn(async move {
-                loop {
-                    tokio::select! {
-                        biased;
-                        _ = stop_dpms.changed() => break,
-                        effect = effects.recv() => {
-                            match effect {
-                                Ok(IdleEffect::RunAction {
-                                    action_id,
-                                    action: IdleAction::ScreenOff,
-                                    ..
-                                }) => {
-                                    let outcome = match wayland.as_ref().and_then(Weak::upgrade) {
-                                        Some(handle) => {
-                                            match handle.set_all_outputs_power(OutputPowerMode::Off).await {
-                                                Ok(()) => ActionCompletion::Succeeded,
-                                                Err(error) => {
-                                                    tracing::warn!(%error, "ScreenOff output-power failed");
-                                                    ActionCompletion::Failed
-                                                }
-                                            }
-                                        }
-                                        None => ActionCompletion::Failed,
-                                    };
-                                    if let Some(svc) = session_weak.upgrade() {
-                                        svc.complete_idle_action(action_id, outcome).await;
-                                    }
-                                }
-                                Ok(IdleEffect::ResumeAction {
-                                    action: IdleAction::ScreenOff,
-                                    ..
-                                }) => {
-                                    if let Some(handle) = wayland.as_ref().and_then(Weak::upgrade)
-                                        && let Err(error) = handle.set_all_outputs_power(OutputPowerMode::On).await
-                                    {
-                                        tracing::warn!(%error, "ScreenOff resume output-power failed");
-                                    }
-                                }
-                                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                            }
-                        }
-                    }
-                }
-            }));
+            let effects = session.subscribe_idle_effects();
+            let stop_dpms = stop_rx.clone();
+            tasks.push(runtime.spawn(drive_dpms_idle_effects(
+                stop_dpms,
+                session_weak,
+                effects,
+                move |mode| {
+                    wayland
+                        .as_ref()
+                        .and_then(Weak::upgrade)
+                        .map(|handle| async move { handle.set_all_outputs_power(mode).await })
+                },
+            )));
         }
 
         // 2. org.freedesktop.ScreenSaver per-connection cookie inhibition server.
@@ -1558,5 +1524,211 @@ impl Drop for WallpaperThemeBridge {
         if let Some(task) = &self.task {
             task.abort();
         }
+    }
+}
+
+async fn drive_dpms_idle_effects<F, Fut>(
+    mut stop_dpms: watch::Receiver<bool>,
+    session_weak: Weak<SessionService>,
+    mut effects: tokio::sync::broadcast::Receiver<IdleEffect>,
+    mut set_power: F,
+) where
+    F: FnMut(OutputPowerMode) -> Option<Fut>,
+    Fut: Future<Output = Result<(), RpcError>>,
+{
+    loop {
+        tokio::select! {
+            biased;
+            _ = stop_dpms.changed() => break,
+            effect = effects.recv() => {
+                match effect {
+                    Ok(IdleEffect::RunAction {
+                        action_id,
+                        action: IdleAction::ScreenOff,
+                        ..
+                    }) => {
+                        let outcome = match set_power(OutputPowerMode::Off) {
+                            Some(fut) => match fut.await {
+                                Ok(()) => ActionCompletion::Succeeded,
+                                Err(error) => {
+                                    tracing::warn!(%error, "ScreenOff output-power failed");
+                                    ActionCompletion::Failed
+                                }
+                            },
+                            None => ActionCompletion::Failed,
+                        };
+                        if let Some(svc) = session_weak.upgrade() {
+                            svc.complete_idle_action(action_id, outcome).await;
+                        }
+                    }
+                    Ok(IdleEffect::ResumeAction {
+                        action: IdleAction::ScreenOff,
+                        ..
+                    }) => {
+                        if let Some(fut) = set_power(OutputPowerMode::On)
+                            && let Err(error) = fut.await
+                        {
+                            tracing::warn!(%error, "ScreenOff resume output-power failed");
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        if let Some(svc) = session_weak.upgrade() {
+                            let (running_ids, applied) = svc.reconcile_lagged_screen_off();
+                            if !running_ids.is_empty() {
+                                tracing::warn!(
+                                    skipped,
+                                    count = running_ids.len(),
+                                    "idle effects receiver lagged across ScreenOff RunAction; driving Off and completing"
+                                );
+                                let outcome = match set_power(OutputPowerMode::Off) {
+                                    Some(fut) => match fut.await {
+                                        Ok(()) => ActionCompletion::Succeeded,
+                                        Err(error) => {
+                                            tracing::warn!(%error, "lagged ScreenOff output-power failed");
+                                            ActionCompletion::Failed
+                                        }
+                                    },
+                                    None => ActionCompletion::Failed,
+                                };
+                                for action_id in running_ids {
+                                    svc.complete_idle_action(action_id, outcome).await;
+                                }
+                            } else {
+                                let desired = if applied {
+                                    OutputPowerMode::Off
+                                } else {
+                                    OutputPowerMode::On
+                                };
+                                tracing::warn!(
+                                    skipped,
+                                    ?desired,
+                                    "idle effects receiver lagged; reconciling DPMS output power"
+                                );
+                                if let Some(fut) = set_power(desired)
+                                    && let Err(error) = fut.await
+                                {
+                                    tracing::warn!(%error, ?desired, "DPMS lag reconciliation failed");
+                                }
+                            }
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::time::{Duration, timeout};
+    use z_shell_config::{IdleRuleAction, IdleRuleSettings, IdleSettings};
+    use z_shell_session::wayland_idle::WaylandIdleEvent;
+
+    #[tokio::test]
+    async fn dpms_consumer_reconciles_output_power_when_broadcast_receiver_lags() {
+        let settings = IdleSettings {
+            pre_action_fade_seconds: 0,
+            fallback_locker: None,
+            rules: vec![IdleRuleSettings {
+                name: "screen-off".to_owned(),
+                timeout_seconds: 60,
+                locked_timeout_seconds: None,
+                action: IdleRuleAction::ScreenOff,
+                resume_command: None,
+                pre_action_fade_seconds: Some(0),
+                enabled: true,
+            }],
+        };
+        let session = Arc::new(SessionService::new(
+            "test-daemon",
+            Arc::new(PamHelperAuthenticator::resolve(None)),
+            Arc::new(LazyLogindSleepInhibitor::new(DaemonBus::Disabled)),
+            &settings,
+        ));
+        let (tx, rx) = tokio::sync::broadcast::channel(2);
+        let (stop_tx, stop_rx) = watch::channel(false);
+        let (power_tx, mut power_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let consumer = tokio::spawn(drive_dpms_idle_effects(
+            stop_rx,
+            Arc::downgrade(&session),
+            rx,
+            move |mode| {
+                let power_tx = power_tx.clone();
+                Some(async move {
+                    power_tx.send(mode).expect("power channel open");
+                    Ok(())
+                })
+            },
+        ));
+
+        // 1. Trigger ScreenOff (`RulePhase::Running`) and drop `RunAction(ScreenOff)` via broadcast lag:
+        //    `reconcile_lagged_screen_off` must drive `Off` and complete the pending action to `Applied`.
+        let (rule_index, token, _) = session.active_idle_watches()[0];
+        session
+            .handle_wayland_idle(WaylandIdleEvent::Idled { rule_index, token })
+            .await;
+        assert!(!session.is_screen_off_applied());
+        for index in 0..4 {
+            let _ = tx.send(IdleEffect::CancelWatch {
+                rule_index: index,
+                token: 0,
+            });
+        }
+        assert_eq!(
+            timeout(Duration::from_secs(1), power_rx.recv())
+                .await
+                .expect("lagged RunAction drives Off"),
+            Some(OutputPowerMode::Off),
+        );
+        timeout(Duration::from_secs(1), async {
+            while !session.is_screen_off_applied() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("lagged ScreenOff RunAction must complete and reach Applied state");
+
+        // 2. Overflow the bounded channel while ScreenOff is already applied -> reconciles Off.
+        for index in 0..4 {
+            let _ = tx.send(IdleEffect::CancelWatch {
+                rule_index: index,
+                token: 0,
+            });
+        }
+        assert_eq!(
+            timeout(Duration::from_secs(1), power_rx.recv())
+                .await
+                .expect("lagged while applied reconciles Off"),
+            Some(OutputPowerMode::Off),
+        );
+
+        // 3. Resume user activity (`!is_screen_off_applied()`), drop `ResumeAction(ScreenOff)` via
+        // broadcast lag, and verify the consumer reconciles `OutputPowerMode::On` on wake.
+        session
+            .handle_wayland_idle(WaylandIdleEvent::Resumed { rule_index, token })
+            .await;
+        assert!(!session.is_screen_off_applied());
+        for index in 0..4 {
+            let _ = tx.send(IdleEffect::CancelWatch {
+                rule_index: index,
+                token: 0,
+            });
+        }
+        assert_eq!(
+            timeout(Duration::from_secs(1), power_rx.recv())
+                .await
+                .expect("lagged across wake reconciles On"),
+            Some(OutputPowerMode::On),
+        );
+
+        let _ = stop_tx.send(true);
+        timeout(Duration::from_secs(1), consumer)
+            .await
+            .expect("consumer stops cleanly")
+            .expect("consumer task ok");
     }
 }

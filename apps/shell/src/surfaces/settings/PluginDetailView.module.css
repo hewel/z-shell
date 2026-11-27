@@ -127,6 +127,28 @@
   line-height: 16px;
 }
 
+.runtimeErrorsCard {
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background-color: var(--color-error-container);
+}
+
+.runtimeErrorRow {
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+}
+
+.runtimeErrorText {
+  flex-grow: 1;
+  flex-basis: 0px;
+  min-width: 0px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-on-error-container);
+}
+
 .sectionCardCompact {
   border-radius: var(--radius-card);
   background-color: var(--color-surface-container-high);

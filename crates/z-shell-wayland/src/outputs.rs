@@ -326,7 +326,6 @@ impl Outputs {
     }
 
     pub(crate) fn set_power(&self, target: PowerTarget, mode: power::Mode) -> Result<(), RpcError> {
-        let available = |output: &Output| output.power.as_ref().is_some_and(Proxy::is_alive);
         let unavailable = || {
             RpcError::new(
                 ErrorCode::Disabled,
@@ -346,13 +345,15 @@ impl Outputs {
                     .set_mode(mode);
             }
             PowerTarget::All => {
-                if self.items.is_empty() || !self.items.values().all(available) {
-                    return Err(unavailable());
-                }
+                let mut sent_any = false;
                 for output in self.items.values() {
-                    if let Some(power) = &output.power {
+                    if let Some(power) = output.power.as_ref().filter(|proxy| proxy.is_alive()) {
                         power.set_mode(mode);
+                        sent_any = true;
                     }
+                }
+                if !sent_any {
+                    return Err(unavailable());
                 }
             }
         }

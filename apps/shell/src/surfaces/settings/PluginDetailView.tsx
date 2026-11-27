@@ -41,7 +41,8 @@ export function PluginDetailView(props: {
   readonly onRequestApproval: (req: ApprovalReviewRequest) => void;
   readonly onRefreshList: () => void;
 }): NativeChild {
-  const { publicClient, invokePublic, invokeHostResult } = useShellStore();
+  const { publicClient, invokePublic, invokeHostResult, pluginRuntimeErrors } = useShellStore();
+  const runtimeErrors = () => pluginRuntimeErrors()[props.pluginId] ?? [];
   const [detail, setDetail] = createSignal<CatalogDetailResponse | null>(null);
   const [audit, setAudit] = createSignal<PluginAuditResponse | null>(null);
   const [selectedSourceId, setSelectedSourceId] = createSignal<string>("");
@@ -260,6 +261,19 @@ export function PluginDetailView(props: {
               <text class={styles.errorBannerText}>{err()}</text>
             </row>
           )}
+        </Show>
+
+        <Show when={runtimeErrors().length > 0}>
+          <column testId="plugin-detail-runtime-error" class={styles.runtimeErrorsCard}>
+            <For each={runtimeErrors()} keyed={item => item.instanceId ?? item.entryId}>
+              {err => (
+                <row class={styles.runtimeErrorRow}>
+                  <ShellIcon name="warning" size={14} color="var(--color-on-error-container)" />
+                  <text class={styles.runtimeErrorText}>{`${err().entryId}: ${err().message}`}</text>
+                </row>
+              )}
+            </For>
+          </column>
         </Show>
 
         <Show when={hasMultipleOfferings()}>

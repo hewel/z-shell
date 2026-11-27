@@ -255,9 +255,37 @@ async fn wayland_idle_driver_arms_settings_rules_and_delivers_idled_to_session_s
     });
 
     // SessionService must receive Idled and emit RunAction(ScreenOff).
-    let effect = tokio::time::timeout(Duration::from_secs(2), async {
+    let (action_id, effect) = tokio::time::timeout(Duration::from_secs(2), async {
         loop {
-            if let Ok(z_shell_session::idle::IdleEffect::RunAction { action, .. }) =
+            if let Ok(z_shell_session::idle::IdleEffect::RunAction {
+                action_id, action, ..
+            }) = effects.recv().await
+            {
+                return (action_id, action);
+            }
+        }
+    })
+    .await
+    .expect("expected RunAction effect from SessionService");
+    assert_eq!(effect, z_shell_session::idle::IdleAction::ScreenOff);
+
+    // Completing ScreenOff as Succeeded (even when a sibling Wayland output failed) marks
+    // ScreenOff applied and causes compositor resumed() to emit ResumeAction(ScreenOff).
+    service
+        .complete_idle_action(
+            action_id,
+            z_shell_session::idle::ActionCompletion::Succeeded,
+        )
+        .await;
+    assert!(service.is_screen_off_applied());
+
+    peer.act(|state| {
+        state.notifications[0].resumed();
+    });
+
+    let resumed_action = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Ok(z_shell_session::idle::IdleEffect::ResumeAction { action, .. }) =
                 effects.recv().await
             {
                 return action;
@@ -265,8 +293,9 @@ async fn wayland_idle_driver_arms_settings_rules_and_delivers_idled_to_session_s
         }
     })
     .await
-    .expect("expected RunAction effect from SessionService");
-    assert_eq!(effect, z_shell_session::idle::IdleAction::ScreenOff);
+    .expect("expected ResumeAction effect on compositor resume");
+    assert_eq!(resumed_action, z_shell_session::idle::IdleAction::ScreenOff);
+    assert!(!service.is_screen_off_applied());
 
     drop(driver);
 }

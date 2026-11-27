@@ -9,6 +9,8 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use z_shell_protocol::MediaRef;
+use zbus::names::OwnedWellKnownName;
+use zbus::zvariant::OwnedObjectPath;
 
 use crate::assets::{cache_icon, read_bounded};
 
@@ -22,7 +24,25 @@ pub(crate) type Catalog = BTreeMap<String, App>;
 
 type Sections<'a> = HashMap<&'a str, HashMap<&'a str, &'a str>>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DbusTarget {
+    pub(crate) bus_name: OwnedWellKnownName,
+    pub(crate) object_path: OwnedObjectPath,
+}
+
 #[derive(Debug)]
+pub(crate) struct DbusActivation {
+    pub(crate) target: DbusTarget,
+    pub(crate) action: Option<String>,
+}
+
+#[derive(Debug)]
+pub(crate) struct LaunchPlan {
+    pub(crate) dbus: Option<DbusActivation>,
+    pub(crate) command: Option<Command>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct App {
     pub(crate) title: String,
     pub(crate) subtitle: Option<String>,
@@ -31,24 +51,37 @@ pub(crate) struct App {
     pub(crate) actions: Vec<Action>,
     search_name: String,
     search_fields: String,
-    exec: Vec<String>,
+    exec: Option<Vec<String>>,
+    dbus_activatable: Option<DbusTarget>,
     working_directory: Option<PathBuf>,
     terminal: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Action {
     pub(crate) id: String,
     pub(crate) title: String,
-    exec: Vec<String>,
+    exec: Option<Vec<String>>,
 }
 
 impl App {
-    pub(crate) fn command(&self, action: Option<&str>) -> Option<Command> {
-        let argv = match action {
+    pub(crate) fn launch_plan(&self, action: Option<&str>) -> Option<LaunchPlan> {
+        let exec = match action {
             Some(id) => &self.actions.iter().find(|action| action.id == id)?.exec,
             None => &self.exec,
         };
+        let command = exec.as_deref().and_then(|argv| self.build_command(argv));
+        let dbus = self.dbus_activatable.clone().map(|target| DbusActivation {
+            target,
+            action: action.map(str::to_owned),
+        });
+        if dbus.is_none() && command.is_none() {
+            return None;
+        }
+        Some(LaunchPlan { dbus, command })
+    }
+
+    fn build_command(&self, argv: &[String]) -> Option<Command> {
         let (program, args) = argv.split_first()?;
         let mut command = if self.terminal {
             // Use the platform's terminal selection instead of an implicit command shell.
@@ -351,7 +384,19 @@ fn desktop_entry(
     let icon_name = field("Icon")
         .map(unescape)
         .filter(|value| !value.is_empty());
-    let exec = parse_exec(field("Exec")?)?;
+    let dbus_activatable = (field("DBusActivatable") == Some("true"))
+        .then(|| parse_dbus_target(id))
+        .flatten();
+    let exec_ctx = ExecContext {
+        name: &name,
+        icon: icon_name.as_deref(),
+        desktop_file: file.to_str(),
+    };
+    let exec = match field("Exec") {
+        Some(raw) => Some(parse_exec(raw, &exec_ctx)?),
+        None if dbus_activatable.is_some() => None,
+        None => return None,
+    };
     let working_directory = field("Path")
         .map(unescape)
         .map(PathBuf::from)
@@ -374,13 +419,20 @@ fn desktop_entry(
         else {
             continue;
         };
-        let Some(exec) = section.get("Exec").and_then(|raw| parse_exec(raw)) else {
-            continue;
+        let action_exec = match section.get("Exec") {
+            Some(raw) => {
+                let Some(parsed) = parse_exec(raw, &exec_ctx) else {
+                    continue;
+                };
+                Some(parsed)
+            }
+            None if dbus_activatable.is_some() => None,
+            None => continue,
         };
         actions.push(Action {
             id: action_id,
             title,
-            exec,
+            exec: action_exec,
         });
         if actions.len() == MAX_ACTIONS {
             break;
@@ -403,12 +455,14 @@ fn desktop_entry(
                 .flat_map(char::to_lowercase),
         );
     }
-    search_fields.extend(
-        exec.iter()
-            .flat_map(|arg| [' '].into_iter().chain(arg.chars()))
-            .take(1024)
-            .flat_map(char::to_lowercase),
-    );
+    if let Some(exec) = &exec {
+        search_fields.extend(
+            exec.iter()
+                .flat_map(|arg| [' '].into_iter().chain(arg.chars()))
+                .take(1024)
+                .flat_map(char::to_lowercase),
+        );
+    }
     let icon = icon_name.as_deref().and_then(|name| icons.resolve(name));
     let startup_wm_class = field("StartupWMClass")
         .map(unescape)
@@ -421,9 +475,21 @@ fn desktop_entry(
         startup_wm_class,
         icon,
         exec,
+        dbus_activatable,
         actions,
         terminal: field("Terminal") == Some("true"),
         working_directory,
+    })
+}
+
+fn parse_dbus_target(id: &str) -> Option<DbusTarget> {
+    let raw_name = id.strip_suffix(".desktop")?;
+    let bus_name = OwnedWellKnownName::try_from(raw_name).ok()?;
+    let raw_path = format!("/{}", raw_name.replace('.', "/").replace('-', "_"));
+    let object_path = OwnedObjectPath::try_from(raw_path).ok()?;
+    Some(DbusTarget {
+        bus_name,
+        object_path,
     })
 }
 
@@ -575,47 +641,72 @@ fn has_executable(value: &str, search_path: &[PathBuf]) -> bool {
     }
 }
 
-fn parse_exec(raw: &str) -> Option<Vec<String>> {
+struct ExecContext<'a> {
+    name: &'a str,
+    icon: Option<&'a str>,
+    desktop_file: Option<&'a str>,
+}
+
+fn parse_exec(raw: &str, ctx: &ExecContext<'_>) -> Option<Vec<String>> {
     if raw.contains('\0') {
         return None;
     }
-    let mut argv = tokenize_exec(&unescape(raw))?;
-    let program = argv.first_mut()?;
-    if !strip_fields(program) || program.is_empty() || program.contains('=') {
+    let tokens = tokenize_exec(&unescape(raw))?;
+    let (first, rest) = tokens.split_first()?;
+    if matches!(first.as_str(), "%F" | "%U" | "%i") {
         return None;
     }
-    let mut first = true;
-    let mut valid = true;
-    argv.retain_mut(|word| {
-        if std::mem::take(&mut first) || word.is_empty() {
-            return true;
+    let program = expand_word(first, ctx)?;
+    if program.is_empty() || program.contains('=') {
+        return None;
+    }
+    let mut argv = Vec::with_capacity(tokens.len() + 1);
+    argv.push(program);
+    for word in rest {
+        if word.is_empty() {
+            argv.push(String::new());
+            continue;
         }
-        valid &= strip_fields(word);
-        !word.is_empty()
-    });
-    valid.then_some(argv)
+        if word == "%i" {
+            if let Some(icon) = ctx.icon {
+                argv.push("--icon".to_owned());
+                argv.push(icon.to_owned());
+            }
+            continue;
+        }
+        if matches!(word.as_str(), "%F" | "%U") {
+            continue;
+        }
+        let expanded = expand_word(word, ctx)?;
+        if !expanded.is_empty() {
+            argv.push(expanded);
+        }
+    }
+    Some(argv)
 }
 
-fn strip_fields(word: &mut String) -> bool {
-    let whole_code = word.len() == 2;
-    let mut valid = true;
-    let mut percent = false;
-    word.retain(|ch| {
-        if std::mem::take(&mut percent) {
-            match ch {
-                '%' => return true,
-                'F' | 'U' | 'i' if !whole_code => valid = false,
-                // This launcher does not pass files, URLs, or desktop metadata to Exec.
-                'f' | 'F' | 'u' | 'U' | 'i' | 'c' | 'k' | 'd' | 'D' | 'n' | 'N' | 'v' | 'm' => {}
-                _ => valid = false,
-            }
-            false
-        } else {
-            percent = ch == '%';
-            !percent
+fn expand_word(word: &str, ctx: &ExecContext<'_>) -> Option<String> {
+    let mut out = String::with_capacity(word.len());
+    let mut chars = word.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '%' {
+            out.push(ch);
+            continue;
         }
-    });
-    valid && !percent
+        match chars.next()? {
+            '%' => out.push('%'),
+            'c' => out.push_str(ctx.name),
+            'k' => {
+                if let Some(path) = ctx.desktop_file {
+                    out.push_str(path);
+                }
+            }
+            'f' | 'u' | 'd' | 'D' | 'n' | 'N' | 'v' | 'm' => {}
+            // %F, %U, and %i are valid only as standalone words handled by parse_exec.
+            _ => return None,
+        }
+    }
+    Some(out)
 }
 
 fn tokenize_exec(value: &str) -> Option<Vec<String>> {

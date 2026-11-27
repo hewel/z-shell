@@ -5,50 +5,127 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 
 use thiserror::Error;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::UnixStream;
 use tokio::process::{ChildStdin, ChildStdout};
 use tokio::sync::{mpsc, oneshot};
 use zeroize::{Zeroize, Zeroizing};
 
-const SYSTEM_HELPERS: [&str; 3] = [
+const DEFAULT_SOCKET_PATH: &str = "/run/polkit/agent-helper.socket";
+const SYSTEM_HELPERS: [&str; 4] = [
+    "/run/wrappers/bin/polkit-agent-helper-1",
     "/usr/lib/polkit-1/polkit-agent-helper-1",
     "/usr/libexec/polkit-agent-helper-1",
-    "/usr/lib/x86_64-linux-gnu/polkit-1/polkit-agent-helper-1",
+    "/usr/lib64/polkit-1/polkit-agent-helper-1",
 ];
 const MAX_LINE_BYTES: usize = 8 * 1024;
 /// Linux PAM's 512-byte response buffer also needs room for LF and NUL.
 pub(super) const MAX_RESPONSE_BYTES: usize = 510;
 
-/// Selects the trusted helper executable used for Polkit PAM conversations.
+/// Selects the trusted helper socket, executable fallback, and local passwd source for Polkit PAM conversations.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PolkitHelperConfig {
+    socket_path: Option<PathBuf>,
     path: Option<PathBuf>,
+    passwd_path: PathBuf,
 }
 
 impl PolkitHelperConfig {
-    /// Uses the specified trusted executable path without probing system locations.
+    /// Uses the specified trusted executable path without probing system locations or sockets.
     #[must_use]
     pub fn with_path(path: PathBuf) -> Self {
-        Self { path: Some(path) }
+        Self {
+            socket_path: None,
+            path: Some(path),
+            passwd_path: PathBuf::from("/etc/passwd"),
+        }
     }
 
-    /// Chooses the first executable helper at a standard system installation path.
+    /// Uses an explicit helper socket path without a binary fallback.
+    #[must_use]
+    pub fn with_socket(socket_path: impl Into<PathBuf>) -> Self {
+        Self::with_socket_and_binary(socket_path, None)
+    }
+
+    /// Uses an explicit helper socket path with an optional binary fallback.
+    #[must_use]
+    pub fn with_socket_and_binary(
+        socket_path: impl Into<PathBuf>,
+        binary_path: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            socket_path: Some(socket_path.into()),
+            path: binary_path,
+            passwd_path: PathBuf::from("/etc/passwd"),
+        }
+    }
+
+    /// Overrides the local `passwd` file path checked before falling back to `getpwuid_r`.
+    #[must_use]
+    pub fn with_passwd_path(mut self, passwd_path: impl Into<PathBuf>) -> Self {
+        self.passwd_path = passwd_path.into();
+        self
+    }
+
+    /// Configures the default Polkit socket and probes standard, NixOS, and multiarch helper paths.
     #[must_use]
     pub fn resolve_system_helper() -> Self {
-        let path = SYSTEM_HELPERS
-            .into_iter()
-            .map(Path::new)
-            .find(|path| {
-                path.metadata()
-                    .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
-            })
-            .map(Path::to_path_buf);
-        Self { path }
+        Self {
+            socket_path: Some(PathBuf::from(DEFAULT_SOCKET_PATH)),
+            path: resolve_helper_binary(),
+            passwd_path: PathBuf::from("/etc/passwd"),
+        }
     }
 
     pub(super) fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
+
+    pub(super) fn socket_path(&self) -> Option<&Path> {
+        self.socket_path.as_deref()
+    }
+
+    pub(super) fn passwd_path(&self) -> &Path {
+        &self.passwd_path
+    }
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    path.is_absolute()
+        && path
+            .metadata()
+            .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+}
+
+fn resolve_helper_binary() -> Option<PathBuf> {
+    if let Some(env_path) = option_env!("POLKIT_AGENT_HELPER_1")
+        .map(Path::new)
+        .filter(|path| is_executable_file(path))
+    {
+        return Some(env_path.to_path_buf());
+    }
+    if let Some(fixed) = SYSTEM_HELPERS
+        .into_iter()
+        .map(Path::new)
+        .find(|path| is_executable_file(path))
+    {
+        return Some(fixed.to_path_buf());
+    }
+    let mut multiarch_dirs: Vec<PathBuf> = std::fs::read_dir("/usr/lib")
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with("-linux-gnu"))
+        })
+        .collect();
+    multiarch_dirs.sort();
+    multiarch_dirs
+        .into_iter()
+        .map(|dir| dir.join("polkit-1/polkit-agent-helper-1"))
+        .find(|candidate| is_executable_file(candidate))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -72,6 +149,8 @@ pub(super) enum HelperOutcome {
 
 #[derive(Debug, Error)]
 pub(super) enum HelperError {
+    #[error("polkit-agent-helper-1 not found")]
+    Unavailable,
     #[error("could not launch Polkit helper")]
     Launch(#[source] io::Error),
     #[error("Polkit helper pipe unavailable")]
@@ -89,16 +168,45 @@ pub(super) enum HelperError {
 }
 
 pub(super) async fn run(
-    path: &Path,
+    config: &PolkitHelperConfig,
     username: &str,
     cookie: &str,
     responses: mpsc::Receiver<Arc<Zeroizing<String>>>,
     mut cancel: oneshot::Receiver<()>,
-    on_event: impl FnMut(HelperEvent),
+    mut on_event: impl FnMut(HelperEvent),
 ) -> Result<HelperOutcome, HelperError> {
     if !matches!(cancel.try_recv(), Err(oneshot::error::TryRecvError::Empty)) {
         return Ok(HelperOutcome::Cancelled);
     }
+
+    if let Some(socket_path) = config.socket_path() {
+        let connected = tokio::select! {
+            biased;
+            _ = &mut cancel => return Ok(HelperOutcome::Cancelled),
+            res = UnixStream::connect(socket_path) => res,
+        };
+        match connected {
+            Ok(stream) => {
+                let (reader, mut writer) = stream.into_split();
+                return tokio::select! {
+                    biased;
+                    _ = &mut cancel => Ok(HelperOutcome::Cancelled),
+                    result = async {
+                        write_line(&mut writer, username).await?;
+                        exchange(writer, reader, cookie, responses, &mut on_event).await
+                    } => result,
+                };
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+                ) => {}
+            Err(error) => return Err(HelperError::Launch(error)),
+        }
+    }
+
+    let path = config.path().ok_or(HelperError::Unavailable)?;
     let mut child = Command::new(path)
         .arg(username)
         .stdin(Stdio::piped())
@@ -119,7 +227,7 @@ pub(super) async fn run(
         Ok((stdin, stdout)) => tokio::select! {
             biased;
             _ = &mut cancel => Ok(HelperOutcome::Cancelled),
-            result = exchange(stdin, stdout, cookie, responses, on_event) => result,
+            result = exchange(stdin, stdout, cookie, responses, &mut on_event) => result,
         },
         Err(error) => Err(error),
     };
@@ -158,13 +266,17 @@ impl Drop for ReapChild {
     }
 }
 
-async fn exchange(
-    mut stdin: ChildStdin,
-    stdout: ChildStdout,
+async fn exchange<W, R>(
+    mut stdin: W,
+    stdout: R,
     cookie: &str,
     mut responses: mpsc::Receiver<Arc<Zeroizing<String>>>,
-    mut on_event: impl FnMut(HelperEvent),
-) -> Result<HelperOutcome, HelperError> {
+    on_event: &mut impl FnMut(HelperEvent),
+) -> Result<HelperOutcome, HelperError>
+where
+    W: AsyncWrite + Unpin,
+    R: AsyncRead + Unpin,
+{
     write_line(&mut stdin, cookie).await?;
     let mut output = HelperOutput {
         stdout,
@@ -198,7 +310,7 @@ async fn exchange(
     }
 }
 
-async fn write_line(stdin: &mut ChildStdin, line: &str) -> Result<(), HelperError> {
+async fn write_line<W: AsyncWrite + Unpin>(stdin: &mut W, line: &str) -> Result<(), HelperError> {
     stdin
         .write_all(line.as_bytes())
         .await
@@ -206,14 +318,14 @@ async fn write_line(stdin: &mut ChildStdin, line: &str) -> Result<(), HelperErro
     stdin.write_all(b"\n").await.map_err(HelperError::PipeIo)
 }
 
-struct HelperOutput {
-    stdout: ChildStdout,
+struct HelperOutput<R> {
+    stdout: R,
     bytes: Zeroizing<[u8; MAX_LINE_BYTES]>,
     start: usize,
     end: usize,
 }
 
-impl HelperOutput {
+impl<R: AsyncRead + Unpin> HelperOutput<R> {
     async fn read_frame(&mut self) -> Result<Frame, HelperError> {
         let mut scan = self.start;
         loop {

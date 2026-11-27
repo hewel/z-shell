@@ -308,6 +308,9 @@ export interface TrayMenuNode {
   readonly separator: boolean;
   readonly toggle_type: "checkmark" | "radio" | null;
   readonly toggle_state: number | null;
+  readonly is_submenu?: boolean;
+  readonly children_display?: "submenu";
+  readonly disposition?: "normal" | "informative" | "warning" | "alert";
   readonly children: readonly TrayMenuNode[];
 }
 
@@ -319,6 +322,7 @@ export interface TrayItem {
   readonly status: string | null;
   readonly icon_name: string | null;
   readonly item_is_menu: boolean;
+  readonly has_menu?: boolean;
   readonly tooltip: {
     readonly title: string | null;
     readonly description: string | null;
@@ -328,6 +332,26 @@ export interface TrayItem {
     readonly revision: number;
     readonly root: TrayMenuNode;
   } | null;
+}
+
+export function hasTrayMenu(item: Pick<TrayItem, "has_menu" | "menu">): boolean {
+  return Boolean(item.has_menu || item.menu);
+}
+
+export function isTrayActivateMenuFallback(result: { readonly data?: unknown } | undefined): boolean {
+  return Boolean(
+    result?.data
+    && typeof result.data === "object"
+    && (result.data as { readonly fallback_menu?: unknown }).fallback_menu === true,
+  );
+}
+
+export function isTraySubmenuNode(node: Pick<TrayMenuNode, "separator" | "is_submenu" | "children_display" | "children">): boolean {
+  return !node.separator && Boolean(
+    node.is_submenu
+    || node.children_display === "submenu"
+    || node.children.some(child => child.visible),
+  );
 }
 
 export interface DesktopTraySnapshot {

@@ -482,7 +482,7 @@ impl PolkitService {
         reaped
     }
 
-    fn enqueue(
+    async fn enqueue(
         self: &Arc<Self>,
         sender: Option<&UniqueName<'_>>,
         input: AuthenticationRequest,
@@ -502,8 +502,8 @@ impl PolkitService {
         if cookie.is_empty() || !valid_frame(&cookie) {
             return Err(PolkitError::Failed("invalid authentication cookie".into()));
         }
-        let identities = resolve_identities(identities);
-        let selected_uid = effective_uid()
+        let identities = resolve_identities(identities, self.helper.passwd_path()).await;
+        let selected_uid = crate::passwd::effective_uid()
             .filter(|uid| identities.iter().any(|identity| identity.uid == *uid))
             .or_else(|| identities.first().map(|identity| identity.uid))
             .ok_or_else(|| PolkitError::Failed("no usable local Polkit identities".into()))?;
@@ -518,12 +518,6 @@ impl PolkitService {
 
         let mut state = self.state.lock().expect("Polkit agent state poisoned");
         state.authorize(sender)?;
-        if self.helper.path().is_none() {
-            let error = "polkit-agent-helper-1 not found";
-            state.last_error = Some(error.into());
-            state.publish(UpdateKind::Live);
-            return Err(PolkitError::Failed(error.into()));
-        }
         let duplicate = |request: &Request| request.cookie.as_str() == cookie.as_str();
         if state.queue.len() + usize::from(state.active.is_some()) >= MAX_REQUESTS
             || state.next_id > MAX_SAFE_JS_INT
@@ -687,11 +681,7 @@ impl PolkitService {
     }
 
     fn start_attempt(self: &Arc<Self>, mut request: Request, attempts: u8) -> Active {
-        let path = self
-            .helper
-            .path()
-            .expect("requests require a configured helper")
-            .to_path_buf();
+        let helper = self.helper.clone();
         let request_id = request.view.request_id;
         let username = request
             .view
@@ -711,7 +701,7 @@ impl PolkitService {
         let (reap_complete, reaped) = watch::channel(());
         let service = Arc::downgrade(self);
         tokio::spawn(async move {
-            let outcome = helper::run(&path, &username, &cookie, input, cancelled, |event| {
+            let outcome = helper::run(&helper, &username, &cookie, input, cancelled, |event| {
                 if let Some(service) = service.upgrade() {
                     service.helper_event(request_id, event);
                 }
@@ -857,43 +847,53 @@ fn contains_secret(text: &str, secret: &str) -> bool {
     !secret.is_empty() && text.contains(secret)
 }
 
-fn effective_uid() -> Option<u32> {
-    let status = fs::read_to_string("/proc/self/status").ok()?;
-    status
-        .lines()
-        .find_map(|line| line.strip_prefix("Uid:"))?
-        .split_ascii_whitespace()
-        .nth(1)?
-        .parse()
-        .ok()
-}
-
-fn resolve_identities(input: Identities) -> Vec<PolkitIdentity> {
-    let Ok(passwd) = fs::read_to_string("/etc/passwd") else {
-        return Vec::new();
-    };
-    let mut accounts = HashMap::new();
-    for line in passwd.lines() {
-        let mut fields = line.split(':');
-        if let Some(username) = fields.next().filter(|name| !name.is_empty())
-            && let Some(uid) = fields.nth(1).and_then(|uid| uid.parse::<u32>().ok())
+async fn resolve_identities(
+    input: Identities,
+    passwd_path: &std::path::Path,
+) -> Vec<PolkitIdentity> {
+    let mut candidate_uids = Vec::new();
+    let mut seen_candidates = HashSet::new();
+    for (kind, fields) in &input {
+        if kind == "unix-user"
+            && let Some(uid) = fields.get("uid").and_then(|val| u32::try_from(val).ok())
+            && seen_candidates.insert(uid)
         {
-            accounts.entry(uid).or_insert(username);
+            candidate_uids.push(uid);
         }
     }
-    let mut seen = HashSet::new();
-    input
-        .into_iter()
-        .filter_map(|(kind, fields)| {
-            if kind != "unix-user" {
-                return None;
+    if candidate_uids.is_empty() {
+        return Vec::new();
+    }
+
+    let passwd_path = passwd_path.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        let mut accounts: HashMap<u32, String> = HashMap::new();
+        if let Ok(passwd) = fs::read_to_string(&passwd_path) {
+            for line in passwd.lines() {
+                let mut fields = line.split(':');
+                if let Some(username) = fields.next().filter(|name| !name.is_empty())
+                    && let Some(uid) = fields.nth(1).and_then(|uid| uid.parse::<u32>().ok())
+                {
+                    accounts.entry(uid).or_insert_with(|| username.to_owned());
+                }
             }
-            let uid = u32::try_from(fields.get("uid")?).ok()?;
-            let username = accounts.get(&uid)?;
-            seen.insert(uid).then(|| PolkitIdentity {
-                uid,
-                username: (*username).to_owned(),
+        }
+        for &uid in &candidate_uids {
+            if !accounts.contains_key(&uid)
+                && let Ok(username) = crate::passwd::resolve_username_by_uid(uid)
+            {
+                accounts.insert(uid, username);
+            }
+        }
+        candidate_uids
+            .into_iter()
+            .filter_map(|uid| {
+                accounts
+                    .remove(&uid)
+                    .map(|username| PolkitIdentity { uid, username })
             })
-        })
-        .collect()
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
 }

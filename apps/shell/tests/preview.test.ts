@@ -1,9 +1,10 @@
 import { beforeAll, describe, expect } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { buildShellApplication } from "@z-shell/composer";
 import type { PublishedApplication } from "@hewel/zgui-build";
-import { buildShellPreviewFixture, makeTinyPngBytes } from "./fixture-builder.ts";
+import { buildShellPreviewFixture, makeSamplePluginsTopicSnapshot, makeTinyPngBytes } from "./fixture-builder.ts";
 import {
   buildPublishedShell,
   createPreviewWorkspace,
@@ -16,6 +17,7 @@ import {
   previewSurfaces,
   previewTest,
   readCapture,
+  repoRoot,
   runPreview as runPreviewBundle,
   sessionLockTrace,
   shellDir,
@@ -2095,6 +2097,773 @@ describe("apps/shell preview", () => {
 
       expect(previewSurfaces(out, "during-engaging")).not.toContain("notification-toasts");
       expect(previewSurfaces(out, "during-engaging")).not.toContain("panel-calendar");
+    } finally {
+      cleanup();
+    }
+  });
+
+  previewTest("multi-output ungrabbed bar popover dismisses on secondary monitor click without stealing keyboard focus or swallowing subsequent clicks", () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-multi-backdrop-");
+    const dp1 = {
+      id: "dp-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900,
+      scale: 1, refreshRateMilliHz: 60000,
+    };
+    const hdmi1 = {
+      id: "hdmi-1", name: "HDMI-A-1", x: 1440, y: 0, width: 1280, height: 720,
+      scale: 1, refreshRateMilliHz: 60000,
+    };
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [dp1, hdmi1] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+
+      // Open Calendar on Monitor A (dp-1), then switch directly to Quick Settings on Monitor A so
+      // Quick Settings enters ungrabbed bar-popup mode (`ungrabbedBarPopupMonitorId() === "dp-1"`).
+      timeline.step({ id: "open-cal-dp1", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-clock" }, button: "primary" });
+      timeline.advance("cal-open-settle", 250);
+      timeline.step({ id: "switch-qs-dp1", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-quick-settings" }, button: "primary" });
+      timeline.advance("qs-switch-settle", 250);
+      timeline.step({ id: "while-ungrabbed", op: "monitors.set", monitors: [dp1, hdmi1] });
+      timeline.step({ id: "capture-backdrop-dp1", op: "capture", surface: "bar-backdrop-dp-1", captureId: "dp1-ungrabbed" });
+      timeline.step({ id: "capture-backdrop-hdmi1", op: "capture", surface: "bar-backdrop-hdmi-1", captureId: "hdmi1-ungrabbed" });
+
+      // Clicking Monitor B (hdmi-1)'s desktop backdrop must immediately dismiss Monitor A's ungrabbed popup.
+      timeline.step({
+        id: "click-secondary-backdrop",
+        op: "pointer.click",
+        target: { surface: "bar-backdrop-hdmi-1", testId: "bar-popover-backdrop-hdmi-1" },
+        button: "primary",
+      });
+      timeline.advance("secondary-dismiss-settle", 250);
+      timeline.step({ id: "after-secondary-dismiss", op: "monitors.set", monitors: [dp1, hdmi1] });
+
+      // Subsequent clicks on Monitor B must never be swallowed by a lingering backdrop.
+      timeline.step({ id: "open-cal-hdmi1", op: "pointer.click", target: { surface: "bar-hdmi-1", testId: "bar-clock" }, button: "primary" });
+      timeline.advance("cal-hdmi1-settle", 250);
+      timeline.step({ id: "after-hdmi1-open", op: "monitors.set", monitors: [dp1, hdmi1] });
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-multi-output-backdrop",
+        outputs: [
+          { name: "DP-1", x: 0, y: 0, width: 1440, height: 900, scale: 1, enabled: true },
+          { name: "HDMI-A-1", x: 1440, y: 0, width: 1280, height: 720, scale: 1, enabled: true },
+        ],
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-multi-output-backdrop",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(fixture, scenario, out);
+      expectCleanPreview(result, 2, 0);
+
+      expect(previewSurfaces(out, "while-ungrabbed")).toContain("panel-quick-settings");
+      const dp1Backdrop = readCapture(out, "bar-backdrop-dp-1", "dp1-ungrabbed");
+      const hdmi1Backdrop = readCapture(out, "bar-backdrop-hdmi-1", "hdmi1-ungrabbed");
+      const dp1Node = treeNode(dp1Backdrop.tree, "bar-popover-backdrop-dp-1") as { readonly state?: { readonly focused?: boolean } };
+      const hdmi1Node = treeNode(hdmi1Backdrop.tree, "bar-popover-backdrop-hdmi-1") as { readonly state?: { readonly focused?: boolean } };
+      expect(dp1Node.state?.focused).toBe(true);
+      expect(hdmi1Node.state?.focused ?? false).toBe(false);
+
+      expect(previewSurfaces(out, "after-secondary-dismiss")).not.toContain("panel-quick-settings");
+      expect(previewSurfaces(out, "after-hdmi1-open")).toContain("panel-calendar");
+    } finally {
+      cleanup();
+    }
+  });
+
+  previewTest("PluginHost isolates throwing widget, panel, settings_page, layer, and service entries via Errored and surfaces runtime errors in PluginsPane", async () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-plugin-errored-");
+    const monitor = {
+      id: "dp-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900,
+      scale: 1, refreshRateMilliHz: 60000,
+    };
+    try {
+      const stagedShellDir = join(workspace, "shell");
+      mkdirSync(stagedShellDir, { recursive: true });
+      for (const entry of ["package.json", "tsconfig.json", "assets", "src", "preview"]) {
+        cpSync(join(shellDir, entry), join(stagedShellDir, entry), { recursive: true });
+      }
+      symlinkSync(join(repoRoot, "node_modules"), join(stagedShellDir, "node_modules"), "dir");
+
+      writeFileSync(
+        join(stagedShellDir, "src", "plugins", "synthetic-plugins.tsx"),
+        `import { Button, type NativeChild } from "@hewel/zgui";
+import { definePlugin, PLUGIN_API_LEVEL } from "@z-shell/plugin-api";
+
+export const brokenService = definePlugin({
+  manifest: {
+    id: "acme/broken",
+    version: "0.1.0",
+    pluginApi: PLUGIN_API_LEVEL,
+    title: "Broken Plugin",
+    entries: [{ name: "service", kind: "service", title: "Broken Service" }],
+    defaults: {},
+  },
+  setup() {
+    throw new Error("broken service boom");
+  },
+});
+
+export function BrokenLayer(): NativeChild {
+  throw new Error("broken layer boom");
+}
+
+export function BrokenWidget(): NativeChild {
+  throw new Error("broken widget boom");
+}
+
+export function HealthyWidget(props: { readonly onOpenPanel: (entryId?: string) => void }): NativeChild {
+  return (
+    <Button testId="healthy-plugin-btn" onClick={() => props.onOpenPanel("bad-panel")}>
+      <text>Healthy 99%</text>
+    </Button>
+  );
+}
+
+export function BrokenPanel(): NativeChild {
+  throw new Error("broken panel boom");
+}
+
+export function HealthySettings(): NativeChild {
+  return (
+    <box testId="healthy-settings-card">
+      <text>Healthy Settings Ready</text>
+    </box>
+  );
+}
+`,
+      );
+      writeFileSync(
+        join(stagedShellDir, "src", "plugins", "composed.ts"),
+        `import type { PluginEntryKind } from "@z-shell/plugin-api";
+import {
+  BrokenLayer,
+  BrokenPanel,
+  BrokenWidget,
+  HealthySettings,
+  HealthyWidget,
+  brokenService,
+} from "./synthetic-plugins.tsx";
+export type { ComposedPluginBundle } from "./PluginHost.tsx";
+
+export interface ComposedServiceDescriptor {
+  readonly pluginId: string;
+  readonly id: string;
+  readonly entryId: string;
+  readonly kind: Extract<PluginEntryKind, "service">;
+  readonly entry: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly widthTier?: "compact" | "standard";
+  readonly settings: Readonly<Record<string, unknown>>;
+  readonly pluginSettings: Readonly<Record<string, unknown>>;
+  readonly importKey: string;
+}
+
+export interface ComposedEntryInstanceDescriptor {
+  readonly pluginId: string;
+  readonly id: string;
+  readonly entryId: string;
+  readonly kind: Exclude<PluginEntryKind, "service">;
+  readonly entry: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly widthTier?: "compact" | "standard";
+  readonly settings: Readonly<Record<string, unknown>>;
+  readonly pluginSettings: Readonly<Record<string, unknown>>;
+  readonly instanceId: string;
+  readonly instanceSlug?: string;
+  readonly outputId?: string;
+  readonly importKey: string;
+}
+
+export const entryImports: Readonly<Record<string, Record<string, unknown>>> = {
+  "acme/broken:service": { default: brokenService },
+  "acme/broken:layer": { default: BrokenLayer },
+  "acme/broken:widget": { default: BrokenWidget },
+  "acme/broken:settings": { default: null },
+  "acme/healthy:widget": { default: HealthyWidget },
+  "acme/healthy:bad-panel": { default: BrokenPanel },
+  "acme/healthy:settings": { default: HealthySettings },
+};
+
+export const services: readonly ComposedServiceDescriptor[] = [
+  {
+    pluginId: "acme/broken",
+    id: "service",
+    entryId: "acme/broken:service",
+    kind: "service",
+    entry: "src/service.ts",
+    settings: {},
+    pluginSettings: {},
+    importKey: "acme/broken:service",
+  },
+];
+
+export const entryInstances: readonly ComposedEntryInstanceDescriptor[] = [
+  {
+    pluginId: "acme/broken",
+    id: "layer",
+    entryId: "acme/broken:layer",
+    kind: "layer",
+    entry: "src/layer.tsx",
+    settings: {},
+    pluginSettings: {},
+    instanceId: "broken-layer",
+    importKey: "acme/broken:layer",
+  },
+  {
+    pluginId: "acme/broken",
+    id: "widget",
+    entryId: "acme/broken:widget",
+    kind: "widget",
+    entry: "src/widget.tsx",
+    settings: {},
+    pluginSettings: {},
+    instanceId: "broken-widget",
+    importKey: "acme/broken:widget",
+  },
+  {
+    pluginId: "acme/broken",
+    id: "settings",
+    entryId: "acme/broken:settings",
+    kind: "settings_page",
+    entry: "src/settings.tsx",
+    settings: {},
+    pluginSettings: {},
+    instanceId: "broken-settings",
+    importKey: "acme/broken:settings",
+  },
+  {
+    pluginId: "acme/healthy",
+    id: "widget",
+    entryId: "acme/healthy:widget",
+    kind: "widget",
+    entry: "src/widget.tsx",
+    settings: {},
+    pluginSettings: {},
+    instanceId: "healthy-widget",
+    importKey: "acme/healthy:widget",
+  },
+  {
+    pluginId: "acme/healthy",
+    id: "bad-panel",
+    entryId: "acme/healthy:bad-panel",
+    kind: "panel",
+    entry: "src/panel.tsx",
+    settings: {},
+    pluginSettings: {},
+    instanceId: "healthy-bad-panel",
+    importKey: "acme/healthy:bad-panel",
+  },
+  {
+    pluginId: "acme/healthy",
+    id: "settings",
+    entryId: "acme/healthy:settings",
+    kind: "settings_page",
+    entry: "src/settings.tsx",
+    settings: {},
+    pluginSettings: {},
+    instanceId: "healthy-settings",
+    importKey: "acme/healthy:settings",
+  },
+];
+
+export const composedPlugins = { entryImports, services, entryInstances } as const;
+export default composedPlugins;
+`,
+      );
+
+      const stagedPublished = await buildShellApplication({
+        app: "shell",
+        appDirectory: stagedShellDir,
+      });
+
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+      timeline.step({ id: "capture-bar", op: "capture", surface: "bar-dp-1", captureId: "bar-isolated" });
+
+      // Clicking the healthy bar widget opens its throwing panel inside a popup fallback card.
+      timeline.step({
+        id: "open-broken-panel",
+        op: "pointer.click",
+        target: { surface: "bar-dp-1", testId: "healthy-plugin-btn" },
+        button: "primary",
+      });
+      timeline.advance("panel-open-settle", 250);
+      timeline.step({
+        id: "capture-broken-panel",
+        op: "capture",
+        surface: "plugin-panel-healthy-bad-panel",
+        captureId: "panel-isolated",
+      });
+
+      // Open Settings > Plugins to verify runtime errors are surfaced visibly.
+      const subscribePluginsAtMs = timeline.after(5);
+      const catalogList1AtMs = timeline.after(5);
+      const catalogList2AtMs = timeline.after(15);
+      timeline.step({
+        id: "open-settings-plugins",
+        op: "service.emit",
+        channel: "control.message",
+        value: {
+          args: ["settings", "plugins"],
+          reply: { text: "{\"settingsWindowOpen\":true,\"settingsWindowTab\":\"plugins\"}" },
+        },
+      });
+      timeline.advance("settings-plugins-settle", 250);
+      timeline.step({ id: "capture-settings-plugins", op: "capture", surface: "settings-window", captureId: "settings-plugins" });
+
+      // Switch to broken settings page (missing default export) and then healthy settings page.
+      const unsubPluginsAtMs = timeline.after(5);
+      timeline.step({
+        id: "nav-broken-settings",
+        op: "pointer.click",
+        target: { surface: "settings-window", testId: "settings-nav-plugin-broken-settings" },
+        button: "primary",
+      });
+      timeline.advance("broken-settings-settle", 200);
+      timeline.step({ id: "capture-broken-settings", op: "capture", surface: "settings-window", captureId: "broken-settings" });
+
+      timeline.step({
+        id: "nav-healthy-settings",
+        op: "pointer.click",
+        target: { surface: "settings-window", testId: "settings-nav-plugin-healthy-settings" },
+        button: "primary",
+      });
+      timeline.advance("healthy-settings-settle", 200);
+      timeline.step({ id: "capture-healthy-settings", op: "capture", surface: "settings-window", captureId: "healthy-settings" });
+
+      const basePlugins = makeSamplePluginsTopicSnapshot();
+      const brokenInstalled = {
+        ...(basePlugins.plugins[0] as Record<string, unknown>),
+        id: "acme/broken",
+        name: "Broken Plugin",
+        version: "0.1.0",
+        enabled: true,
+        approved: true,
+        revoked: false,
+        migration_reapproval_required: false,
+      };
+      const pluginsSnapshot = makeSamplePluginsTopicSnapshot({
+        plugins: [brokenInstalled],
+      });
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-plugin-errored-isolation",
+        publicTopicSubscriptions: [
+          {
+            topic: "plugins",
+            id: 26,
+            atMs: subscribePluginsAtMs,
+            data: pluginsSnapshot,
+          },
+        ],
+        extraPublicSends: [
+          JSON.stringify({ jsonrpc: "2.0", id: 29, method: "topic.unsubscribe", params: { topic: "plugins" } }),
+        ],
+        extraPublicEvents: [
+          {
+            kind: "message",
+            atMs: unsubPluginsAtMs,
+            text: JSON.stringify({ jsonrpc: "2.0", id: 29, result: {} }),
+          },
+        ],
+        commands: [
+          {
+            id: 27,
+            name: "plugins.catalog.list",
+            payload: { query: "", offset: 0, limit: 30 },
+            atMs: catalogList1AtMs,
+            result: { data: { total: 0, offset: 0, limit: 30, items: [] } },
+          },
+          {
+            id: 28,
+            name: "plugins.catalog.list",
+            payload: { query: "", offset: 0, limit: 30 },
+            atMs: catalogList2AtMs,
+            result: { data: { total: 0, offset: 0, limit: 30, items: [] } },
+          },
+        ],
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-plugin-errored-isolation",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreviewBundle(stagedPublished.dist, fixture, scenario, out);
+      expectCleanPreview(result, 5, 0);
+
+      const bar = readCapture(out, "bar-dp-1", "bar-isolated");
+      expect(treeNode(bar.tree, "plugin-error-broken-widget").boundsDevice).toBeDefined();
+      expect(treeNode(bar.tree, "healthy-plugin-btn").text).toContain("Healthy 99%");
+      expect(treeNode(bar.tree, "bar-clock").boundsDevice).toBeDefined();
+
+      const badPanel = readCapture(out, "plugin-panel-healthy-bad-panel", "panel-isolated");
+      expect(treeNode(badPanel.tree, "plugin-error-healthy-bad-panel").boundsDevice).toBeDefined();
+      expect(badPanel.tree.nodes.some(node => node.text?.includes("broken panel boom"))).toBe(true);
+
+      const settingsPlugins = readCapture(out, "settings-window", "settings-plugins");
+      expect(treeNode(settingsPlugins.tree, "plugins-runtime-errors").boundsDevice).toBeDefined();
+      expect(settingsPlugins.tree.nodes.some(node => node.text?.includes("acme/broken:service"))).toBe(true);
+      expect(settingsPlugins.tree.nodes.some(node => node.text?.includes("acme/broken:layer"))).toBe(true);
+      expect(settingsPlugins.tree.nodes.some(node => node.text?.includes("acme/broken:widget"))).toBe(true);
+      expect(settingsPlugins.tree.nodes.some(node => node.text?.includes("acme/healthy:bad-panel"))).toBe(true);
+      expect(settingsPlugins.tree.nodes.some(node => node.text === "Runtime error")).toBe(true);
+
+      const brokenSettings = readCapture(out, "settings-window", "broken-settings");
+      expect(treeNode(brokenSettings.tree, "plugin-error-broken-settings").boundsDevice).toBeDefined();
+
+      const healthySettings = readCapture(out, "settings-window", "healthy-settings");
+      expect(treeNode(healthySettings.tree, "healthy-settings-card").text).toContain("Healthy Settings Ready");
+    } finally {
+      cleanup();
+    }
+  });
+
+  previewTest("SNI lazy tray menus (has_menu with null initial menu), lazy submenu expansion, close-menu, and Activate fallback_menu in bar and overflow", () => {
+    const { workspace, out, cleanup } = createPreviewWorkspace("z-shell-preview-sni-lazy-");
+    const monitor = {
+      id: "dp-1", name: "DP-1", x: 0, y: 0, width: 1440, height: 900,
+      scale: 1, refreshRateMilliHz: 60000,
+    };
+    const makeMenuNode = (
+      id: number,
+      label: string,
+      opts: { is_submenu?: boolean; children_display?: "submenu"; children?: unknown[] } = {},
+    ) => ({
+      id,
+      label,
+      enabled: true,
+      visible: true,
+      separator: false,
+      toggle_type: null,
+      toggle_state: null,
+      is_submenu: opts.is_submenu ?? false,
+      ...(opts.children_display ? { children_display: opts.children_display } : {}),
+      children: opts.children ?? [],
+    });
+    const baseItems = (overrides: {
+      telegramMenu?: unknown;
+      wineMenu?: unknown;
+      overflowMenu?: unknown;
+    } = {}) => [
+      {
+        id: "telegram",
+        app_id: "org.telegram.desktop",
+        title: "Telegram",
+        category: "Communications",
+        status: "Active",
+        icon_name: "telegram",
+        item_is_menu: true,
+        has_menu: true,
+        tooltip: null,
+        icon: null,
+        menu: overrides.telegramMenu ?? null,
+      },
+      {
+        id: "wine-app",
+        app_id: "wine-tray",
+        title: "Wine App",
+        category: "ApplicationStatus",
+        status: "Active",
+        icon_name: "wine",
+        item_is_menu: false,
+        has_menu: true,
+        tooltip: null,
+        icon: null,
+        menu: overrides.wineMenu ?? null,
+      },
+      {
+        id: "legacy-overflow",
+        app_id: "legacy-indicator",
+        title: "Legacy Indicator",
+        category: "ApplicationStatus",
+        status: "Active",
+        icon_name: "legacy-indicator",
+        item_is_menu: false,
+        has_menu: true,
+        tooltip: null,
+        icon: null,
+        menu: overrides.overflowMenu ?? null,
+      },
+      {
+        id: "empty-lazy",
+        app_id: "empty-lazy-app",
+        title: "Empty Lazy",
+        category: "ApplicationStatus",
+        status: "Active",
+        icon_name: "empty-lazy",
+        item_is_menu: true,
+        has_menu: true,
+        tooltip: null,
+        icon: null,
+        menu: null,
+      },
+    ];
+
+    try {
+      const fixture = join(workspace, "fixture.json");
+      const scenario = join(workspace, "scenario.json");
+      const timeline = createVirtualTimeline();
+      timeline.step({ id: "outputs", op: "monitors.set", monitors: [monitor] });
+      timeline.advance("daemon-events", 30);
+      timeline.step({ id: "ready", op: "settle" });
+
+      // 1. Click `telegram` (item_is_menu: true, has_menu: true, menu: null) -> prepares root menu asynchronously.
+      //    `z-shelld` publishes `desktop.tray` before returning the `tray.prepare-menu` RPC response.
+      const telegramRootTopicAtMs = timeline.after(6);
+      const prepareTelegramRootAtMs = timeline.after(8);
+      timeline.step({
+        id: "open-telegram",
+        op: "pointer.click",
+        target: { surface: "bar-dp-1", testId: "tray-item-telegram" },
+        button: "primary",
+      });
+      timeline.advance("telegram-root-settle", 250);
+      timeline.step({ id: "capture-telegram-root", op: "capture", surface: "tray-menu", captureId: "telegram-root" });
+
+      // 2. Click lazy submenu `Accounts` (id 20, is_submenu: true, children: []) -> prepares submenu without closing.
+      const telegramSubmenuTopicAtMs = timeline.after(6);
+      const prepareTelegramSubmenuAtMs = timeline.after(8);
+      timeline.step({
+        id: "expand-telegram-submenu",
+        op: "pointer.click",
+        target: { surface: "tray-menu", testId: "tray-menu-item-20" },
+        button: "primary",
+      });
+      timeline.advance("telegram-submenu-settle", 120);
+      timeline.step({ id: "capture-telegram-submenu", op: "capture", surface: "tray-menu", captureId: "telegram-submenu" });
+
+      // 3. Click leaf item `Personal (@ada)` (id 21) -> invokes tray.menu-item + tray.close-menu and closes popup.
+      const clickTelegramLeafAtMs = timeline.after(5);
+      const closeTelegramAtMs = timeline.after(8);
+      timeline.step({
+        id: "click-telegram-leaf",
+        op: "pointer.click",
+        target: { surface: "tray-menu", testId: "tray-menu-item-21" },
+        button: "primary",
+      });
+      timeline.advance("telegram-close-settle", 250);
+
+      // 4. Primary-click `wine-app` (item_is_menu: false) -> tray.activate returns { fallback_menu: true } -> prepares & opens menu!
+      const activateWineAtMs = timeline.after(5);
+      const wineMenuTopicAtMs = timeline.after(8);
+      const prepareWineAtMs = timeline.after(10);
+      timeline.step({
+        id: "activate-wine-fallback",
+        op: "pointer.click",
+        target: { surface: "bar-dp-1", testId: "tray-item-wine-app" },
+        button: "primary",
+      });
+      timeline.advance("wine-fallback-settle", 250);
+      timeline.step({ id: "capture-wine-fallback", op: "capture", surface: "tray-menu", captureId: "wine-fallback" });
+
+      const closeWineAtMs = timeline.after(5);
+      timeline.step({ id: "escape-wine-menu", op: "key.press", surface: "tray-menu", key: "Escape" });
+      timeline.advance("wine-close-settle", 250);
+
+      // 5. Open tray-overflow and primary-click `legacy-overflow` -> tray.activate returns { fallback_menu: true } -> prepares & opens bar-anchored tray-menu!
+      timeline.step({
+        id: "open-overflow",
+        op: "pointer.click",
+        target: { surface: "bar-dp-1", testId: "bar-tray-overflow-toggle" },
+        button: "primary",
+      });
+      timeline.advance("overflow-open-settle", 250);
+
+      const activateOverflowAtMs = timeline.after(5);
+      const overflowMenuTopicAtMs = timeline.after(8);
+      const prepareOverflowAtMs = timeline.after(10);
+      timeline.step({
+        id: "activate-overflow-fallback",
+        op: "pointer.click",
+        target: { surface: "tray-overflow", testId: "tray-overflow-item-legacy-overflow" },
+        button: "primary",
+      });
+      timeline.advance("overflow-fallback-settle", 250);
+      timeline.step({ id: "capture-overflow-fallback", op: "capture", surface: "tray-menu", captureId: "overflow-fallback" });
+      timeline.step({ id: "after-overflow-handoff", op: "monitors.set", monitors: [monitor] });
+
+      const closeOverflowMenuAtMs = timeline.after(5);
+      timeline.step({ id: "escape-overflow-menu", op: "key.press", surface: "tray-menu", key: "Escape" });
+      timeline.advance("overflow-menu-close-settle", 250);
+
+      // 6. Clicking an item whose `tray.prepare-menu` settles with 0 visible rows must close `activeTrayMenu`
+      //    cleanly (never stranding `overlay()` in `"tray"` or locking `BarPopoverBackdrop`).
+      const prepareEmptyLazyAtMs = timeline.after(5);
+      const closeEmptyLazyAtMs = timeline.after(10);
+      timeline.step({
+        id: "open-empty-lazy",
+        op: "pointer.click",
+        target: { surface: "bar-dp-1", testId: "tray-item-empty-lazy" },
+        button: "primary",
+      });
+      timeline.advance("empty-lazy-settle", 120);
+      timeline.step({ id: "after-empty-lazy", op: "monitors.set", monitors: [monitor] });
+      timeline.step({ id: "open-cal-after-empty-lazy", op: "pointer.click", target: { surface: "bar-dp-1", testId: "bar-clock" }, button: "primary" });
+      timeline.advance("cal-after-empty-settle", 250);
+      timeline.step({ id: "after-cal-open", op: "monitors.set", monitors: [monitor] });
+
+      const telegramRootMenu = {
+        revision: 1,
+        root: makeMenuNode(0, "", {
+          children: [
+            makeMenuNode(10, "Open Telegram"),
+            makeMenuNode(20, "Accounts", { is_submenu: true, children_display: "submenu", children: [] }),
+          ],
+        }),
+      };
+      const telegramExpandedMenu = {
+        revision: 2,
+        root: makeMenuNode(0, "", {
+          children: [
+            makeMenuNode(10, "Open Telegram"),
+            makeMenuNode(20, "Accounts", {
+              is_submenu: true,
+              children_display: "submenu",
+              children: [makeMenuNode(21, "Personal (@ada)")],
+            }),
+          ],
+        }),
+      };
+      const wineMenu = {
+        revision: 1,
+        root: makeMenuNode(0, "", {
+          children: [makeMenuNode(30, "Restore Wine Window")],
+        }),
+      };
+      const overflowMenu = {
+        revision: 1,
+        root: makeMenuNode(0, "", {
+          children: [makeMenuNode(40, "Overflow Settings")],
+        }),
+      };
+
+      writeFileSync(fixture, JSON.stringify(buildShellPreviewFixture({
+        id: "z-shell-sni-lazy-menus",
+        initialTopics: {
+          settings: {
+            general: { offline_mode: false, log_level: "info" },
+            bar: {
+              position: "top",
+              style: "floating",
+              gaps: 14,
+              edge_overrides: { top: null, right: null, bottom: null, left: null },
+              launcher_enabled: true,
+              dock_enabled: true,
+              clock_24h: true,
+              clock_seconds: false,
+              tray: {
+                default_action: "show",
+                rules: { "legacy-indicator": "collapse" },
+              },
+            },
+            theme: { mode: "dark", variant: "tonal", seed_color: null, backend: "builtin", gtk_linking: false },
+            ime: { mode: "indicator_only", candidate_layout: "auto", switch_osd: true },
+            polkit: { enabled: true },
+            wallpaper: { directories: [], fit: "cover", sync_theme: true, slideshow_seconds: 300 },
+            pre_action_fade_seconds: 0,
+            configured_plugins: [],
+          },
+          "desktop.tray": {
+            available: true,
+            items: baseItems(),
+          },
+        },
+        topicUpdates: [
+          {
+            topic: "desktop.tray",
+            atMs: telegramRootTopicAtMs,
+            revision: 2,
+            data: { available: true, items: baseItems({ telegramMenu: telegramRootMenu }) },
+          },
+          {
+            topic: "desktop.tray",
+            atMs: telegramSubmenuTopicAtMs,
+            revision: 3,
+            data: { available: true, items: baseItems({ telegramMenu: telegramExpandedMenu }) },
+          },
+          {
+            topic: "desktop.tray",
+            atMs: wineMenuTopicAtMs,
+            revision: 4,
+            data: { available: true, items: baseItems({ telegramMenu: telegramExpandedMenu, wineMenu }) },
+          },
+          {
+            topic: "desktop.tray",
+            atMs: overflowMenuTopicAtMs,
+            revision: 5,
+            data: { available: true, items: baseItems({ telegramMenu: telegramExpandedMenu, wineMenu, overflowMenu }) },
+          },
+        ],
+        commands: [
+          { id: 26, name: "tray.prepare-menu", payload: { id: "telegram" }, atMs: prepareTelegramRootAtMs },
+          { id: 27, name: "tray.prepare-menu", payload: { id: "telegram", menu_id: 20 }, atMs: prepareTelegramSubmenuAtMs },
+          { id: 28, name: "tray.menu-item", payload: { id: "telegram", menu_id: 21 }, atMs: clickTelegramLeafAtMs },
+          { id: 29, name: "tray.close-menu", payload: { id: "telegram" }, atMs: closeTelegramAtMs },
+          {
+            id: 30,
+            name: "tray.activate",
+            payload: { id: "wine-app" },
+            atMs: activateWineAtMs,
+            result: { data: { fallback_menu: true } },
+          },
+          { id: 31, name: "tray.prepare-menu", payload: { id: "wine-app" }, atMs: prepareWineAtMs },
+          { id: 32, name: "tray.close-menu", payload: { id: "wine-app" }, atMs: closeWineAtMs },
+          {
+            id: 33,
+            name: "tray.activate",
+            payload: { id: "legacy-overflow" },
+            atMs: activateOverflowAtMs,
+            result: { data: { fallback_menu: true } },
+          },
+          { id: 34, name: "tray.prepare-menu", payload: { id: "legacy-overflow" }, atMs: prepareOverflowAtMs },
+          { id: 35, name: "tray.close-menu", payload: { id: "legacy-overflow" }, atMs: closeOverflowMenuAtMs },
+          { id: 36, name: "tray.prepare-menu", payload: { id: "empty-lazy" }, atMs: prepareEmptyLazyAtMs },
+          { id: 37, name: "tray.close-menu", payload: { id: "empty-lazy" }, atMs: closeEmptyLazyAtMs },
+        ],
+      }), null, 2));
+      writeFileSync(scenario, JSON.stringify({
+        schemaVersion: 1,
+        id: "z-shell-sni-lazy-menus",
+        requiredCapabilities: ["pixels", "capture.transparent", "surface.multiple", "virtual-time"],
+        steps: timeline.steps,
+      }, null, 2));
+
+      const result = runPreview(fixture, scenario, out);
+      expectCleanPreview(result, 4, 0);
+
+      const telegramRoot = readCapture(out, "tray-menu", "telegram-root");
+      expect(treeNode(telegramRoot.tree, "tray-menu-item-10").text).toContain("Open Telegram");
+      expect(treeNode(telegramRoot.tree, "tray-menu-item-20").text).toContain("Accounts");
+      expect(telegramRoot.tree.nodes.some(node => node.testId === "tray-menu-item-21")).toBe(false);
+
+      const telegramSubmenu = readCapture(out, "tray-menu", "telegram-submenu");
+      expect(treeNode(telegramSubmenu.tree, "tray-menu-item-21").text).toContain("Personal (@ada)");
+
+      const wineFallback = readCapture(out, "tray-menu", "wine-fallback");
+      expect(treeNode(wineFallback.tree, "tray-menu-item-30").text).toContain("Restore Wine Window");
+
+      const overflowFallback = readCapture(out, "tray-menu", "overflow-fallback");
+      expect(treeNode(overflowFallback.tree, "tray-menu-item-40").text).toContain("Overflow Settings");
+      expect(previewSurfaces(out, "after-overflow-handoff")).toContain("tray-menu");
+      expect(previewSurfaces(out, "after-overflow-handoff")).not.toContain("tray-overflow");
+
+      expect(previewSurfaces(out, "after-empty-lazy")).not.toContain("tray-menu");
+      expect(previewSurfaces(out, "after-cal-open")).toContain("panel-calendar");
     } finally {
       cleanup();
     }

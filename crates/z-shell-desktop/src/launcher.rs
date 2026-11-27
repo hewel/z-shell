@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tokio::sync::oneshot;
+use tokio::sync::{Mutex as AsyncMutex, oneshot, watch};
+use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use z_shell_bus::{BusHub, CommandCall, UpdateKind};
 use z_shell_config::{ConfigStore, ShellPaths};
@@ -14,14 +15,17 @@ use z_shell_protocol::{
     ClientMessage, ClientRole, CommandInvokeResult, ErrorCode, MAX_SAFE_JS_INT, MediaRef,
     PluginEntryId, RequestId, RpcError, ServerMessage,
 };
+use zbus::Connection;
 
-use crate::apps::{self, Catalog, MAX_ACTIONS};
+use crate::apps::{self, Catalog, LaunchPlan, MAX_ACTIONS};
 use crate::{
-    ImeLockState, data, disabled, failed, invalid, not_found, ok, payload, publish, register,
+    ImeLockState, SessionBusAddress, connect, data, disabled, failed, invalid, not_found, ok,
+    payload, publish, register,
 };
 
 const APPS_TOPIC: &str = "desktop.apps";
 const APPS: &str = "desktop";
+const FDO_APPLICATION: &str = "org.freedesktop.Application";
 const QUERY_BYTES: usize = 256;
 const MAX_ITEMS: usize = 48;
 const MAX_PENDING: usize = 512;
@@ -29,6 +33,10 @@ const MAX_PROVIDERS_PER_CLIENT: usize = 8;
 const QUERY_TIMEOUT: Duration = Duration::from_millis(750);
 const ACTIVATION_TIMEOUT: Duration = Duration::from_secs(2);
 const REAP_INTERVAL: Duration = Duration::from_secs(1);
+#[cfg(target_os = "linux")]
+const WATCH_DEBOUNCE: Duration = Duration::from_millis(300);
+#[cfg(target_os = "linux")]
+const WATCH_MAX_WAIT: Duration = Duration::from_secs(3);
 
 /// Installed app catalog and authenticated launcher sessions.
 #[derive(Debug)]
@@ -36,6 +44,8 @@ pub(crate) struct Launcher {
     state: Mutex<State>,
     pin_write: Mutex<()>,
     store: ConfigStore,
+    session_bus: SessionBusAddress,
+    dbus_conn: AsyncMutex<Option<Connection>>,
     children: Arc<Mutex<Vec<Child>>>,
 }
 
@@ -283,14 +293,14 @@ impl State {
         });
     }
 
-    fn command(&self, id: &str, action: Option<&str>) -> Result<Command, RpcError> {
+    fn launch_plan(&self, id: &str, action: Option<&str>) -> Result<LaunchPlan, RpcError> {
         self.ensure_connected()?;
         let apps = self
             .apps
             .as_ref()
             .ok_or_else(|| disabled("app catalog is still loading"))?;
         apps.get(id)
-            .and_then(|app| app.command(action))
+            .and_then(|app| app.launch_plan(action))
             .ok_or_else(|| not_found("app or desktop action not found"))
     }
 
@@ -352,13 +362,17 @@ impl Launcher {
     pub(crate) fn install(
         hub: &BusHub,
         paths: &ShellPaths,
+        session_bus: SessionBusAddress,
         data_dirs: Vec<PathBuf>,
         icon_theme: String,
-    ) -> Arc<Self> {
+        stop: watch::Receiver<()>,
+    ) -> (Arc<Self>, Option<JoinHandle<()>>) {
         let launcher = Arc::new(Self {
             state: Mutex::new(State::default()),
             pin_write: Mutex::new(()),
             store: ConfigStore::new(paths.clone()),
+            session_bus,
+            dbus_conn: AsyncMutex::new(None),
             children: Arc::default(),
         });
         register(
@@ -427,7 +441,14 @@ impl Launcher {
         let hub = hub.clone();
         let store = launcher.store.clone();
         let cache_dir = paths.media_dir();
+        let (watcher_tx, watcher_rx) = oneshot::channel();
+        let watch_dirs = data_dirs.clone();
+        let watch_theme = icon_theme.clone();
+        let watch_cache = cache_dir.clone();
+        let watch_hub = hub.clone();
+        let watch_weak = weak.clone();
         tokio::task::spawn_blocking(move || {
+            let watcher = init_desktop_watcher(&data_dirs);
             let apps = apps::scan(&data_dirs, &icon_theme, &cache_dir);
             let pinned_apps = match store.load_state() {
                 Ok(state) => state.pinned_apps,
@@ -449,9 +470,21 @@ impl Launcher {
                     &state.status(),
                     UpdateKind::SourceBaseline,
                 );
+                if let Some(watcher) = watcher {
+                    let _ = watcher_tx.send(watcher);
+                }
             }
         });
-        launcher
+        let watcher_task = spawn_desktop_watcher(
+            watcher_rx,
+            stop,
+            watch_dirs,
+            watch_theme,
+            watch_cache,
+            watch_hub,
+            watch_weak,
+        );
+        (launcher, watcher_task)
     }
 
     pub(crate) fn disconnected(&self) {
@@ -549,7 +582,7 @@ impl Launcher {
     }
 
     async fn launch(&self, call: &CommandCall) -> Result<CommandInvokeResult, RpcError> {
-        let command = {
+        let plan = {
             let state = self.state.lock().expect("launcher state lock poisoned");
             state.ensure_connected()?;
             if state.lock == ImeLockState::Locked {
@@ -558,8 +591,90 @@ impl Launcher {
                 ));
             }
             let request: LaunchApp = payload(call)?;
-            state.command(&request.id, request.action_id.as_deref())?
+            state.launch_plan(&request.id, request.action_id.as_deref())?
         };
+        self.execute_plan(plan).await
+    }
+
+    async fn session_connection(&self) -> Option<Connection> {
+        let mut guard = self.dbus_conn.lock().await;
+        if let Some(existing) = guard.as_ref()
+            && !existing.is_closed()
+        {
+            return Some(existing.clone());
+        }
+        let connected = connect(&self.session_bus).await;
+        *guard = connected.clone();
+        connected
+    }
+
+    async fn execute_plan(&self, plan: LaunchPlan) -> Result<CommandInvokeResult, RpcError> {
+        if let Some(dbus) = plan.dbus {
+            let Some(connection) = self.session_connection().await else {
+                return match plan.command {
+                    Some(command) => self.execute(command).await,
+                    None => Err(failed(
+                        "session D-Bus is unavailable for DBusActivatable entry",
+                    )),
+                };
+            };
+            let bus_name = dbus.target.bus_name.as_str();
+            let object_path = dbus.target.object_path.as_str();
+            let platform_data = HashMap::<&str, zbus::zvariant::Value<'_>>::new();
+            let call_fut = async {
+                match &dbus.action {
+                    None => {
+                        connection
+                            .call_method(
+                                Some(bus_name),
+                                object_path,
+                                Some(FDO_APPLICATION),
+                                "Activate",
+                                &(platform_data,),
+                            )
+                            .await
+                    }
+                    Some(action_id) => {
+                        let params = Vec::<zbus::zvariant::Value<'_>>::new();
+                        connection
+                            .call_method(
+                                Some(bus_name),
+                                object_path,
+                                Some(FDO_APPLICATION),
+                                "ActivateAction",
+                                &(action_id.as_str(), params, platform_data),
+                            )
+                            .await
+                    }
+                }
+            };
+            return match tokio::time::timeout(ACTIVATION_TIMEOUT, call_fut).await {
+                Ok(Ok(_)) => Ok(ok()),
+                Ok(Err(zbus::Error::MethodError(name, _, _)))
+                    if matches!(
+                        name.as_str(),
+                        "org.freedesktop.DBus.Error.ServiceUnknown"
+                            | "org.freedesktop.DBus.Error.NameHasNoOwner"
+                    ) =>
+                {
+                    match plan.command {
+                        Some(command) => self.execute(command).await,
+                        None => Err(failed("desktop entry D-Bus service has no owner")),
+                    }
+                }
+                Ok(Err(error)) => {
+                    tracing::warn!(%error, app = %bus_name, "cannot activate desktop entry over D-Bus");
+                    Err(failed("could not activate desktop entry over D-Bus"))
+                }
+                Err(_) => Err(RpcError::new(
+                    ErrorCode::Timeout,
+                    "desktop entry D-Bus activation timed out",
+                )),
+            };
+        }
+        let command = plan
+            .command
+            .ok_or_else(|| failed("desktop entry has no launch command"))?;
         self.execute(command).await
     }
 
@@ -791,7 +906,7 @@ impl Launcher {
         let client = call.caller.client_id;
         require_active(&call.hub, client)?;
         enum Execute<'a> {
-            App(Command),
+            App(Box<LaunchPlan>),
             Provider(Request<'a>),
         }
         let execute = {
@@ -816,7 +931,9 @@ impl Launcher {
                 ));
             }
             if request.provider_id == APPS {
-                Execute::App(state.command(&request.item_id, request.action_id.as_deref())?)
+                Execute::App(Box::new(
+                    state.launch_plan(&request.item_id, request.action_id.as_deref())?,
+                ))
             } else {
                 let owner = state
                     .providers
@@ -833,7 +950,7 @@ impl Launcher {
             }
         };
         match execute {
-            Execute::App(command) => self.execute(command).await,
+            Execute::App(plan) => self.execute_plan(*plan).await,
             Execute::Provider(mut pending) => {
                 match pending.until(Instant::now() + ACTIVATION_TIMEOUT).await? {
                     Reply::Activation(true) => Ok(ok()),
@@ -946,4 +1063,177 @@ fn denied(message: &'static str) -> RpcError {
 
 fn exhausted(message: &'static str) -> RpcError {
     RpcError::new(ErrorCode::ResourceExhausted, message)
+}
+
+#[cfg(target_os = "linux")]
+type DesktopWatcher = std::os::fd::OwnedFd;
+
+#[cfg(not(target_os = "linux"))]
+type DesktopWatcher = ();
+
+#[cfg(target_os = "linux")]
+fn init_desktop_watcher(data_dirs: &[PathBuf]) -> Option<DesktopWatcher> {
+    use rustix::fs::inotify::{CreateFlags, init};
+    if data_dirs.is_empty() {
+        return None;
+    }
+    let fd = init(CreateFlags::CLOEXEC | CreateFlags::NONBLOCK).ok()?;
+    sync_inotify_watches(&fd, data_dirs);
+    Some(fd)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn init_desktop_watcher(_data_dirs: &[PathBuf]) -> Option<DesktopWatcher> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn sync_inotify_watches(fd: &std::os::fd::OwnedFd, data_dirs: &[PathBuf]) {
+    use rustix::fs::inotify::{WatchFlags, add_watch};
+    let flags = WatchFlags::CREATE
+        | WatchFlags::DELETE
+        | WatchFlags::MODIFY
+        | WatchFlags::CLOSE_WRITE
+        | WatchFlags::MOVED_FROM
+        | WatchFlags::MOVED_TO
+        | WatchFlags::DELETE_SELF
+        | WatchFlags::MOVE_SELF
+        | WatchFlags::ATTRIB;
+    for data_dir in data_dirs {
+        let apps_root = data_dir.join("applications");
+        if apps_root.is_dir() {
+            if data_dir.is_dir() {
+                let _ = add_watch(fd, data_dir, flags);
+            }
+            let mut stack = vec![apps_root];
+            while let Some(dir) = stack.pop() {
+                let _ = add_watch(fd, &dir, flags);
+                for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                    if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                        stack.push(entry.path());
+                    }
+                }
+            }
+        } else if data_dir.is_dir() {
+            let _ = add_watch(fd, data_dir, flags);
+        } else if let Some(parent) = data_dir.parent().filter(|p| p.is_dir()) {
+            let _ = add_watch(fd, parent, flags);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn spawn_desktop_watcher(
+    watcher_rx: oneshot::Receiver<DesktopWatcher>,
+    mut stop: watch::Receiver<()>,
+    data_dirs: Vec<PathBuf>,
+    icon_theme: String,
+    cache_dir: PathBuf,
+    hub: BusHub,
+    launcher: std::sync::Weak<Launcher>,
+) -> Option<JoinHandle<()>> {
+    if data_dirs.is_empty() {
+        return None;
+    }
+    Some(tokio::spawn(async move {
+        let fd = tokio::select! {
+            biased;
+            _ = stop.changed() => return,
+            res = watcher_rx => match res {
+                Ok(fd) => fd,
+                Err(_) => return,
+            }
+        };
+        // SAFETY: AsyncFd owns the inotify OwnedFd, keeping it open until deregistration on drop.
+        let Ok(async_fd) = (unsafe { tokio::io::unix::AsyncFd::register(fd) }) else {
+            return;
+        };
+        let mut pending_since: Option<Instant> = None;
+        let mut quiet_deadline: Option<Instant> = None;
+        let mut buf = [0_u8; 4096];
+
+        loop {
+            let timer = async {
+                match quiet_deadline {
+                    Some(deadline) => tokio::time::sleep_until(deadline).await,
+                    None => std::future::pending::<()>().await,
+                }
+            };
+            tokio::select! {
+                biased;
+                _ = stop.changed() => break,
+                readable = async_fd.readable() => {
+                    let Ok(mut guard) = readable else { break };
+                    let mut saw_event = false;
+                    loop {
+                        match rustix::io::read(async_fd.get_ref(), &mut buf) {
+                            Ok(0) => break,
+                            Ok(_) => saw_event = true,
+                            Err(rustix::io::Errno::INTR) => continue,
+                            Err(rustix::io::Errno::AGAIN) => {
+                                guard.clear_ready();
+                                break;
+                            }
+                            Err(_) => return,
+                        }
+                    }
+                    drop(guard);
+                    if saw_event {
+                        if let Ok(fd_clone) = async_fd.get_ref().try_clone() {
+                            let sync_dirs = data_dirs.clone();
+                            let _ = tokio::task::spawn_blocking(move || {
+                                sync_inotify_watches(&fd_clone, &sync_dirs);
+                            })
+                            .await;
+                        }
+                        let now = Instant::now();
+                        let first = *pending_since.get_or_insert(now);
+                        quiet_deadline = Some((now + WATCH_DEBOUNCE).min(first + WATCH_MAX_WAIT));
+                    }
+                }
+                () = timer => {
+                    pending_since = None;
+                    quiet_deadline = None;
+                    let Some(strong) = launcher.upgrade() else { break };
+                    let scan_dirs = data_dirs.clone();
+                    let scan_theme = icon_theme.clone();
+                    let scan_cache = cache_dir.clone();
+                    let fd_clone = async_fd.get_ref().try_clone().ok();
+                    let Ok(fresh_apps) = tokio::task::spawn_blocking(move || {
+                        if let Some(fd) = &fd_clone {
+                            sync_inotify_watches(fd, &scan_dirs);
+                        }
+                        let scanned = apps::scan(&scan_dirs, &scan_theme, &scan_cache);
+                        if let Some(fd) = &fd_clone {
+                            sync_inotify_watches(fd, &scan_dirs);
+                        }
+                        scanned
+                    }).await else {
+                        continue;
+                    };
+                    let mut state = strong.state.lock().expect("launcher state lock poisoned");
+                    if state.disconnected {
+                        break;
+                    }
+                    if state.apps.as_ref() != Some(&fresh_apps) {
+                        state.apps = Some(fresh_apps);
+                        publish(&hub, APPS_TOPIC, &state.status(), UpdateKind::Live);
+                    }
+                }
+            }
+        }
+    }))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn spawn_desktop_watcher(
+    _watcher_rx: oneshot::Receiver<DesktopWatcher>,
+    _stop: watch::Receiver<()>,
+    _data_dirs: Vec<PathBuf>,
+    _icon_theme: String,
+    _cache_dir: PathBuf,
+    _hub: BusHub,
+    _launcher: std::sync::Weak<Launcher>,
+) -> Option<JoinHandle<()>> {
+    None
 }

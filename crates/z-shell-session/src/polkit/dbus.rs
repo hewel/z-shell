@@ -14,7 +14,7 @@ use zbus::export::futures_core::Stream;
 use zbus::fdo::{self, DBusProxy};
 use zbus::message::{Header, Type};
 use zbus::names::OwnedUniqueName;
-use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
+use zbus::zvariant::{OwnedValue, Value};
 use zbus::{Connection, MatchRule, MessageStream};
 use zeroize::Zeroizing;
 
@@ -28,10 +28,6 @@ const AUTHORITY_PATH: &str = "/org/freedesktop/PolicyKit1/Authority";
 const AGENT_PATH: &str = "/org/zshell/PolicyKit1/AuthenticationAgent";
 const DBUS_NAME: &str = "org.freedesktop.DBus";
 const DBUS_PATH: &str = "/org/freedesktop/DBus";
-const LOGIND_NAME: &str = "org.freedesktop.login1";
-const LOGIND_PATH: &str = "/org/freedesktop/login1";
-const LOGIND_MANAGER: &str = "org.freedesktop.login1.Manager";
-const LOGIND_SESSION: &str = "org.freedesktop.login1.Session";
 const BUS_TIMEOUT: Duration = Duration::from_secs(3);
 const INITIAL_RETRY_BACKOFF: Duration = Duration::from_millis(250);
 const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(10);
@@ -119,7 +115,8 @@ impl Agent {
             .0
             .upgrade()
             .ok_or_else(agent_stopped)?
-            .enqueue(header.sender(), request)?;
+            .enqueue(header.sender(), request)
+            .await?;
         result.await.map_err(|_| agent_stopped())?
     }
 
@@ -592,37 +589,16 @@ async fn wait_for_owner_loss(
 
 async fn session_id(connection: &Connection, bus: &PolkitBus) -> Result<String, RegistrationError> {
     if matches!(bus, PolkitBus::System)
-        && let Some(id) = nonempty_env("XDG_SESSION_ID")
+        && let Some(id) = nonempty_env("XDG_SESSION_ID").filter(|id| id != "auto")
     {
         return Ok(id);
     }
-    let id = bounded("resolving the current logind session", async {
-        let session: OwnedObjectPath = connection
-            .call_method(
-                Some(LOGIND_NAME),
-                LOGIND_PATH,
-                Some(LOGIND_MANAGER),
-                "GetSessionByPID",
-                &(std::process::id(),),
-            )
-            .await?
-            .body()
-            .deserialize()?;
-        let id: OwnedValue = connection
-            .call_method(
-                Some(LOGIND_NAME),
-                &session,
-                Some("org.freedesktop.DBus.Properties"),
-                "Get",
-                &(LOGIND_SESSION, "Id"),
-            )
-            .await?
-            .body()
-            .deserialize()?;
-        String::try_from(id).map_err(zbus::Error::from)
-    })
+    let id = bounded(
+        "resolving the current logind session",
+        crate::logind_session::resolve_session_id(connection),
+    )
     .await?;
-    if id.is_empty() {
+    if id.is_empty() || id == "auto" {
         return Err(RegistrationError::EmptySessionId);
     }
     Ok(id)

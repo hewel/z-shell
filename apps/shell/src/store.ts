@@ -1,6 +1,7 @@
 import { createContext, createDelay, createEffect, createMemo, createSignal, flush, getSessionGeneration, onCleanup, runWithOwner, untrack, useContext, useMonitors, type Accessor, type Monitor, type NativeChild, type NativeWindowRect } from "@hewel/zgui";
 import { mountOwned } from "@hewel/zgui/renderer";
 import { getResolvedCapabilities, onControlMessage, type JsonValue } from "@hewel/zgui-services";
+import type { PluginEntryKind } from "@z-shell/plugin-api";
 import { ZShellClient, type BusHelloResult, type BusTransport, type CommandInvokeResult } from "@z-shell/sdk";
 import { createZguiSocketTransport, setGlobalMotionScheme, useTopic, type TopicState } from "@z-shell/sdk/zgui";
 import { composedPlugins } from "./plugins/composed.ts";
@@ -112,6 +113,14 @@ export type PluginSettingsPageEntry = {
   readonly render: () => NativeChild;
 };
 
+export interface PluginRuntimeError {
+  readonly pluginId: string;
+  readonly entryId: string;
+  readonly instanceId?: string;
+  readonly kind: PluginEntryKind;
+  readonly message: string;
+}
+
 type BarOverlay =
   | { readonly kind: "panel"; readonly target: PanelTarget }
   | { readonly kind: "tray"; readonly target: TrayMenuTarget }
@@ -218,6 +227,9 @@ export interface ShellStore extends ShellTopics {
   registerPluginBarWidget(slot: PluginBarWidgetSlot): () => void;
   readonly pluginSettingsPages: Accessor<readonly PluginSettingsPageEntry[]>;
   registerPluginSettingsPage(page: PluginSettingsPageEntry): () => void;
+  readonly pluginRuntimeErrors: Accessor<Readonly<Record<string, readonly PluginRuntimeError[]>>>;
+  reportPluginRuntimeError(error: PluginRuntimeError): void;
+  clearPluginRuntimeErrors(pluginId?: string, key?: string): void;
   readonly pluginUpdatesCount: Accessor<number>;
   setPluginUpdatesCount(count: number): void;
   readonly settingsWindowOpen: Accessor<boolean>;
@@ -316,6 +328,10 @@ export function createShellStore(): ShellStore {
   const ungrabbedBarPopupMonitorId = createMemo((): string | null => {
     const active = overlay();
     if (!isBarPopupOverlay(active) || barPopupGrab()) return null;
+    if (active?.kind === "tray") {
+      const item = topics?.tray.data()?.items.find(candidate => candidate.id === active.target.itemId);
+      if (!item?.menu) return null;
+    }
     return overlayMonitorId(active, monitors()) ?? activeMonitor()?.id ?? null;
   });
   function defaultPanelAnchor(
@@ -546,6 +562,42 @@ export function createShellStore(): ShellStore {
     return () => setPluginSettingsPages(pages => pages.includes(registration)
       ? pages.filter(candidate => candidate !== registration)
       : pages);
+  }
+
+  const [pluginRuntimeErrors, setPluginRuntimeErrors] = createSignal<Readonly<Record<string, readonly PluginRuntimeError[]>>>({});
+  function reportPluginRuntimeError(entry: PluginRuntimeError): void {
+    if (disposed) return;
+    setPluginRuntimeErrors(prev => {
+      const existing = prev[entry.pluginId] ?? [];
+      const key = entry.instanceId ?? entry.entryId;
+      const filtered = existing.filter(item => (item.instanceId ?? item.entryId) !== key);
+      return {
+        ...prev,
+        [entry.pluginId]: [...filtered, entry],
+      };
+    });
+  }
+  function clearPluginRuntimeErrors(pluginId?: string, key?: string): void {
+    if (disposed) return;
+    if (pluginId === undefined) {
+      setPluginRuntimeErrors({});
+      return;
+    }
+    setPluginRuntimeErrors(prev => {
+      const existing = prev[pluginId];
+      if (!existing) return prev;
+      if (key === undefined) {
+        const next = { ...prev };
+        delete next[pluginId];
+        return next;
+      }
+      const remaining = existing.filter(item => (item.instanceId ?? item.entryId) !== key);
+      if (remaining.length === existing.length) return prev;
+      const next = { ...prev };
+      if (remaining.length === 0) delete next[pluginId];
+      else next[pluginId] = remaining;
+      return next;
+    });
   }
 
   const [pluginUpdatesCount, setPluginUpdatesCount] = createSignal(0);
@@ -904,6 +956,9 @@ export function createShellStore(): ShellStore {
     registerPluginBarWidget,
     pluginSettingsPages,
     registerPluginSettingsPage,
+    pluginRuntimeErrors,
+    reportPluginRuntimeError,
+    clearPluginRuntimeErrors,
     pluginUpdatesCount,
     setPluginUpdatesCount,
     settingsWindowOpen,

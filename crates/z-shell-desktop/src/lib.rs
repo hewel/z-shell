@@ -22,9 +22,11 @@
 //!
 //! ## System tray and media
 //!
-//! `desktop.tray` reports registered items, optional icons, and DBusMenu
-//! layouts. `tray.activate` and `tray.context-menu` take `{id, x?, y?}`;
-//! `tray.menu-item` takes `{id, menu_id, timestamp?}`.
+//! `desktop.tray` reports registered items (`has_menu` plus optional `icon` and
+//! `DBusMenu` `menu` layouts with stripped mnemonics and `is_submenu` flags).
+//! `tray.activate` (returning `{fallback_menu}`) and `tray.context-menu` take
+//! `{id, x?, y?}`; `tray.prepare-menu` and `tray.close-menu` take
+//! `{id, menu_id?, timestamp?}`; `tray.menu-item` takes `{id, menu_id, timestamp?}`.
 //!
 //! `desktop.media` reports the MPRIS players, `selected_player_id`,
 //! `any_playing`, and the selected player's `cover`. `media.play-pause`,
@@ -223,11 +225,14 @@ impl DesktopServices {
         paths: &ShellPaths,
         options: DesktopOptions,
     ) -> DesktopHandle {
-        let launcher = launcher::Launcher::install(
+        let (stop, running) = watch::channel(());
+        let (launcher, launcher_watcher) = launcher::Launcher::install(
             hub,
             paths,
+            options.session_bus.clone(),
             options.xdg_data_dirs.clone(),
             options.icon_theme.clone(),
+            running.clone(),
         );
         let notifications = notifications::Notifications::install(
             hub,
@@ -247,10 +252,12 @@ impl DesktopServices {
         let ime = ime::Ime::install(hub, options.ime, ime_refresh);
         let media = media::Media::install(hub, paths.media_dir(), options.offline_policy);
 
-        let (stop, running) = watch::channel(());
         let (notifications_enabled, notifications_setting) = watch::channel(options.notifications);
         let (tray_enabled, tray_setting) = watch::channel(options.tray);
         let mut workers = Vec::new();
+        if let Some(watcher) = launcher_watcher {
+            workers.push(watcher);
+        }
         if options.session_bus != SessionBusAddress::Disabled {
             workers.extend([
                 tokio::spawn(supervise(

@@ -1,8 +1,10 @@
 import {
-  For, PopupSurface, Show, createEffect, createMemo, createSignal, cx, getWindowRect, onCleanup, onSettled, untrack,
+  Errored, For, PopupSurface, Show, createEffect, createMemo, createSignal, cx, getWindowRect, onCleanup, onSettled, untrack,
   type Component, type NativeChild, type NativeNode, type NativeWindowRect,
 } from "@hewel/zgui";
+import { M3Button } from "@z-shell/sdk/primitives";
 import { type PluginSettingsProps } from "@z-shell/sdk/zgui";
+import { ShellIcon } from "../icons.tsx";
 import {
   createRetainedPresence,
   panelMotionStyle,
@@ -31,6 +33,7 @@ type WidgetProps = ClientProps & { readonly vertical: boolean; readonly onOpenPa
 type PanelProps = ClientProps & { readonly onClose: () => void; readonly onOpenSettings?: () => void };
 export type PluginSettingsPageProps = PluginSettingsProps;
 type ActivePluginPanel = {
+  readonly panel: ComposedEntryInstanceDescriptor;
   readonly pluginId: string;
   readonly entryId: string;
   readonly instanceId: string;
@@ -39,11 +42,73 @@ type ActivePluginPanel = {
   readonly anchorRect: NativeWindowRect;
   readonly position: BarPosition;
   readonly style: BarStyle;
-  readonly Component: Component<PanelProps>;
 };
 
 const COMPACT_PLUGIN_PANEL_WIDTH = 360;
 const STANDARD_PLUGIN_PANEL_WIDTH = 396;
+
+function formatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function GuardedPluginMount(props: {
+  readonly instance: ComposedEntryInstanceDescriptor;
+  readonly variant: "widget" | "card" | "layer";
+  readonly vertical?: boolean;
+  readonly onError: (instance: ComposedEntryInstanceDescriptor, error: unknown) => void;
+  readonly onReset?: () => void;
+  readonly render: () => NativeChild;
+}): NativeChild {
+  return (
+    <Errored
+      fallback={(err, reset) => {
+        createEffect(err, currentErr => {
+          props.onError(props.instance, currentErr);
+        });
+        if (props.variant === "layer") return null;
+        if (props.variant === "widget") {
+          return (
+            <box
+              testId={`plugin-error-${props.instance.instanceId}`}
+              ariaLabel={`Plugin error: ${props.instance.entryId}`}
+              data-vertical={props.vertical ? "true" : null}
+              class={styles.widgetErrorBadge}
+            >
+              <ShellIcon name="warning" size={13} color="var(--color-on-error-container)" />
+            </box>
+          );
+        }
+        return (
+          <column
+            testId={`plugin-error-${props.instance.instanceId}`}
+            class={styles.panelErrorCard}
+          >
+            <row class={styles.panelErrorHeader}>
+              <ShellIcon name="warning" size={16} color="var(--color-on-error-container)" />
+              <text class={styles.panelErrorTitle}>{`Plugin error · ${props.instance.entryId}`}</text>
+            </row>
+            <text class={styles.panelErrorMessage}>{formatErrorMessage(err())}</text>
+            <row>
+              <M3Button
+                variant="neutral-tonal"
+                size="sm"
+                testId={`plugin-error-retry-${props.instance.instanceId}`}
+                onClick={() => {
+                  props.onReset?.();
+                  reset();
+                }}
+              >
+                <text>Retry</text>
+              </M3Button>
+            </row>
+          </column>
+        );
+      }}
+    >
+      {props.render()}
+    </Errored>
+  );
+}
 
 function PluginPanelFrame(props: {
   theme: ShellStore["theme"];
@@ -101,6 +166,7 @@ function formatPluginTitle(pluginId: string, entryId: string): string {
 function ActivePluginHost(props: { readonly bundle: ComposedPluginBundle }): NativeChild {
   const {
     publicClient, invokeHostResult, registerPluginBarWidget, registerPluginSettingsPage, pluginSettingsPages, openSettingsWindow,
+    reportPluginRuntimeError, clearPluginRuntimeErrors,
     monitors, outputs, settings, theme, sessionLock,
     activePluginPanelId, overlayKind, barPopupGrab, togglePluginPanel, closePluginPanel, dismissBarPopupFromCompositor, recordActiveMonitor,
   } = useShellStore();
@@ -109,6 +175,15 @@ function ActivePluginHost(props: { readonly bundle: ComposedPluginBundle }): Nat
   const panels = () => props.bundle.entryInstances.filter(instance => instance.kind === "panel");
   const scheme = useMotionScheme();
   const lockActive = () => isSessionLockActive(sessionLock.data());
+  const reportEntryError = (instance: ComposedEntryInstanceDescriptor, error: unknown) => {
+    reportPluginRuntimeError({
+      pluginId: instance.pluginId,
+      entryId: instance.entryId,
+      instanceId: instance.instanceId,
+      kind: instance.kind,
+      message: formatErrorMessage(error),
+    });
+  };
   const activePluginPanel = createMemo(() => {
     if (lockActive()) return null;
     const activeId = activePluginPanelId();
@@ -143,7 +218,14 @@ function ActivePluginHost(props: { readonly bundle: ComposedPluginBundle }): Nat
         serviceController = undefined;
         return;
       }
-      const controller = createComposedServiceController(props.bundle, client);
+      const controller = createComposedServiceController(props.bundle, client, (service, error) => {
+        reportPluginRuntimeError({
+          pluginId: service.pluginId,
+          entryId: service.entryId,
+          kind: "service",
+          message: formatErrorMessage(error),
+        });
+      });
       serviceController = controller;
       return () => {
         if (serviceController === controller) serviceController = undefined;
@@ -171,6 +253,7 @@ function ActivePluginHost(props: { readonly bundle: ComposedPluginBundle }): Nat
     const layout = resolveBarLayout(settings.data()?.bar, monitor, outputs.data());
     const targetRect = anchor ? getWindowRect(anchor) : null;
     setPluginPanelData({
+      panel,
       pluginId: panel.pluginId,
       entryId: panel.entryId,
       instanceId: panel.instanceId,
@@ -182,7 +265,6 @@ function ActivePluginHost(props: { readonly bundle: ComposedPluginBundle }): Nat
       }),
       position: layout.position,
       style: layout.style,
-      Component: entryComponent<PanelProps>(props.bundle, panel),
     });
     if (!togglePluginPanel(panel.instanceId, outputId, panel.pluginId)) {
       setPluginPanelData(null);
@@ -194,11 +276,19 @@ function ActivePluginHost(props: { readonly bundle: ComposedPluginBundle }): Nat
       <For each={props.bundle.entryInstances}>
         {instance => {
           if (instance.kind === "layer") {
-            const LayerComponent = entryComponent<ClientProps>(props.bundle, instance);
-            return <LayerComponent client={publicClient} />;
+            return (
+              <GuardedPluginMount
+                instance={instance}
+                variant="layer"
+                onError={reportEntryError}
+                render={() => {
+                  const LayerComponent = entryComponent<ClientProps>(props.bundle, instance);
+                  return <LayerComponent client={publicClient} />;
+                }}
+              />
+            );
           }
           if (instance.kind === "settings_page") {
-            const SettingsComponent = entryComponent<PluginSettingsPageProps>(props.bundle, instance);
             const readSettings = async (): Promise<Readonly<Record<string, unknown>>> => {
               const res = await invokeHostResult("settings.get-plugin", { plugin_id: instance.pluginId });
               const data = res.ok ? (res.result.data as { settings?: Record<string, unknown> } | undefined) : undefined;
@@ -214,6 +304,11 @@ function ActivePluginHost(props: { readonly bundle: ComposedPluginBundle }): Nat
               if (!res.ok) return undefined;
               const data = res.result.data as { settings?: Record<string, unknown> } | undefined;
               const committed = data?.settings ?? patch;
+              for (const svc of props.bundle.services) {
+                if (svc.pluginId === instance.pluginId) {
+                  clearPluginRuntimeErrors(instance.pluginId, svc.entryId);
+                }
+              }
               serviceController?.restartPlugin(instance.pluginId, committed);
               return committed;
             };
@@ -224,10 +319,21 @@ function ActivePluginHost(props: { readonly bundle: ComposedPluginBundle }): Nat
                 pluginId: instance.pluginId,
                 title: formatPluginTitle(instance.pluginId, instance.entryId),
                 render: () => (
-                  <SettingsComponent
-                    client={publicClient}
-                    readSettings={readSettings}
-                    patchSettings={patchSettings}
+                  <GuardedPluginMount
+                    instance={instance}
+                    variant="card"
+                    onError={reportEntryError}
+                    onReset={() => clearPluginRuntimeErrors(instance.pluginId, instance.instanceId)}
+                    render={() => {
+                      const SettingsComponent = entryComponent<PluginSettingsPageProps>(props.bundle, instance);
+                      return (
+                        <SettingsComponent
+                          client={publicClient}
+                          readSettings={readSettings}
+                          patchSettings={patchSettings}
+                        />
+                      );
+                    }}
                   />
                 ),
               });
@@ -236,7 +342,6 @@ function ActivePluginHost(props: { readonly bundle: ComposedPluginBundle }): Nat
             return null;
           }
           if (instance.kind !== "widget") return null;
-          const WidgetComponent = entryComponent<WidgetProps>(props.bundle, instance);
           const register = (outputId: string) => {
             let slotNode: NativeNode | undefined;
             const onOpenPanel: OpenPanel = (entryId, anchor) => openPanel(instance, outputId, entryId, anchor ?? slotNode);
@@ -254,7 +359,16 @@ function ActivePluginHost(props: { readonly bundle: ComposedPluginBundle }): Nat
                     class={styles.widgetSlot}
                     data-vertical={slotProps.vertical ? "true" : null}
                   >
-                    <WidgetComponent client={publicClient} vertical={slotProps.vertical} onOpenPanel={onOpenPanel} />
+                    <GuardedPluginMount
+                      instance={instance}
+                      variant="widget"
+                      vertical={slotProps.vertical}
+                      onError={reportEntryError}
+                      render={() => {
+                        const WidgetComponent = entryComponent<WidgetProps>(props.bundle, instance);
+                        return <WidgetComponent client={publicClient} vertical={slotProps.vertical} onOpenPanel={onOpenPanel} />;
+                      }}
+                    />
                   </box>
                 ),
               });
@@ -272,7 +386,7 @@ function ActivePluginHost(props: { readonly bundle: ComposedPluginBundle }): Nat
           const initial = untrack(() => panelPresence.value()!);
           const initialGrab = untrack(barPopupGrab);
           const current = () => panelPresence.value() ?? initial;
-          const { pluginId, instanceId, outputId, width, Component: PanelComponent } = initial;
+          const { panel: panelInstance, pluginId, instanceId, outputId, width } = initial;
           const geometry = createMemo(() => resolvePopoverGeometry(current().position, current().style, false));
           const ownSettingsPage = () => pluginSettingsPages().find(page => page.pluginId === pluginId);
           const onOpenSettings = () => {
@@ -288,7 +402,16 @@ function ActivePluginHost(props: { readonly bundle: ComposedPluginBundle }): Nat
               inputRegion={cardNode() ? [cardNode()!] : []}
               placement={geometry().placement} offset={geometry().offset} grab={initialGrab} blurRegion={cardNode() ? [cardNode()!] : "none"} onDismiss={dismissPluginPanelInstant}>
               <PluginPanelFrame theme={theme} position={current().position} inert={!panelPresence.present()} spatial={panelPresence.progress} opacity={panelPresence.opacity} cardRef={setCardNode}>
-                <PanelComponent client={publicClient} onClose={dismissPluginPanel} onOpenSettings={onOpenSettings} />
+                <GuardedPluginMount
+                  instance={panelInstance}
+                  variant="card"
+                  onError={reportEntryError}
+                  onReset={() => clearPluginRuntimeErrors(panelInstance.pluginId, panelInstance.instanceId)}
+                  render={() => {
+                    const PanelComponent = entryComponent<PanelProps>(props.bundle, panelInstance);
+                    return <PanelComponent client={publicClient} onClose={dismissPluginPanel} onOpenSettings={onOpenSettings} />;
+                  }}
+                />
               </PluginPanelFrame>
             </PopupSurface>
           );

@@ -49,7 +49,7 @@ struct Device {
     path: String,
     adapter: String,
     address: String,
-    name: Option<String>,
+    name: String,
     icon: Option<String>,
     paired: bool,
     trusted: bool,
@@ -90,9 +90,7 @@ impl State {
                     path: path.to_string(),
                     adapter: adapter.to_string(),
                     address: address.to_owned(),
-                    name: text(props, "Name")
-                        .or_else(|| text(props, "Alias"))
-                        .map(str::to_owned),
+                    name: device_display_name(props, address).to_owned(),
                     icon: text(props, "Icon").map(str::to_owned),
                     paired: flag(props, "Paired"),
                     trusted: flag(props, "Trusted"),
@@ -105,6 +103,19 @@ impl State {
         state.devices.sort_unstable_by(|a, b| a.path.cmp(&b.path));
         state
     }
+}
+
+fn device_display_name<'props>(props: &'props Properties, address: &'props str) -> &'props str {
+    let default_alias = address.replace(':', "-");
+    if let Some(alias) = text(props, "Alias")
+        .filter(|alias| !alias.is_empty() && !alias.eq_ignore_ascii_case(&default_alias))
+    {
+        return alias;
+    }
+    if let Some(name) = text(props, "Name").filter(|name| !name.is_empty()) {
+        return name;
+    }
+    address
 }
 
 fn flag(props: &Properties, name: &str) -> bool {
@@ -484,11 +495,109 @@ mod tests {
                     },
                     {
                         "path": "/org/bluez/hci1/dev_BB", "adapter": "/org/bluez/hci1",
-                        "address": "BB:00:00:00:00:00", "name": null, "icon": null,
+                        "address": "BB:00:00:00:00:00", "name": "BB:00:00:00:00:00", "icon": null,
                         "paired": false, "trusted": false, "connected": false, "battery": null
                     }
                 ]
             })
+        );
+    }
+
+    #[test]
+    fn prefers_non_default_alias_over_name_and_falls_back_to_address() {
+        let adapter_path = || ObjectPath::try_from("/org/bluez/hci0").unwrap();
+        let objects = ManagedObjects::from([
+            (
+                "/org/bluez/hci0/dev_1_custom_alias".try_into().unwrap(),
+                [(
+                    DEVICE.try_into().unwrap(),
+                    [
+                        ("Adapter".into(), adapter_path().into()),
+                        ("Address".into(), Str::from("11:22:33:44:55:01").into()),
+                        ("Name".into(), Str::from("WH-1000XM5").into()),
+                        ("Alias".into(), Str::from("Studio Headphones").into()),
+                    ]
+                    .into(),
+                )]
+                .into(),
+            ),
+            (
+                "/org/bluez/hci0/dev_2_default_mac_alias"
+                    .try_into()
+                    .unwrap(),
+                [(
+                    DEVICE.try_into().unwrap(),
+                    [
+                        ("Adapter".into(), adapter_path().into()),
+                        ("Address".into(), Str::from("AA:BB:CC:DD:EE:02").into()),
+                        ("Name".into(), Str::from("Keychron K2").into()),
+                        ("Alias".into(), Str::from("AA-BB-CC-DD-EE-02").into()),
+                    ]
+                    .into(),
+                )]
+                .into(),
+            ),
+            (
+                "/org/bluez/hci0/dev_3_empty_alias_has_name"
+                    .try_into()
+                    .unwrap(),
+                [(
+                    DEVICE.try_into().unwrap(),
+                    [
+                        ("Adapter".into(), adapter_path().into()),
+                        ("Address".into(), Str::from("11:22:33:44:55:03").into()),
+                        ("Name".into(), Str::from("MX Master 3S").into()),
+                        ("Alias".into(), Str::from("").into()),
+                    ]
+                    .into(),
+                )]
+                .into(),
+            ),
+            (
+                "/org/bluez/hci0/dev_4_default_alias_no_name"
+                    .try_into()
+                    .unwrap(),
+                [(
+                    DEVICE.try_into().unwrap(),
+                    [
+                        ("Adapter".into(), adapter_path().into()),
+                        ("Address".into(), Str::from("11:22:33:44:55:04").into()),
+                        ("Name".into(), Str::from("").into()),
+                        ("Alias".into(), Str::from("11-22-33-44-55-04").into()),
+                    ]
+                    .into(),
+                )]
+                .into(),
+            ),
+        ]);
+
+        let snapshot = serde_json::to_value(State::from_objects(&objects)).unwrap();
+        let names: Vec<(&str, Option<&str>)> = snapshot["devices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|dev| (dev["path"].as_str().unwrap(), dev["name"].as_str()))
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                (
+                    "/org/bluez/hci0/dev_1_custom_alias",
+                    Some("Studio Headphones")
+                ),
+                (
+                    "/org/bluez/hci0/dev_2_default_mac_alias",
+                    Some("Keychron K2")
+                ),
+                (
+                    "/org/bluez/hci0/dev_3_empty_alias_has_name",
+                    Some("MX Master 3S")
+                ),
+                (
+                    "/org/bluez/hci0/dev_4_default_alias_no_name",
+                    Some("11:22:33:44:55:04")
+                ),
+            ]
         );
     }
 

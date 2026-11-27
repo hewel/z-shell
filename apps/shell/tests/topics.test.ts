@@ -40,10 +40,13 @@ import {
   formatTrackTimeUs,
   formatUptimeCompact,
   groupNotificationPopups,
+  hasTrayMenu,
   hasWindowsOnMonitor,
   isImeTrayItem,
   isMediaPlayerAudible,
   isSessionLockActive,
+  isTrayActivateMenuFallback,
+  isTraySubmenuNode,
   maxThermalCelsius,
   notificationGroupKey,
   partitionPluginBarWidgets,
@@ -1824,5 +1827,29 @@ describe("isSessionLockActive & buildDockItems desktopId", () => {
       windows: [],
       focused: false,
     }]);
+  });
+
+  test("hasTrayMenu and isTraySubmenuNode support lazy SNI menus and empty submenu descriptors", () => {
+    expect(hasTrayMenu({ has_menu: true, menu: null })).toBe(true);
+    expect(hasTrayMenu({ has_menu: false, menu: null })).toBe(false);
+    expect(hasTrayMenu({ menu: null })).toBe(false);
+
+    const baseNode = {
+      id: 20,
+      label: "Accounts",
+      enabled: true,
+      visible: true,
+      separator: false,
+      toggle_type: null,
+      toggle_state: null,
+      children: [],
+    };
+    expect(isTraySubmenuNode(baseNode)).toBe(false);
+    expect(isTraySubmenuNode({ ...baseNode, is_submenu: true })).toBe(true);
+    expect(isTraySubmenuNode({ ...baseNode, children_display: "submenu" })).toBe(true);
+    expect(isTraySubmenuNode({ ...baseNode, separator: true, is_submenu: true })).toBe(false);
+    expect(isTrayActivateMenuFallback(undefined)).toBe(false);
+    expect(isTrayActivateMenuFallback({ data: { fallback_menu: false } })).toBe(false);
+    expect(isTrayActivateMenuFallback({ data: { fallback_menu: true } })).toBe(true);
   });
 });

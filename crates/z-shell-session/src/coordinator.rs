@@ -9,10 +9,10 @@ use std::sync::Mutex;
 use thiserror::Error;
 use zbus::zvariant::OwnedFd;
 
-const LOGIND_NAME: &str = "org.freedesktop.login1";
-const LOGIND_PATH: &str = "/org/freedesktop/login1";
-const LOGIND_INTERFACE: &str = "org.freedesktop.login1.Manager";
-const LOGIND_SESSION_INTERFACE: &str = "org.freedesktop.login1.Session";
+const LOGIND_NAME: &str = crate::logind_session::LOGIND_NAME;
+const LOGIND_PATH: &str = crate::logind_session::LOGIND_PATH;
+const LOGIND_INTERFACE: &str = crate::logind_session::LOGIND_MANAGER;
+const LOGIND_SESSION_INTERFACE: &str = crate::logind_session::LOGIND_SESSION;
 const DBUS_NAME: &str = "org.freedesktop.DBus";
 const DBUS_PATH: &str = "/org/freedesktop/DBus";
 const LOGIND_RETRY_INITIAL: std::time::Duration = std::time::Duration::from_millis(250);
@@ -246,39 +246,17 @@ impl LogindSleepInhibitor {
         })
     }
 
-    /// Resolves the current logind session object path via PID or `XDG_SESSION_ID`.
-    async fn resolve_session_path_for(
-        connection: &zbus::Connection,
-    ) -> Option<zbus::zvariant::OwnedObjectPath> {
-        let proxy = Self::proxy_for(connection).await.ok()?;
-        if let Ok(path) = proxy
-            .call::<_, _, zbus::zvariant::OwnedObjectPath>(
-                "GetSessionByPID",
-                &(std::process::id(),),
-            )
-            .await
-        {
-            return Some(path);
-        }
-        if let Ok(session_id) = std::env::var("XDG_SESSION_ID")
-            && !session_id.trim().is_empty()
-            && let Ok(path) = proxy
-                .call::<_, _, zbus::zvariant::OwnedObjectPath>("GetSession", &(session_id,))
-                .await
-        {
-            return Some(path);
-        }
-        None
-    }
-
     async fn open_session_lock_stream(
         connection: &zbus::Connection,
     ) -> Result<Option<zbus::MessageStream>, SleepInhibitorError> {
-        let Some(session_path) = Self::resolve_session_path_for(connection).await else {
+        let Some(session_path) = crate::logind_session::resolve_session_path(connection).await
+        else {
             return Ok(None);
         };
         let lock_rule = zbus::MatchRule::builder()
             .msg_type(zbus::message::Type::Signal)
+            .sender(LOGIND_NAME)
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))?
             .interface(LOGIND_SESSION_INTERFACE)
             .map_err(|error| SleepInhibitorError::new(error.to_string()))?
             .path(session_path.as_str())
@@ -364,6 +342,8 @@ impl LogindSleepInhibitor {
 
         let sleep_rule = zbus::MatchRule::builder()
             .msg_type(zbus::message::Type::Signal)
+            .sender(LOGIND_NAME)
+            .map_err(|error| SleepInhibitorError::new(error.to_string()))?
             .interface(LOGIND_INTERFACE)
             .map_err(|error| SleepInhibitorError::new(error.to_string()))?
             .path(LOGIND_PATH)
@@ -426,13 +406,12 @@ impl LogindSleepInhibitor {
                             return Err(SleepInhibitorError::new("logind PrepareForSleep stream ended"));
                         }
                     };
-                    let (sleeping,) = message
-                        .body()
-                        .deserialize::<(bool,)>()
-                        .map_err(|error| {
-                            self.clear_held_fds();
-                            SleepInhibitorError::new(error.to_string())
-                        })?;
+                    if message.header().sender() != Some(owner.inner()) {
+                        continue;
+                    }
+                    let Ok((sleeping,)) = message.body().deserialize::<(bool,)>() else {
+                        continue;
+                    };
                     if sleeping {
                         LogindEvent::PrepareForSleep
                     } else {
@@ -446,7 +425,10 @@ impl LogindSleepInhibitor {
                     }
                 } => {
                     match lock_msg {
-                        Some(Ok(_)) => {
+                        Some(Ok(message)) => {
+                            if message.header().sender() != Some(owner.inner()) {
+                                continue;
+                            }
                             if lock_stream_opened_at
                                 .is_some_and(|opened| opened.elapsed() >= LOGIND_HEALTHY_WINDOW)
                             {

@@ -954,3 +954,355 @@ async fn late_authority_startup_and_authority_restart_self_heal_without_settings
     registration.shutdown().await;
     drop(bus);
 }
+
+#[tokio::test]
+async fn socket_activated_helper_binary_fallback_and_getpwuid_r_nss_identity() {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as AsyncBufReader};
+    use tokio::net::UnixListener;
+
+    let (bus, address) = TestBus::start();
+    let (tx, mut events) = mpsc::unbounded_channel();
+    let authority = timeout(
+        WAIT,
+        Builder::address(address.as_str())
+            .unwrap()
+            .name(AUTHORITY_NAME)
+            .unwrap()
+            .name("org.freedesktop.login1")
+            .unwrap()
+            .serve_at(AUTHORITY_PATH, MockAuthority(tx))
+            .unwrap()
+            .serve_at(LOGIND_PATH, MockLogind)
+            .unwrap()
+            .serve_at(SESSION_PATH, MockSession)
+            .unwrap()
+            .build(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let dir = TempDir::new().unwrap();
+    let empty_passwd = dir.path().join("empty-passwd");
+    fs::write(&empty_passwd, "").unwrap();
+
+    // 1. Socket-only Polkit helper (binary_path = None!) with empty /etc/passwd (forcing getpwuid_r!).
+    let sock_path = dir.path().join("agent-helper.socket");
+    let listener = UnixListener::bind(&sock_path).unwrap();
+    let (closed_tx, closed_rx) = tokio::sync::oneshot::channel::<()>();
+    let server_task = tokio::spawn(async move {
+        // Request 1: normal socket prompt + success
+        let (stream, _) = listener.accept().await.unwrap();
+        let (rd, mut wr) = stream.into_split();
+        let mut lines = AsyncBufReader::new(rd).lines();
+        let username = lines.next_line().await.unwrap().unwrap();
+        let cookie = lines.next_line().await.unwrap().unwrap();
+        assert!(!username.is_empty());
+        assert_eq!(cookie, "cookie-secret-socket-1");
+        wr.write_all(b"PAM_PROMPT_ECHO_OFF Socket password: \n")
+            .await
+            .unwrap();
+        let answer = lines.next_line().await.unwrap().unwrap();
+        assert_eq!(answer, "socket-secret-pw");
+        wr.write_all(b"SUCCESS\n").await.unwrap();
+
+        // Request 2: cancellation closes socket stream promptly
+        let (stream2, _) = listener.accept().await.unwrap();
+        let (rd2, mut wr2) = stream2.into_split();
+        let mut lines2 = AsyncBufReader::new(rd2).lines();
+        let _ = lines2.next_line().await.unwrap().unwrap();
+        let _ = lines2.next_line().await.unwrap().unwrap();
+        wr2.write_all(b"PAM_PROMPT_ECHO_OFF Cancel me: \n")
+            .await
+            .unwrap();
+        let eof = lines2.next_line().await.unwrap();
+        assert!(eof.is_none(), "cancelled request must close helper socket");
+        let _ = closed_tx.send(());
+    });
+
+    let service = Arc::new(PolkitService::with_helper(
+        &PolkitSettings::default(),
+        PolkitHelperConfig::with_socket_and_binary(&sock_path, None)
+            .with_passwd_path(&empty_passwd),
+    ));
+    let hub = BusHub::new("test", dir.path().join("media"));
+    service.install_on_bus(&hub);
+    let (observer, outbound) = hub.register_client(ClientRole::Public).unwrap();
+    hub.handle_inline_message(
+        observer,
+        ClientMessage::request(
+            RequestId::Number(1),
+            methods::BUS_HELLO,
+            Some(json!({"protocol_version": PROTOCOL_VERSION})),
+        ),
+    );
+    outbound.next_line().await.unwrap();
+    hub.handle_inline_message(
+        observer,
+        ClientMessage::request(
+            RequestId::Number(2),
+            methods::TOPIC_SUBSCRIBE,
+            Some(json!({"topic": POLKIT_TOPIC})),
+        ),
+    );
+    outbound.next_line().await.unwrap();
+    let (client_id, _) = hub.register_client(ClientRole::PrivilegedHost).unwrap();
+    let host = CallerContext {
+        client_id,
+        role: ClientRole::PrivilegedHost,
+    };
+
+    let registration = service.start_registration(
+        PolkitBus::Address(address.clone()),
+        &tokio::runtime::Handle::current(),
+    );
+    let RegistrationEvent::Register(dest) = timeout(WAIT, events.recv()).await.unwrap().unwrap()
+    else {
+        panic!("expected Register");
+    };
+
+    unsafe extern "C" {
+        fn geteuid() -> u32;
+    }
+    // SAFETY: `geteuid` has no preconditions.
+    let euid = unsafe { geteuid() };
+
+    let wait_topic = |predicate: fn(&Value) -> bool| {
+        let outbound = &outbound;
+        async move {
+            timeout(WAIT, async {
+                loop {
+                    let line = outbound.next_line().await.unwrap();
+                    let frame: Value = serde_json::from_str(&line).unwrap();
+                    let state = &frame["params"]["data"];
+                    if predicate(state) {
+                        return state.clone();
+                    }
+                }
+            })
+            .await
+            .expect("expected session.polkit update")
+        }
+    };
+    wait_topic(|state| state["registered"] == true).await;
+
+    let call1 = {
+        let (conn, dest) = (authority.clone(), dest.clone());
+        tokio::spawn(async move {
+            begin(
+                &conn,
+                &dest,
+                "socket-auth",
+                "cookie-secret-socket-1",
+                identities(&[euid]),
+            )
+            .await
+        })
+    };
+    let prompt1 = wait_topic(|state| state["active"]["prompt"] == "Socket password: ").await;
+    assert_eq!(prompt1["active"]["selected_uid"], euid);
+    invoke(
+        &hub,
+        host,
+        "host.polkit-respond",
+        json!({
+            "request_id": prompt1["active"]["request_id"],
+            "response": "socket-secret-pw",
+        }),
+    )
+    .await
+    .unwrap();
+    finished(call1).await.unwrap();
+
+    let call2 = {
+        let (conn, dest) = (authority.clone(), dest.clone());
+        tokio::spawn(async move {
+            begin(
+                &conn,
+                &dest,
+                "socket-cancel",
+                "cookie-secret-socket-2",
+                identities(&[euid]),
+            )
+            .await
+        })
+    };
+    let prompt2 = wait_topic(|state| state["active"]["prompt"] == "Cancel me: ").await;
+    invoke(
+        &hub,
+        host,
+        "host.polkit-cancel",
+        json!({ "request_id": prompt2["active"]["request_id"] }),
+    )
+    .await
+    .unwrap();
+    assert_dbus_error(finished(call2).await, CANCELLED);
+    timeout(WAIT, closed_rx)
+        .await
+        .expect("socket server saw EOF")
+        .unwrap();
+    server_task.await.unwrap();
+    registration.shutdown().await;
+
+    // 2. ECONNREFUSED dead socket falls back cleanly to binary helper!
+    let dead_sock = dir.path().join("dead-helper.socket");
+    drop(std::os::unix::net::UnixListener::bind(&dead_sock).unwrap());
+    let fallback_bin = dir.path().join("fallback-helper");
+    fs::write(
+        &fallback_bin,
+        "#!/bin/sh\nIFS= read -r _cookie || exit 2\nprintf 'SUCCESS\\n'\n",
+    )
+    .unwrap();
+    fs::set_permissions(&fallback_bin, fs::Permissions::from_mode(0o700)).unwrap();
+
+    let fallback_svc = Arc::new(PolkitService::with_helper(
+        &PolkitSettings::default(),
+        PolkitHelperConfig::with_socket_and_binary(&dead_sock, Some(fallback_bin)),
+    ));
+    let fallback_hub = BusHub::new("test2", dir.path().join("media2"));
+    fallback_svc.install_on_bus(&fallback_hub);
+    let fallback_reg = fallback_svc.start_registration(
+        PolkitBus::Address(address),
+        &tokio::runtime::Handle::current(),
+    );
+    let _ = timeout(WAIT, events.recv()).await; // Unregister from previous shutdown
+    let RegistrationEvent::Register(dest_fb) = timeout(WAIT, events.recv()).await.unwrap().unwrap()
+    else {
+        panic!("expected Register for fallback service");
+    };
+    let fb_res = begin(
+        &authority,
+        &dest_fb,
+        "fallback-action",
+        "cookie-secret-fb",
+        identities(&[euid]),
+    )
+    .await;
+    fb_res.expect("ECONNREFUSED socket must fall back to binary helper");
+
+    fallback_reg.shutdown().await;
+    drop(bus);
+}
+
+#[tokio::test]
+async fn polkit_registration_falls_back_to_auto_session_verifies_uid_and_extracts_concrete_id() {
+    let (bus, address) = TestBus::start();
+
+    unsafe extern "C" {
+        fn geteuid() -> u32;
+    }
+    // SAFETY: `geteuid` has no preconditions.
+    let euid = unsafe { geteuid() };
+
+    struct AutoOnlyLogind;
+
+    #[zbus::interface(name = "org.freedesktop.login1.Manager")]
+    impl AutoOnlyLogind {
+        #[zbus(name = "GetSessionByPID")]
+        fn get_session_by_pid(&self, _pid: u32) -> zbus::fdo::Result<OwnedObjectPath> {
+            Err(zbus::fdo::Error::Failed("NoSessionForPID".into()))
+        }
+
+        #[zbus(name = "GetSession")]
+        fn get_session(&self, session_id: &str) -> zbus::fdo::Result<OwnedObjectPath> {
+            match session_id {
+                "auto" => {
+                    Ok(OwnedObjectPath::try_from("/org/freedesktop/login1/session/auto").unwrap())
+                }
+                "graphical-7" => Ok(OwnedObjectPath::try_from(SESSION_PATH).unwrap()),
+                _ => Err(zbus::fdo::Error::UnknownObject("unknown session".into())),
+            }
+        }
+    }
+
+    struct AutoSessionObj {
+        uid: u32,
+    }
+
+    #[zbus::interface(name = "org.freedesktop.login1.Session")]
+    impl AutoSessionObj {
+        #[zbus(property, name = "Id")]
+        fn id(&self) -> &str {
+            "graphical-7"
+        }
+
+        #[zbus(property, name = "User")]
+        fn user(&self) -> (u32, OwnedObjectPath) {
+            (
+                self.uid,
+                OwnedObjectPath::try_from(format!("/org/freedesktop/login1/user/_{}", self.uid))
+                    .unwrap(),
+            )
+        }
+    }
+
+    let (reg_tx, mut reg_rx) = mpsc::unbounded_channel::<String>();
+    struct RecordingAuthority(mpsc::UnboundedSender<String>);
+
+    #[zbus::interface(name = "org.freedesktop.PolicyKit1.Authority")]
+    impl RecordingAuthority {
+        fn register_authentication_agent(&self, subject: Subject, _locale: String, path: String) {
+            assert_eq!(subject.0, "unix-session");
+            assert_eq!(path, AGENT_PATH);
+            let session_id = <&str>::try_from(&subject.1["session-id"])
+                .unwrap()
+                .to_owned();
+            self.0.send(session_id).unwrap();
+        }
+
+        fn unregister_authentication_agent(&self, _subject: Subject, _path: String) {}
+    }
+
+    let _authority = timeout(
+        WAIT,
+        Builder::address(address.as_str())
+            .unwrap()
+            .name(AUTHORITY_NAME)
+            .unwrap()
+            .name("org.freedesktop.login1")
+            .unwrap()
+            .serve_at(AUTHORITY_PATH, RecordingAuthority(reg_tx))
+            .unwrap()
+            .serve_at(LOGIND_PATH, AutoOnlyLogind)
+            .unwrap()
+            .serve_at(
+                "/org/freedesktop/login1/session/auto",
+                AutoSessionObj { uid: euid },
+            )
+            .unwrap()
+            .serve_at(SESSION_PATH, AutoSessionObj { uid: euid })
+            .unwrap()
+            .build(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let dir = TempDir::new().unwrap();
+    let helper = dir.path().join("helper");
+    fs::write(&helper, "#!/bin/sh\nexit 0\n").unwrap();
+    fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
+
+    let service = Arc::new(PolkitService::with_helper(
+        &PolkitSettings::default(),
+        PolkitHelperConfig::with_path(helper),
+    ));
+    let hub = BusHub::new("test", dir.path().join("media"));
+    service.install_on_bus(&hub);
+    let registration = service.start_registration(
+        PolkitBus::Address(address),
+        &tokio::runtime::Handle::current(),
+    );
+
+    let registered_session_id = timeout(WAIT, reg_rx.recv())
+        .await
+        .expect("Polkit agent must register via GetSession(auto) fallback")
+        .unwrap();
+    assert_eq!(
+        registered_session_id, "graphical-7",
+        "must pass concrete Session.Id and never literal 'auto'"
+    );
+
+    registration.shutdown().await;
+    drop(bus);
+}

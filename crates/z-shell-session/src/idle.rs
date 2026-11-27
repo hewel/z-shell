@@ -462,6 +462,7 @@ pub struct IdlePolicy {
     states: Vec<RuleState>,
     pending: Vec<PendingAction>,
     deferred_resume: Vec<PendingAction>,
+    reconciled_cancelled_screen_off_serial: u64,
     serial: u64,
     fade: Option<u64>,
     caffeine: Caffeine,
@@ -492,6 +493,7 @@ impl Default for IdlePolicy {
             states,
             pending: Vec::new(),
             deferred_resume: Vec::new(),
+            reconciled_cancelled_screen_off_serial: 0,
             serial: 0,
             fade: None,
             caffeine: Caffeine::Disabled,
@@ -697,6 +699,44 @@ impl IdlePolicy {
         self.service_status = status;
     }
 
+    /// Reports whether any [`IdleAction::ScreenOff`] rule is currently applied and awaiting resume.
+    #[must_use]
+    pub fn is_screen_off_applied(&self) -> bool {
+        self.config
+            .rules
+            .iter()
+            .zip(&self.states)
+            .any(|(rule, state)| {
+                rule.action == IdleAction::ScreenOff && state.phase == RulePhase::Applied
+            })
+    }
+
+    /// Reconciles `ScreenOff` action state after an idle-effect broadcast receiver lags.
+    ///
+    /// Removes cancelled `ScreenOff` pending actions whose `RunAction` may have been dropped, and
+    /// returns `(uncancelled_running_screen_off_action_ids, is_screen_off_applied)`.
+    pub fn reconcile_lagged_screen_off(&mut self) -> (Vec<u64>, bool) {
+        let mut pruned_cancelled = false;
+        self.pending.retain(|pending| {
+            if pending.action == IdleAction::ScreenOff && pending.cancelled {
+                pruned_cancelled = true;
+                false
+            } else {
+                true
+            }
+        });
+        if pruned_cancelled {
+            self.reconciled_cancelled_screen_off_serial = self.serial;
+        }
+        let running_ids = self
+            .pending
+            .iter()
+            .filter(|pending| pending.action == IdleAction::ScreenOff && !pending.cancelled)
+            .map(|pending| pending.id)
+            .collect();
+        (running_ids, self.is_screen_off_applied())
+    }
+
     /// Returns whether OS-level `systemd-logind` `sleep:block` inhibition should be held.
     ///
     /// Restricted strictly to active Keep awake (`Caffeine::Enabled`) and explicit
@@ -825,6 +865,37 @@ impl IdlePolicy {
             .iter()
             .position(|action| action.id == action_id)
         else {
+            if action_id <= self.reconciled_cancelled_screen_off_serial
+                && completion == ActionCompletion::Succeeded
+                && !self.is_screen_off_applied()
+                && !self
+                    .config
+                    .rules
+                    .iter()
+                    .zip(&self.states)
+                    .any(|(rule, state)| {
+                        rule.action == IdleAction::ScreenOff
+                            && matches!(state.phase, RulePhase::Running(_))
+                    })
+                && let Some(rule) = self
+                    .config
+                    .rules
+                    .iter()
+                    .find(|rule| rule.action == IdleAction::ScreenOff)
+            {
+                let stale = PendingAction {
+                    id: action_id,
+                    rule_name: rule.name.clone(),
+                    action: IdleAction::ScreenOff,
+                    resume_command: rule.resume_command.clone(),
+                    cancelled: true,
+                };
+                if self.sleep == SleepState::Sleeping {
+                    self.deferred_resume.push(stale);
+                    return Vec::new();
+                }
+                return vec![resume_effect(&stale)];
+            }
             return Vec::new();
         };
         let pending = self.pending.remove(index);

@@ -11,6 +11,7 @@ z-shell-config = { workspace = true }
 z-shell-protocol = { workspace = true }
 getrandom = { workspace = true }
 image = { workspace = true }
+rustix = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -22,6 +23,7 @@ zbus = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

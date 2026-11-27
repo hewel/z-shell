@@ -26,3 +26,48 @@
     height: auto;
   }
 }
+
+.widgetErrorBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: inherit;
+  background-color: var(--color-error-container);
+  color: var(--color-on-error-container);
+
+  &[data-vertical="true"] {
+    width: 28px;
+    min-width: 0px;
+    height: 26px;
+    padding: 0px;
+  }
+}
+
+.panelErrorCard {
+  width: 100%;
+  padding: 14px;
+  gap: 8px;
+  border-radius: 14px;
+  background-color: var(--color-error-container);
+  color: var(--color-on-error-container);
+}
+
+.panelErrorHeader {
+  align-items: center;
+  gap: 8px;
+}
+
+.panelErrorTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-on-error-container);
+}
+
+.panelErrorMessage {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-on-error-container);
+}

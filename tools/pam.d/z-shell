@@ -1,0 +1,9 @@
+#%PAM-1.0
+# PAM configuration for z-shell lock-screen authentication (ADR-0004: pam_authenticate only).
+# Debian/Ubuntu systems using common-* stacks can replace `system-auth` with `common-auth`,
+# `common-account`, `common-password`, and `common-session` respectively.
+
+auth       include      system-auth
+account    include      system-auth
+password   include      system-auth
+session    include      system-auth

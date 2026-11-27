@@ -38,14 +38,24 @@ export function createComposedServiceController(
   let nextToken = 1;
   const running = new Map<string, RunningService>();
 
+  function reportServiceError(service: ComposedServiceDescriptor, error: unknown): void {
+    try {
+      onError?.(service, error);
+    } catch {
+      // Never allow an error observer to break sibling plugin lifecycle hooks.
+    }
+  }
+
   function invokeCleanup(service: ComposedServiceDescriptor, cleanup: PluginCleanup): void {
     try {
       const pending = cleanup();
       if (pending && typeof (pending as PromiseLike<void>).then === "function") {
-        void Promise.resolve(pending).catch(() => undefined);
+        void Promise.resolve(pending).catch(error => {
+          reportServiceError(service, error);
+        });
       }
     } catch (error) {
-      onError?.(service, error);
+      reportServiceError(service, error);
     }
   }
 
@@ -98,15 +108,16 @@ export function createComposedServiceController(
             }
           },
           error => {
-            if (!disposed && running.get(service.entryId)?.token === token) {
-              onError?.(service, error);
+            if (running.get(service.entryId)?.token === token) {
+              running.delete(service.entryId);
             }
+            reportServiceError(service, error);
           },
         );
       }
     } catch (error) {
       running.delete(service.entryId);
-      onError?.(service, error);
+      reportServiceError(service, error);
     }
   }
 

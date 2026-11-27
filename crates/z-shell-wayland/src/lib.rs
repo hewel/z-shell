@@ -95,12 +95,12 @@ impl fmt::Debug for WaylandHandle {
 }
 
 impl WaylandHandle {
-    /// Requests a power-mode transition across all compositor outputs via `wlr-output-power`.
+    /// Requests a power-mode transition across all controllable compositor outputs via `wlr-output-power`.
     ///
     /// # Errors
     ///
     /// Returns [`RpcError`] if the Wayland worker has stopped, output-power is unsupported,
-    /// or any output lacks an active power-control object.
+    /// or zero outputs currently hold an active power-control object.
     pub async fn set_all_outputs_power(&self, mode: OutputPowerMode) -> Result<(), RpcError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.commands
@@ -156,7 +156,8 @@ pub fn connect_stream(stream: UnixStream) -> Result<WaylandHandle, ConnectError>
 /// Command parameters are JSON object fields or positional arguments in this order:
 /// `workspace_id` for workspace activation; `window_id` for window activation and
 /// close; `output_instance_id` (an ID or `"all"`) and `mode` (`"on"` or `"off"`)
-/// for display power. `"all"` requires a power-control object for every output.
+/// for display power. `"all"` applies best-effort across controllable outputs and
+/// requires at least one output with an active power-control object.
 ///
 /// # Panics
 /// Panics if the given handle is already installed.

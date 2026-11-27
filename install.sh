@@ -6,7 +6,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 PREFIX=""
 SYSTEMD_DIR_OVERRIDE=""
+PAM_DIR_OVERRIDE=""
 INSTALL_SYSTEMD=1
+INSTALL_PAM=1
 ENABLE_SYSTEMD=0
 BUILD_STANDALONE=0
 ENABLE_FIRST_PARTY=0
@@ -33,6 +35,9 @@ Options:
                           (default: ${XDG_CONFIG_HOME:-~/.config}/systemd/user)
   --no-systemd            Do not install systemd --user unit files
   --enable-systemd        Run 'systemctl --user enable z-shelld.service z-shell-ui.service'
+  --pam-dir <DIR>         Install PAM service configuration z-shell into <DIR>
+                          (default: /etc/pam.d when writable; always staged at <DATADIR>/pam.d/z-shell)
+  --no-pam                Do not install system PAM service configuration
   --standalone            Build a zero-plugin shell bundle (mutually exclusive with --enable-first-party)
   --enable-first-party    Register, approve, and enable all 3 first-party plugins before building
   --init-config           Create default settings.toml if it does not exist yet
@@ -82,6 +87,18 @@ while (( $# > 0 )); do
       ;;
     --enable-systemd)
       ENABLE_SYSTEMD=1
+      shift
+      ;;
+    --pam-dir)
+      if (( $# < 2 )) || [[ -z "$2" ]]; then
+        echo "error: --pam-dir requires a directory argument" >&2
+        exit 2
+      fi
+      PAM_DIR_OVERRIDE="$(resolve_abs_path "$2")"
+      shift 2
+      ;;
+    --no-pam)
+      INSTALL_PAM=0
       shift
       ;;
     --standalone)
@@ -247,11 +264,17 @@ has_shared_lib() {
 }
 
 find_polkit_helper() {
+  if [[ -S /run/polkit/agent-helper.socket ]]; then
+    printf '%s' "/run/polkit/agent-helper.socket"
+    return 0
+  fi
   local candidate
   for candidate in \
+    /run/wrappers/bin/polkit-agent-helper-1 \
     /usr/lib/polkit-1/polkit-agent-helper-1 \
     /usr/libexec/polkit-agent-helper-1 \
-    /usr/lib/x86_64-linux-gnu/polkit-1/polkit-agent-helper-1; do
+    /usr/lib64/polkit-1/polkit-agent-helper-1 \
+    /usr/lib/*-linux-gnu/polkit-1/polkit-agent-helper-1; do
     if [[ -x "$candidate" ]]; then
       printf '%s' "$candidate"
       return 0
@@ -395,6 +418,10 @@ run_uninstall() {
     "$BINDIR/z-shell-session" \
     "$SYSTEMD_USER_DIR/z-shelld.service" \
     "$SYSTEMD_USER_DIR/z-shell-ui.service"
+
+  if [[ -n "$PAM_DIR_OVERRIDE" ]]; then
+    rm -f "$PAM_DIR_OVERRIDE/z-shell"
+  fi
 
   rm -rf "$DATADIR"
 
@@ -582,13 +609,55 @@ if (( SKIP_BUILD == 0 )); then
   (cd "$REPO_ROOT" && bun "${BUILD_ARGS[@]}")
 fi
 
-install -d -m 0755 "$BINDIR" "$DATADIR" "$DATADIR/libexec"
+install -d -m 0755 "$BINDIR" "$DATADIR" "$DATADIR/libexec" "$DATADIR/pam.d"
 
 install_atomic_bin "$REPO_ROOT/target/release/z-shelld" "$BINDIR/z-shelld"
 install_atomic_bin "$REPO_ROOT/target/release/z-shell" "$BINDIR/z-shell"
 install_atomic_bin "$REPO_ROOT/target/release/z-shell-pam-helper" "$BINDIR/z-shell-pam-helper"
 install_atomic_bin "$ZGUI_HOST_BIN" "$DATADIR/libexec/zgui-host"
 render_template_atomic "$REPO_ROOT/tools/z-shell-session.sh" "$BINDIR/z-shell-session" 0755
+
+stage_pam_config() {
+  local dest="$1"
+  local tmp="${dest}.tmp.$$"
+  if [[ -r /etc/pam.d/common-auth && ! -r /etc/pam.d/system-auth ]]; then
+    cat > "$tmp" <<'EOF'
+#%PAM-1.0
+# PAM configuration for z-shell lock-screen authentication (ADR-0004: pam_authenticate only).
+
+auth       include      common-auth
+account    include      common-account
+password   include      common-password
+session    include      common-session
+EOF
+    chmod 0644 "$tmp"
+  else
+    install -m 0644 "$REPO_ROOT/tools/pam.d/z-shell" "$tmp"
+  fi
+  mv -f "$tmp" "$dest"
+}
+
+stage_pam_config "$DATADIR/pam.d/z-shell"
+
+INSTALLED_PAM_FILE=""
+if (( INSTALL_PAM == 1 )); then
+  TARGET_PAM_DIR=""
+  if [[ -n "$PAM_DIR_OVERRIDE" ]]; then
+    install -d -m 0755 "$PAM_DIR_OVERRIDE"
+    TARGET_PAM_DIR="$PAM_DIR_OVERRIDE"
+  elif [[ -d /etc/pam.d && -w /etc/pam.d ]]; then
+    TARGET_PAM_DIR="/etc/pam.d"
+  fi
+
+  if [[ -n "$TARGET_PAM_DIR" ]]; then
+    INSTALLED_PAM_FILE="$TARGET_PAM_DIR/z-shell"
+    if [[ -e "$INSTALLED_PAM_FILE" ]]; then
+      echo "Preserving existing PAM configuration at $INSTALLED_PAM_FILE"
+    else
+      stage_pam_config "$INSTALLED_PAM_FILE"
+    fi
+  fi
+fi
 
 STAGE_BUNDLE="$DATADIR/.bundle-stage.$$"
 OLD_BUNDLE="$DATADIR/.bundle-old.$$"
@@ -735,6 +804,14 @@ EOF
 
 if (( INSTALL_SYSTEMD == 1 )); then
   echo "  Systemd units:   $SYSTEMD_USER_DIR/{z-shelld.service,z-shell-ui.service}"
+fi
+if [[ -n "$INSTALLED_PAM_FILE" ]]; then
+  echo "  PAM config:      $INSTALLED_PAM_FILE"
+else
+  echo "  PAM reference:   $DATADIR/pam.d/z-shell"
+  if (( INSTALL_PAM == 1 )) && [[ ! -r /etc/pam.d/z-shell && ! -r /usr/lib/pam.d/z-shell && ! -r /lib/pam.d/z-shell ]]; then
+    echo "                   (optional system install: sudo install -Dm644 \"$DATADIR/pam.d/z-shell\" /etc/pam.d/z-shell)"
+  fi
 fi
 
 case ":$PATH:" in

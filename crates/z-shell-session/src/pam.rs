@@ -17,10 +17,14 @@ use zeroize::Zeroizing;
 const HELPER_IO_LIMIT: u64 = 64 * 1024;
 const DEFAULT_HELPER_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL_INTERVAL: Duration = Duration::from_millis(5);
-const PAM_SERVICE: &[u8] = b"login\0";
+const MIN_FAILURE_DURATION: Duration = Duration::from_millis(500);
+const DEFAULT_PAM_DIRS: [&str; 3] = ["/etc/pam.d", "/usr/lib/pam.d", "/lib/pam.d"];
 const PAM_SUCCESS: c_int = 0;
 const PAM_BUF_ERR: c_int = 5;
+const PAM_PERM_DENIED: c_int = 6;
 const PAM_AUTH_ERR: c_int = 7;
+const PAM_CRED_INSUFFICIENT: c_int = 8;
+const PAM_USER_UNKNOWN: c_int = 10;
 const PAM_MAXTRIES: c_int = 11;
 const PAM_CONV_ERR: c_int = 19;
 const PAM_PROMPT_ECHO_OFF: c_int = 1;
@@ -259,14 +263,36 @@ impl Authenticator for HelperAuthenticator {
     }
 }
 
-fn run_helper_process(path: &Path, timeout: Duration, request: &[u8]) -> AuthOutcome {
-    let result = (|| {
-        let verified_path = validate_trusted_helper_path(path)?;
-        let mut child = Command::new(&verified_path)
+fn spawn_helper_command(verified_path: &Path) -> Result<std::process::Child, std::io::Error> {
+    const MAX_ETXTBSY_RETRIES: u32 = 25;
+    const ETXTBSY_BACKOFF: Duration = Duration::from_millis(4);
+
+    let mut attempt = 0;
+    loop {
+        match Command::new(verified_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
+        {
+            Ok(child) => return Ok(child),
+            Err(error)
+                if cfg!(unix)
+                    && error.raw_os_error() == Some(26)
+                    && attempt < MAX_ETXTBSY_RETRIES =>
+            {
+                attempt += 1;
+                std::thread::sleep(ETXTBSY_BACKOFF);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+fn run_helper_process(path: &Path, timeout: Duration, request: &[u8]) -> AuthOutcome {
+    let result = (|| {
+        let verified_path = validate_trusted_helper_path(path)?;
+        let mut child = spawn_helper_command(&verified_path)
             .map_err(|error| format!("could not spawn PAM helper: {error}"))?;
         child
             .stdin
@@ -522,18 +548,52 @@ fn converse_inner(
     PAM_SUCCESS
 }
 
+fn resolve_pam_service_name(pam_dirs: &[&Path]) -> &'static CStr {
+    for dir in pam_dirs {
+        let candidate = dir.join("z-shell");
+        match std::fs::File::open(&candidate) {
+            Ok(file) => {
+                if file.metadata().is_ok_and(|metadata| metadata.is_file()) {
+                    return c"z-shell";
+                }
+                return c"login";
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return c"login",
+        }
+    }
+    c"login"
+}
+
 /// Executes `pam_authenticate` directly in the current short-lived process.
 ///
+/// Probes `/etc/pam.d/z-shell`, `/usr/lib/pam.d/z-shell`, and `/lib/pam.d/z-shell` before falling
+/// back to `login`, and enforces a `500ms` minimum duration on non-authenticated outcomes.
 /// Long-lived daemons should use [`HelperAuthenticator`] instead.
 #[must_use]
 pub fn authenticate_with_pam(credentials: Credentials) -> AuthOutcome {
-    match authenticate_inner(&credentials) {
-        Ok(outcome) => outcome,
-        Err(reason) => AuthOutcome::Unavailable { reason },
-    }
+    let default_dirs = DEFAULT_PAM_DIRS.map(Path::new);
+    authenticate_with_pam_in(credentials, &default_dirs)
 }
 
-fn authenticate_inner(credentials: &Credentials) -> Result<AuthOutcome, String> {
+fn authenticate_with_pam_in(credentials: Credentials, pam_dirs: &[&Path]) -> AuthOutcome {
+    let started = Instant::now();
+    let outcome = match authenticate_inner(&credentials, pam_dirs) {
+        Ok(outcome) => outcome,
+        Err(reason) => AuthOutcome::Unavailable { reason },
+    };
+    if !matches!(outcome, AuthOutcome::Authenticated)
+        && let Some(remaining) = MIN_FAILURE_DURATION.checked_sub(started.elapsed())
+    {
+        std::thread::sleep(remaining);
+    }
+    outcome
+}
+
+fn authenticate_inner(
+    credentials: &Credentials,
+    pam_dirs: &[&Path],
+) -> Result<AuthOutcome, String> {
     if credentials.username().is_empty() {
         return Err("username is empty".into());
     }
@@ -548,6 +608,7 @@ fn authenticate_inner(credentials: &Credentials) -> Result<AuthOutcome, String> 
     password.extend_from_slice(credentials.password().as_bytes());
     password.push(0);
     let api = PamApi::load()?;
+    let service = resolve_pam_service_name(pam_dirs);
     let answers = Answers {
         username,
         password,
@@ -561,7 +622,7 @@ fn authenticate_inner(credentials: &Credentials) -> Result<AuthOutcome, String> 
     // SAFETY: All pointers remain valid for pam_start; PAM initializes handle on success.
     let started = unsafe {
         (api.start)(
-            PAM_SERVICE.as_ptr().cast::<c_char>(),
+            service.as_ptr(),
             answers.username.as_ptr(),
             &conversation,
             &mut handle,
@@ -593,7 +654,11 @@ fn authenticate_inner(credentials: &Credentials) -> Result<AuthOutcome, String> 
     guard.status = code;
     let outcome = match code {
         PAM_SUCCESS => AuthOutcome::Authenticated,
-        PAM_AUTH_ERR | PAM_MAXTRIES => {
+        PAM_AUTH_ERR
+        | PAM_MAXTRIES
+        | PAM_PERM_DENIED
+        | PAM_USER_UNKNOWN
+        | PAM_CRED_INSUFFICIENT => {
             let messages = answers.messages.borrow();
             AuthOutcome::Denied {
                 message: if messages.is_empty() {
@@ -625,9 +690,21 @@ fn authenticate_inner(credentials: &Credentials) -> Result<AuthOutcome, String> 
 ///
 /// Invalid requests produce one [`AuthOutcome::Unavailable`] JSON object. No credentials or PAM
 /// messages are logged to stderr.
-pub fn run_pam_helper(mut input: impl Read, mut output: impl Write) {
+pub fn run_pam_helper(input: impl Read, output: impl Write) {
+    let default_dirs = DEFAULT_PAM_DIRS.map(Path::new);
+    run_pam_helper_with_pam_dirs(input, output, &default_dirs);
+}
+
+/// Runs the standalone helper's single-request stdin/stdout protocol probing `pam_dirs` in order
+/// for a readable regular `z-shell` PAM configuration file before falling back to `login`.
+#[doc(hidden)]
+pub fn run_pam_helper_with_pam_dirs(
+    mut input: impl Read,
+    mut output: impl Write,
+    pam_dirs: &[&Path],
+) {
     let outcome = match read_helper_request(&mut input) {
-        Ok(credentials) => authenticate_with_pam(credentials),
+        Ok(credentials) => authenticate_with_pam_in(credentials, pam_dirs),
         Err(reason) => AuthOutcome::Unavailable { reason },
     };
     if serde_json::to_writer(&mut output, &outcome).is_ok() {

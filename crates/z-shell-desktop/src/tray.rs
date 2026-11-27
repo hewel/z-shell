@@ -6,12 +6,13 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task::{AbortHandle, Id, JoinSet};
-use tokio::time::timeout;
+use tokio::time::{Instant, timeout, timeout_at};
 use z_shell_bus::{BusHub, CommandCall, UpdateKind};
-use z_shell_protocol::{CommandInvokeResult, MediaRef, RpcError};
+use z_shell_protocol::{CommandInvokeResult, ErrorCode, MediaRef, RpcError};
 use zbus::export::futures_core::Stream;
 use zbus::fdo::{self, DBusProxy, RequestNameFlags, RequestNameReply};
 use zbus::message::{Header, Sequence, Type as MessageType};
@@ -21,7 +22,7 @@ use zbus::zvariant::{Array, Dict, ObjectPath, Signature, Structure, Value};
 use zbus::{Connection, MatchRule, Message, MessageStream};
 
 use crate::assets::{Blobs, cache_icon, local_path, png_rgba};
-use crate::{disabled, failed, not_found, ok, payload, publish, register};
+use crate::{data, disabled, failed, not_found, ok, payload, publish, register};
 
 const TOPIC: &str = "desktop.tray";
 pub(crate) const WATCHER: &str = "org.kde.StatusNotifierWatcher";
@@ -49,6 +50,8 @@ const MENU_PROPERTIES: &[&str] = &[
     "type",
     "toggle-type",
     "toggle-state",
+    "children-display",
+    "disposition",
 ];
 
 pub(crate) struct Tray {
@@ -84,6 +87,7 @@ struct Item {
     id: String,
     #[serde(flatten)]
     info: ItemInfo,
+    has_menu: bool,
     icon: Option<MediaRef>,
     menu: Option<Menu>,
     #[serde(skip)]
@@ -140,6 +144,11 @@ struct MenuNode {
     enabled: bool,
     visible: bool,
     separator: bool,
+    is_submenu: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    children_display: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    disposition: Option<&'static str>,
     toggle_type: Option<&'static str>,
     toggle_state: Option<i32>,
     children: Vec<Self>,
@@ -151,6 +160,13 @@ impl MenuNode {
             && self.enabled
             && !self.separator
             && (self.id == id || self.children.iter().any(|child| child.accepts_click(id)))
+    }
+
+    fn find(&self, id: i32) -> Option<&Self> {
+        if self.id == id {
+            return Some(self);
+        }
+        self.children.iter().find_map(|child| child.find(id))
     }
 }
 
@@ -207,6 +223,8 @@ enum Control {
     Activate,
     ContextMenu,
     MenuItem,
+    PrepareMenu,
+    CloseMenu,
 }
 
 #[derive(Deserialize)]
@@ -221,6 +239,16 @@ struct PointAction<'a> {
 #[derive(Deserialize)]
 struct MenuAction<'a> {
     id: &'a str,
+    menu_id: i32,
+    #[serde(default)]
+    timestamp: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MenuLifecycle<'a> {
+    id: &'a str,
+    #[serde(default)]
     menu_id: i32,
     #[serde(default)]
     timestamp: u32,
@@ -258,6 +286,16 @@ impl Tray {
                 Control::MenuItem,
                 "tray.menu-item",
                 "Click a status notifier menu entry",
+            ),
+            (
+                Control::PrepareMenu,
+                "tray.prepare-menu",
+                "Prepare a status notifier menu or submenu via AboutToShow",
+            ),
+            (
+                Control::CloseMenu,
+                "tray.close-menu",
+                "Notify a status notifier menu or submenu that it closed",
             ),
         ] {
             register(
@@ -366,29 +404,61 @@ impl Tray {
         kind: Control,
         call: &CommandCall,
     ) -> Result<CommandInvokeResult, RpcError> {
-        let result = match kind {
-            Control::Activate | Control::ContextMenu => {
+        match kind {
+            Control::Activate => {
+                let request: PointAction<'_> = payload(call)?;
+                let (connection, endpoint, has_menu) = {
+                    let state = self.state();
+                    let (connection, item) = action_item(&state, request.id)?;
+                    (
+                        connection.clone(),
+                        item.endpoint.clone(),
+                        item.menu_path.is_some(),
+                    )
+                };
+                match timeout(
+                    TIMEOUT,
+                    connection.call_method(
+                        Some(endpoint.owner.as_str()),
+                        endpoint.path.as_str(),
+                        Some(endpoint.interface),
+                        "Activate",
+                        &(request.x, request.y),
+                    ),
+                )
+                .await
+                {
+                    Ok(Ok(_)) => Ok(data(json!({ "fallback_menu": false }))),
+                    Ok(Err(error)) if has_menu && is_unsupported_dbus_method(&error) => {
+                        Ok(data(json!({ "fallback_menu": true })))
+                    }
+                    Err(_) => Err(RpcError::new(ErrorCode::Timeout, "tray action timed out")),
+                    Ok(Err(_)) => Err(failed("tray action did not complete")),
+                }
+            }
+            Control::ContextMenu => {
                 let request: PointAction<'_> = payload(call)?;
                 let (connection, endpoint) = {
                     let state = self.state();
                     let (connection, item) = action_item(&state, request.id)?;
                     (connection.clone(), item.endpoint.clone())
                 };
-                let method = match kind {
-                    Control::Activate => "Activate",
-                    _ => "ContextMenu",
-                };
-                timeout(
+                match timeout(
                     TIMEOUT,
                     connection.call_method(
                         Some(endpoint.owner.as_str()),
                         endpoint.path.as_str(),
                         Some(endpoint.interface),
-                        method,
+                        "ContextMenu",
                         &(request.x, request.y),
                     ),
                 )
                 .await
+                {
+                    Ok(Ok(_)) => Ok(ok()),
+                    Err(_) => Err(RpcError::new(ErrorCode::Timeout, "tray action timed out")),
+                    Ok(Err(_)) => Err(failed("tray action did not complete")),
+                }
             }
             Control::MenuItem => {
                 let request: MenuAction<'_> = payload(call)?;
@@ -411,7 +481,7 @@ impl Tray {
                         path.clone(),
                     )
                 };
-                timeout(
+                match timeout(
                     TIMEOUT,
                     connection.call_method(
                         Some(owner.as_str()),
@@ -422,12 +492,155 @@ impl Tray {
                     ),
                 )
                 .await
+                {
+                    Ok(Ok(_)) => Ok(ok()),
+                    Err(_) => Err(RpcError::new(ErrorCode::Timeout, "tray action timed out")),
+                    Ok(Err(_)) => Err(failed("tray action did not complete")),
+                }
+            }
+            Control::PrepareMenu => {
+                let request: MenuLifecycle<'_> = payload(call)?;
+                self.prepare_menu_inner(request.id, request.menu_id, request.timestamp)
+                    .await
+            }
+            Control::CloseMenu => {
+                let request: MenuLifecycle<'_> = payload(call)?;
+                let (connection, owner, path) = {
+                    let state = self.state();
+                    let (connection, item) = action_item(&state, request.id)?;
+                    let path = item
+                        .menu_path
+                        .clone()
+                        .ok_or_else(|| not_found("tray item has no menu"))?;
+                    (connection.clone(), item.endpoint.owner.clone(), path)
+                };
+                match timeout(
+                    TIMEOUT,
+                    connection.call_method(
+                        Some(owner.as_str()),
+                        path.as_str(),
+                        Some(MENU),
+                        "Event",
+                        &(request.menu_id, "closed", Value::I32(0), request.timestamp),
+                    ),
+                )
+                .await
+                {
+                    Ok(Ok(_)) => Ok(ok()),
+                    Ok(Err(error)) if is_unsupported_dbus_method(&error) => Ok(ok()),
+                    Err(_) => Err(RpcError::new(
+                        ErrorCode::Timeout,
+                        "tray menu close timed out",
+                    )),
+                    Ok(Err(_)) => Err(failed("tray menu close failed")),
+                }
+            }
+        }
+    }
+
+    async fn prepare_menu_inner(
+        &self,
+        id: &str,
+        menu_id: i32,
+        timestamp: u32,
+    ) -> Result<CommandInvokeResult, RpcError> {
+        let (connection, owner, path, cached_empty, has_cached_menu) = {
+            let state = self.state();
+            let (connection, item) = action_item(&state, id)?;
+            let path = item
+                .menu_path
+                .clone()
+                .ok_or_else(|| not_found("tray item has no menu"))?;
+            if menu_id != 0
+                && let Some(menu) = &item.menu
+                && menu.root.find(menu_id).is_none()
+            {
+                return Err(not_found("tray menu item not found"));
+            }
+            let cached_empty = match &item.menu {
+                None => true,
+                Some(menu) if menu_id == 0 => menu.root.children.is_empty(),
+                Some(menu) => menu
+                    .root
+                    .find(menu_id)
+                    .is_none_or(|node| node.children.is_empty()),
+            };
+            (
+                connection.clone(),
+                item.endpoint.owner.clone(),
+                path,
+                cached_empty,
+                item.menu.is_some(),
+            )
+        };
+        let deadline = Instant::now() + TIMEOUT;
+        let opened = timeout_at(
+            deadline,
+            connection.call_method(
+                Some(owner.as_str()),
+                path.as_str(),
+                Some(MENU),
+                "Event",
+                &(menu_id, "opened", Value::I32(0), timestamp),
+            ),
+        )
+        .await
+        .map_err(|_| RpcError::new(ErrorCode::Timeout, "tray menu preparation timed out"))?;
+        if let Err(error) = opened
+            && !is_unsupported_dbus_method(&error)
+        {
+            tracing::debug!(%error, id, menu_id, "DBusMenu Event(opened) returned error");
+        }
+
+        let need_update = match timeout_at(
+            deadline,
+            connection.call_method(
+                Some(owner.as_str()),
+                path.as_str(),
+                Some(MENU),
+                "AboutToShow",
+                &(menu_id,),
+            ),
+        )
+        .await
+        {
+            Ok(Ok(message)) => message.body().deserialize::<bool>().unwrap_or(true),
+            Ok(Err(error)) if is_unsupported_dbus_method(&error) => false,
+            Ok(Err(_)) => return Err(failed("tray menu preparation failed")),
+            Err(_) => {
+                return Err(RpcError::new(
+                    ErrorCode::Timeout,
+                    "tray menu preparation timed out",
+                ));
             }
         };
-        match result {
-            Ok(Ok(_)) => Ok(ok()),
-            _ => Err(failed("tray action did not complete")),
+
+        if need_update || cached_empty {
+            let layout = timeout_at(deadline, read_menu(&connection, &owner, &path))
+                .await
+                .map_err(|_| {
+                    RpcError::new(ErrorCode::Timeout, "tray menu layout refresh timed out")
+                })?;
+            match layout {
+                Some(menu) => {
+                    let mut state = self.state();
+                    if let Some(item) = state.items.iter_mut().find(|item| {
+                        item.id == id
+                            && item.endpoint.owner == owner
+                            && item.menu_path.as_deref() == Some(path.as_str())
+                    }) && item.menu.as_ref() != Some(&menu)
+                    {
+                        item.menu = Some(menu);
+                        self.publish(&state, UpdateKind::Live);
+                    }
+                }
+                None if !has_cached_menu => {
+                    return Err(failed("tray menu layout unavailable"));
+                }
+                None => {}
+            }
         }
+        Ok(ok())
     }
 }
 
@@ -635,6 +848,7 @@ impl Monitor<'_> {
                 name,
                 owner_verified_at,
                 info: ItemInfo::default(),
+                has_menu: false,
                 icon: None,
                 icon_digest: None,
                 menu: None,
@@ -801,6 +1015,11 @@ impl Monitor<'_> {
                         changed = true;
                     }
                     changed |= update_icon(item, blobs, properties.icon);
+                    let next_has_menu = properties.menu_path.is_some();
+                    if item.has_menu != next_has_menu {
+                        item.has_menu = next_has_menu;
+                        changed = true;
+                    }
                     if item.menu_path != properties.menu_path {
                         item.menu_refresh.cancel();
                         item.menu_path = properties.menu_path;
@@ -823,10 +1042,13 @@ impl Monitor<'_> {
                 if dirty {
                     self.refresh_menu(item);
                 }
-                if item.menu == menu {
+                let Some(menu) = menu else {
+                    return;
+                };
+                if item.menu.as_ref() == Some(&menu) {
                     false
                 } else {
-                    item.menu = menu;
+                    item.menu = Some(menu);
                     true
                 }
             }
@@ -1140,12 +1362,32 @@ fn parse_menu_node(
             nodes.push(parse_menu_node(*id, props, children, depth - 1, remaining));
         }
     }
+    let separator = property("type").and_then(as_str) == Some("separator");
+    let children_display = match property("children-display").and_then(as_str) {
+        Some("submenu") => Some("submenu"),
+        _ => None,
+    };
+    let disposition = match property("disposition").and_then(as_str) {
+        Some("normal") => Some("normal"),
+        Some("informative") => Some("informative"),
+        Some("warning") => Some("warning"),
+        Some("alert") => Some("alert"),
+        _ => None,
+    };
+    let is_submenu = !separator && (children_display == Some("submenu") || !nodes.is_empty());
     MenuNode {
         id,
-        label: property("label").and_then(as_str).and_then(text),
+        label: property("label")
+            .and_then(as_str)
+            .map(strip_mnemonics)
+            .as_deref()
+            .and_then(text),
         enabled: !matches!(property("enabled"), Some(Value::Bool(false))),
         visible: !matches!(property("visible"), Some(Value::Bool(false))),
-        separator: property("type").and_then(as_str) == Some("separator"),
+        separator,
+        is_submenu,
+        children_display,
+        disposition,
         toggle_type: match property("toggle-type").and_then(as_str) {
             Some("checkmark") => Some("checkmark"),
             Some("radio") => Some("radio"),
@@ -1157,6 +1399,33 @@ fn parse_menu_node(
         },
         children: nodes,
     }
+}
+
+fn is_unsupported_dbus_method(error: &zbus::Error) -> bool {
+    matches!(
+        error,
+        zbus::Error::MethodError(name, _, _)
+            if matches!(
+                name.as_str(),
+                "org.freedesktop.DBus.Error.UnknownMethod"
+                    | "org.freedesktop.DBus.Error.NotSupported"
+            )
+    )
+}
+
+fn strip_mnemonics(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '_' {
+            if let Some(next) = chars.next() {
+                out.push(next);
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 fn unvariant<'a, 'v>(mut value: &'a Value<'v>) -> &'a Value<'v> {

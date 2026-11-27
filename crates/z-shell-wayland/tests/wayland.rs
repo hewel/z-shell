@@ -14,7 +14,7 @@ use z_shell_protocol::{
     PROTOCOL_VERSION, RequestId, RpcError, ServerMessage, TopicUpdate, methods,
 };
 use z_shell_wayland::{
-    WaylandHandle, connect_stream, install_on_bus, publish_disconnected_baselines,
+    OutputPowerMode, WaylandHandle, connect_stream, install_on_bus, publish_disconnected_baselines,
 };
 
 const OUTPUTS: &str = "wayland.outputs";
@@ -475,4 +475,69 @@ async fn stalled_registry_does_not_block_controls_or_shutdown() {
     {
         assert_eq!(data["capability"], "disconnected");
     }
+}
+
+#[tokio::test]
+async fn all_outputs_power_isolates_failed_output_and_wakes_healthy_outputs() {
+    let observer = Observer::new().await;
+    let (mut compositor, stream) = Mock::start(Protocols::Full);
+    let service = observer.install(stream);
+    let _baseline = observer
+        .updates(true, &[OUTPUTS, WORKSPACES, WINDOWS, POWER])
+        .await;
+
+    compositor.act(|state, handle| state.add_second_output(handle));
+    let mut output_update = None;
+    let mut power_ready = false;
+    while output_update.is_none() || !power_ready {
+        let update = observer.update(false).await;
+        match update.topic.as_str() {
+            OUTPUTS => output_update = Some(update.data),
+            POWER => power_ready = update.data["outputs"][1]["mode"] == "on",
+            _ => panic!("unexpected update: {update:?}"),
+        }
+    }
+
+    // Fail DP-1's zwlr_output_power_v1 handle while DP-2 remains controllable.
+    compositor.act(|state, _| state.fail_power());
+    let after_fail = observer.updates(false, &[POWER]).await;
+    assert_eq!(after_fail[POWER]["capability"], "controllable");
+    assert_eq!(after_fail[POWER]["outputs"][0]["mode"], "unknown");
+    assert_eq!(after_fail[POWER]["outputs"][1]["mode"], "on");
+
+    // `wayland.display_power.set` ("all", "off") must succeed for healthy DP-2 instead of aborting!
+    observer
+        .invoke(
+            "wayland.display_power.set",
+            vec!["all".into(), "off".into()],
+            None,
+        )
+        .await
+        .expect("PowerTarget::All Off must succeed when >= 1 output is controllable");
+    compositor.expect(Request::SetPower(2, Mode::Off)).await;
+    let powered_off = observer.updates(false, &[POWER]).await;
+    assert_eq!(powered_off[POWER]["outputs"][0]["mode"], "unknown");
+    assert_eq!(powered_off[POWER]["outputs"][1]["mode"], "off");
+
+    // Waking via `set_all_outputs_power(OutputPowerMode::On)` must wake healthy DP-2!
+    service
+        .set_all_outputs_power(OutputPowerMode::On)
+        .await
+        .expect("set_all_outputs_power(On) must wake healthy outputs");
+    compositor.expect(Request::SetPower(2, Mode::On)).await;
+    let powered_on = observer.updates(false, &[POWER]).await;
+    assert_eq!(powered_on[POWER]["outputs"][0]["mode"], "unknown");
+    assert_eq!(powered_on[POWER]["outputs"][1]["mode"], "on");
+
+    // Once DP-2 is also removed so zero controllable outputs remain, "all" returns Disabled.
+    compositor.act(|state, handle| state.remove_second_output(handle));
+    let _removed = observer.updates(false, &[OUTPUTS, POWER]).await;
+    let none_left = service
+        .set_all_outputs_power(OutputPowerMode::Off)
+        .await
+        .expect_err("zero controllable outputs must return Disabled");
+    assert_eq!(none_left.code, ErrorCode::Disabled);
+
+    drop(service);
+    compositor.stop().await;
 }

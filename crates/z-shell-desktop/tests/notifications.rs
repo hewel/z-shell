@@ -354,6 +354,9 @@ async fn an_existing_owner_is_not_replaced_and_disabling_releases_the_name() {
         signal.body().deserialize::<(u32, &str)>().unwrap(),
         (id, "open")
     );
+    let acted = next_update(&stream).await;
+    assert_eq!(acted["popups"], json!([]));
+    assert_eq!(acted["history"][0]["actions"], json!([]));
     desktop.set_notifications(z_shell_desktop::ServiceToggle::Disabled);
     assert_eq!(next_update(&stream).await["available"], false);
     assert!(!dbus.name_has_owner(name).await.unwrap());
@@ -1136,11 +1139,305 @@ async fn locking_hides_popups_suppresses_live_toasts_and_denies_invoke_action() 
         invoked.body().deserialize::<(u32, &str)>().unwrap(),
         (id2, "open")
     );
+    let acted2 = next_update(&stream).await;
+    assert_eq!(acted2["history"][0]["id"], id2);
+    assert_eq!(acted2["history"][0]["actions"], json!([]));
 
     let id3 = notify(&proxy, 0, "after-unlock", blob_hint()).await;
     let unlocked_live = next_update(&stream).await;
     assert_eq!(unlocked_live["popups"].as_array().unwrap().len(), 1);
     assert_eq!(unlocked_live["popups"][0]["id"], id3);
+
+    desktop.shutdown().await;
+}
+
+#[tokio::test]
+async fn honors_transient_resident_and_critical_urgency_hints() {
+    let bus = TestBus::new();
+    let client = bus.connection().await;
+    let root = tempfile::tempdir().unwrap();
+    let paths = paths(root.path());
+    let hub = BusHub::new("test", paths.media_dir());
+    let desktop = DesktopServices::install_with_options(
+        &hub,
+        &paths,
+        DesktopOptions {
+            session_bus: SessionBusAddress::Address(bus.address().to_owned()),
+            tray: false,
+            xdg_data_dirs: Vec::new(),
+            ..DesktopOptions::default()
+        },
+    );
+    let (initial, stream) = subscribe(&hub, TOPIC).await;
+    assert_eq!(ready(initial, &stream).await["available"], true);
+    let proxy = dbus_proxy(&client).await;
+    let mut actions = proxy.receive_signal("ActionInvoked").await.unwrap();
+    let mut closed = proxy.receive_signal("NotificationClosed").await.unwrap();
+
+    // 1. transient = true: appears in popups, excluded from history while open, and discarded on expiry.
+    let (_, img_data) = blob_hint();
+    let transient_id: u32 = proxy
+        .call(
+            "Notify",
+            &(
+                "OSD",
+                0_u32,
+                "",
+                "Volume 65%",
+                "",
+                Vec::<String>::new(),
+                HashMap::from([
+                    (
+                        "transient",
+                        OwnedValue::try_from(DbusValue::from(true)).unwrap(),
+                    ),
+                    ("image-data", img_data),
+                ]),
+                40_i32,
+            ),
+        )
+        .await
+        .unwrap();
+    let transient_live = next_update(&stream).await;
+    assert_eq!(transient_live["popups"][0]["id"], transient_id);
+    assert_eq!(
+        transient_live["history"],
+        json!([]),
+        "transient notification must not enter retained history"
+    );
+    let transient_token = json!({"token": transient_live["popups"][0]["attachment"]["token"]});
+
+    let exp_sig = tokio::time::timeout(
+        Duration::from_secs(3),
+        poll_fn(|cx| Pin::new(&mut closed).poll_next(cx)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        exp_sig.body().deserialize::<(u32, u32)>().unwrap(),
+        (transient_id, 1)
+    );
+    let transient_expired = next_update(&stream).await;
+    assert_eq!(transient_expired["popups"], json!([]));
+    assert_eq!(transient_expired["history"], json!([]));
+    assert_eq!(
+        invoke(
+            &hub,
+            ClientRole::PrivilegedHost,
+            "notifications.fetch-blob",
+            transient_token
+        )
+        .await
+        .unwrap_err()
+        .code,
+        ErrorCode::NotFound,
+        "discarded transient notification revokes its blob"
+    );
+
+    // 2. Non-resident notification: invoke-action emits ActionInvoked then NotificationClosed(2)
+    //    and archives to history with actions: [] (or discards completely if transient = true).
+    let std_id: u32 = proxy
+        .call(
+            "Notify",
+            &(
+                "Mail",
+                0_u32,
+                "",
+                "New message",
+                "Click to open",
+                vec!["open", "Open", "archive", "Archive"],
+                HashMap::<String, OwnedValue>::new(),
+                0_i32,
+            ),
+        )
+        .await
+        .unwrap();
+    let std_live = next_update(&stream).await;
+    assert_eq!(std_live["popups"][0]["id"], std_id);
+
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "notifications.invoke-action",
+        json!({"id": std_id, "action_key": "open"}),
+    )
+    .await
+    .unwrap();
+    let act_sig = tokio::time::timeout(
+        Duration::from_secs(2),
+        poll_fn(|cx| Pin::new(&mut actions).poll_next(cx)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        act_sig.body().deserialize::<(u32, &str)>().unwrap(),
+        (std_id, "open")
+    );
+    let close_sig = tokio::time::timeout(
+        Duration::from_secs(2),
+        poll_fn(|cx| Pin::new(&mut closed).poll_next(cx)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        close_sig.body().deserialize::<(u32, u32)>().unwrap(),
+        (std_id, 2)
+    );
+    let std_after = next_update(&stream).await;
+    assert_eq!(std_after["popups"], json!([]));
+    assert_eq!(std_after["history"][0]["id"], std_id);
+    assert_eq!(std_after["history"][0]["actions"], json!([]));
+
+    // Transient + action: discarded completely after ActionInvoked + NotificationClosed(2).
+    let trans_act_id: u32 = proxy
+        .call(
+            "Notify",
+            &(
+                "Alert",
+                0_u32,
+                "",
+                "Ephemeral prompt",
+                "",
+                vec!["ack", "Acknowledge"],
+                HashMap::from([(
+                    "transient",
+                    OwnedValue::try_from(DbusValue::from(true)).unwrap(),
+                )]),
+                0_i32,
+            ),
+        )
+        .await
+        .unwrap();
+    let _ = next_update(&stream).await;
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "notifications.invoke-action",
+        json!({"id": trans_act_id, "action_key": "ack"}),
+    )
+    .await
+    .unwrap();
+    let _ = tokio::time::timeout(
+        Duration::from_secs(2),
+        poll_fn(|cx| Pin::new(&mut actions).poll_next(cx)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let trans_close_sig = tokio::time::timeout(
+        Duration::from_secs(2),
+        poll_fn(|cx| Pin::new(&mut closed).poll_next(cx)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        trans_close_sig.body().deserialize::<(u32, u32)>().unwrap(),
+        (trans_act_id, 2)
+    );
+    let trans_after_act = next_update(&stream).await;
+    assert_eq!(trans_after_act["popups"], json!([]));
+    assert_eq!(trans_after_act["history"].as_array().unwrap().len(), 1);
+    assert_eq!(trans_after_act["history"][0]["id"], std_id);
+
+    // 3. resident = true: invoke-action emits ActionInvoked without closing, keeping notification active.
+    let res_id: u32 = proxy
+        .call(
+            "Notify",
+            &(
+                "Player",
+                0_u32,
+                "",
+                "Now Playing",
+                "Track 1",
+                vec!["play", "Play/Pause", "next", "Next"],
+                HashMap::from([(
+                    "resident",
+                    OwnedValue::try_from(DbusValue::from(true)).unwrap(),
+                )]),
+                0_i32,
+            ),
+        )
+        .await
+        .unwrap();
+    let res_live = next_update(&stream).await;
+    assert_eq!(res_live["popups"][0]["id"], res_id);
+
+    for key in ["play", "next"] {
+        invoke(
+            &hub,
+            ClientRole::Public,
+            "notifications.invoke-action",
+            json!({"id": res_id, "action_key": key}),
+        )
+        .await
+        .expect("resident notification stays open across multiple action invocations");
+        let sig = tokio::time::timeout(
+            Duration::from_secs(2),
+            poll_fn(|cx| Pin::new(&mut actions).poll_next(cx)),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            sig.body().deserialize::<(u32, &str)>().unwrap(),
+            (res_id, key)
+        );
+    }
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(60),
+            poll_fn(|cx| Pin::new(&mut closed).poll_next(cx)),
+        )
+        .await
+        .is_err(),
+        "resident notification must not emit NotificationClosed on invoke-action"
+    );
+
+    // 4. Critical urgency (urgency == 2) with expire_timeout < 0 stays open past 5000ms default timeout.
+    let crit_id: u32 = proxy
+        .call(
+            "Notify",
+            &(
+                "Power",
+                0_u32,
+                "",
+                "Battery Critical (3%)",
+                "Plug in AC adapter immediately",
+                Vec::<String>::new(),
+                HashMap::from([(
+                    "urgency",
+                    OwnedValue::try_from(DbusValue::from(2_u8)).unwrap(),
+                )]),
+                -1_i32,
+            ),
+        )
+        .await
+        .unwrap();
+    let crit_live = next_update(&stream).await;
+    assert_eq!(crit_live["popups"][0]["id"], crit_id);
+    assert_eq!(crit_live["popups"][0]["urgency"], 2);
+
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(6)).await;
+    for _ in 0..5 {
+        tokio::task::yield_now().await;
+    }
+    tokio::time::resume();
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), next_update(&stream))
+            .await
+            .is_err(),
+        "urgency == 2 with expire_timeout < 0 must not auto-expire after 5000ms"
+    );
+    proxy
+        .call::<_, _, ()>("CloseNotification", &(crit_id,))
+        .await
+        .expect("critical notification is still open after 6s");
 
     desktop.shutdown().await;
 }

@@ -10,7 +10,7 @@ import { useShellStore, type PluginBarWidgetSlot } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
 import {
   DEFAULT_BAR_SETTINGS, computeMemoryBreakdown, filterWorkspacesForMonitor, findActiveWindowForMonitor,
-  formatBarClock, formatSurfaceName, isImeTrayItem, isMediaPlayerAudible, partitionPluginBarWidgets, partitionTrayItems, resolveBarLayout, resolveBarPopupAnchor, resolveDesktopApp, resolveWorkspaceLabel, selectActiveMediaPlayer,
+  formatBarClock, formatSurfaceName, hasTrayMenu, isImeTrayItem, isMediaPlayerAudible, isTrayActivateMenuFallback, partitionPluginBarWidgets, partitionTrayItems, resolveBarLayout, resolveBarPopupAnchor, resolveDesktopApp, resolveWorkspaceLabel, selectActiveMediaPlayer,
   type ResolvedBarLayout, type TrayItem, type WaylandWindow, type WaylandWorkspace,
 } from "../topics.ts";
 import styles from "./StatusBar.module.css";
@@ -313,16 +313,26 @@ function TrayButton(props: { item: TrayItem; vertical: boolean; docked: boolean;
       class={styles.trayButton}
       onClick={event => {
         const item = props.item;
-        if (item.item_is_menu && item.menu) {
+        const anchorRect = anchorFor(event.currentTarget);
+        if (item.item_is_menu && hasTrayMenu(item)) {
           event.stopPropagation();
-          openTrayMenu({ itemId: item.id, monitorId: props.monitorId, parentSurface: props.surfaceName, anchorRect: anchorFor(event.currentTarget) });
+          openTrayMenu({ itemId: item.id, monitorId: props.monitorId, parentSurface: props.surfaceName, anchorRect });
         } else {
-          void invokePublic("tray.activate", { id: item.id });
+          void invokePublic("tray.activate", { id: item.id }).then(res => {
+            if (isTrayActivateMenuFallback(res)) {
+              openTrayMenu({
+                itemId: item.id,
+                monitorId: props.monitorId,
+                parentSurface: props.surfaceName,
+                anchorRect,
+              });
+            }
+          });
         }
       }}
       {...secondaryAction(node => {
         const item = props.item;
-        if (item.menu) {
+        if (hasTrayMenu(item)) {
           openTrayMenu({ itemId: item.id, monitorId: props.monitorId, parentSurface: props.surfaceName, anchorRect: anchorFor(node) });
         } else {
           void invokePublic("tray.context-menu", { id: item.id });

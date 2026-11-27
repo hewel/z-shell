@@ -104,6 +104,7 @@ impl Mock {
 
 pub struct Compositor {
     first_global: Option<GlobalId>,
+    second_global: Option<GlobalId>,
     first_output: Option<output::WlOutput>,
     xdg_output: Option<xdg_output::ZxdgOutputV1>,
     group: Option<group::ExtWorkspaceGroupHandleV1>,
@@ -131,6 +132,7 @@ impl Compositor {
         let first_global = handle.create_global::<Self, output::WlOutput, _>(4, 1u32);
         Self {
             first_global: Some(first_global),
+            second_global: None,
             first_output: None,
             xdg_output: None,
             group: None,
@@ -165,12 +167,16 @@ impl Compositor {
         self.first_power.take().unwrap().failed();
     }
 
-    pub fn add_second_output(&self, handle: &DisplayHandle) {
-        handle.create_global::<Self, output::WlOutput, _>(4, 2u32);
+    pub fn add_second_output(&mut self, handle: &DisplayHandle) {
+        self.second_global = Some(handle.create_global::<Self, output::WlOutput, _>(4, 2u32));
     }
 
     pub fn remove_first_output(&mut self, handle: &DisplayHandle) {
         handle.disable_global::<Self>(self.first_global.take().unwrap());
+    }
+
+    pub fn remove_second_output(&mut self, handle: &DisplayHandle) {
+        handle.disable_global::<Self>(self.second_global.take().unwrap());
     }
 
     pub fn remove_workspace(&mut self) {

@@ -37,11 +37,13 @@ function createFakeRepo(root: string): {
   readonly mockHost: string;
 } {
   mkdirSync(join(root, "tools", "systemd"), { recursive: true });
+  mkdirSync(join(root, "tools", "pam.d"), { recursive: true });
   mkdirSync(join(root, "target", "release"), { recursive: true });
   mkdirSync(join(root, "apps", "shell", ".zgui-generations", "gen-1"), { recursive: true });
 
   cpSync(join(REPO_ROOT, "install.sh"), join(root, "install.sh"));
   cpSync(join(REPO_ROOT, "tools", "z-shell-session.sh"), join(root, "tools", "z-shell-session.sh"));
+  cpSync(join(REPO_ROOT, "tools", "pam.d", "z-shell"), join(root, "tools", "pam.d", "z-shell"));
   cpSync(
     join(REPO_ROOT, "tools", "systemd", "z-shelld.service.in"),
     join(root, "tools", "systemd", "z-shelld.service.in"),
@@ -150,6 +152,7 @@ describe("install.sh and z-shell-session", () => {
       const stateDir = join(xdgHome, ".local", "state");
       const cacheDir = join(xdgHome, ".cache");
       const systemdDir = join(configDir, "systemd", "user");
+      const pamDir = join(tempDir, "pam.d");
 
       const env = {
         ...process.env,
@@ -171,7 +174,15 @@ describe("install.sh and z-shell-session", () => {
       expect(conflictRes.exitCode).toBe(2);
 
       const installRes = Bun.spawnSync(
-        [join(fakeRepo, "install.sh"), "--skip-build", "--init-config", "--systemd-dir", systemdDir],
+        [
+          join(fakeRepo, "install.sh"),
+          "--skip-build",
+          "--init-config",
+          "--systemd-dir",
+          systemdDir,
+          "--pam-dir",
+          pamDir,
+        ],
         { cwd: fakeRepo, env, stdout: "pipe", stderr: "pipe" },
       );
       expect(installRes.exitCode, installRes.stderr.toString()).toBe(0);
@@ -185,6 +196,14 @@ describe("install.sh and z-shell-session", () => {
       expect(existsSync(join(installedBundle, "manifest.json"))).toBe(true);
       expect(existsSync(join(dataDir, "z-shell", "libexec", "zgui-host"))).toBe(true);
       expect(existsSync(join(dataDir, "z-shell", "bundled-plugins", "ai-usage", "plugin.toml"))).toBe(true);
+      expect(existsSync(join(dataDir, "z-shell", "pam.d", "z-shell"))).toBe(true);
+      expect(statSync(join(dataDir, "z-shell", "pam.d", "z-shell")).mode & 0o777).toBe(0o644);
+
+      const pamFile = join(pamDir, "z-shell");
+      expect(existsSync(pamFile)).toBe(true);
+      expect(statSync(pamFile).mode & 0o777).toBe(0o644);
+      expect(readFileSync(pamFile, "utf8")).toContain("auth");
+      writeFileSync(pamFile, "# custom pam config\n");
 
       const unitDaemon = readFileSync(join(systemdDir, "z-shelld.service"), "utf8");
       const unitUi = readFileSync(join(systemdDir, "z-shell-ui.service"), "utf8");
@@ -196,15 +215,35 @@ describe("install.sh and z-shell-session", () => {
       expect(statSync(settingsFile).mode & 0o777).toBe(0o600);
       writeFileSync(settingsFile, "# custom user edit\n");
 
-      // Re-running with --init-config --no-systemd must preserve user settings.toml.
+      // Re-running with --pam-dir preserves customized pam.d/z-shell; --no-pam skips altPamDir.
+      const preservePamRes = Bun.spawnSync(
+        [join(fakeRepo, "install.sh"), "--skip-build", "--no-systemd", "--pam-dir", pamDir],
+        { cwd: fakeRepo, env, stdout: "pipe", stderr: "pipe" },
+      );
+      expect(preservePamRes.exitCode, preservePamRes.stderr.toString()).toBe(0);
+      expect(readFileSync(pamFile, "utf8")).toBe("# custom pam config\n");
+
+      // Re-running with --init-config --no-systemd --no-pam must preserve user settings.toml.
       const altSystemdDir = join(tempDir, "alt-systemd");
+      const altPamDir = join(tempDir, "alt-pam.d");
       const reinstallRes = Bun.spawnSync(
-        [join(fakeRepo, "install.sh"), "--skip-build", "--init-config", "--no-systemd", "--systemd-dir", altSystemdDir],
+        [
+          join(fakeRepo, "install.sh"),
+          "--skip-build",
+          "--init-config",
+          "--no-systemd",
+          "--systemd-dir",
+          altSystemdDir,
+          "--no-pam",
+          "--pam-dir",
+          altPamDir,
+        ],
         { cwd: fakeRepo, env, stdout: "pipe", stderr: "pipe" },
       );
       expect(reinstallRes.exitCode, reinstallRes.stderr.toString()).toBe(0);
       expect(readFileSync(settingsFile, "utf8")).toBe("# custom user edit\n");
       expect(existsSync(join(altSystemdDir, "z-shelld.service"))).toBe(false);
+      expect(existsSync(join(altPamDir, "z-shell"))).toBe(false);
 
       // Prepare read-only plugin bundle in state dir to verify uninstall vs purge.
       const roBundleDir = join(stateDir, "z-shell", "plugins", "bundles", "z-shell__ai-usage", "sha256_abc");
@@ -215,13 +254,14 @@ describe("install.sh and z-shell-session", () => {
       writeFileSync(join(cacheDir, "z-shell", "marker"), "cached");
 
       const uninstallRes = Bun.spawnSync(
-        [join(fakeRepo, "install.sh"), "--uninstall", "--systemd-dir", systemdDir],
+        [join(fakeRepo, "install.sh"), "--uninstall", "--systemd-dir", systemdDir, "--pam-dir", pamDir],
         { cwd: fakeRepo, env, stdout: "pipe", stderr: "pipe" },
       );
       expect(uninstallRes.exitCode, uninstallRes.stderr.toString()).toBe(0);
       expect(existsSync(join(binDir, "z-shell-session"))).toBe(false);
       expect(existsSync(join(dataDir, "z-shell"))).toBe(false);
       expect(existsSync(join(systemdDir, "z-shelld.service"))).toBe(false);
+      expect(existsSync(pamFile)).toBe(false);
       expect(existsSync(settingsFile)).toBe(true);
       expect(existsSync(roBundleDir)).toBe(true);
 

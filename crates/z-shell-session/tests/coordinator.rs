@@ -616,3 +616,269 @@ async fn logind_sleep_inhibitor_self_heals_late_session_lock_and_service_restart
     drop(rx2);
     monitor_task_2.abort();
 }
+
+#[tokio::test]
+async fn logind_auto_session_verifies_uid_resolves_concrete_path_and_pins_lock_sender() {
+    use std::io::{BufRead, BufReader};
+    use std::process::{Child, Command, Stdio};
+    use std::time::Duration;
+    use tokio::time::timeout;
+    use zbus::connection::Builder;
+    use zbus::object_server::SignalEmitter;
+    use zbus::zvariant::OwnedObjectPath;
+
+    struct TestBus(Child);
+    impl Drop for TestBus {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    let mut daemon = Command::new("dbus-daemon")
+        .args(["--session", "--nofork", "--nosyslog", "--print-address=1"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("start private dbus-daemon");
+    let mut address = String::new();
+    BufReader::new(daemon.stdout.take().expect("dbus stdout"))
+        .read_line(&mut address)
+        .expect("read dbus address");
+    let _bus = TestBus(daemon);
+    let address = address.trim().to_owned();
+
+    unsafe extern "C" {
+        fn geteuid() -> u32;
+    }
+    // SAFETY: `geteuid` has no preconditions.
+    let euid = unsafe { geteuid() };
+
+    struct AutoLogindManager {
+        resolved: Arc<tokio::sync::Notify>,
+    }
+
+    #[zbus::interface(name = "org.freedesktop.login1.Manager")]
+    impl AutoLogindManager {
+        #[zbus(name = "GetSessionByPID")]
+        fn get_session_by_pid(&self, _pid: u32) -> zbus::fdo::Result<OwnedObjectPath> {
+            Err(zbus::fdo::Error::Failed(
+                "NoSessionForPID: running under systemd --user".into(),
+            ))
+        }
+
+        #[zbus(name = "GetSession")]
+        fn get_session(&self, session_id: &str) -> zbus::fdo::Result<OwnedObjectPath> {
+            match session_id {
+                "auto" | "c42" => {
+                    self.resolved.notify_waiters();
+                    Ok(OwnedObjectPath::try_from("/org/freedesktop/login1/session/_342").unwrap())
+                }
+                _ => Err(zbus::fdo::Error::UnknownObject("unknown session".into())),
+            }
+        }
+
+        #[zbus(signal)]
+        async fn prepare_for_sleep(emitter: &SignalEmitter<'_>, start: bool) -> zbus::Result<()>;
+    }
+
+    struct AutoLogindSession {
+        uid: u32,
+    }
+
+    #[zbus::interface(name = "org.freedesktop.login1.Session")]
+    impl AutoLogindSession {
+        #[zbus(property, name = "Id")]
+        fn id(&self) -> &str {
+            "c42"
+        }
+
+        #[zbus(property, name = "User")]
+        fn user(&self) -> (u32, OwnedObjectPath) {
+            (
+                self.uid,
+                OwnedObjectPath::try_from(format!("/org/freedesktop/login1/user/_{}", self.uid))
+                    .unwrap(),
+            )
+        }
+
+        #[zbus(signal, name = "Lock")]
+        async fn lock(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
+    }
+
+    // 1. Mismatched UID session must NOT be subscribed for Session.Lock.
+    let mismatch_resolved = Arc::new(tokio::sync::Notify::new());
+    let bad_logind = Builder::address(address.as_str())
+        .expect("builder")
+        .name("org.freedesktop.login1")
+        .expect("name")
+        .serve_at(
+            "/org/freedesktop/login1",
+            AutoLogindManager {
+                resolved: Arc::clone(&mismatch_resolved),
+            },
+        )
+        .expect("serve manager")
+        .serve_at(
+            "/org/freedesktop/login1/session/_342",
+            AutoLogindSession {
+                uid: euid.wrapping_add(1),
+            },
+        )
+        .expect("serve mismatched session")
+        .build()
+        .await
+        .expect("build mismatched logind");
+
+    let inhibitor = Arc::new(
+        LogindSleepInhibitor::connect_address(&address)
+            .await
+            .expect("connect"),
+    );
+    let (bad_tx, mut bad_rx) = tokio::sync::mpsc::channel(8);
+    let bad_mon_inhibitor = Arc::clone(&inhibitor);
+    let bad_seen = mismatch_resolved.notified();
+    let bad_task = tokio::spawn(async move { bad_mon_inhibitor.monitor_events(bad_tx).await });
+    timeout(Duration::from_secs(2), bad_seen)
+        .await
+        .expect("monitor_events must probe GetSession(auto) when GetSessionByPID fails");
+    let bad_session_iface = bad_logind
+        .object_server()
+        .interface::<_, AutoLogindSession>("/org/freedesktop/login1/session/_342")
+        .await
+        .expect("bad session iface");
+    AutoLogindSession::lock(bad_session_iface.signal_emitter())
+        .await
+        .expect("emit Lock on mismatched UID session");
+    assert!(
+        timeout(Duration::from_millis(120), bad_rx.recv())
+            .await
+            .is_err(),
+        "Session.Lock from a session owned by a different UID must be rejected"
+    );
+    assert!(
+        bad_logind
+            .release_name("org.freedesktop.login1")
+            .await
+            .expect("release")
+    );
+    let _ = timeout(Duration::from_secs(2), bad_task).await;
+
+    // 2. Matching UID session resolves concrete path, rejects spoofed non-logind sender, and accepts real logind Lock.
+    let ok_resolved = Arc::new(tokio::sync::Notify::new());
+    let good_logind = Builder::address(address.as_str())
+        .expect("builder")
+        .name("org.freedesktop.login1")
+        .expect("name")
+        .serve_at(
+            "/org/freedesktop/login1",
+            AutoLogindManager {
+                resolved: Arc::clone(&ok_resolved),
+            },
+        )
+        .expect("serve manager")
+        .serve_at(
+            "/org/freedesktop/login1/session/_342",
+            AutoLogindSession { uid: euid },
+        )
+        .expect("serve matching session")
+        .build()
+        .await
+        .expect("build matching logind");
+
+    // Unprivileged peer serving the exact same object path without owning org.freedesktop.login1.
+    let impostor = Builder::address(address.as_str())
+        .expect("impostor builder")
+        .serve_at(
+            "/org/freedesktop/login1/session/_342",
+            AutoLogindSession { uid: euid },
+        )
+        .expect("impostor session")
+        .build()
+        .await
+        .expect("build impostor");
+
+    inhibitor
+        .reconnect_address(&address)
+        .await
+        .expect("reconnect");
+    let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+    let ok_seen = ok_resolved.notified();
+    let mon_inhibitor = Arc::clone(&inhibitor);
+    let mon_task = tokio::spawn(async move { mon_inhibitor.monitor_events(tx).await });
+    timeout(Duration::from_secs(2), ok_seen)
+        .await
+        .expect("monitor_events must resolve matching auto session");
+
+    let impostor_iface = impostor
+        .object_server()
+        .interface::<_, AutoLogindSession>("/org/freedesktop/login1/session/_342")
+        .await
+        .expect("impostor iface");
+    let good_iface = good_logind
+        .object_server()
+        .interface::<_, AutoLogindSession>("/org/freedesktop/login1/session/_342")
+        .await
+        .expect("good iface");
+
+    // Wait until real logind Lock works, then verify impostor Lock produces NO event!
+    timeout(Duration::from_secs(2), async {
+        loop {
+            AutoLogindSession::lock(good_iface.signal_emitter())
+                .await
+                .expect("emit real Lock");
+            if let Ok(Some(event)) = timeout(Duration::from_millis(80), rx.recv()).await
+                && event == LogindEvent::SessionLock
+            {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("real org.freedesktop.login1 Session.Lock must arrive");
+
+    // Drain any buffered duplicate from the readiness loop, then emit ONLY from impostor!
+    while rx.try_recv().is_ok() {}
+    AutoLogindSession::lock(impostor_iface.signal_emitter())
+        .await
+        .expect("emit spoofed Lock");
+    impostor
+        .emit_signal(
+            None::<&str>,
+            "/org/freedesktop/login1",
+            "org.freedesktop.login1.Manager",
+            "PrepareForSleep",
+            &(true,),
+        )
+        .await
+        .expect("emit spoofed PrepareForSleep");
+    // Also send a malformed PrepareForSleep signal body from real logind to ensure decode resilience.
+    good_logind
+        .emit_signal(
+            None::<&str>,
+            "/org/freedesktop/login1",
+            "org.freedesktop.login1.Manager",
+            "PrepareForSleep",
+            &("not-a-bool",),
+        )
+        .await
+        .expect("emit malformed PrepareForSleep");
+    // Fence the bus by sending a real PrepareForSleep(false -> Wake) right after spoofed/malformed signals!
+    let good_mgr = good_logind
+        .object_server()
+        .interface::<_, AutoLogindManager>("/org/freedesktop/login1")
+        .await
+        .expect("good mgr");
+    AutoLogindManager::prepare_for_sleep(good_mgr.signal_emitter(), false)
+        .await
+        .expect("emit fence PrepareForSleep");
+    assert_eq!(
+        timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("fence signal"),
+        Some(LogindEvent::Wake),
+        "spoofed Lock/PrepareForSleep and malformed PrepareForSleep must be ignored before Wake fence"
+    );
+
+    drop(rx);
+    mon_task.abort();
+}

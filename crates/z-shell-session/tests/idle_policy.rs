@@ -102,6 +102,7 @@ fn keep_awake_inhibits_only_sleep_and_preserves_screen_off_and_fading_lock() {
     let suspend_token = watch(&effects, 2);
 
     // 1. Apply ScreenOff to completion.
+    assert!(!policy.is_screen_off_applied());
     let screen_action_id = match policy.idle(0, screen_token).as_slice() {
         [IdleEffect::RunAction { action_id, .. }] => *action_id,
         other => panic!("expected ScreenOff RunAction, got {other:?}"),
@@ -111,6 +112,7 @@ fn keep_awake_inhibits_only_sleep_and_preserves_screen_off_and_fading_lock() {
             .action_completed(screen_action_id, ActionCompletion::Succeeded)
             .is_empty()
     );
+    assert!(policy.is_screen_off_applied());
 
     // 2. Start warning fade on Lock AND LockAndSuspend.
     let lock_fading = policy.idle(1, lock_token);
@@ -341,6 +343,7 @@ fn sleep_defers_successful_resume_until_wake() {
             .is_empty()
     );
     let wake = policy.set_sleep_state(SleepState::Awake);
+    assert!(!policy.is_screen_off_applied());
     assert!(
         wake.iter()
             .any(|effect| matches!(effect, IdleEffect::ResumeAction { .. }))
@@ -410,4 +413,75 @@ fn is_sleep_blocked_is_restricted_to_caffeine_and_explicit_sleep_plugin_leases()
     );
     policy.set_caffeine(Caffeine::Disabled);
     assert!(!policy.is_sleep_blocked());
+}
+
+#[test]
+fn reconcile_lagged_screen_off_recovers_running_actions_and_prunes_cancelled_entries() {
+    let mut policy = IdlePolicy::default();
+    let effects = policy
+        .configure(IdleConfig {
+            rules: vec![rule("screen-off", IdleAction::ScreenOff, 0)],
+        })
+        .expect("valid screen-off rule");
+    let token = match &effects[0] {
+        IdleEffect::StartWatch { token, .. } => *token,
+        other => panic!("expected StartWatch, got {other:?}"),
+    };
+
+    // 1. Uncancelled Running(action_id) is surfaced so lagged receiver can drive Off + complete.
+    let idle_effects = policy.idle(0, token);
+    let action_id = match &idle_effects[0] {
+        IdleEffect::RunAction {
+            action_id,
+            action: IdleAction::ScreenOff,
+            ..
+        } => *action_id,
+        other => panic!("expected RunAction(ScreenOff), got {other:?}"),
+    };
+    assert_eq!(
+        policy.reconcile_lagged_screen_off(),
+        (vec![action_id], false)
+    );
+    assert!(
+        policy
+            .action_completed(action_id, ActionCompletion::Succeeded)
+            .is_empty()
+    );
+    assert_eq!(policy.reconcile_lagged_screen_off(), (Vec::new(), true));
+
+    // Resume clears Applied and rearms a new watch.
+    let resume_effects = policy.activity();
+    assert!(resume_effects.iter().any(|effect| matches!(
+        effect,
+        IdleEffect::ResumeAction {
+            action: IdleAction::ScreenOff,
+            ..
+        }
+    )));
+    let next_token = resume_effects
+        .iter()
+        .find_map(|effect| match effect {
+            IdleEffect::StartWatch { token, .. } => Some(*token),
+            _ => None,
+        })
+        .expect("rearmed watch");
+
+    // 2. Cancelled Running(action_id) (activity before lag reconciliation) is pruned cleanly.
+    let second_run = policy.idle(0, next_token);
+    let cancelled_id = match &second_run[0] {
+        IdleEffect::RunAction { action_id, .. } => *action_id,
+        other => panic!("expected RunAction, got {other:?}"),
+    };
+    let _ = policy.activity();
+    assert_eq!(policy.reconcile_lagged_screen_off(), (Vec::new(), false));
+    // Even if a queued RunAction(cancelled_id) completes afterward, it immediately emits ResumeAction.
+    let late_effects = policy.action_completed(cancelled_id, ActionCompletion::Succeeded);
+    assert_eq!(
+        late_effects,
+        vec![IdleEffect::ResumeAction {
+            rule_name: "screen-off".into(),
+            action: IdleAction::ScreenOff,
+            resume_command: None,
+        }]
+    );
 }

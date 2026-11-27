@@ -179,4 +179,96 @@ describe("startComposedPluginServices", () => {
       "cleanup:beta",
     ]);
   });
+
+  test("forwards async setup and async cleanup promise rejections to onError without breaking sibling services", async () => {
+    const events: string[] = [];
+    const errors: Array<{ entryId: string; message: string }> = [];
+
+    const asyncSetupFail = definePlugin({
+      manifest: {
+        id: "z-shell/async-setup-fail",
+        version: "0.1.0",
+        pluginApi: PLUGIN_API_LEVEL,
+        title: "AsyncSetupFail",
+        entries: [{ name: "service", kind: "service", title: "AsyncSetupFail" }],
+        defaults: {},
+      },
+      setup() {
+        return Promise.reject(new Error("async setup failed"));
+      },
+    });
+
+    const asyncCleanupFail = definePlugin({
+      manifest: {
+        id: "z-shell/async-cleanup-fail",
+        version: "0.1.0",
+        pluginApi: PLUGIN_API_LEVEL,
+        title: "AsyncCleanupFail",
+        entries: [{ name: "service", kind: "service", title: "AsyncCleanupFail" }],
+        defaults: { rev: 1 },
+      },
+      setup(ctx) {
+        events.push(`setup:${ctx.config.rev}`);
+        return () => Promise.reject(new Error(`async cleanup failed ${ctx.config.rev}`));
+      },
+    });
+
+    const healthySibling = definePlugin({
+      manifest: {
+        id: "z-shell/healthy",
+        version: "0.1.0",
+        pluginApi: PLUGIN_API_LEVEL,
+        title: "Healthy",
+        entries: [{ name: "service", kind: "service", title: "Healthy" }],
+        defaults: {},
+      },
+      setup() {
+        events.push("setup:healthy");
+        return () => {
+          events.push("cleanup:healthy");
+        };
+      },
+    });
+
+    const controller = createComposedServiceController(
+      {
+        entryImports: {
+          "z-shell/async-setup-fail:service": { default: asyncSetupFail },
+          "z-shell/async-cleanup-fail:service": { default: asyncCleanupFail },
+          "z-shell/healthy:service": { default: healthySibling },
+        },
+        services: [
+          makeServiceDescriptor("z-shell/async-setup-fail", "z-shell/async-setup-fail:service"),
+          makeServiceDescriptor("z-shell/async-cleanup-fail", "z-shell/async-cleanup-fail:service", { rev: 1 }),
+          makeServiceDescriptor("z-shell/healthy", "z-shell/healthy:service"),
+        ],
+      },
+      {} as ZShellClient,
+      (service, error) => {
+        errors.push({
+          entryId: service.entryId,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      },
+    );
+
+    await Promise.resolve();
+    expect(errors).toEqual([{ entryId: "z-shell/async-setup-fail:service", message: "async setup failed" }]);
+
+    controller.restartPlugin("z-shell/async-cleanup-fail", { rev: 2 });
+    await Promise.resolve();
+    expect(errors).toEqual([
+      { entryId: "z-shell/async-setup-fail:service", message: "async setup failed" },
+      { entryId: "z-shell/async-cleanup-fail:service", message: "async cleanup failed 1" },
+    ]);
+
+    controller.dispose();
+    await Promise.resolve();
+    expect(events).toEqual(["setup:1", "setup:healthy", "setup:2", "cleanup:healthy"]);
+    expect(errors).toEqual([
+      { entryId: "z-shell/async-setup-fail:service", message: "async setup failed" },
+      { entryId: "z-shell/async-cleanup-fail:service", message: "async cleanup failed 1" },
+      { entryId: "z-shell/async-cleanup-fail:service", message: "async cleanup failed 2" },
+    ]);
+  });
 });

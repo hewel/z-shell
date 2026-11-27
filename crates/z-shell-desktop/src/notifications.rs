@@ -70,6 +70,8 @@ struct State {
 struct Entry {
     notification: Notification,
     popup: bool,
+    transient: bool,
+    resident: bool,
     lifetime: Lifetime,
 }
 
@@ -333,6 +335,7 @@ impl Notifications {
                 history: state
                     .history
                     .iter()
+                    .filter(|entry| !entry.transient)
                     .map(|entry| &entry.notification)
                     .collect(),
             },
@@ -392,6 +395,8 @@ impl Notifications {
         let app_key = compute_app_key(incoming.desktop_entry.as_deref(), &incoming.app_name, id);
         state.history.push_front(Entry {
             popup,
+            transient: incoming.transient,
+            resident: incoming.resident,
             lifetime: incoming.timeout.map_or(Lifetime::Persistent, |duration| {
                 if paused {
                     Lifetime::Paused {
@@ -431,10 +436,22 @@ impl Notifications {
         let mut closed = Vec::new();
         let now = Instant::now();
         let mut snapshot_changed = false;
-        for entry in &mut state.history {
-            if entry.lifetime.deadline().is_some_and(|when| when <= now) {
-                snapshot_changed |= entry.archive();
-                closed.push(entry.notification.id);
+        let mut index = 0;
+        while index < state.history.len() {
+            if state.history[index]
+                .lifetime
+                .deadline()
+                .is_some_and(|when| when <= now)
+            {
+                let id = state.history[index].notification.id;
+                let transient = state.history[index].transient;
+                snapshot_changed |= state.close_or_discard(index);
+                closed.push(id);
+                if !transient {
+                    index += 1;
+                }
+            } else {
+                index += 1;
             }
         }
         if snapshot_changed {
@@ -531,15 +548,16 @@ impl Notifications {
             let mut dismissed_ids = Vec::new();
             let mut snapshot_changed = false;
             for item in items {
-                if let Some(entry) = state.history.iter_mut().find(|entry| {
+                if let Some(index) = state.history.iter().position(|entry| {
                     entry.popup
                         && entry.notification.id == item.id
                         && entry.notification.revision == item.revision
                 }) {
-                    let was_open = entry.lifetime.is_open();
-                    snapshot_changed |= entry.archive();
+                    let was_open = state.history[index].lifetime.is_open();
+                    let id = state.history[index].notification.id;
+                    snapshot_changed |= state.close_or_discard(index);
                     if was_open {
-                        dismissed_ids.push(entry.notification.id);
+                        dismissed_ids.push(id);
                     }
                 }
             }
@@ -595,8 +613,8 @@ impl Notifications {
             id: u32,
             action_key: &'a str,
         }
-        let (connection, id, action_key) = {
-            let state = self.state();
+        let (connection, id, action_key, close_after) = {
+            let mut state = self.state();
             if state.lock == ImeLockState::Locked {
                 return Err(RpcError::new(
                     ErrorCode::PermissionDenied,
@@ -604,12 +622,12 @@ impl Notifications {
                 ));
             }
             let Invoke { id, action_key } = payload(&call)?;
-            let entry = state
+            let index = state
                 .history
                 .iter()
-                .find(|entry| entry.notification.id == id && entry.lifetime.is_open())
+                .position(|entry| entry.notification.id == id && entry.lifetime.is_open())
                 .ok_or(NotificationError::Unknown)?;
-            if !entry
+            if !state.history[index]
                 .notification
                 .actions
                 .iter()
@@ -621,7 +639,14 @@ impl Notifications {
                 .connection
                 .clone()
                 .ok_or(NotificationError::Unavailable)?;
-            (connection, id, action_key)
+            let close_after = !state.history[index].resident;
+            if close_after {
+                if state.close_or_discard(index) {
+                    self.publish(&state, UpdateKind::Live);
+                }
+                self.timer_changed.notify_one();
+            }
+            (connection, id, action_key, close_after)
         };
         Interface::action_invoked(&signal_emitter(&connection)?, id, action_key)
             .await
@@ -629,6 +654,9 @@ impl Notifications {
                 tracing::debug!(%error, id, "failed to emit Notification ActionInvoked");
                 failed("cannot signal notification action")
             })?;
+        if close_after {
+            emit_closed(&connection, id, DISMISSED).await;
+        }
         Ok(ok())
     }
 
@@ -715,6 +743,14 @@ impl State {
             .revoke(entry.notification.attachment.as_ref().map(|a| &a.media));
         entry
     }
+
+    fn close_or_discard(&mut self, index: usize) -> bool {
+        if self.history[index].transient {
+            self.remove(index).popup
+        } else {
+            self.history[index].archive()
+        }
+    }
 }
 
 struct Incoming {
@@ -727,6 +763,8 @@ struct Incoming {
     attachment: Option<Attachment>,
     actions: Vec<Action>,
     urgency: u8,
+    transient: bool,
+    resident: bool,
     timeout: Option<Duration>,
 }
 
@@ -775,8 +813,11 @@ impl Interface {
             .and_then(|value| u8::try_from(value).ok())
             .unwrap_or(1)
             .min(2);
+        let transient = hint_bool(&hints, "transient");
+        let resident = hint_bool(&hints, "resident");
         let timeout = match expire_timeout {
             0 => None,
+            ..0 if urgency == 2 => None,
             ..0 => Some(Duration::from_millis(DEFAULT_TIMEOUT_MS)),
             ms => Some(Duration::from_millis(u64::from(ms.unsigned_abs()))),
         };
@@ -843,6 +884,8 @@ impl Interface {
                     attachment,
                     actions: parse_actions(actions),
                     urgency,
+                    transient,
+                    resident,
                     timeout,
                 },
                 self.epoch,
@@ -910,6 +953,14 @@ fn compute_app_key(desktop_entry: Option<&str>, app_name: &str, id: u32) -> Stri
 
 fn source_unavailable() -> fdo::Error {
     fdo::Error::Failed(NotificationError::Unavailable.to_string())
+}
+
+fn hint_bool(hints: &HashMap<String, OwnedValue>, key: &str) -> bool {
+    hints.get(key).is_some_and(|value| {
+        bool::try_from(value).unwrap_or_else(|_| {
+            u8::try_from(value).is_ok_and(|n| n != 0) || i32::try_from(value).is_ok_and(|n| n != 0)
+        })
+    })
 }
 
 fn floor_char_boundary(text: &str, max_bytes: usize) -> usize {

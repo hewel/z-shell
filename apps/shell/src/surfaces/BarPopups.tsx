@@ -1,4 +1,4 @@
-import { Button, For, Image, PopupSurface, Show, createEffect, createMemo, createSignal, cx, untrack, type NativeChild, type NativeNode } from "@hewel/zgui";
+import { Button, For, Image, PopupSurface, Show, createEffect, createMemo, createSignal, cx, onCleanup, untrack, type NativeChild, type NativeNode } from "@hewel/zgui";
 import { MenuItemPrimitive, MenuListPrimitive, MenuRootPrimitive } from "@hewel/zgui/primitives";
 import { useDaemonMedia } from "@z-shell/sdk/zgui";
 import { ShellIcon } from "../icons.tsx";
@@ -6,7 +6,7 @@ import { createRetainedPresence, panelMotionStyle, popoverContentMotionStyle, us
 import { POPOVER_SHADOW_INSETS, resolvePopoverGeometry, shellPanelsStyles } from "../panels/ShellPanels.tsx";
 import { useShellStore, type ImeMenuTarget, type TrayMenuTarget, type TrayOverflowTarget } from "../store.ts";
 import { useShellTheme } from "../theme.ts";
-import { isImeTrayItem, isSessionLockActive, partitionTrayItems, type BarPosition, type BarStyle, type TrayItem, type TrayMenuNode } from "../topics.ts";
+import { hasTrayMenu, isImeTrayItem, isSessionLockActive, isTrayActivateMenuFallback, isTraySubmenuNode, partitionTrayItems, type BarPosition, type BarStyle, type TrayItem, type TrayMenuNode } from "../topics.ts";
 import styles from "./BarPopups.module.css";
 
 const MENU_MIN_WIDTH = 220;
@@ -28,17 +28,23 @@ interface TrayMenuRow {
   readonly depth: number;
   readonly enabled: boolean;
   readonly submenu: boolean;
+  readonly expanded: boolean;
 }
 
-function visibleTrayRows(nodes: readonly TrayMenuNode[]): TrayMenuRow[] {
+function visibleTrayRows(
+  nodes: readonly TrayMenuNode[],
+  collapsedSubmenuIds: ReadonlySet<number> = new Set(),
+): TrayMenuRow[] {
   const rows: TrayMenuRow[] = [];
   function append(children: readonly TrayMenuNode[], depth: number, parentEnabled: boolean) {
     for (const node of children) {
       if (!node.visible) continue;
       const enabled = parentEnabled && node.enabled;
-      const submenu = !node.separator && node.children.some(child => child.visible);
-      rows.push({ node, depth, enabled, submenu });
-      if (submenu) append(node.children, depth + 1, enabled);
+      const submenu = isTraySubmenuNode(node);
+      const hasVisibleChildren = node.children.some(child => child.visible);
+      const expanded = submenu && hasVisibleChildren && !collapsedSubmenuIds.has(node.id);
+      rows.push({ node, depth, enabled, submenu, expanded });
+      if (expanded) append(node.children, depth + 1, enabled);
     }
   }
   append(nodes, 0, true);
@@ -142,6 +148,7 @@ function MenuButton(props: {
   checked?: boolean;
   active?: boolean;
   submenu?: boolean;
+  expanded?: boolean;
   activate: () => void;
 }) {
   const depthAttr = () => {
@@ -156,6 +163,7 @@ function MenuButton(props: {
       disabled={props.disabled ?? false}
       data-active={props.active ? "true" : null}
       data-depth={depthAttr()}
+      data-expanded={props.submenu ? (props.expanded ? "true" : "false") : null}
       closeOnSelect={false}
       onSelect={() => { if (!props.disabled) props.activate(); }}
       class={styles.menuItem}
@@ -172,7 +180,11 @@ function MenuButton(props: {
       </box>
       <text class={styles.menuItemLabel}>{props.label}</text>
       <Show when={props.submenu}>
-        <ShellIcon name="chevronRight" size={12} color={props.active ? "var(--color-on-primary-container)" : "var(--color-on-surface-variant)"} />
+        <ShellIcon
+          name={props.expanded ? "expandMore" : "chevronRight"}
+          size={12}
+          color={props.active ? "var(--color-on-primary-container)" : "var(--color-on-surface-variant)"}
+        />
       </Show>
     </MenuItemPrimitive>
   );
@@ -194,7 +206,7 @@ function TrayOverflowTile(props: {
   const openMenuOnBar = () => {
     const { item } = props;
     const target = props.overflowTarget;
-    if (item.menu) {
+    if (hasTrayMenu(item)) {
       // Bar-anchored handoff so tray-menu never anchors to the closing tray-overflow popup.
       openTrayMenu({
         itemId: item.id,
@@ -227,10 +239,14 @@ function TrayOverflowTile(props: {
       testId={`tray-overflow-item-${props.item.id}`}
       ariaLabel={label()}
       onClick={() => {
-        if (props.item.item_is_menu && props.item.menu) {
+        if (props.item.item_is_menu && hasTrayMenu(props.item)) {
           openMenuOnBar();
         } else {
-          void invokePublic("tray.activate", { id: props.item.id });
+          void invokePublic("tray.activate", { id: props.item.id }).then(res => {
+            if (isTrayActivateMenuFallback(res)) {
+              openMenuOnBar();
+            }
+          });
         }
       }}
       onPointerDown={event => {
@@ -359,6 +375,47 @@ export function BarPopups(): NativeChild {
   const scheme = useMotionScheme();
   const lockActive = () => isSessionLockActive(sessionLock.data());
   const [instantExitNext, setInstantExitNext] = createSignal(false);
+  const [collapsedSubmenuIds, setCollapsedSubmenuIds] = createSignal<ReadonlySet<number>>(new Set<number>());
+  let preparedTrayItemId: string | null = null;
+  onCleanup(() => {
+    preparedTrayItemId = null;
+  });
+  createEffect(
+    () => {
+      if (lockActive()) return null;
+      const target = activeTrayMenu();
+      return target ? `${target.itemId}\0${target.parentSurface}` : null;
+    },
+    key => {
+      setCollapsedSubmenuIds(new Set<number>());
+      const nextTarget = untrack(() => (lockActive() ? null : activeTrayMenu()));
+      const nextItemId = nextTarget?.itemId ?? null;
+      if (preparedTrayItemId !== null && preparedTrayItemId !== nextItemId) {
+        const closingId = preparedTrayItemId;
+        preparedTrayItemId = null;
+        const stillHasMenu = untrack(() =>
+          tray.data()?.items.some(candidate => candidate.id === closingId && candidate.has_menu) ?? false,
+        );
+        if (stillHasMenu) {
+          void invokePublic("tray.close-menu", { id: closingId });
+        }
+      }
+      if (key === null || !nextTarget) return;
+      const item = untrack(() => tray.data()?.items.find(candidate => candidate.id === nextTarget.itemId));
+      if (!item?.has_menu) return;
+      preparedTrayItemId = item.id;
+      const requestedId = item.id;
+      void invokePublic("tray.prepare-menu", { id: requestedId }).finally(() => {
+        queueMicrotask(() => {
+          const currentTarget = untrack(activeTrayMenu);
+          if (currentTarget?.itemId !== requestedId) return;
+          const latest = untrack(() => tray.data()?.items.find(candidate => candidate.id === requestedId));
+          const rows = latest?.menu ? visibleTrayRows(latest.menu.root.children) : [];
+          if (rows.length === 0) closeTrayMenu();
+        });
+      });
+    },
+  );
   const position = (): BarPosition => settings.data()?.bar.position ?? "top";
   const barStyle = (): BarStyle => settings.data()?.bar.style ?? "floating";
   const geometry = createMemo(() => resolvePopoverGeometry(position(), barStyle(), false));
@@ -387,7 +444,7 @@ export function BarPopups(): NativeChild {
     const trayMenuTarget = activeTrayMenu();
     if (trayMenuTarget) {
       const item = tray.data()?.items.find(candidate => candidate.id === trayMenuTarget.itemId);
-      if (item?.menu) {
+      if (item?.menu && visibleTrayRows(item.menu.root.children).length > 0) {
         return {
           kind: "tray-menu",
           key: `tray-menu:${trayMenuTarget.itemId}:${trayMenuTarget.parentSurface}`,
@@ -432,8 +489,31 @@ export function BarPopups(): NativeChild {
   const mountedKey = createMemo(() => presence.value()?.key ?? null);
   const trayRows = createMemo(() => {
     const current = presence.value();
-    return current?.kind === "tray-menu" ? visibleTrayRows(current.menu.root.children) : [];
+    return current?.kind === "tray-menu" ? visibleTrayRows(current.menu.root.children, collapsedSubmenuIds()) : [];
   });
+  const toggleTraySubmenu = (itemId: string, row: TrayMenuRow) => {
+    const hasMenu = tray.data()?.items.some(candidate => candidate.id === itemId && candidate.has_menu) ?? false;
+    if (row.expanded) {
+      setCollapsedSubmenuIds(prev => {
+        const next = new Set(prev);
+        next.add(row.node.id);
+        return next;
+      });
+      if (hasMenu) {
+        void invokePublic("tray.close-menu", { id: itemId, menu_id: row.node.id });
+      }
+      return;
+    }
+    setCollapsedSubmenuIds(prev => {
+      if (!prev.has(row.node.id)) return prev;
+      const next = new Set(prev);
+      next.delete(row.node.id);
+      return next;
+    });
+    if (hasMenu) {
+      void invokePublic("tray.prepare-menu", { id: itemId, menu_id: row.node.id });
+    }
+  };
   const trayWidth = createMemo(() =>
     resolveMenuWidth(trayRows().map(row => ({ label: row.node.label ?? "", depth: row.depth, submenu: row.submenu }))),
   );
@@ -476,8 +556,13 @@ export function BarPopups(): NativeChild {
                   {row => (
                     <Show when={!row().node.separator} fallback={<box ariaHidden class={styles.separator} />}>
                       <MenuButton testId={`tray-menu-item-${row().node.id}`} label={row().node.label ?? ""} depth={row().depth}
-                        disabled={!row().enabled} toggle={row().node.toggle_type} checked={row().node.toggle_state === 1} submenu={row().submenu}
+                        disabled={!row().enabled} toggle={row().node.toggle_type} checked={row().node.toggle_state === 1}
+                        submenu={row().submenu} expanded={row().expanded}
                         activate={() => {
+                          if (row().submenu) {
+                            toggleTraySubmenu(entry.target.itemId, row());
+                            return;
+                          }
                           void invokePublic("tray.menu-item", { id: entry.target.itemId, menu_id: row().node.id });
                           closeTrayMenu();
                         }} />

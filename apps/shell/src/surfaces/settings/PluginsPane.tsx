@@ -41,6 +41,7 @@ interface PluginCardRow {
   readonly subtitle: string;
   readonly statusLabel: string;
   readonly accentStatus: boolean;
+  readonly errorStatus: boolean;
   readonly icon: MediaRef | null;
 }
 
@@ -60,7 +61,7 @@ export function PluginsPane(props: {
   readonly selectedPluginId: Accessor<string | null>;
   readonly onSelectPlugin: (id: string | null) => void;
 }): NativeChild {
-  const { publicClient, settings, invokePublic, invokeHostResult, setPluginUpdatesCount } = useShellStore();
+  const { publicClient, settings, invokePublic, invokeHostResult, setPluginUpdatesCount, pluginRuntimeErrors } = useShellStore();
   // Lazy subscription: subscribed ONLY while PluginsPane is mounted so SHELL_SUBSCRIBED_TOPICS stays at 24.
   const pluginsTopic = useTopic<PluginsTopicSnapshot>(publicClient, "plugins");
 
@@ -125,40 +126,55 @@ export function PluginsPane(props: {
     return map;
   });
 
+  const runtimeErrorsList = createMemo(() => Object.values(pluginRuntimeErrors()).flat());
+
   const cards = createMemo((): readonly PluginCardRow[] => {
+    const runtimeErrors = pluginRuntimeErrors();
     if (viewMode() === "installed") {
       const q = query().trim().toLowerCase();
       return (pluginsTopic.data()?.plugins ?? [])
         .filter(p => !q || p.id.toLowerCase().includes(q) || p.name.toLowerCase().includes(q))
         .map(p => {
           const catItem = catalogById().get(p.id);
+          const hasRuntimeErr = (runtimeErrors[p.id]?.length ?? 0) > 0;
           const statusLabel = p.revoked
             ? "Revoked"
             : !p.approved || p.migration_reapproval_required
               ? "Needs approval"
-              : catItem?.update_available
-                ? `Update v${catItem.latest_version}`
-                : p.enabled
-                  ? "Enabled"
-                  : "Disabled";
+              : hasRuntimeErr
+                ? "Runtime error"
+                : catItem?.update_available
+                  ? `Update v${catItem.latest_version}`
+                  : p.enabled
+                    ? "Enabled"
+                    : "Disabled";
           return {
             id: p.id,
             name: p.name,
             subtitle: `${p.id} · v${p.version}`,
             statusLabel,
-            accentStatus: p.enabled && p.approved && !p.revoked,
+            accentStatus: p.enabled && p.approved && !p.revoked && !hasRuntimeErr,
+            errorStatus: hasRuntimeErr && !p.revoked,
             icon: catItem?.icon ?? null,
           };
         });
     }
-    return (catalog()?.items ?? []).map(item => ({
-      id: item.id,
-      name: item.name,
-      subtitle: `${item.id} · v${item.latest_version}`,
-      statusLabel: item.installed ? (item.update_available ? "Update available" : "Installed") : item.category,
-      accentStatus: Boolean(item.installed),
-      icon: item.icon ?? null,
-    }));
+    return (catalog()?.items ?? []).map(item => {
+      const hasRuntimeErr = (runtimeErrors[item.id]?.length ?? 0) > 0;
+      return {
+        id: item.id,
+        name: item.name,
+        subtitle: `${item.id} · v${item.latest_version}`,
+        statusLabel: hasRuntimeErr
+          ? "Runtime error"
+          : item.installed
+            ? (item.update_available ? "Update available" : "Installed")
+            : item.category,
+        accentStatus: Boolean(item.installed) && !hasRuntimeErr,
+        errorStatus: hasRuntimeErr,
+        icon: item.icon ?? null,
+      };
+    });
   });
 
   const cardRows = createMemo(() => {
@@ -270,6 +286,24 @@ export function PluginsPane(props: {
               )}
             </Show>
 
+            <Show when={runtimeErrorsList().length > 0}>
+              <column testId="plugins-runtime-errors" class={styles.runtimeErrorsCard}>
+                <For each={runtimeErrorsList()} keyed={item => item.instanceId ?? item.entryId}>
+                  {err => (
+                    <row
+                      testId={`plugin-runtime-error-${err().instanceId ?? err().entryId}`}
+                      class={styles.runtimeErrorRow}
+                    >
+                      <ShellIcon name="warning" size={14} color="var(--color-on-error-container)" />
+                      <text class={styles.runtimeErrorText}>
+                        {`${err().entryId}: ${err().message}`}
+                      </text>
+                    </row>
+                  )}
+                </For>
+              </column>
+            </Show>
+
             <column class={styles.cardList}>
               <For
                 each={cardRows()}
@@ -309,6 +343,7 @@ export function PluginsPane(props: {
                             <box
                               class={styles.statusBadge}
                               data-accent={card().accentStatus ? "true" : "false"}
+                              data-error={card().errorStatus ? "true" : "false"}
                             >
                               <text class={styles.statusBadgeText}>
                                 {card().statusLabel}

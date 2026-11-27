@@ -1,18 +1,21 @@
 mod common;
 
+use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::time::Duration;
 
-use common::{invoke, next_update, paths, subscribe};
+use common::{TestBus, invoke, next_update, paths, subscribe};
 use serde_json::{Value, json};
+use tokio::sync::mpsc;
 use z_shell_bus::{BusHub, hub::ClientOutbound};
 use z_shell_config::ConfigStore;
 use z_shell_desktop::{DesktopOptions, DesktopServices, ImeLockState, SessionBusAddress};
 use z_shell_protocol::{
     ClientMessage, ClientRole, ErrorCode, PROTOCOL_VERSION, RequestId, RpcError,
 };
+use zbus::zvariant::OwnedValue;
 
 struct Client {
     hub: BusHub,
@@ -246,8 +249,12 @@ async fn xdg_precedence_ranking_cache_and_action_argv() {
         .invoke("launcher.activate", activation)
         .await
         .expect("launch the produced action");
+    let desktop_file = home.join("applications/vendor/editor.desktop");
     let argv = tokio::time::timeout(Duration::from_secs(5), async {
-        let expected = "%\nliteral ; $(false)\n";
+        let expected = format!(
+            "%\nMarkdown Editor\n{}\n--icon\nproof\nliteral ; $(false)\n",
+            desktop_file.display()
+        );
         loop {
             if let Ok(got) = fs::read_to_string(&record)
                 && got.ends_with('\n')
@@ -262,7 +269,7 @@ async fn xdg_precedence_ranking_cache_and_action_argv() {
     .expect("desktop action recorded its argv");
     assert_eq!(
         argv.0, argv.1,
-        "strip Exec fields and pass arguments without shell interpretation"
+        "expand %%/c/k/i and strip unused Exec fields without shell interpretation"
     );
 
     invoke(
@@ -518,6 +525,19 @@ async fn scoped_provider_replies_activation_and_query_supersession() {
 
 #[tokio::test]
 async fn apps_launch_executes_catalog_entries_without_query_and_enforces_catalog_errors() {
+    struct FifoGate {
+        path: std::path::PathBuf,
+        hold: Option<fs::File>,
+    }
+    impl Drop for FifoGate {
+        fn drop(&mut self) {
+            // Unlink before closing the writer FD so a late open(O_RDONLY) gets ENOENT
+            // while an already-opened reader gets immediate EOF.
+            let _ = fs::remove_file(&self.path);
+            let _ = self.hold.take();
+        }
+    }
+
     let dir = tempfile::tempdir().expect("isolated XDG roots");
     let paths = paths(dir.path());
     let state_fifo = paths.state_file();
@@ -529,11 +549,16 @@ async fn apps_launch_executes_catalog_entries_without_query_and_enforces_catalog
             .success(),
         "create state.toml FIFO gate"
     );
-    let fifo_hold = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(&state_fifo)
-        .expect("hold FIFO writer open until dropped");
+    let fifo_gate = FifoGate {
+        hold: Some(
+            fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&state_fifo)
+                .expect("hold FIFO writer open until dropped"),
+        ),
+        path: state_fifo,
+    };
 
     let xdg = dir.path().join("data");
     let exe = dir.path().join("record-launch");
@@ -584,8 +609,7 @@ async fn apps_launch_executes_catalog_entries_without_query_and_enforces_catalog
     );
 
     // Unblock initial catalog scan deterministically and remove FIFO so normal state files work.
-    drop(fifo_hold);
-    fs::remove_file(&state_fifo).expect("clean up state.toml FIFO");
+    drop(fifo_gate);
     ready(&hub).await;
 
     // Cold-boot launch without any prior launcher.query on this connection.
@@ -759,4 +783,247 @@ async fn apps_launch_is_denied_while_session_is_locked() {
     .await
     .expect("unlocked apps.launch executed");
     assert_eq!(recorded, "launched\n");
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum DbusAppCall {
+    Activate,
+    Action(String, usize),
+}
+
+struct MockFdoApp {
+    calls: mpsc::UnboundedSender<DbusAppCall>,
+}
+
+#[zbus::interface(name = "org.freedesktop.Application")]
+impl MockFdoApp {
+    fn activate(&self, _platform_data: HashMap<String, OwnedValue>) {
+        self.calls.send(DbusAppCall::Activate).unwrap();
+    }
+
+    fn activate_action(
+        &self,
+        action_name: String,
+        parameter: Vec<OwnedValue>,
+        _platform_data: HashMap<String, OwnedValue>,
+    ) {
+        self.calls
+            .send(DbusAppCall::Action(action_name, parameter.len()))
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn dbus_activatable_launches_org_freedesktop_application_and_falls_back_on_service_unknown() {
+    let bus = TestBus::new();
+    let conn = bus.connection().await;
+    let (calls_tx, mut calls_rx) = mpsc::unbounded_channel();
+    conn.object_server()
+        .at("/org/example/my_app", MockFdoApp { calls: calls_tx })
+        .await
+        .unwrap();
+    conn.request_name("org.example.my-app").await.unwrap();
+
+    let dir = tempfile::tempdir().expect("isolated XDG roots");
+    let paths = paths(dir.path());
+    let xdg = dir.path().join("data");
+    let exe = dir.path().join("record-fallback");
+    let record = dir.path().join("fallback-output");
+    put(
+        dir.path(),
+        "record-fallback",
+        "#!/bin/sh\noutput=$1\nshift\nprintf '%s\\n' \"$@\" > \"$output.tmp\" && mv \"$output.tmp\" \"$output\"\n",
+    );
+    fs::set_permissions(&exe, fs::Permissions::from_mode(0o700)).unwrap();
+
+    // Pure DBusActivatable entry without Exec= in main or action section.
+    put(
+        &xdg,
+        "applications/org.example.my-app.desktop",
+        "[Desktop Entry]\nType=Application\nName=Pure D-Bus App\nDBusActivatable=true\nActions=new-window;\n[Desktop Action new-window]\nName=New Window\n",
+    );
+
+    // Hybrid DBusActivatable entry whose D-Bus service has no owner (ServiceUnknown) and no Icon=.
+    let fallback_desktop = xdg.join("applications/org.example.UnownedApp.desktop");
+    put(
+        &xdg,
+        "applications/org.example.UnownedApp.desktop",
+        &format!(
+            "[Desktop Entry]\nType=Application\nName=Fallback App\nDBusActivatable=true\nExec=\"{}\" \"{}\" %i %c %k\n",
+            exe.display(),
+            record.display(),
+        ),
+    );
+
+    let hub = BusHub::new("test", paths.media_dir());
+    let desktop = DesktopServices::install_with_options(
+        &hub,
+        &paths,
+        DesktopOptions {
+            session_bus: SessionBusAddress::Address(bus.address().to_owned()),
+            notifications: false,
+            tray: false,
+            xdg_data_dirs: vec![xdg],
+            ..DesktopOptions::default()
+        },
+    );
+    ready(&hub).await;
+
+    let client = Client::connect(&hub).await;
+    client
+        .invoke("apps.launch", json!({"id": "org.example.my-app.desktop"}))
+        .await
+        .expect("pure DBusActivatable default launch");
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(3), calls_rx.recv())
+            .await
+            .unwrap(),
+        Some(DbusAppCall::Activate)
+    );
+
+    client
+        .invoke(
+            "apps.launch",
+            json!({"id": "org.example.my-app.desktop", "action_id": "new-window"}),
+        )
+        .await
+        .expect("pure DBusActivatable action launch");
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(3), calls_rx.recv())
+            .await
+            .unwrap(),
+        Some(DbusAppCall::Action("new-window".to_owned(), 0))
+    );
+
+    // Unowned DBusActivatable service falls back to Exec, omitting empty %i and expanding %c + %k.
+    client
+        .invoke(
+            "apps.launch",
+            json!({"id": "org.example.UnownedApp.desktop"}),
+        )
+        .await
+        .expect("DBusActivatable ServiceUnknown falls back to Exec");
+    let got = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(content) = fs::read_to_string(&record) {
+                break content;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("fallback Exec wrote output");
+    assert_eq!(
+        got,
+        format!("Fallback App\n{}\n", fallback_desktop.display())
+    );
+
+    desktop.shutdown().await;
+}
+
+#[tokio::test]
+async fn live_desktop_watcher_updates_catalog_on_create_modify_and_delete_preserving_pins() {
+    let dir = tempfile::tempdir().expect("isolated XDG roots");
+    let paths = paths(dir.path());
+    let store = ConfigStore::new(paths.clone());
+    let xdg = dir.path().join("data");
+    put(
+        &xdg,
+        "applications/pinned.desktop",
+        "[Desktop Entry]\nType=Application\nName=Pinned Base\nExec=/bin/true\n",
+    );
+
+    let hub = BusHub::new("test", paths.media_dir());
+    let desktop = DesktopServices::install_with_options(
+        &hub,
+        &paths,
+        DesktopOptions {
+            session_bus: SessionBusAddress::Disabled,
+            xdg_data_dirs: vec![xdg.clone()],
+            ..DesktopOptions::default()
+        },
+    );
+
+    let (mut snapshot, subscriber) = subscribe(&hub, "desktop.apps").await;
+    while snapshot["available"] != true {
+        snapshot = next_update(&subscriber).await;
+    }
+    assert_eq!(snapshot["count"], 1);
+
+    invoke(
+        &hub,
+        ClientRole::PrivilegedHost,
+        "apps.pin",
+        json!({"id": "pinned.desktop", "pinned": true}),
+    )
+    .await
+    .expect("pin existing app");
+    let pinned_snap = next_update(&subscriber).await;
+    assert_eq!(pinned_snap["pinned_apps"], json!(["pinned.desktop"]));
+
+    // 1. Live creation in a newly created subdirectory updates desktop.apps without losing pins.
+    put(
+        &xdg,
+        "applications/sub/fresh.desktop",
+        "[Desktop Entry]\nType=Application\nName=Fresh Installed\nExec=/bin/true\n",
+    );
+    let created = next_update(&subscriber).await;
+    assert_eq!(created["count"], 2);
+    assert_eq!(created["pinned_apps"], json!(["pinned.desktop"]));
+    assert!(
+        created["apps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|app| app["id"] == "sub-fresh.desktop" && app["title"] == "Fresh Installed")
+    );
+    invoke(
+        &hub,
+        ClientRole::Public,
+        "apps.launch",
+        json!({"id": "sub-fresh.desktop"}),
+    )
+    .await
+    .expect("newly watched desktop entry launches immediately");
+
+    // 2. Live modification updates title while preserving durable pinned_apps.
+    put(
+        &xdg,
+        "applications/sub/fresh.desktop",
+        "[Desktop Entry]\nType=Application\nName=Fresh Updated\nExec=/bin/true\n",
+    );
+    let modified = next_update(&subscriber).await;
+    assert_eq!(modified["count"], 2);
+    assert_eq!(modified["pinned_apps"], json!(["pinned.desktop"]));
+    assert!(
+        modified["apps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|app| app["id"] == "sub-fresh.desktop" && app["title"] == "Fresh Updated")
+    );
+
+    // 3. Live deletion removes entry from catalog while keeping durable state.toml pins intact.
+    fs::remove_file(xdg.join("applications/sub/fresh.desktop")).unwrap();
+    let deleted = next_update(&subscriber).await;
+    assert_eq!(deleted["count"], 1);
+    assert_eq!(deleted["pinned_apps"], json!(["pinned.desktop"]));
+    assert_eq!(
+        store.load_state().unwrap().pinned_apps,
+        vec!["pinned.desktop".to_owned()]
+    );
+    assert_eq!(
+        invoke(
+            &hub,
+            ClientRole::Public,
+            "apps.launch",
+            json!({"id": "sub-fresh.desktop"}),
+        )
+        .await
+        .unwrap_err()
+        .code,
+        ErrorCode::NotFound
+    );
+
+    desktop.shutdown().await;
 }
