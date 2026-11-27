@@ -1,4 +1,4 @@
-import { createMemo, cx } from "@hewel/zgui";
+import { Show, createMemo, cx } from "@hewel/zgui";
 import styles from "./icons.module.css";
 import { createM3Spring, createPhaseLoop, useMotionScheme } from "./motion.ts";
 import {
@@ -28,6 +28,38 @@ export type ShellIconName = keyof typeof SHELL_ICON_PATHS;
 
 export { resolveIconStrokeWidthPx };
 
+function VectorGlyph(props: {
+  readonly d: string;
+  readonly viewBox: string;
+  readonly size: number;
+  readonly color: string;
+  readonly strokeWidth: number;
+  readonly filled?: boolean | undefined;
+  readonly testId?: string | undefined;
+  readonly label?: string | undefined;
+}) {
+  const resolvedSize = () => `${props.size}px`;
+  const useFilled = () => Boolean(props.filled);
+  return (
+    <vector
+      d={props.d}
+      viewBox={props.viewBox}
+      ariaHidden={props.label ? null : true}
+      ariaLabel={props.label ?? null}
+      testId={props.testId ?? null}
+      class={useFilled() ? styles.icon : cx(styles.icon, styles.outline)}
+      style={{
+        width: resolvedSize(),
+        height: resolvedSize(),
+        color: props.color,
+        ...(useFilled() ? { "--zgui-fill": props.color } : {}),
+        "--zgui-stroke": useFilled() ? "transparent" : props.color,
+        "--zgui-stroke-width": useFilled() ? "0px" : resolveIconStrokeWidthPx(props.size, props.strokeWidth),
+      }}
+    />
+  );
+}
+
 /**
  * Render a Tier 1 Tabler v3.53 system UI icon (pure 2px round Outline on a 24x24
  * viewBox, scaled proportionally to `size / 24` CSS pixels) or the Tier 2 M3
@@ -42,26 +74,74 @@ export function ShellIcon(props: {
   label?: string | undefined;
 }) {
   const icon = (): ShellIconDefinition => SHELL_ICON_PATHS[props.name];
-  const resolvedColor = () => props.color ?? "var(--color-on-surface)";
-  const sizePx = () => props.size ?? 16;
-  const useFilled = () => Boolean(icon().expressiveFilledOnly);
-  const resolvedSize = () => `${sizePx()}px`;
   return (
-    <vector
+    <VectorGlyph
       d={icon().d}
       viewBox={icon().viewBox}
-      ariaHidden={props.label ? null : true}
-      ariaLabel={props.label ?? null}
-      testId={props.testId ?? null}
-      class={styles.icon}
-      style={{
-        width: resolvedSize(),
-        height: resolvedSize(),
-        color: resolvedColor(),
-        "--zgui-fill": useFilled() ? resolvedColor() : "transparent",
-        "--zgui-stroke": useFilled() ? "transparent" : resolvedColor(),
-        "--zgui-stroke-width": useFilled() ? "0px" : resolveIconStrokeWidthPx(sizePx(), props.strokeWidth ?? 2),
-      }}
+      size={props.size ?? 16}
+      color={props.color ?? "var(--color-on-surface)"}
+      strokeWidth={props.strokeWidth ?? 2}
+      filled={icon().expressiveFilledOnly}
+      testId={props.testId}
+      label={props.label}
+    />
+  );
+}
+
+interface MediaEqIconProps {
+  readonly active: boolean;
+  readonly mode?: "continuous" | "state" | undefined;
+  readonly size?: number | undefined;
+  readonly color?: string | undefined;
+  readonly inactiveColor?: string | undefined;
+  readonly strokeWidth?: number | undefined;
+  readonly testId?: string | undefined;
+  readonly label?: string | undefined;
+}
+
+function ContinuousMediaEq(props: MediaEqIconProps) {
+  const scheme = useMotionScheme();
+  const waveAmplitude = createM3Spring(() => (props.active && scheme() !== "reduced" ? 1 : 0), "defaultSpatial", { scheme });
+  const phase = createPhaseLoop(() => props.active, 1, scheme);
+  const path = createMemo(() => buildMediaEqWavePath(waveAmplitude(), phase()));
+  return (
+    <VectorGlyph
+      d={path()}
+      viewBox="0 0 24 24"
+      size={props.size ?? 16}
+      color={props.color ?? "var(--color-on-surface)"}
+      strokeWidth={props.strokeWidth ?? 2}
+      testId={props.testId}
+      label={props.label}
+    />
+  );
+}
+
+function StateMediaEq(props: MediaEqIconProps) {
+  const scheme = useMotionScheme();
+  const expandedScale = createM3Spring(() => (props.active ? 1 : 0), "defaultSpatial", { scheme });
+  const colorMix = createM3Spring(() => (props.active ? 1 : 0), "fastEffects", { scheme });
+  const path = createMemo(() => buildMediaEqStatePath(expandedScale()));
+  const resolvedColor = () => {
+    const activeColor = props.color ?? "var(--color-on-surface)";
+    const inactiveColor = props.inactiveColor;
+    if (!inactiveColor || inactiveColor === activeColor) {
+      return activeColor;
+    }
+    const pct = Math.round(Math.max(0, Math.min(1, colorMix())) * 100);
+    if (pct >= 100) return activeColor;
+    if (pct <= 0) return inactiveColor;
+    return `color-mix(in srgb, ${activeColor} ${pct}%, ${inactiveColor})`;
+  };
+  return (
+    <VectorGlyph
+      d={path()}
+      viewBox="0 0 24 24"
+      size={props.size ?? 16}
+      color={resolvedColor()}
+      strokeWidth={props.strokeWidth ?? 2}
+      testId={props.testId}
+      label={props.label}
     />
   );
 }
@@ -70,48 +150,33 @@ export function ShellIcon(props: {
  * Playback-driven 5-bar waveform glyph on the canonical 24x24 Tabler grid.
  * - `"continuous"` mode breathes smoothly while `active` is true (stopping at 0% idle CPU when false or `reduced`),
  *   settling back to the exact resting `mediaEq` silhouette.
- * - `"state"` mode performs a single `defaultSpatial` expand/compress transition without a background loop (0% bar CPU).
+ * - `"state"` mode performs a single `defaultSpatial` expand/compress transition paired with a `fastEffects`
+ *   color transition without a background loop (0% steady-state bar CPU).
  */
-export function MediaEqIcon(props: {
-  readonly active: boolean;
-  readonly mode?: "continuous" | "state" | undefined;
-  readonly size?: number | undefined;
-  readonly color?: string | undefined;
-  readonly strokeWidth?: number | undefined;
-  readonly testId?: string | undefined;
-  readonly label?: string | undefined;
-}) {
-  const scheme = useMotionScheme();
-  const isContinuous = () => (props.mode ?? "continuous") === "continuous";
-  const level = createM3Spring(
-    () => (isContinuous() ? (props.active && scheme() !== "reduced" ? 1 : 0) : (props.active ? 1 : 0)),
-    "defaultSpatial",
-    { scheme },
-  );
-  const phase = createPhaseLoop(() => isContinuous() && props.active, 1, scheme);
-  const path = createMemo(() => (
-    isContinuous()
-      ? buildMediaEqWavePath(level(), phase())
-      : buildMediaEqStatePath(level())
-  ));
-  const resolvedColor = () => props.color ?? "var(--color-on-surface)";
-  const sizePx = () => props.size ?? 16;
-  const resolvedSize = () => `${sizePx()}px`;
+export function MediaEqIcon(props: MediaEqIconProps) {
   return (
-    <vector
-      d={path()}
-      viewBox="0 0 24 24"
-      ariaHidden={props.label ? null : true}
-      ariaLabel={props.label ?? null}
-      testId={props.testId ?? null}
-      class={cx(styles.icon, styles.outline)}
-      style={{
-        width: resolvedSize(),
-        height: resolvedSize(),
-        color: resolvedColor(),
-        "--zgui-stroke": resolvedColor(),
-        "--zgui-stroke-width": resolveIconStrokeWidthPx(sizePx(), props.strokeWidth ?? 2),
-      }}
-    />
+    <Show
+      when={(props.mode ?? "continuous") === "continuous"}
+      fallback={
+        <StateMediaEq
+          active={props.active}
+          size={props.size}
+          color={props.color}
+          inactiveColor={props.inactiveColor}
+          strokeWidth={props.strokeWidth}
+          testId={props.testId}
+          label={props.label}
+        />
+      }
+    >
+      <ContinuousMediaEq
+        active={props.active}
+        size={props.size}
+        color={props.color}
+        strokeWidth={props.strokeWidth}
+        testId={props.testId}
+        label={props.label}
+      />
+    </Show>
   );
 }

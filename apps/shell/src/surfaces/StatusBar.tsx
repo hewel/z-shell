@@ -968,11 +968,9 @@ function BarContent(props: {
           {active => {
             const mediaRef = useBlurRef(props.trackBlur);
             const mediaAudible = () => isMediaPlayerAudible(active(), store.audio.data());
-            const mediaIconColor = () => (docked() && activePanel() === "media")
-              ? "var(--color-on-primary-container)"
-              : mediaAudible()
-                ? "var(--color-primary)"
-                : "var(--color-on-surface-variant)";
+            const dockedMediaActive = () => docked() && activePanel() === "media";
+            const mediaActiveColor = () => (dockedMediaActive() ? "var(--color-on-primary-container)" : "var(--color-primary)");
+            const mediaInactiveColor = () => (dockedMediaActive() ? "var(--color-on-primary-container)" : "var(--color-on-surface-variant)");
             return (
               <Button
                 ref={mediaRef}
@@ -1002,7 +1000,14 @@ function BarContent(props: {
                 }}
               >
                 <row data-press-visual="compact" data-docked={docked() ? "true" : "false"} class={styles.mediaInner}>
-                  <MediaEqIcon active={mediaAudible()} mode="state" size={16} color={mediaIconColor()} testId="bar-media-eq" />
+                  <MediaEqIcon
+                    active={mediaAudible()}
+                    mode="state"
+                    size={16}
+                    color={mediaActiveColor()}
+                    inactiveColor={mediaInactiveColor()}
+                    testId="bar-media-eq"
+                  />
                   <Show when={!vertical()}><text testId="bar-media-text" class={styles.mediaText}>{mediaLabel()}</text></Show>
                 </row>
               </Button>
